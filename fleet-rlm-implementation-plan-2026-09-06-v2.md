@@ -723,14 +723,46 @@ same HTTP/SSE client and lifecycle observer. The local protocol receipt at
 144 scheduled attempts (12 cases × 3 repeats × 4 balanced rotations), but it is
 fixture transport evidence only and is not provider value proof.
 
+For the operator-approved API-first exploratory slice, use the ordinary
+committed profile (no `--profile`) and keep the candidate FastAPI service on
+loopback. `--partial-live` starts only the disposable frozen-baseline C service
+and routes C/D through the public attachment, Session, Turn, and UI-v1 SSE
+contract; A/B remain direct DSPy ablations. It admits exactly ten sealed rows
+(A3/B3/C2/D2 from `p4-suitable-01`) in three balanced rotations, retains the
+candidate-created Session/attachment records, and treats spend/optional D
+telemetry as explicitly non-gating observations. The resulting receipt is an
+exploratory partial sample and must remain `incomplete`; it cannot close P4.5,
+P4.6, or the Phase 4 exit.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live --candidate-url http://127.0.0.1:8000 \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+The 2026-09-10 exploratory execution is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json`. It attempted
+all ten scheduled rows (A3/B3/C2/D2) across `ABCD`, `BCDA`, and `CDAB`; three
+A trials completed, seven rows failed or lacked required observations, no row
+was a verified success, and the mechanical result is `incomplete`. The frozen
+C service was verified at `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead` and its
+process cleanup completed. C recorded baseline timeout/cleanup loss, B's
+native-RLM rows were ordinary malformed-result failures, and D used the
+already-running ordinary candidate so its lifecycle telemetry and spend were
+unknown by design. The two D Sessions and attachment-backed Turns were kept
+in the candidate database and labeled `phase4-D-p4-suitable-01-r1` and
+`phase4-D-p4-suitable-01-r2`. This receipt is failed exploratory evidence,
+not P4.5 value proof; P4.5, P4.6, and the Phase 4 exit remain open.
+
 The immutable prior receipt at
 `.scratch/benchmark-reports/phase4-ablation-decf0da7.json` remains failed,
 incomplete, and superseded. Its top-level observed spend is unknown, so the
-live driver refuses to treat it as zero when applying the cumulative US$50
-cap. Until a defensible prior spend observation is available, no paid trial is
-admitted. Consequently P4.5 live evidence, the mechanical P4.6 decision, and
-the Phase 4 exit remain open; no live certification or recursive-default
-change is claimed.
+full 144-trial live driver refuses to treat it as zero when applying the
+cumulative US$50 cap. The ten-row exploratory path above intentionally does
+not use that cap as an admission gate; it records unknown spend explicitly and
+does not qualify as value evidence. Consequently P4.5 live evidence, the
+mechanical P4.6 decision, and the Phase 4 exit remain open; no live
+certification or recursive-default change is claimed.
 
 The follow-up failure-accounting slice keeps single-capsule measurements and
 successful access identifiers even when execution fails, without treating those

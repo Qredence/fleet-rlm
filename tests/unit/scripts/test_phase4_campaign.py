@@ -15,9 +15,11 @@ from scripts.benchmarks.phase4_campaign import (
     balanced_schedule,
     campaign_summary,
     execute_campaign,
+    execute_partial_campaign,
     load_cases,
     observation_from_mapping,
     paired_bootstrap,
+    partial_schedule,
     phase4_decision,
     receipt,
     score_trial,
@@ -63,6 +65,100 @@ def test_phase4_fixture_is_sealed_and_schedule_is_exactly_balanced() -> None:
         "D": 36,
     }
     assert all(tuple(sorted(trial.arm_order)) == ("A", "B", "C", "D") for trial in schedule)
+
+
+def test_partial_schedule_is_fixed_to_the_first_case_and_arm_quota() -> None:
+    cases = load_cases(_CASES)
+
+    schedule = partial_schedule(cases)
+
+    assert [(trial.case_id, trial.repeat, trial.arm, "".join(trial.arm_order)) for trial in schedule] == [
+        ("p4-suitable-01", 1, "A", "ABCD"),
+        ("p4-suitable-01", 1, "B", "ABCD"),
+        ("p4-suitable-01", 1, "C", "ABCD"),
+        ("p4-suitable-01", 1, "D", "ABCD"),
+        ("p4-suitable-01", 2, "B", "BCDA"),
+        ("p4-suitable-01", 2, "C", "BCDA"),
+        ("p4-suitable-01", 2, "D", "BCDA"),
+        ("p4-suitable-01", 2, "A", "BCDA"),
+        ("p4-suitable-01", 3, "A", "CDAB"),
+        ("p4-suitable-01", 3, "B", "CDAB"),
+    ]
+
+
+def test_partial_campaign_continues_ordinary_failures_but_halts_safety_faults() -> None:
+    cases = load_cases(_CASES)
+    schedule = partial_schedule(cases)
+    calls = 0
+
+    def ordinary_failure(_trial, _case):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return replace(_observation(cases[0]), completed=False, error_category="provider_error")
+        return _observation(cases[0])
+
+    rows = execute_partial_campaign(
+        cases=cases,
+        trials=schedule[:3],
+        envelope=_envelope(),
+        runner=ordinary_failure,
+        started_at=0,
+        clock=lambda: 0,
+    )
+    assert len(rows) == 3
+
+    calls = 0
+
+    def safety_failure(_trial, _case):
+        nonlocal calls
+        calls += 1
+        return replace(_observation(cases[0]), cleanup_confirmed=False, error_category="cleanup_failed")
+
+    rows = execute_partial_campaign(
+        cases=cases,
+        trials=schedule[:3],
+        envelope=_envelope(),
+        runner=safety_failure,
+        started_at=0,
+        clock=lambda: 0,
+    )
+    assert len(rows) == 1
+
+    def baseline_telemetry_failure(trial, case):
+        observation = _observation(case)
+        if trial.arm == "C":
+            return replace(observation, cleanup_confirmed=False, error_category="cleanup_unavailable")
+        return observation
+
+    rows = execute_partial_campaign(
+        cases=cases,
+        trials=schedule[:4],
+        envelope=_envelope(),
+        runner=baseline_telemetry_failure,
+        started_at=0,
+        clock=lambda: 0,
+    )
+    assert len(rows) == 3
+
+
+def test_partial_campaign_reserves_cleanup_window_before_admission_deadline() -> None:
+    cases = load_cases(_CASES)
+    schedule = partial_schedule(cases)
+    ticks = iter((0.0, 0.0, 61.0))
+
+    rows = execute_partial_campaign(
+        cases=cases,
+        trials=schedule[:2],
+        envelope=_envelope(),
+        runner=lambda _trial, case: _observation(case),
+        started_at=0.0,
+        clock=lambda: next(ticks),
+        max_elapsed_seconds=100,
+        cleanup_reserve_seconds=40,
+    )
+
+    assert len(rows) == 1
 
 
 def test_four_arm_contract_keeps_c_on_the_frozen_revision_only() -> None:

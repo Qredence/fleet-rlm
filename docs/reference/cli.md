@@ -145,6 +145,24 @@ ordinary launchers retain their existing defaults. The prior receipt at
 `.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
 incomplete, and superseded, so it is not value proof.
 
+To exercise the same API/SSE path against the ordinary committed profile, keep
+the candidate backend running on loopback and run the fixed exploratory sample:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live --candidate-url http://127.0.0.1:8000 \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+This admits ten sealed rows with A/B direct DSPy ablations and C/D FastAPI
+services. It is deliberately partial and non-certifying; it records unknown
+cost or unavailable candidate lifecycle telemetry instead of treating either
+as zero, and it leaves the ordinary launcher profile unchanged.
+
+The 2026-09-10 sample is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json`; it attempted ten
+rows and is intentionally marked `incomplete`, not certified value evidence.
+
 ## Daytona doctor
 
 `fleet doctor daytona` validates required settings, database connectivity and

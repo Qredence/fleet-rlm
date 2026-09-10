@@ -25,7 +25,7 @@ _PUBLIC_CHUNK_TYPES = frozenset({"data-structured-result", "data-usage", "error"
 def _error_observation(
     category: str,
     *,
-    telemetry_path: Path,
+    telemetry_path: Path | None,
     offset: int,
     token: str,
     started: float,
@@ -33,6 +33,8 @@ def _error_observation(
     """Return one bounded failure while still collecting cleanup telemetry."""
     events = _read_events(telemetry_path, offset=offset, token=token, timeout=2.0)
     cleanup, sandbox_seconds, sandbox_count, shape, cleanup_category = _telemetry(events)
+    if telemetry_path is None:
+        cleanup_category = "telemetry_unavailable"
     return replace(
         _blank(cleanup_category or category),
         cleanup_confirmed=cleanup,
@@ -98,6 +100,11 @@ def _parse_sse(lines: Any) -> tuple[list[dict[str, Any]], str]:
 def trial_token(trial: Trial) -> str:
     """Return the bounded correlation token sent in the campaign-only header."""
     return f"{trial.arm}-{trial.case_id}-{trial.repeat}"
+
+
+def _record_label(trial: Trial, case: Phase4Case) -> str:
+    """Return the bounded label retained on the trial's Session and upload."""
+    return f"{trial.arm}-{case.identifier}-r{trial.repeat}"
 
 
 def _blank(category: str) -> TrialObservation:
@@ -235,7 +242,9 @@ def _usage_metrics(usage: Mapping[str, Any]) -> tuple[int | None, int | None, in
     return input_tokens, output_tokens, root_calls, child_calls, delegated
 
 
-def _read_events(path: Path, *, offset: int, token: str, timeout: float = 5.0) -> list[dict[str, Any]]:
+def _read_events(path: Path | None, *, offset: int, token: str, timeout: float = 5.0) -> list[dict[str, Any]]:
+    if path is None:
+        return []
     deadline = time.monotonic() + timeout
     while True:
         events: list[dict[str, Any]] = []
@@ -278,7 +287,10 @@ def _telemetry(
     category = cleanup.get("error_category") if isinstance(cleanup.get("error_category"), str) else None
     if sandbox_count and sandbox_seconds == 0:
         sandbox_seconds = 1
-    if not cleanup_confirmed and category is None:
+    # Do not propagate arbitrary SDK exception names as lifecycle semantics.
+    # Any observed failed cleanup is the same safety category; the receipt
+    # must not depend on provider-specific exception text.
+    if not cleanup_confirmed:
         category = "cleanup_failed"
     return cleanup_confirmed, sandbox_seconds, sandbox_count, resource_shape, category
 
@@ -290,7 +302,7 @@ class Phase4ApiTrialRunner:
         self,
         *,
         base_url: str,
-        telemetry_path: Path,
+        telemetry_path: Path | None,
         timeout_seconds: float = 150.0,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -302,18 +314,19 @@ class Phase4ApiTrialRunner:
     def __call__(self, trial: Trial, case: Phase4Case) -> TrialObservation:
         token = trial_token(trial)
         try:
-            offset = self.telemetry_path.stat().st_size
+            offset = self.telemetry_path.stat().st_size if self.telemetry_path is not None else 0
         except OSError:
             offset = 0
         started = time.perf_counter()
         try:
             timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
             with httpx.Client(timeout=timeout, transport=self.transport) as client:
+                label = _record_label(trial, case)
                 upload = client.post(
                     f"{self.base_url}/api/attachments",
                     files={
                         "attachment": (
-                            f"{case.identifier}.txt",
+                            f"{label}.txt",
                             _source_material(case),
                             "text/plain; charset=utf-8",
                         )
@@ -331,7 +344,7 @@ class Phase4ApiTrialRunner:
                     raise Phase4ApiClientError("attachment_unavailable") from exc
                 session = client.post(
                     f"{self.base_url}/api/sessions",
-                    json={"title": f"phase4-{case.identifier}"},
+                    json={"title": f"phase4-{label}"},
                     headers={"x-fleet-phase4-trial": token},
                 )
                 if not 200 <= session.status_code < 300:
@@ -412,6 +425,8 @@ class Phase4ApiTrialRunner:
         cleanup, sandbox_seconds, sandbox_count, shape, cleanup_category = _telemetry(
             _read_events(self.telemetry_path, offset=offset, token=token)
         )
+        if self.telemetry_path is None:
+            cleanup_category = "telemetry_unavailable"
         if trial.arm in {"C", "D"} and (
             sandbox_count is None or sandbox_count < 1 or sandbox_seconds is None or shape is None
         ):
