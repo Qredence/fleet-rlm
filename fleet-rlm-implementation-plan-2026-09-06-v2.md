@@ -334,7 +334,13 @@ remaining overlapping lifecycle owners.
 
 **Done when:** Daytona runtime behavior has one package boundary.
 
-## P2.2 - Collapse Daytona resource ownership to one graph
+## P2.2 - Collapse Daytona resource ownership to one graph — in progress
+
+**Status: in progress (2026-09-10).** The first migration removes the
+process-global Run-environment cleanup, client-close, late-lookup, and
+provider-retention collections. `DaytonaRuntimeResources` now owns those
+records and exposes the shutdown wait used by composition. Session-manager
+lease ownership remains the next migration target.
 
 **Rationale:** `session_manager.py`, Run-environment owners, lease helpers, provider task sets, late-acquisition maps, cleanup supervisors, and binding watchers currently overlap.
 

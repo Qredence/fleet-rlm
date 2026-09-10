@@ -83,42 +83,6 @@ from fleet_rlm.workspace.storage import (
 
 logger = logging.getLogger(__name__)
 
-_LATE_LOOKUP_OWNERS: dict[int, tuple[asyncio.Task[Any], Any]] = {}
-_RESOURCE_CLEANUP_OWNERS: set[tuple[asyncio.Future[Any], Any, str]] = set()
-_CLIENT_CLOSE_OWNERS: set[tuple[asyncio.Future[Any], Any]] = set()
-# Keep a resident environment provider alive while it owns a root, an
-# acquisition, or a late lookup. This prevents loop-bound root leases from
-# disappearing before the composition owner has fenced the Daytona client.
-_ENVIRONMENT_OWNERS: dict[int, Any] = {}
-
-
-def has_pending_resource_cleanup() -> bool:
-    """Return whether any tracked resource deletion still owns provider work."""
-    return (
-        any(not task.done() for task, _owner, _sandbox_id in _RESOURCE_CLEANUP_OWNERS)
-        or any(not task.done() for task, _owner in _CLIENT_CLOSE_OWNERS)
-        or bool(_ENVIRONMENT_OWNERS)
-    )
-
-
-async def wait_resource_cleanup(*, timeout: float | None = None) -> bool:
-    """Wait for tracked resource deletion without cancelling late provider work."""
-    tasks = tuple(task for task, _owner, _sandbox_id in _RESOURCE_CLEANUP_OWNERS if not task.done()) + tuple(
-        task for task, _owner in _CLIENT_CLOSE_OWNERS if not task.done()
-    )
-    if not tasks:
-        return True
-    current_loop = asyncio.get_running_loop()
-    if any(task.get_loop() is not current_loop for task in tasks):
-        return False
-    if timeout is None:
-        await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
-    else:
-        _, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout))
-        if pending:
-            return False
-    return not has_pending_resource_cleanup()
-
 
 def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSessionHistory:
     """Materialize the canonical ``CommittedSessionHistory`` for one claimed checkpoint.
@@ -368,7 +332,9 @@ class _DaytonaEnvironmentProvider:
 
     def _retain_environment_owner(self) -> None:
         """Keep this provider alive across caller/lifespan ownership changes."""
-        _ENVIRONMENT_OWNERS[id(self)] = self
+        retain = getattr(self.resources, "retain_environment_provider", None)
+        if callable(retain):
+            retain(self)
 
     def _maybe_release_environment_owner(self) -> None:
         """Drop process ownership only after every root/acquisition is gone."""
@@ -388,8 +354,9 @@ class _DaytonaEnvironmentProvider:
             or self._compatibility_quarantines
         ):
             return
-        if _ENVIRONMENT_OWNERS.get(id(self)) is self:
-            _ENVIRONMENT_OWNERS.pop(id(self), None)
+        release = getattr(self.resources, "release_environment_provider", None)
+        if callable(release):
+            release(self)
 
     def _preparation_gate(self, key: tuple[UUID, UUID]) -> asyncio.Lock:
         gate = self._preparation_gates.get(key)
@@ -611,11 +578,9 @@ class _DaytonaEnvironmentProvider:
             if on_settled is not None:
                 on_settled()
             return
-        _LATE_LOOKUP_OWNERS[id(task)] = (task, self)
         self._late_lookup_tasks.add(task)
 
         def settled(completed: asyncio.Task[Any]) -> None:
-            _LATE_LOOKUP_OWNERS.pop(id(completed), None)
             self._late_lookup_tasks.discard(completed)
             _consume_task_result(completed)
             if on_settled is not None:
@@ -2093,6 +2058,11 @@ class DaytonaRuntimeResources:
         # admission and provider cleanup guarantees.
         self.runtime = DaytonaRuntime(self)
         self._sandbox_ids: list[str] = []
+        self._resource_cleanup_owners: set[tuple[asyncio.Future[Any], str]] = set()
+        self._client_close_owners: set[asyncio.Future[Any]] = set()
+        # Environment providers retain themselves here only while provider
+        # work can outlive a cancelled Turn or the lifespan disposer.
+        self._environment_owners: dict[int, Any] = {}
         self._client_close_lock = Lock()
         self._client_close_task: asyncio.Task[Any] | None = None
         self._client_closed = False
@@ -2100,6 +2070,41 @@ class DaytonaRuntimeResources:
     def track_sandbox(self, sandbox_id: str | None) -> None:
         if sandbox_id and sandbox_id not in self._sandbox_ids:
             self._sandbox_ids.append(sandbox_id)
+
+    def retain_environment_provider(self, provider: Any) -> None:
+        """Retain an environment provider while it owns provider work."""
+        self._environment_owners[id(provider)] = provider
+
+    def release_environment_provider(self, provider: Any) -> None:
+        """Release an environment provider only after its own ownership settles."""
+        if self._environment_owners.get(id(provider)) is provider:
+            self._environment_owners.pop(id(provider), None)
+
+    def has_pending_cleanup(self) -> bool:
+        """Whether this process resource owner still retains provider work."""
+        return (
+            any(not task.done() for task, _sandbox_id in self._resource_cleanup_owners)
+            or any(not task.done() for task in self._client_close_owners)
+            or bool(self._environment_owners)
+        )
+
+    async def wait_pending_cleanup(self, *, timeout: float | None = None) -> bool:
+        """Wait for this owner's retained work without cancelling it."""
+        tasks = tuple(task for task, _sandbox_id in self._resource_cleanup_owners if not task.done()) + tuple(
+            task for task in self._client_close_owners if not task.done()
+        )
+        if not tasks:
+            return not self._environment_owners
+        current_loop = asyncio.get_running_loop()
+        if any(task.get_loop() is not current_loop for task in tasks):
+            return False
+        if timeout is None:
+            await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
+        else:
+            _, pending = await asyncio.wait(tasks, timeout=max(0.0, timeout))
+            if pending:
+                return False
+        return not self.has_pending_cleanup()
 
     async def cleanup(self, *, deadline: float | None = None) -> bool:
         """Delete tracked Sandboxes with bounded, retained provider requests."""
@@ -2117,12 +2122,12 @@ class DaytonaRuntimeResources:
                     raise TimeoutError
                 return True, await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
             except TimeoutError:
-                _RESOURCE_CLEANUP_OWNERS.add((task, self, sandbox_id))
+                self._resource_cleanup_owners.add((task, sandbox_id))
                 task.add_done_callback(lambda completed, sid=sandbox_id: self._settled_resource_cleanup(sid, completed))
                 settled = False
                 return False, None
             except asyncio.CancelledError:
-                _RESOURCE_CLEANUP_OWNERS.add((task, self, sandbox_id))
+                self._resource_cleanup_owners.add((task, sandbox_id))
                 task.add_done_callback(lambda completed, sid=sandbox_id: self._settled_resource_cleanup(sid, completed))
                 settled = False
                 raise
@@ -2160,12 +2165,8 @@ class DaytonaRuntimeResources:
         return settled
 
     def _settled_resource_cleanup(self, sandbox_id: str, task: asyncio.Future[Any]) -> None:
-        owners = [
-            owner
-            for owner in _RESOURCE_CLEANUP_OWNERS
-            if owner[1] is self and owner[2] == sandbox_id and owner[0] is task
-        ]
-        _RESOURCE_CLEANUP_OWNERS.difference_update(owners)
+        owners = [owner for owner in self._resource_cleanup_owners if owner[1] == sandbox_id and owner[0] is task]
+        self._resource_cleanup_owners.difference_update(owners)
         if task.cancelled():
             return
         with contextlib.suppress(BaseException):
@@ -2189,10 +2190,10 @@ class DaytonaRuntimeResources:
             if task is None:
                 task = asyncio.create_task(self.client.close(), name="fleet-daytona-client-close")
                 self._client_close_task = task
-                _CLIENT_CLOSE_OWNERS.add((task, self))
+                self._client_close_owners.add(task)
 
                 def settled(completed: asyncio.Task[Any]) -> None:
-                    _CLIENT_CLOSE_OWNERS.discard((completed, self))
+                    self._client_close_owners.discard(completed)
                     if not completed.cancelled():
                         with contextlib.suppress(BaseException):
                             error = completed.exception()
@@ -2230,10 +2231,10 @@ class DaytonaRuntimeResources:
         settled = await self.session_manager.aclose(drain_seconds=drain_seconds)
         cleanup_settled = await self.cleanup(deadline=started + drain_seconds)
         pending_ownership = bool(getattr(self.session_manager, "has_pending_ownership", False))
-        resource_ownership = has_pending_resource_cleanup()
+        resource_ownership = self.has_pending_cleanup()
         if resource_ownership:
             remaining = max(0.0, started + drain_seconds - asyncio.get_running_loop().time())
-            resource_ownership = not await wait_resource_cleanup(timeout=remaining)
+            resource_ownership = not await self.wait_pending_cleanup(timeout=remaining)
         lease_ownership = has_pending_lease_ownership()
         if lease_ownership:
             remaining = max(0.0, started + drain_seconds - asyncio.get_running_loop().time())
@@ -2266,7 +2267,5 @@ __all__ = [
     "_prepare_memory_digest",
     "_promote_memory_candidates",
     "build_committed_session_history_for_claim",
-    "has_pending_resource_cleanup",
     "resolve_settings",
-    "wait_resource_cleanup",
 ]

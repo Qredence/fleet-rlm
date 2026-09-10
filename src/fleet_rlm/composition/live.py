@@ -161,10 +161,6 @@ async def _finish_daytona_disposal(
     composition_loop: asyncio.AbstractEventLoop | None,
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.composition.daytona_run_preparation import (
-        has_pending_resource_cleanup,
-        wait_resource_cleanup,
-    )
     from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
@@ -206,7 +202,7 @@ async def _finish_daytona_disposal(
             or cleanup_pending
             or bool(getattr(preparation, "has_pending_acquisitions", False))
             or bool(getattr(registry, "has_deferred_closes", False))
-            or has_pending_resource_cleanup()
+            or bool(resources is not None and resources.has_pending_cleanup())
             or has_pending_lease_ownership()
         )
         if not pending:
@@ -217,8 +213,9 @@ async def _finish_daytona_disposal(
         # Wait briefly for owned tasks that are still attached to this loop.
         # Foreign-loop ownership is deliberately reported as unresolved by the
         # wait helpers, so this task never clears a bridge needed elsewhere.
-        with contextlib.suppress(BaseException):
-            await wait_resource_cleanup(timeout=0.25)
+        if resources is not None:
+            with contextlib.suppress(BaseException):
+                await resources.wait_pending_cleanup(timeout=0.25)
         with contextlib.suppress(BaseException):
             await wait_lease_ownership(timeout=0.25)
         await asyncio.sleep(0.25)
