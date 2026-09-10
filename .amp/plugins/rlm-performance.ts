@@ -8,7 +8,6 @@ const FOCUSED_TEST_PATHS = [
 	'tests/unit/backend/daytona/test_broker.py',
 	'tests/unit/backend/daytona/test_interpreter_tracing.py',
 	'tests/unit/backend/rlm/test_program_instructions.py',
-	'tests/unit/backend/rlm/test_program_instructions.py',
 	'tests/unit/backend/test_config.py',
 	'tests/unit/backend/test_config_policy.py',
 	'tests/unit/scripts/test_run_rlm_latency.py',
