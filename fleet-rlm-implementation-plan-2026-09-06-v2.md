@@ -311,10 +311,8 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
-**Progress (2026-09-10):** P2.1, P2.3, P2.4, and P2.5 are complete. P2.2 is
-partially complete: process-global cleanup and active-claim ownership are gone,
-but the provider adapter still duplicates `DaytonaRuntime` root-replacement
-indexing. P2.6 remains an SDK-parity audit. P2.7 has reduced image definitions
+**Progress (2026-09-10):** P2.1 through P2.5 are complete. P2.6 remains an
+SDK-parity audit. P2.7 has reduced image definitions
 and verified new disposable runtime probes, but still needs representative live
 host-tool/RLM evidence, sealed receipts, and operator promotion.
 
@@ -341,23 +339,21 @@ remaining overlapping lifecycle owners.
 
 **Done when:** Daytona runtime behavior has one package boundary.
 
-## P2.2 - Collapse Daytona resource ownership to one graph — in progress
+## P2.2 - Collapse Daytona resource ownership to one graph — complete
 
-**Status: in progress (2026-09-10).** The first migration removes the
-process-global Run-environment cleanup, client-close, late-lookup, and
-provider-retention collections. `DaytonaRuntimeResources` now owns those
-records and exposes the shutdown wait used by composition. The next slice
-moves both late-acquisition and late-lease maps into `DaytonaSessionManager`
-and removes their redundant manager back-references. Shutdown now reports an
-unscheduled foreign-loop acquisition as pending. Active Session claims are now
-owned by each `DaytonaSessionManager`, eliminating the process-global claim
-registry and preventing separate compositions from sharing admission state.
-The provider adapter's root-replacement index still overlaps the public
-`DaytonaRuntime` root owner and remains open.
+**Status: complete (2026-09-10).** `DaytonaRuntimeResources` owns
+process-lifetime cleanup, client close, late lookup, and provider retention;
+`DaytonaSessionManager` owns active Session claims and late lease/acquisition
+records. Production root acquisition now delegates directly to `DaytonaRuntime`,
+which solely owns root replacement and cleanup. The preparation adapter keeps
+only Run assembly; its remaining local root index is compatibility-only and is
+not used by the composed Daytona runtime.
 
 **Rationale:** `session_manager.py`, Run-environment owners, lease helpers,
-provider task sets, late-acquisition maps, cleanup supervisors, and the
-provider adapter's root index still overlap.
+provider task sets, late-acquisition maps, cleanup supervisors, and root
+replacement previously overlapped. The selected production graph now assigns
+those responsibilities to the resource owner, Session manager, and
+`DaytonaRuntime` respectively.
 
 **Implement:** define the minimal ownership chain for the selected Phase 1 architecture:
 
@@ -494,8 +490,8 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
-**Phase 2 exit (pending P2.2, P2.6, and P2.7):** one runtime graph, one
-provider package, one execution implementation, fewer resident/global owners.
+**Phase 2 exit (pending P2.6 and P2.7):** one runtime graph, one provider
+package, one execution implementation, fewer resident/global owners.
 
 ---
 

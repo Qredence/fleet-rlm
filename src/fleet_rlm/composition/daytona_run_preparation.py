@@ -340,10 +340,11 @@ class _DaytonaEnvironmentProvider:
 
     def _mark_provider_root_tainted(self, key: tuple[UUID, UUID]) -> None:
         """Require a fresh provider root on the next acquisition for ``key``."""
-        self._tainted_root_keys.add(key)
         runtime = getattr(self.resources, "runtime", None)
         if isinstance(runtime, DaytonaRuntime):
             runtime.mark_root_tainted(*key)
+            return
+        self._tainted_root_keys.add(key)
 
     def _prune_preparation_gate(self, key: tuple[UUID, UUID]) -> None:
         """Drop an idle Session preparation gate once no root remains."""
@@ -980,9 +981,24 @@ class _DaytonaEnvironmentProvider:
         """Return the resident root lease and whether this call created it."""
         key = (run.access.workspace_id, run.session_id)
         context_key = self._context_key(run)
-        # Keep registry access short and serialize transitions separately. A
-        # RootSessionLease close callback removes the owner from this map, so
-        # never await provider cleanup while holding ``_resident_root_lock``.
+        runtime = getattr(self.resources, "runtime", None)
+        if isinstance(runtime, DaytonaRuntime):
+            # The public runtime is the sole owner of production roots,
+            # including context-fingerprint replacement and late cleanup.
+            owner = await runtime.acquire_root_session(
+                RootSessionSpec(
+                    workspace_id=key[0],
+                    session_id=key[1],
+                    user_id=run.access.user_id,
+                    run_id=run.run_id,
+                    context_fingerprint=context_key,
+                    deadline=deadline,
+                )
+            )
+            return owner, False
+
+        # Compatibility resources predate DaytonaRuntime. Their test-only
+        # ownership remains local until those seams are retired.
         async with self._resident_root_transition_lock:
             async with self._resident_root_lock:
                 owner = self._resident_root_leases.get(key)
@@ -998,49 +1014,6 @@ class _DaytonaEnvironmentProvider:
                     return owner, False
             had_previous = owner is not None
             force_new = had_previous or key in self._tainted_root_keys
-
-            # ``DaytonaRuntime`` is the canonical provider lifecycle boundary.
-            # Keep the local map only as a preparation/sink index; admission,
-            # Sandbox replacement, and root cleanup remain owned by the facade.
-            runtime = getattr(self.resources, "runtime", None)
-            if isinstance(runtime, DaytonaRuntime):
-                try:
-                    runtime_owner = await runtime.acquire_root_session(
-                        RootSessionSpec(
-                            workspace_id=key[0],
-                            session_id=key[1],
-                            user_id=run.access.user_id,
-                            run_id=run.run_id,
-                            context_fingerprint=context_key,
-                            deadline=deadline,
-                            force_new=force_new,
-                        )
-                    )
-                except BaseException:
-                    # DaytonaRuntime may fail after the manager acquired and
-                    # retired an unpublished lease, before this adapter can
-                    # bind the provider owner.  Fence the resident RLM too;
-                    # otherwise it could reuse an interpreter whose provider
-                    # lookup already failed on the next Turn.
-                    raise
-                try:
-                    self._bind_runtime_root(key, runtime_owner)
-                    async with self._resident_root_lock:
-                        if owner is not None and owner is not runtime_owner:
-                            self._resident_root_leases.pop(key, None)
-                            self._resident_context_keys.pop(key, None)
-                        self._resident_root_leases[key] = runtime_owner
-                        self._resident_context_keys[key] = context_key
-                        self._tainted_root_keys.discard(key)
-                except BaseException:
-                    # The runtime facade published this owner before the
-                    # adapter could publish its local sink index. Close it (or
-                    # leave it retained by the facade) rather than creating an
-                    # untracked root across the handoff cancellation window.
-                    with contextlib.suppress(BaseException):
-                        await asyncio.shield(runtime_owner.close(notify=True, deadline=deadline))
-                    raise
-                return runtime_owner, not reusable
 
             # Compatibility path for test/provider resources that predate the
             # public facade. Production DaytonaRuntimeResources always takes
