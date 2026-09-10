@@ -71,6 +71,17 @@ direct DSPy ablations by design; they compare model behavior without claiming
 to certify the API transport. There is no public arm selector or alternate
 in-process campaign execution path.
 
+For a bounded operator smoke of the live transport, the campaign driver can
+reuse an ordinary loopback candidate (`http://127.0.0.1:8000`) and start an
+isolated frozen-baseline service from the pinned revision. Its `--partial-live`
+mode sends exactly ten sealed exploratory trials through the public API/SSE
+contract, keeps one Session per trial, and records a partial receipt. This is
+transport evidence only: unknown provider spend and telemetry remain explicit,
+and the receipt cannot certify recursive value or change the default profile.
+The 2026-09-10 execution is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
+`incomplete`.
+
 ### Composition
 
 `src/fleet_rlm/composition/` constructs the process-scoped runtime graph. The

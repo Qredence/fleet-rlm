@@ -124,6 +124,24 @@ certification. The earlier receipt at
 `.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
 incomplete, and superseded; it is not value proof.
 
+For a bounded live transport sample, start the ordinary backend as above and
+run the fixed ten-trial API-first probe:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live --candidate-url http://127.0.0.1:8000 \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+The probe keeps C/D on the public FastAPI/SSE path, leaves A/B as direct
+ablations, and writes a content-safe exploratory receipt. It is not the 144-
+trial value campaign and cannot mark Phase 4 complete; unknown spend or
+candidate lifecycle telemetry remains explicit in that receipt.
+
+The 2026-09-10 exploratory receipt is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and remains
+`incomplete`.
+
 ## How a turn works
 
 ```text

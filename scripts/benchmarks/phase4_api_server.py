@@ -73,7 +73,11 @@ def _write_event(path: Path, event: Mapping[str, object]) -> None:
 def _shape(resources: Any, profile: object) -> tuple[int, int, int] | None:
     try:
         resolver = getattr(resources.platform, "spec_for_profile", None)
-        spec = resolver(profile) if callable(resolver) else resources.sandbox_spec
+        # ``SandboxProvisioner`` omits ``profile`` for the normal Session
+        # sandbox, relying on the platform's default.  Resolve that omission
+        # to the platform's configured default spec instead of asking a
+        # profile resolver to look up ``None``.
+        spec = resolver(profile) if callable(resolver) and profile is not None else resources.sandbox_spec
         value = (int(spec.cpu), int(spec.memory_gib), int(spec.disk_gib))
     except (AttributeError, TypeError, ValueError):
         return None
@@ -296,37 +300,45 @@ def _campaign_settings(
     # The frozen baseline predates explicit profile selection. Its disposable
     # policy overlay sets the campaign profile as default.
     settings = load_settings(profile=profile) if profile is not None and accepts_profile else load_settings()
-    return settings.model_copy(
-        update={
-            "root_llm_max_tokens": 1_024,
-            "sub_llm_max_tokens": 512,
-            "root_llm_timeout_seconds": 90,
-            "sub_llm_timeout_seconds": 90,
-            "root_llm_temperature": 0.0,
-            "sub_llm_temperature": 0.0,
-            "root_llm_num_retries": 0,
-            "sub_llm_num_retries": 0,
-            "root_llm_cache": False,
-            "sub_llm_cache": False,
-            "rlm_max_iters": 6,
-            "rlm_max_llm_calls": 8,
-            "rlm_max_provider_attempts": 8,
-            "rlm_execution_timeout_s": 90,
-            "rlm_wrap_up_seconds": 30,
-            "rlm_recursion_enabled": recursive,
-            "rlm_recursion_max_calls": 4,
-            "rlm_recursion_child_max_iters": 4,
-            "rlm_recursion_child_max_llm_calls": 4,
-            "rlm_recursion_child_max_output_chars": 2_000,
-            "rlm_recursion_max_parallel_children": 4,
-            "max_active_daytona_leases": 1,
-            "turn_timeout_seconds": 90,
-            "mlflow_tracing_enabled": False,
-            "data_root": str(data_root),
-            "database_url": database_url,
-            "volume_name": volume_name,
-        }
-    )
+    update: dict[str, object] = {
+        # These values are process-local overlays for the disposable API
+        # service.  The ordinary profile's provider/model and runtime limits
+        # remain intact when no explicit campaign profile is supplied.
+        "rlm_recursion_enabled": recursive,
+        "data_root": str(data_root),
+        "database_url": database_url,
+        "volume_name": volume_name,
+    }
+    if profile is not None:
+        update.update(
+            {
+                "root_llm_max_tokens": 1_024,
+                "sub_llm_max_tokens": 512,
+                "root_llm_timeout_seconds": 90,
+                "sub_llm_timeout_seconds": 90,
+                "root_llm_temperature": 0.0,
+                "sub_llm_temperature": 0.0,
+                "root_llm_num_retries": 0,
+                "sub_llm_num_retries": 0,
+                "root_llm_cache": False,
+                "sub_llm_cache": False,
+                "rlm_max_iters": 6,
+                "rlm_max_llm_calls": 8,
+                "rlm_max_provider_attempts": 8,
+                "rlm_execution_timeout_s": 90,
+                "rlm_wrap_up_seconds": 30,
+                "rlm_recursion_enabled": recursive,
+                "rlm_recursion_max_calls": 4,
+                "rlm_recursion_child_max_iters": 4,
+                "rlm_recursion_child_max_llm_calls": 4,
+                "rlm_recursion_child_max_output_chars": 2_000,
+                "rlm_recursion_max_parallel_children": 4,
+                "max_active_daytona_leases": 1,
+                "turn_timeout_seconds": 90,
+                "mlflow_tracing_enabled": False,
+            }
+        )
+    return settings.model_copy(update=update)
 
 
 def _parser() -> argparse.ArgumentParser:

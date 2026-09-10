@@ -7,7 +7,13 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from scripts.benchmarks.phase4_api_client import Phase4ApiClientError, Phase4ApiTrialRunner, _parse_sse
+from scripts.benchmarks.phase4_api_client import (
+    Phase4ApiClientError,
+    Phase4ApiTrialRunner,
+    _parse_sse,
+    _record_label,
+    _telemetry,
+)
 from scripts.benchmarks.phase4_campaign import Trial, load_cases
 from scripts.benchmarks.run_phase4_campaign import _prior_receipt_spend
 
@@ -119,6 +125,12 @@ def test_api_runner_uses_public_sse_and_sanitized_lifecycle_telemetry(tmp_path: 
     assert result.resource_shape == (4, 8, 8)
 
 
+def test_trial_records_use_a_repeat_specific_bounded_label() -> None:
+    case = load_cases(_CASES)[0]
+
+    assert _record_label(_trial(case.identifier), case) == "D-p4-suitable-01-r1"
+
+
 def test_api_runner_rejects_partial_stream_and_keeps_cleanup_observable(tmp_path: Path) -> None:
     case = load_cases(_CASES)[0]
     telemetry = tmp_path / "telemetry.ndjson"
@@ -145,6 +157,50 @@ def test_api_runner_rejects_missing_stream_header(tmp_path: Path) -> None:
 
     assert result.completed is False
     assert result.error_category == "stream_contract"
+
+
+def test_api_runner_records_missing_optional_telemetry_as_unknown() -> None:
+    case = load_cases(_CASES)[0]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            headers, body = _stream(case)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=None,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is True
+    assert result.cleanup_confirmed is False
+    assert result.sandbox_count is None
+    assert result.resource_shape is None
+    assert result.error_category == "telemetry_unavailable"
+
+
+def test_telemetry_normalizes_provider_cleanup_errors_to_the_safety_category() -> None:
+    cleanup, sandbox_seconds, sandbox_count, shape, category = _telemetry(
+        [
+            {
+                "event": "turn_cleanup",
+                "cleanup": False,
+                "error_category": "TimeoutError",
+            }
+        ]
+    )
+
+    assert cleanup is False
+    assert sandbox_seconds is None
+    assert sandbox_count is None
+    assert shape is None
+    assert category == "cleanup_failed"
 
 
 def test_api_runner_never_verifies_a_stream_that_contains_an_error_frame(tmp_path: Path) -> None:

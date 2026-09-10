@@ -428,6 +428,24 @@ def balanced_schedule(cases: Sequence[Phase4Case], *, repeats: int = 3) -> tuple
     return tuple(trials)
 
 
+def partial_schedule(cases: Sequence[Phase4Case]) -> tuple[Trial, ...]:
+    """Return the fixed ten-row exploratory sample used by the API smoke run.
+
+    The sample is deliberately derived from the sealed full schedule rather
+    than manufacturing new descriptors.  It covers the first suitable case,
+    keeps repeats one and two complete, and adds the A/B descriptors from
+    repeat three so the arm quotas are exactly A3/B3/C2/D2.
+    """
+    full = balanced_schedule(cases)
+    selected = tuple(
+        trial for trial in full if trial.case_id == "p4-suitable-01" and (trial.repeat <= 2 or trial.arm in {"A", "B"})
+    )
+    counts = {arm: sum(trial.arm == arm for trial in selected) for arm in ARMS}
+    if len(selected) != 10 or counts != {"A": 3, "B": 3, "C": 2, "D": 2}:
+        raise ValueError("the exploratory Phase 4 sample is not sealed")
+    return selected
+
+
 def score_trial(
     case: Phase4Case, trial: Trial, observation: TrialObservation, rates: PublicRateCard, envelope: TrialEnvelope
 ) -> ScoredTrial:
@@ -799,6 +817,105 @@ def execute_campaign(
     return tuple(output)
 
 
+def execute_partial_campaign(
+    *,
+    cases: Sequence[Phase4Case],
+    trials: Sequence[Trial],
+    envelope: TrialEnvelope,
+    runner: Callable[[Trial, Phase4Case], TrialObservation],
+    rates: PublicRateCard | None = None,
+    started_at: float | None = None,
+    clock: Callable[[], float] | None = None,
+    max_elapsed_seconds: int = 45 * 60,
+    cleanup_reserve_seconds: int = 15 * 60,
+) -> tuple[ScoredTrial, ...]:
+    """Execute a bounded exploratory sample without making cost a gate.
+
+    This path is intentionally separate from ``execute_campaign``.  It still
+    serializes trials, records ordinary failures, and aborts on explicit
+    lifecycle/authorization faults, but it allows unknown cost or optional
+    telemetry to remain visible in an incomplete receipt.
+    """
+    if type(max_elapsed_seconds) is not int or max_elapsed_seconds <= 0:
+        raise ValueError("partial campaign elapsed bound must be positive")
+    if type(cleanup_reserve_seconds) is not int or cleanup_reserve_seconds < 0:
+        raise ValueError("partial campaign cleanup reserve must be nonnegative")
+    if cleanup_reserve_seconds >= max_elapsed_seconds:
+        raise ValueError("partial campaign cleanup reserve must leave an admission window")
+    if not trials:
+        raise ValueError("partial campaign requires at least one trial")
+    rates = rates or PublicRateCard()
+    clock = clock or time.monotonic
+    started = clock() if started_at is None else started_at
+    if not math.isfinite(started):
+        raise ValueError("partial campaign start must be finite")
+    deadline = started + max_elapsed_seconds - cleanup_reserve_seconds
+    by_id = {case.identifier: case for case in cases}
+    if any(trial.case_id not in by_id for trial in trials):
+        raise ValueError("partial campaign trial references an unknown case")
+    safety_categories = frozenset(
+        {
+            "authorization",
+            "unauthorized",
+            "cleanup",
+            "cleanup_failed",
+            "service_cleanup_failed",
+            "deadline",
+            "process_group",
+            "process_group_failed",
+            "service_stopped",
+        }
+    )
+
+    def is_safety_failure(trial: Trial, observation: TrialObservation) -> bool:
+        category = observation.error_category
+        if category in safety_categories:
+            return True
+        # C has a campaign-owned lifecycle observer. Missing cleanup or
+        # resource telemetry there is a safety failure, while D may reuse the
+        # ordinary candidate service whose observer is intentionally absent in
+        # this exploratory mode.
+        return trial.arm == "C" and category in {
+            "cleanup_unavailable",
+            "resource_observation_unavailable",
+            "telemetry_unavailable",
+        }
+
+    output: list[ScoredTrial] = []
+    for trial in trials:
+        if clock() >= deadline:
+            break
+        try:
+            observation = runner(trial, by_id[trial.case_id])
+        except Exception:
+            observation = TrialObservation(
+                answer="",
+                cited_evidence=(),
+                uncertainty="",
+                completed=False,
+                authorization_confirmed=False,
+                cleanup_confirmed=False,
+                input_tokens=None,
+                output_tokens=None,
+                cache_read_tokens=None,
+                sandbox_seconds=None,
+                latency_ms=None,
+                root_lm_calls=None,
+                child_lm_calls=None,
+                delegated_bytes=None,
+                sandbox_count=None,
+                resource_shape=None,
+                error_category="runner_failed",
+            )
+        scored = score_trial(by_id[trial.case_id], trial, observation, rates, envelope)
+        output.append(scored)
+        if is_safety_failure(trial, observation):
+            break
+        if clock() >= deadline:
+            break
+    return tuple(output)
+
+
 __all__ = [
     "ARMS",
     "ArmSpec",
@@ -813,9 +930,11 @@ __all__ = [
     "campaign_summary",
     "corpus_sha256",
     "execute_campaign",
+    "execute_partial_campaign",
     "load_cases",
     "observation_from_mapping",
     "paired_bootstrap",
+    "partial_schedule",
     "phase4_decision",
     "policy_sha256",
     "receipt",

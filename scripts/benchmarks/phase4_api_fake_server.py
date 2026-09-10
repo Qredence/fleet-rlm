@@ -74,7 +74,19 @@ def build_app(*, corpus: Path, telemetry: Path, recursive: bool) -> FastAPI:
         title = body.get("title")
         if not isinstance(title, str) or not title.startswith("phase4-"):
             raise ValueError("invalid fake session title")
-        case_id = title.removeprefix("phase4-")
+        raw_label = title.removeprefix("phase4-")
+        case_id = next(
+            (
+                identifier
+                for identifier in cases
+                if raw_label == identifier
+                or raw_label.startswith(f"A-{identifier}-r")
+                or raw_label.startswith(f"B-{identifier}-r")
+                or raw_label.startswith(f"C-{identifier}-r")
+                or raw_label.startswith(f"D-{identifier}-r")
+            ),
+            raw_label,
+        )
         if case_id not in cases:
             raise ValueError("unknown fake case")
         session_id = uuid4()

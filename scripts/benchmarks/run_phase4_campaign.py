@@ -1,14 +1,17 @@
 """Run the sealed Phase 4 four-arm ablation.
 
-The default command is a credential-free validator.  Provider-backed
-execution requires ``--live`` plus ``FLEET_LIVE=1`` and an explicit bounded
-campaign.  Exactly 144 trial descriptors are admitted at most once; a worker
-failure is recorded as a failed attempt and is never retried or replaced.
+The default command is a credential-free validator. Provider-backed execution
+requires ``--live`` plus ``FLEET_LIVE=1`` for the full 144-trial campaign, or
+``--partial-live`` for the fixed ten-trial exploratory sample. The partial path
+reuses a running ordinary candidate API and starts only the disposable
+frozen-baseline service. Trial failures are recorded once and are never retried
+or replaced.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -29,6 +32,7 @@ from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -50,9 +54,11 @@ from scripts.benchmarks.phase4_campaign import (
     arm_specs,
     corpus_sha256,
     execute_campaign,
+    execute_partial_campaign,
     load_cases,
     observation_from_mapping,
     paired_bootstrap,
+    partial_schedule,
     policy_sha256,
     receipt,
 )
@@ -73,6 +79,10 @@ CLEANUP_RESERVE_SECONDS = 15 * 60
 MAX_ADMISSIONS = 144
 MAX_SANDBOX_CONCURRENCY = 5
 TOTAL_SPEND_CAP = 50.0
+PARTIAL_MAX_ELAPSED_SECONDS = 45 * 60
+PARTIAL_ADMISSION_SECONDS = PARTIAL_MAX_ELAPSED_SECONDS - CLEANUP_RESERVE_SECONDS
+PARTIAL_MAX_ADMISSIONS = 10
+DEFAULT_CANDIDATE_API_URL = "http://127.0.0.1:8000"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _DEFAULT_PROFILE_RE = re.compile(r'(?m)^(default_profile\s*=\s*)(["\'][^"\']+["\'])\s*$')
 
@@ -89,6 +99,21 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--campaign", default=CAMPAIGN_NAME)
     parser.add_argument("--target", default=CAMPAIGN_TARGET)
     parser.add_argument("--live", action="store_true", help="admit provider-backed A/B/C/D execution")
+    parser.add_argument(
+        "--partial-live",
+        action="store_true",
+        help="run the fixed ten-trial exploratory sample against a live API",
+    )
+    parser.add_argument(
+        "--partial-dry-run",
+        action="store_true",
+        help="run the fixed ten-trial exploratory sample against local fake APIs",
+    )
+    parser.add_argument(
+        "--candidate-url",
+        default=DEFAULT_CANDIDATE_API_URL,
+        help="loopback candidate FastAPI URL for --partial-live",
+    )
     parser.add_argument("--dry-run", action="store_true", help="run the local deterministic adapter smoke path")
     return parser
 
@@ -122,6 +147,44 @@ def _candidate_revision(*, require_clean: bool) -> str:
     return revision
 
 
+def _candidate_dirty_fingerprint() -> tuple[bool, str | None]:
+    """Return a content digest for a partial run without exposing file paths."""
+    try:
+        status = _git("status", "--porcelain", "--untracked-files=all")
+        diff = subprocess.run(
+            ["git", "diff", "--binary", "HEAD"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout
+        untracked = _git("ls-files", "--others", "--exclude-standard")
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise Phase4CampaignError("candidate worktree state is unavailable") from exc
+    if not status:
+        return False, None
+    digest = hashlib.sha256(status.encode("utf-8") + b"\0" + diff + b"\0" + untracked.encode("utf-8")).hexdigest()
+    return True, digest
+
+
+def _validate_candidate_url(value: str) -> str:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        port = parsed.port
+    except ValueError as exc:
+        raise Phase4CampaignError("candidate API URL is invalid") from exc
+    if (
+        parsed.scheme != "http"
+        or hostname not in {"127.0.0.1", "localhost", "::1"}
+        or port is None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise Phase4CampaignError("candidate API URL must be a loopback HTTP origin")
+    return value.rstrip("/")
+
+
 def _prepare_baseline(revision: str, supplied: Path | None) -> tuple[Path, bool]:
     if supplied is not None:
         path = supplied.expanduser().resolve()
@@ -135,46 +198,44 @@ def _prepare_baseline(revision: str, supplied: Path | None) -> tuple[Path, bool]
         # Never mutate a caller-owned checkout with the campaign policy. Use
         # the supplied path only as an identity check, then create the same
         # disposable detached worktree used by the default path.
-    parent = Path(tempfile.mkdtemp(prefix=".fleet-p4-baseline-", dir=REPO_ROOT.parent))
+    # Keep the disposable checkout inside the repository's ignored scratch
+    # area. Some managed workspaces permit writes only below the checkout;
+    # using the parent directory would make an otherwise valid campaign fail
+    # before it could admit a trial. The source .git directory is read-only in
+    # that environment, so use a no-local clone instead of ``git worktree``.
+    scratch = REPO_ROOT / ".scratch"
+    scratch.mkdir(parents=True, exist_ok=True)
+    parent = Path(tempfile.mkdtemp(prefix=".fleet-p4-baseline-", dir=scratch))
     path = parent / "checkout"
     try:
         subprocess.run(
-            ["git", "worktree", "add", "--detach", str(path), revision],
+            ["git", "clone", "--no-local", str(REPO_ROOT), str(path)],
             cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "checkout", "--detach", revision],
+            cwd=path,
             check=True,
             capture_output=True,
             text=True,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         with suppress(OSError):
-            parent.rmdir()
+            shutil.rmtree(parent)
         raise Phase4CampaignError("could not create frozen baseline worktree") from exc
     try:
         actual = _git("rev-parse", "HEAD", cwd=path)
         dirty = _git("status", "--porcelain", "--untracked-files=all", cwd=path)
     except (OSError, subprocess.SubprocessError) as exc:
-        with suppress(OSError, subprocess.SubprocessError):
-            subprocess.run(
-                ["git", "worktree", "remove", "--force", str(path)],
-                cwd=REPO_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
         with suppress(OSError):
-            parent.rmdir()
+            shutil.rmtree(parent)
         raise Phase4CampaignError("frozen baseline worktree could not be verified") from exc
     if actual != revision or dirty:
-        with suppress(OSError, subprocess.SubprocessError):
-            subprocess.run(
-                ["git", "worktree", "remove", "--force", str(path)],
-                cwd=REPO_ROOT,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
         with suppress(OSError):
-            parent.rmdir()
+            shutil.rmtree(parent)
         raise Phase4CampaignError("frozen baseline worktree is not the requested clean revision")
     return path, True
 
@@ -208,22 +269,13 @@ def _install_baseline_policy_overlay(path: Path) -> None:
 
 def _remove_baseline(path: Path) -> bool:
     parent = path.parent
+    if not parent.name.startswith(".fleet-p4-baseline-") or parent.parent != REPO_ROOT / ".scratch":
+        return not path.exists()
     try:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(path)],
-            cwd=REPO_ROOT,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except (OSError, subprocess.SubprocessError):
+        shutil.rmtree(parent)
+    except OSError:
         return False
-    if parent.name.startswith(".fleet-p4-baseline-") and parent.parent == REPO_ROOT.parent:
-        try:
-            parent.rmdir()
-        except OSError:
-            return False
-    return not path.exists()
+    return not path.exists() and not parent.exists()
 
 
 def _envelope() -> TrialEnvelope:
@@ -245,6 +297,22 @@ def _envelope() -> TrialEnvelope:
     )
 
 
+def _partial_envelope() -> TrialEnvelope:
+    """Use a broad accounting envelope without making it an admission gate."""
+    return TrialEnvelope(
+        input_tokens=2_000_000,
+        output_tokens=500_000,
+        cache_read_tokens=2_000_000,
+        retries=1,
+        sandbox_seconds=3_600,
+        sandbox_count=MAX_SANDBOX_CONCURRENCY,
+        vcpus=4,
+        gib_ram=8,
+        gib_storage=8,
+        maximum_lifetime_seconds=3_600,
+    )
+
+
 def _profile_contract() -> Mapping[str, Any]:
     from fleet_rlm.config.loader import load_profile_environment_contracts
 
@@ -255,28 +323,30 @@ def _profile_contract() -> Mapping[str, Any]:
     return contract
 
 
-def _require_live_preflight() -> None:
+def _require_live_preflight(*, profile: str | None = CAMPAIGN_PROFILE) -> Any:
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in _LIVE_VALUES:
         raise Phase4CampaignError("FLEET_LIVE=1 is required for provider-backed Phase 4 execution")
     try:
-        from fleet_rlm.config.loader import require_live_execution
+        from fleet_rlm.config.loader import active_profile_contract, require_live_execution
 
-        require_live_execution(profile="phase4-campaign")
-        contract = _profile_contract()
+        settings = require_live_execution(profile=profile) if profile is not None else require_live_execution()
+        contract = _profile_contract() if profile is not None else active_profile_contract()
         if (
             contract.runtime_environment != "daytona"
-            or contract.root_model != MODEL_ID
-            or contract.sub_model != MODEL_ID
-            or contract.root_max_tokens != 1_024
-            or contract.sub_max_tokens != 512
+            or settings.root_lm.model != MODEL_ID
+            or settings.sub_lm.model != MODEL_ID
+            or not settings.rlm_recursion_enabled
         ):
-            raise Phase4CampaignError("phase4-campaign model or runtime contract is not approved")
+            raise Phase4CampaignError("live model or runtime contract is not approved")
+        if profile is not None and (contract.root_max_tokens != 1_024 or contract.sub_max_tokens != 512):
+            raise Phase4CampaignError("phase4-campaign token contract is not approved")
     except Exception as exc:
         raise Phase4CampaignError("live policy preflight failed") from exc
     names = (*contract.provider_environment_names, *contract.daytona_snapshot_environment_names)
     missing = sorted({name for name in names if not os.environ.get(name)})
     if missing:
         raise Phase4CampaignError("live provider environment is incomplete")
+    return contract
 
 
 def _worker_env(*, candidate: str) -> dict[str, str]:
@@ -343,6 +413,16 @@ def _probe(url: str, *, timeout: float = 1.0) -> bool:
         return False
 
 
+def _wait_for_ready(base_url: str, *, timeout_seconds: float = 30.0) -> bool:
+    """Wait for both public readiness endpoints within a bounded window."""
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if _probe(f"{base_url}/health") and _probe(f"{base_url}/health/ready"):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 class Phase4ApiService:
     """Own one loopback FastAPI process and its ephemeral telemetry channel."""
 
@@ -393,6 +473,23 @@ class Phase4ApiService:
             if self.recursive:
                 command.append("--recursive")
         else:
+            db_init = self.checkout_root / "scripts" / "db_init.py"
+            if not db_init.is_file():
+                raise Phase4CampaignError(f"{self.label} API database initializer is unavailable")
+            try:
+                initialized = subprocess.run(
+                    [sys.executable, str(db_init), "--database-url", self.database_url],
+                    cwd=self.checkout_root,
+                    env=self.env,
+                    capture_output=True,
+                    text=True,
+                    timeout=min(60.0, timeout_seconds),
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError):
+                raise Phase4CampaignError(f"{self.label} API database initialization failed") from None
+            if initialized.returncode != 0:
+                raise Phase4CampaignError(f"{self.label} API database initialization failed")
             command = [
                 sys.executable,
                 str(API_SERVER_PATH),
@@ -484,11 +581,20 @@ class Phase4ArmRunner:
 class SubprocessArmRunner:
     """Run one arm in the selected immutable checkout and parse one observation."""
 
-    def __init__(self, *, candidate_root: Path, baseline_root: Path, worker: Path, timeout_seconds: int = 150) -> None:
+    def __init__(
+        self,
+        *,
+        candidate_root: Path,
+        baseline_root: Path,
+        worker: Path,
+        timeout_seconds: int = 150,
+        profile: str | None = CAMPAIGN_PROFILE,
+    ) -> None:
         self.candidate_root = candidate_root
         self.baseline_root = baseline_root
         self.worker = worker
         self.timeout_seconds = timeout_seconds
+        self.profile = profile
         self.env = _worker_env(candidate=str(candidate_root))
 
     def __call__(self, trial: Trial, case: Any) -> TrialObservation:
@@ -502,6 +608,7 @@ class SubprocessArmRunner:
                 "repeat": trial.repeat,
                 "arm": trial.arm,
                 "arm_order": list(trial.arm_order),
+                "profile": self.profile,
             },
             "case": {
                 "id": case.identifier,
@@ -681,7 +788,74 @@ def _campaign_metadata(
     }
 
 
+def _partial_campaign_metadata(
+    *,
+    specs: tuple[Any, ...],
+    name: str,
+    target: str,
+    candidate_url: str,
+    candidate_dirty: bool,
+    candidate_dirty_sha256: str | None,
+    prior_status: str,
+) -> dict[str, object]:
+    """Return bounded metadata for the non-certifying ten-trial sample."""
+    rates = PublicRateCard()
+    return {
+        "name": name,
+        "target": target,
+        "profile": "committed-default",
+        "transport": "fastapi_http_sse_for_C_D",
+        "mode": "partial_exploratory",
+        "candidate_url": candidate_url,
+        "candidate_dirty": candidate_dirty,
+        "candidate_dirty_sha256": candidate_dirty_sha256,
+        "prior_receipt": str(PRIOR_RECEIPT_PATH.relative_to(REPO_ROOT)),
+        "prior_receipt_status": "ignored_for_partial",
+        "prior_receipt_observed_status": prior_status,
+        "max_elapsed_seconds": PARTIAL_MAX_ELAPSED_SECONDS,
+        "admission_deadline_seconds": PARTIAL_ADMISSION_SECONDS,
+        "cleanup_reserve_seconds": CLEANUP_RESERVE_SECONDS,
+        "max_admissions": PARTIAL_MAX_ADMISSIONS,
+        "cost_observation_policy": "non_gating_record_if_available",
+        "pricing": {
+            "cloud_region_assumption": "GCP standard public pricing",
+            "model": MODEL_ID,
+            "input_usd_per_million": str(rates.input_usd_per_million),
+            "output_usd_per_million": str(rates.output_usd_per_million),
+            "cache_read_usd_per_million": str(rates.cache_read_usd_per_million),
+        },
+        "arms": [
+            {
+                "arm": spec.arm,
+                "execution": spec.execution,
+                "uses_child_sandboxes": spec.uses_child_sandboxes,
+                "source_revision": spec.source_revision,
+            }
+            for spec in specs
+        ],
+        "c_snapshot_context_difference": (
+            "Arm C executes the frozen baseline checkout; its durable snapshot/context contract is retained "
+            "from that revision while source material and the ordinary committed profile are used."
+        ),
+        "d_telemetry": "unavailable_by_design_reused_ordinary_service",
+        "d_persistence": "labeled_sessions_and_attachments_retained",
+        "execution_contract": {
+            "A_B": "direct DSPy ablations",
+            "C_D": "supervised FastAPI HTTP/SSE services",
+            "one_session_per_trial": True,
+            "serialized_trials": True,
+            "failure_policy": "ordinary_failures_continue_safety_faults_halt",
+        },
+    }
+
+
 def run(args: argparse.Namespace) -> int:
+    partial_live = bool(getattr(args, "partial_live", False))
+    partial_dry_run = bool(getattr(args, "partial_dry_run", False))
+    live = bool(getattr(args, "live", False))
+    dry_run = bool(getattr(args, "dry_run", False))
+    if sum((live, partial_live, partial_dry_run, dry_run)) > 1:
+        raise Phase4CampaignError("campaign execution modes are mutually exclusive")
     output = args.output.expanduser().resolve()
     if not _path_is_below_scratch(output) or output.exists():
         raise Phase4CampaignError("receipt output must be a new JSON path below .scratch")
@@ -689,29 +863,33 @@ def run(args: argparse.Namespace) -> int:
     if not corpus.is_file():
         raise Phase4CampaignError("sealed Phase 4 corpus is unavailable")
     load_dotenv(REPO_ROOT / ".env", override=False)
-    candidate_revision = _candidate_revision(require_clean=args.live)
-    if args.live:
-        _require_live_preflight()
+    candidate_revision = _candidate_revision(require_clean=live)
+    candidate_dirty, candidate_dirty_sha256 = _candidate_dirty_fingerprint() if partial_live else (False, None)
+    if live:
+        _require_live_preflight(profile=CAMPAIGN_PROFILE)
+    elif partial_live:
+        _require_live_preflight(profile=None)
     prior_spend, prior_status = _prior_receipt_spend()
-    if args.live and prior_spend is None:
+    if live and prior_spend is None:
         raise Phase4CampaignError("prior Phase 4 receipt has no defensible observed spend")
-    if args.live and prior_spend is not None and prior_spend > TOTAL_SPEND_CAP:
+    if live and prior_spend is not None and prior_spend > TOTAL_SPEND_CAP:
         raise Phase4CampaignError("prior Phase 4 receipt already exceeds the cumulative spend cap")
     cases = load_cases(corpus)
     specs = arm_specs(baseline_revision=BASELINE_REVISION, candidate_revision=candidate_revision)
-    envelope = _envelope()
+    envelope = _partial_envelope() if partial_live else _envelope()
     policy = CampaignPreflight(
         args.campaign,
         args.target,
-        MAX_ELAPSED_SECONDS,
-        MAX_ADMISSIONS,
+        PARTIAL_MAX_ELAPSED_SECONDS if partial_live else MAX_ELAPSED_SECONDS,
+        PARTIAL_MAX_ADMISSIONS if partial_live else MAX_ADMISSIONS,
         MAX_SANDBOX_CONCURRENCY,
         TOTAL_SPEND_CAP,
     )
     policy.validate()
+    candidate_url = _validate_candidate_url(args.candidate_url) if partial_live else None
     baseline_root, remove_baseline = (
         _prepare_baseline(BASELINE_REVISION, args.baseline_worktree)
-        if args.live
+        if live or partial_live
         else (
             REPO_ROOT,
             False,
@@ -721,7 +899,7 @@ def run(args: argparse.Namespace) -> int:
     rows: tuple[Any, ...] = ()
     service_cleanup_confirmed = True
     try:
-        if args.live:
+        if live:
             _install_baseline_policy_overlay(baseline_root)
             live_env = _worker_env(candidate=str(REPO_ROOT))
             services = {
@@ -751,8 +929,106 @@ def run(args: argparse.Namespace) -> int:
                 for arm, service in services.items()
             }
             runner = Phase4ArmRunner(
-                direct=SubprocessArmRunner(candidate_root=REPO_ROOT, baseline_root=baseline_root, worker=WORKER_PATH),
+                direct=SubprocessArmRunner(
+                    candidate_root=REPO_ROOT,
+                    baseline_root=baseline_root,
+                    worker=WORKER_PATH,
+                    profile=CAMPAIGN_PROFILE,
+                ),
                 api_runners=api_runners,
+            )
+            rows = execute_campaign(
+                cases=cases,
+                preflight=policy,
+                envelope=envelope,
+                runner=runner,
+                initial_spent_usd=prior_spend if prior_spend is not None else 0.0,
+            )
+        elif partial_live:
+            assert candidate_url is not None
+            if not _wait_for_ready(candidate_url):
+                raise Phase4CampaignError("candidate API is not ready")
+            live_env = _worker_env(candidate=str(REPO_ROOT))
+            services = {
+                "C": Phase4ApiService(
+                    checkout_root=baseline_root,
+                    recursive=True,
+                    profile=None,
+                    env=live_env,
+                    label="C",
+                ),
+            }
+            services["C"].start()
+            api_runners = {
+                "C": Phase4ApiTrialRunner(
+                    base_url=services["C"].base_url,
+                    telemetry_path=services["C"].telemetry_path,
+                    timeout_seconds=150.0,
+                ),
+                "D": Phase4ApiTrialRunner(
+                    base_url=candidate_url,
+                    telemetry_path=None,
+                    timeout_seconds=150.0,
+                ),
+            }
+            runner = Phase4ArmRunner(
+                direct=SubprocessArmRunner(
+                    candidate_root=REPO_ROOT,
+                    baseline_root=baseline_root,
+                    worker=WORKER_PATH,
+                    profile=None,
+                ),
+                api_runners=api_runners,
+            )
+            rows = execute_partial_campaign(
+                cases=cases,
+                trials=partial_schedule(cases),
+                envelope=envelope,
+                runner=runner,
+                max_elapsed_seconds=PARTIAL_MAX_ELAPSED_SECONDS,
+            )
+        elif partial_dry_run:
+            dry_env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)}
+            services = {
+                "C": Phase4ApiService(
+                    checkout_root=REPO_ROOT,
+                    recursive=True,
+                    profile=None,
+                    env=dry_env,
+                    label="C",
+                    fake=True,
+                    corpus=corpus,
+                ),
+                "D": Phase4ApiService(
+                    checkout_root=REPO_ROOT,
+                    recursive=True,
+                    profile=None,
+                    env=dry_env,
+                    label="D",
+                    fake=True,
+                    corpus=corpus,
+                ),
+            }
+            for service in services.values():
+                service.start()
+            api_runners = {
+                arm: Phase4ApiTrialRunner(
+                    base_url=service.base_url,
+                    telemetry_path=service.telemetry_path,
+                    timeout_seconds=30.0,
+                )
+                for arm, service in services.items()
+            }
+            runner = Phase4ArmRunner(
+                direct=_dry_runner,
+                api_runners=api_runners,
+            )
+            rows = execute_partial_campaign(
+                cases=cases,
+                trials=partial_schedule(cases),
+                envelope=envelope,
+                runner=runner,
+                max_elapsed_seconds=PARTIAL_MAX_ELAPSED_SECONDS,
             )
         else:
             dry_env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": str(REPO_ROOT)}
@@ -790,13 +1066,12 @@ def run(args: argparse.Namespace) -> int:
                 direct=_dry_runner,
                 api_runners=api_runners,
             )
-        rows = execute_campaign(
-            cases=cases,
-            preflight=policy,
-            envelope=envelope,
-            runner=runner,
-            initial_spent_usd=prior_spend if args.live and prior_spend is not None else 0.0,
-        )
+            rows = execute_campaign(
+                cases=cases,
+                preflight=policy,
+                envelope=envelope,
+                runner=runner,
+            )
     finally:
         for service in services.values():
             service_cleanup_confirmed = service.stop() and service_cleanup_confirmed
@@ -810,10 +1085,10 @@ def run(args: argparse.Namespace) -> int:
         (row.observed_cost_usd for row in rows if row.observed_cost_usd is not None),
         Decimal(0),
     )
-    cumulative_spend = current_spend + (Decimal(str(prior_spend)) if prior_spend is not None else Decimal(0))
+    cumulative_spend = current_spend + (Decimal(str(prior_spend)) if live and prior_spend is not None else Decimal(0))
     bootstrap = (
         paired_bootstrap(rows)
-        if len(rows) == MAX_ADMISSIONS
+        if len(rows) == MAX_ADMISSIONS and live
         else {
             "point_estimate": None,
             "ci_lower": None,
@@ -822,21 +1097,77 @@ def run(args: argparse.Namespace) -> int:
     )
     observed_spend = str(current_spend)
     cost_observation_complete = all(row.observed_cost_usd is not None for row in rows)
-    payload = receipt(
-        rows,
-        corpus_digest=corpus_sha256(corpus),
-        policy_digest=policy_sha256(REPO_ROOT / "config" / "fleet.toml", profile=CAMPAIGN_PROFILE),
-        baseline_revision=BASELINE_REVISION,
-        candidate_revision=candidate_revision,
-        bootstrap=bootstrap,
-        cases=cases,
-        campaign={
+    expected_admissions = PARTIAL_MAX_ADMISSIONS if partial_live else MAX_ADMISSIONS
+    policy_profile = "committed-default" if (partial_live or partial_dry_run) else CAMPAIGN_PROFILE
+    safety_halted = any(
+        row.observation.error_category
+        in {
+            "authorization",
+            "unauthorized",
+            "cleanup",
+            "cleanup_failed",
+            "service_cleanup_failed",
+            "deadline",
+            "process_group",
+            "process_group_failed",
+            "service_stopped",
+        }
+        for row in rows
+    )
+    if partial_live or partial_dry_run:
+        partial_candidate_url = candidate_url
+        if partial_candidate_url is None and partial_dry_run:
+            dry_candidate_service = services.get("D")
+            partial_candidate_url = dry_candidate_service.base_url if dry_candidate_service is not None else None
+        campaign_metadata = _partial_campaign_metadata(
+            specs=specs,
+            name=args.campaign,
+            target=args.target,
+            candidate_url=partial_candidate_url or DEFAULT_CANDIDATE_API_URL,
+            candidate_dirty=candidate_dirty,
+            candidate_dirty_sha256=candidate_dirty_sha256,
+            prior_status=prior_status,
+        )
+        halted = len(rows) < expected_admissions or safety_halted or not service_cleanup_confirmed
+        halt_reason = (
+            "safety_failure"
+            if safety_halted or not service_cleanup_confirmed
+            else "admission_limit_or_time"
+            if len(rows) < expected_admissions
+            else None
+        )
+        campaign_metadata.update(
+            {
+                "mode": "partial_dry_run" if partial_dry_run else "partial_exploratory",
+                "transport": "local_fake_http_sse" if partial_dry_run else "fastapi_http_sse_for_C_D",
+                "d_telemetry": "available_local_fake" if partial_dry_run else campaign_metadata["d_telemetry"],
+                "selected_trials": [
+                    {
+                        "case_id": row.trial.case_id,
+                        "repeat": row.trial.repeat,
+                        "arm": row.trial.arm,
+                        "arm_order": list(row.trial.arm_order),
+                    }
+                    for row in rows
+                ],
+                "arm_orders": sorted({"".join(row.trial.arm_order) for row in rows}),
+                "admissions": len(rows),
+                "observed_spend_usd": observed_spend if cost_observation_complete else None,
+                "cumulative_observed_spend_usd": observed_spend if cost_observation_complete else None,
+                "cost_observation_complete": cost_observation_complete,
+                "service_cleanup_confirmed": service_cleanup_confirmed,
+                "halted": halted,
+                "halt_reason": halt_reason,
+            }
+        )
+    else:
+        campaign_metadata = {
             **_campaign_metadata(
                 envelope=envelope,
                 specs=specs,
                 name=args.campaign,
                 target=args.target,
-                mode="live" if args.live else "dry-run",
+                mode="live" if live else "dry-run",
                 prior_spend=prior_spend,
                 prior_status=prior_status,
             ),
@@ -857,19 +1188,31 @@ def run(args: argparse.Namespace) -> int:
                 if len(rows) < MAX_ADMISSIONS
                 else None
             ),
-        },
+        }
+    payload = receipt(
+        rows,
+        corpus_digest=corpus_sha256(corpus),
+        policy_digest=policy_sha256(
+            REPO_ROOT / "config" / "fleet.toml",
+            profile=policy_profile if (partial_live or partial_dry_run) else CAMPAIGN_PROFILE,
+        ),
+        baseline_revision=BASELINE_REVISION,
+        candidate_revision=candidate_revision,
+        bootstrap=bootstrap,
+        cases=cases,
+        campaign=campaign_metadata,
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"receipt": str(output), "decision": payload["decision"], "attempted": payload["attempted"]}))
+    if partial_live or partial_dry_run:
+        return 0
     return 0 if payload["decision"] in {"retain_simplified_profile", "disable", "safety_failure"} else 2
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.live and args.dry_run:
-            raise Phase4CampaignError("--live and --dry-run are mutually exclusive")
         return run(args)
     except Phase4CampaignError:
         print("Phase 4 campaign precondition failed.", file=sys.stderr)

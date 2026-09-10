@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import inspect
 import json
 import re
 import sys
@@ -192,55 +193,61 @@ def _lm_observation(
     )
 
 
-def _campaign_settings(*, recursive: bool, trial: Trial, root: Path) -> Any:
-    """Load the selected checkout policy and apply the sealed campaign overlay."""
+def _campaign_settings(*, profile: str | None, recursive: bool, trial: Trial, root: Path) -> Any:
+    """Load one checkout policy and apply only the requested process overlay."""
     import fleet_rlm.config.loader as loader
 
-    settings = loader.load_runtime_settings()
-    settings = settings.model_copy(
-        update={
-            # The worker may be imported from the frozen C checkout, whose
-            # default profile predates the sealed campaign.  Apply every
-            # cost-relevant LLM setting explicitly so all four arms share the
-            # same model, deterministic decoding, retry allowance, and token
-            # ceilings independent of the checkout's default profile.
-            "root_llm_max_tokens": 1_024,
-            "sub_llm_max_tokens": 512,
-            "root_llm_timeout_seconds": 90,
-            "sub_llm_timeout_seconds": 90,
-            "root_llm_temperature": 0.0,
-            "sub_llm_temperature": 0.0,
-            "root_llm_num_retries": 0,
-            "sub_llm_num_retries": 0,
-            "root_llm_cache": False,
-            "sub_llm_cache": False,
-            "rlm_max_iters": 6,
-            "rlm_max_llm_calls": 8,
-            "rlm_max_provider_attempts": 8,
-            "rlm_execution_timeout_s": 90,
-            "rlm_wrap_up_seconds": 30,
-            "rlm_recursion_enabled": recursive,
-            "rlm_recursion_max_calls": 4,
-            "rlm_recursion_child_max_iters": 4,
-            "rlm_recursion_child_max_llm_calls": 4,
-            "rlm_recursion_child_max_output_chars": 2_000,
-            "rlm_recursion_max_parallel_children": 4,
-            "max_active_daytona_leases": 1,
-            "turn_timeout_seconds": 90,
-            "mlflow_tracing_enabled": False,
-            "data_root": str(root / "fleet-data"),
-            "database_url": f"sqlite+aiosqlite:///{(root / 'trial.db').resolve()}",
-            "volume_name": f"fleet-p4-{trial.arm.lower()}-{trial.case_id}-{trial.repeat}-{uuid4().hex[:12]}",
-        }
-    )
-    return settings
+    load_settings = loader.load_runtime_settings
+    try:
+        accepts_profile = "profile" in inspect.signature(load_settings).parameters
+    except (TypeError, ValueError):
+        accepts_profile = False
+    settings = load_settings(profile=profile) if profile is not None and accepts_profile else load_settings()
+    update: dict[str, object] = {
+        "rlm_recursion_enabled": recursive,
+        "data_root": str(root / "fleet-data"),
+        "database_url": f"sqlite+aiosqlite:///{(root / 'trial.db').resolve()}",
+        "volume_name": f"fleet-p4-{trial.arm.lower()}-{trial.case_id}-{trial.repeat}-{uuid4().hex[:12]}",
+    }
+    if profile is not None:
+        # The full campaign uses this explicit overlay so every checkout
+        # shares the same model, deterministic decoding, retry allowance, and
+        # token ceilings independent of its committed default profile.
+        update.update(
+            {
+                "root_llm_max_tokens": 1_024,
+                "sub_llm_max_tokens": 512,
+                "root_llm_timeout_seconds": 90,
+                "sub_llm_timeout_seconds": 90,
+                "root_llm_temperature": 0.0,
+                "sub_llm_temperature": 0.0,
+                "root_llm_num_retries": 0,
+                "sub_llm_num_retries": 0,
+                "root_llm_cache": False,
+                "sub_llm_cache": False,
+                "rlm_max_iters": 6,
+                "rlm_max_llm_calls": 8,
+                "rlm_max_provider_attempts": 8,
+                "rlm_execution_timeout_s": 90,
+                "rlm_wrap_up_seconds": 30,
+                "rlm_recursion_max_calls": 4,
+                "rlm_recursion_child_max_iters": 4,
+                "rlm_recursion_child_max_llm_calls": 4,
+                "rlm_recursion_child_max_output_chars": 2_000,
+                "rlm_recursion_max_parallel_children": 4,
+                "max_active_daytona_leases": 1,
+                "turn_timeout_seconds": 90,
+                "mlflow_tracing_enabled": False,
+            }
+        )
+    return settings.model_copy(update=update)
 
 
-def _model_observation(case: Phase4Case, trial: Trial) -> TrialObservation:
+def _model_observation(case: Phase4Case, trial: Trial, *, profile: str | None) -> TrialObservation:
     from fleet_rlm.rlm.program import build_model_bundle
 
     with tempfile.TemporaryDirectory(prefix="fleet-p4-lm-") as temp:
-        settings = _campaign_settings(recursive=False, trial=trial, root=Path(temp))
+        settings = _campaign_settings(profile=profile, recursive=False, trial=trial, root=Path(temp))
         source = _case_sources(case)
         started = time.perf_counter()
         models = build_model_bundle(settings)
@@ -258,11 +265,11 @@ def _model_observation(case: Phase4Case, trial: Trial) -> TrialObservation:
         )
 
 
-def _native_observation(case: Phase4Case, trial: Trial) -> TrialObservation:
+def _native_observation(case: Phase4Case, trial: Trial, *, profile: str | None) -> TrialObservation:
     from fleet_rlm.rlm.program import build_model_bundle
 
     with tempfile.TemporaryDirectory(prefix="fleet-p4-rlm-") as temp:
-        settings = _campaign_settings(recursive=False, trial=trial, root=Path(temp))
+        settings = _campaign_settings(profile=profile, recursive=False, trial=trial, root=Path(temp))
         models = build_model_bundle(settings)
         source = _case_sources(case)
         started = time.perf_counter()
@@ -310,10 +317,13 @@ def _run(payload: Mapping[str, Any]) -> TrialObservation:
     )
     if trial.case_id != case.identifier or trial.arm not in {"A", "B", "C", "D"} or trial.repeat not in {1, 2, 3}:
         raise ValueError("trial descriptor does not match corpus")
+    profile = raw_trial.get("profile", "phase4-campaign")
+    if profile is not None and profile != "phase4-campaign":
+        raise ValueError("trial profile is invalid")
     if trial.arm == "A":
-        return _model_observation(case, trial)
+        return _model_observation(case, trial, profile=profile)
     if trial.arm == "B":
-        return _native_observation(case, trial)
+        return _native_observation(case, trial, profile=profile)
     return _blank(category="api_adapter_required")
 
 
