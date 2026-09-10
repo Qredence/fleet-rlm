@@ -399,9 +399,10 @@ were deleted with their production integrations and direct tests.
 **Status: complete (2026-09-10).** Removed native Turn preparation and the
 runner's native branch, `TurnScopedRuntimeLease`, duplicate worker builder, and
 production-composition native context factory/cancellation owner. Prepared
-execution rejects all variants except `legacy`. `NativeInterpreterBackend`
-remains an unreferenced feasibility probe covered only by its direct tests; it
-is not part of production composition or a selectable runtime.
+execution rejects all variants except `legacy`. The unreferenced
+`NativeInterpreterBackend` feasibility probe, its native binding-watch support,
+benchmark, and direct tests were deleted. No alternate code-execution
+implementation remains in the source tree.
 
 **Rationale:** The branch currently carries broker execution plus a native interpreter path. Keeping both permanently defeats the migration.
 

@@ -1353,58 +1353,6 @@ async def test_replacement_revokes_old_native_binding_authority() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_binding_authority_fails_closed_for_fenced_state() -> None:
-    mgr, _platform, store, _volumes = _manager()
-    request = _request()
-    lease = await _acquire(mgr, request)
-    current = await store.get(request.session_id)
-    assert current is not None
-    await store.upsert(replace(current, provider_state="stopped"))
-
-    assert not await mgr.refresh_binding_authority(
-        session_id=request.session_id,
-        workspace_id=request.workspace_id,
-        sandbox_id=lease.sandbox_id,
-        generation=lease.binding_generation,
-    )
-    assert not mgr.is_binding_current(
-        session_id=request.session_id,
-        workspace_id=request.workspace_id,
-        sandbox_id=lease.sandbox_id,
-        generation=lease.binding_generation,
-    )
-    await mgr.release(lease)
-
-
-@pytest.mark.asyncio
-async def test_binding_watch_revokes_generation_replaced_in_durable_store() -> None:
-    mgr, _platform, store, _volumes = _manager()
-    request = _request()
-    lease = await _acquire(mgr, request)
-    stop_watch = mgr.start_binding_watch(
-        session_id=request.session_id,
-        workspace_id=request.workspace_id,
-        sandbox_id=lease.sandbox_id,
-        generation=lease.binding_generation,
-        interval_seconds=0.01,
-    )
-    try:
-        current = await store.get(request.session_id)
-        assert current is not None
-        await store.upsert(replace(current, sandbox_id="external-replacement", generation=current.generation + 1))
-        await asyncio.sleep(0.05)
-        assert not mgr.is_binding_current(
-            session_id=request.session_id,
-            workspace_id=request.workspace_id,
-            sandbox_id=lease.sandbox_id,
-            generation=lease.binding_generation,
-        )
-    finally:
-        await stop_watch()
-        await mgr.release(lease)
-
-
-@pytest.mark.asyncio
 async def test_native_retirement_failure_keeps_admission_until_deletion_retry() -> None:
     mgr, platform, store, _volumes = _manager()
     request = _request()
