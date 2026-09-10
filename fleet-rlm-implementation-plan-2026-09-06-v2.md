@@ -467,7 +467,7 @@ atomicity, and bounded-read contracts remain mandatory.
 
 ## P2.7 - Minimize Daytona snapshot dependencies
 
-**Status: in progress (2026-09-10).** Audited Fleet's two `SandboxSerializable`
+**Status: complete (2026-09-10).** Audited Fleet's two `SandboxSerializable`
 implementations, the pinned DSPy serialization prelude, and broker setup:
 committed history and attachment context reconstruct using the standard
 library and broker helpers. Future Session/WorkspaceChild definitions omit
@@ -478,8 +478,7 @@ regression proves broker history/context reconstruction and typed SUBMIT
 without DSPy. New immutable Session `fleet-rlm-python313-v10` and
 SemanticChild `fleet-rlm-python313-child-v5` images were created and passed
 runtime probes; each probe's disposable Sandbox was deleted. Configured names
-and prior images are unchanged rollback references. Host-tool and representative
-RLM live execution, sealed receipts, and operator policy promotion remain open.
+and prior images are unchanged rollback references.
 
 An opt-in aggregate certification controller now preserves the configured
 rollback references while it checks and probes both immutable candidates, then
@@ -490,8 +489,12 @@ The 2026-09-10 live attempt did not pass: both disposable image probes succeeded
 but the candidate-scoped Session MVP failed in its first RLM Turn. Its bounded
 aggregate receipt is `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r2.json`;
 the retained diagnostic receipt is `.scratch/p27-debug-mvp-test-20260910.json`.
-Do not promote either image until a representative Session host-tool/RLM proof
-and the SemanticChild recursive proof both pass in one sealed aggregate receipt.
+The replacement focused certification passed on candidate
+`caa4fd83b578f610e28f6f0e792b04aa0da41d9e`: both immutable image probes,
+the Session host-tool/RLM stream proof, and the SemanticChild recursive proof
+passed with disposable cleanup confirmed. Its sealed bounded receipt is
+`.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`.
+This completes P2.7; manual promotion remains a separate operator decision.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 
@@ -507,21 +510,15 @@ reject mutable names, dirty candidates, failing probes, and malformed receipts
 before promotion. The existing snapshot probe, focused Session stream verifier,
 and focused recursive verifier are the supported evidence paths.
 
-**Next work:**
-1. Run the selected versioned Session and SemanticChild images through a
-   disposable live host-tool and representative RLM probe, retaining only
-   bounded/redacted evidence.
-2. Seal versioned receipts containing image identity, dependency verification,
-   history/context reconstruction, typed `SUBMIT`, host-tool authorization,
-   RLM result, and confirmed Sandbox cleanup.
-3. Have an operator promote the configured snapshot references only after the
-    receipts pass review; keep current images as rollback references.
+**Remaining operator action:** after receipt review, promote the configured
+snapshot references atomically using the documented deployment procedure; keep
+current images as rollback references.
 
 **Validate:** snapshot import probe, typed `SUBMIT`, committed history/context reconstruction, host tools, and representative RLM execution.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
-**Phase 2 exit (pending P2.7):** one runtime graph, one provider package,
+**Phase 2 exit:** one runtime graph, one provider package,
 one execution implementation, fewer resident/global owners.
 
 ---

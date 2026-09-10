@@ -144,15 +144,20 @@ classification must be completed before claiming a Phase 6 quality campaign.
   and typed SUBMIT with no DSPy available. New immutable Session
   `fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5`
   images were created and their runtime probes passed; each disposable probe
-  Sandbox was deleted. Host-tool and representative RLM live execution, sealed
-  receipts, and operator policy promotion remain open. Existing names and
-  configuration remain rollback references. The opt-in aggregate verifier now
+  Sandbox was deleted. Existing names and configuration remain rollback
+  references. The opt-in aggregate verifier now
   checks/probes both candidate images, then runs the narrow Session host-tool/RLM
   stream proof and SemanticChild recursive lane through verifier-only Settings
   overrides; it writes one bounded receipt and never changes the configured
   references.
-  The 2026-09-10 candidate run remains non-promotable: image probes passed, but
-  the Session MVP failed during its first RLM Turn, before recursive evidence.
+  The earlier 2026-09-10 candidate run remained non-promotable: image probes
+  passed, but the Session MVP failed during its first RLM Turn, before recursive
+  evidence. The focused replacement certification then passed on candidate
+  `caa4fd83b578f610e28f6f0e792b04aa0da41d9e`: both immutable probes, the
+  Session host-tool/RLM stream proof, and SemanticChild recursive proof passed
+  with disposable cleanup confirmed. The sealed bounded receipt is
+  `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`.
+  P2.7 is complete; manual promotion remains a separate operator decision.
 
 The Phase 1 retained-broker decision remains authoritative. This continuation
 does not complete Phase 2 or certify native containment, filesystem SDK parity,
