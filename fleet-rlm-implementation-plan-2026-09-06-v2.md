@@ -481,6 +481,10 @@ runtime probes; each probe's disposable Sandbox was deleted. Configured names
 and prior images are unchanged rollback references. Host-tool and representative
 RLM live execution, sealed receipts, and operator policy promotion remain open.
 
+An opt-in aggregate certification controller now preserves the configured
+rollback references while it checks and probes both immutable candidates and
+runs the existing Session MVP and SemanticChild recursive evidence lanes.
+
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 
 **Implement:**
@@ -488,6 +492,22 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 - if no runtime import is required, remove DSPy from Session/SemanticChild snapshot requirements;
 - retain only packages generated Python is expected to use;
 - regenerate immutable snapshot identities instead of mutating existing names.
+
+**Certification contract:** certify only immutable Session and SemanticChild
+candidates; preserve the configured snapshot references until manual promotion;
+reject mutable names, dirty candidates, failing probes, and malformed receipts
+before promotion. The existing snapshot probe plus MVP and recursive verifiers
+are the supported evidence paths.
+
+**Next work:**
+1. Run the selected versioned Session and SemanticChild images through a
+   disposable live host-tool and representative RLM probe, retaining only
+   bounded/redacted evidence.
+2. Seal versioned receipts containing image identity, dependency verification,
+   history/context reconstruction, typed `SUBMIT`, host-tool authorization,
+   RLM result, and confirmed Sandbox cleanup.
+3. Have an operator promote the configured snapshot references only after the
+    receipts pass review; keep current images as rollback references.
 
 **Validate:** snapshot import probe, typed `SUBMIT`, committed history/context reconstruction, host tools, and representative RLM execution.
 

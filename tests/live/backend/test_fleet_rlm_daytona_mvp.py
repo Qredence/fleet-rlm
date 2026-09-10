@@ -46,6 +46,7 @@ _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
 _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
+_P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _SECRET_NAMES = tuple(
     name for contract in load_profile_environment_contracts() for name in contract.provider_environment_names
 )
@@ -185,19 +186,20 @@ def _live_settings(tmp_path: Path) -> Settings:
         pytest.fail("Live Daytona MVP proof requires the committed Root and Sub policy")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
-    return policy.model_copy(
-        update={
-            "database_url": database_url,
-            "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
-            "rlm_max_iters": 8,
-            "rlm_max_llm_calls": 12,
-            "turn_timeout_seconds": 840,
-            # Live product evidence is RuntimeEvents → SSE → TUI. Keep optional
-            # MLflow out of the MVP lane so a dead local tracking URI cannot
-            # starve claim heartbeats during preparation.
-            "mlflow_tracing_enabled": False,
-        }
-    )
+    overrides: dict[str, object] = {
+        "database_url": database_url,
+        "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
+        "rlm_max_iters": 8,
+        "rlm_max_llm_calls": 12,
+        "turn_timeout_seconds": 840,
+        # Live product evidence is RuntimeEvents → SSE → TUI. Keep optional
+        # MLflow out of the MVP lane so a dead local tracking URI cannot
+        # starve claim heartbeats during preparation.
+        "mlflow_tracing_enabled": False,
+    }
+    if candidate_snapshot := os.environ.get(_P27_SESSION_SNAPSHOT_ENV):
+        overrides["daytona_snapshot"] = candidate_snapshot
+    return policy.model_copy(update=overrides)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:

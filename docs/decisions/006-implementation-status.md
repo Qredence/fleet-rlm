@@ -146,7 +146,10 @@ classification must be completed before claiming a Phase 6 quality campaign.
   images were created and their runtime probes passed; each disposable probe
   Sandbox was deleted. Host-tool and representative RLM live execution, sealed
   receipts, and operator policy promotion remain open. Existing names and
-  configuration remain rollback references.
+  configuration remain rollback references. The opt-in aggregate verifier now
+  checks/probes both candidate images and runs the existing Session MVP and
+  SemanticChild recursive lanes through verifier-only Settings overrides; it
+  writes one bounded receipt and never changes the configured references.
 
 The Phase 1 retained-broker decision remains authoritative. This continuation
 does not complete Phase 2 or certify native containment, filesystem SDK parity,

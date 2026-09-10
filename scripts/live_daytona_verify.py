@@ -23,9 +23,11 @@ from fleet_rlm.config.loader import (
     require_live_execution,
 )
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
+from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
+P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
@@ -117,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=900,
         help="Pytest timeout for the live proof (default: 900).",
     )
+    parser.add_argument("--session-snapshot", help="immutable Session snapshot for P2.7 certification")
     return parser
 
 
@@ -728,6 +731,15 @@ def main(argv: list[str] | None = None) -> int:
     child_env = os.environ.copy()
     child_env.pop("FLEET_ROOT_MODEL", None)
     child_env.pop("FLEET_SUB_MODEL", None)
+    if args.session_snapshot is not None:
+        try:
+            child_env[P27_SESSION_SNAPSHOT_ENV] = validate_snapshot_name(args.session_snapshot)
+        except ValueError:
+            _write_failure(
+                output, category="precondition_failed", phase="snapshot", started_at=started_at, sha=sha, branch=branch
+            )
+            print("Live proof snapshot precondition failed.", file=sys.stderr)
+            return EXIT_PRECONDITION
     if not _models_are_approved(models):
         _write_failure(
             output,
