@@ -368,5 +368,48 @@ API, TUI, typing, lint, boundary, and documentation checks passed; package-wide
 coverage remains 79.1%. The documentation gate's initial one-line AGENTS budget
 failure was corrected without weakening the limit.
 
-Affected provider receipts pending. No production source, policy, dependency,
-generated contract, or coverage threshold changed.
+No production source, policy, dependency, generated contract, or coverage
+threshold changed. The final input-helper extraction also passed its focused
+42-case lane and Ruff checks after the full gate.
+
+### Affected live certification — 2026-09-10
+
+Candidate: `10a347fbb86e989af616d4abfb2c81db655edb62`, tested with a clean tree.
+Receipt paths below are relative to `.fleet-evidence/receipts/adr006/`; they are
+local operator evidence, not checked-in artifacts or managed-service certification.
+
+| Lane | Result | Receipt |
+| --- | --- | --- |
+| P2.7 Session and semantic-child probes, Session stream, recursive RLM | PASS, including disposable cleanup | `p3-p27-snapshots-20260910-r1.json` |
+| Recursive two-child batch | PASS | `p3-batch-20260910-r1.json` |
+| Cancellation during execution | PASS | `p3-cancel-20260910-r1.json` |
+| Deadline cleanup | PASS | `p3-deadline-20260910-r1.json` |
+| Memory candidate promotion and next-Turn retrieval | PASS | `p3-memory-candidate-20260910-r1.json` |
+| MVP | FAIL, both cases | `p3-mvp-20260910-r1.json` |
+| Memory semantics | Five passed, one failed | Per-case receipts and `p3-affected-live-summary-20260910-r1.json` |
+| PostgreSQL contention and query plans | Six scenarios and five query plans PASS | `p3-postgres-20260910-r2.json` |
+
+The PostgreSQL run used an owned, disposable local PostgreSQL 17.10 database,
+not the configured shared database. Migration to head `01a087800002` passed.
+The initial SQL-ASCII database attempt failed and its `r1` receipt is retained;
+the UTF-8 database produced the passing `r2` receipt. The owned server was stopped.
+An additional `alembic check` reported proposed constraint removal on
+`fleet_sandbox_bindings`; this schema/autogenerate discrepancy remains unresolved.
+This candidate did not change production models or migrations.
+
+Remaining live failures are preserved without weakening assertions:
+
+- Direct pi-digit MVP completed with the correct digit but emitted four code
+  chunks, exceeding the contracted maximum of three.
+- Complete MVP did not observe the required `append_workspace_text` tool call.
+- Failed-run memory-discard scenario reached an error finish but failed its
+  requirement that an error contain `timed out`; later candidate-discard
+  assertions were therefore not exercised successfully.
+
+The MVP test/helper function bodies are unchanged by extraction (AST comparison
+against the pre-consolidation revision). This does not establish that baseline
+live runs would have failed: no baseline provider comparison was run. The
+current failures block full Phase 3 certification. Provider/workflow diagnosis
+and any production fix are separate from test-suite consolidation. No retries
+were used to replace these failing receipts, and no model, policy, snapshot, or
+runtime promotion was performed. Unaffected MLflow/campaign lanes were not rerun.

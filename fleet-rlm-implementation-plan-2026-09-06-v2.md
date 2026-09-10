@@ -525,11 +525,13 @@ one execution implementation, fewer resident/global owners.
 
 # Phase 3 - Test-suite consolidation
 
-**Status: implementation in progress (2026-09-10).** The pre-move ownership
-inventory, consolidation/deletion decisions, and validation are recorded in
-`docs/testing/phase3-consolidation-ledger.md`. Domain consolidation and shared
-scenario extraction are implemented; full-gate and affected live receipts are
-required before marking this phase complete.
+**Status: consolidation implemented; affected live certification incomplete
+(2026-09-10).** P3.1–P3.4 and P3.6 are implemented, and the deterministic full
+gate passed. P3.5 preserves the existing live entry points and narrow matrix;
+its affected live run has three failing cases (two MVP cases and the failed-run
+memory-discard case). Phase 3 is not marked complete. The ownership inventory,
+scenario reconciliation, exact candidate SHA, passing receipts, and remaining
+certification failures are recorded in `docs/testing/phase3-consolidation-ledger.md`.
 
 The goal is **not** to concatenate hundreds of tests into a few giant files. The goal is to organize tests around stable behavior contracts and remove repeated setup/assertions for internals that no longer exist.
 
