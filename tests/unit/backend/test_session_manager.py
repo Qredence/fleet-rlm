@@ -930,9 +930,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
     replacement_lease = await asyncio.wait_for(replacement, timeout=2)
     await mgr._cleanup.shutdown(drain_seconds=2)
 
-    from fleet_rlm.daytona.session_manager import get_active_lease_registry
-
-    assert get_active_lease_registry().holder(cancelled_request.session_id) is None
+    assert mgr.active_leases.holder(cancelled_request.session_id) is None
     assert platform.backends[0].close_calls == 1
     assert platform.deleted == ["sb-1"]
     await mgr.release(replacement_lease)
@@ -940,7 +938,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeoutError, get_active_lease_registry
+    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeoutError
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -952,11 +950,11 @@ async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup()
 
     with pytest.raises(DaytonaLeaseAcquisitionTimeoutError):
         await acquisition
-    assert get_active_lease_registry().holder(request.session_id) is not None
+    assert mgr.active_leases.holder(request.session_id) is not None
 
     platform.release_creates.set()
     await mgr._cleanup.shutdown(drain_seconds=2)
-    assert get_active_lease_registry().holder(request.session_id) is None
+    assert mgr.active_leases.holder(request.session_id) is None
     assert platform.backends[0].close_calls == 1
 
     replacement = await mgr.acquire(_request(), deadline=asyncio.get_running_loop().time() + 2)

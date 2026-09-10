@@ -21,7 +21,6 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config.loader import active_profile, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
@@ -314,7 +313,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             if callable(close):
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             assert resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
-            assert get_active_lease_registry().holder(session_id) is None
+            assert resources.session_manager.active_leases.holder(session_id) is None
             structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
             assert len(structured) == 1
             assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID

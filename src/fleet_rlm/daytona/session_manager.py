@@ -124,7 +124,9 @@ PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
 _PREWARM_CLAIM_WAIT_SECONDS = 60.0
 
 
-async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
+async def _claim_session_lease(
+    registry: ActiveLeaseRegistry, session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float
+) -> None:
     """Claim the per-session active lease, waiting out a best-effort pre-warm.
 
     Real-versus-real and overlapping pre-warm conflicts still raise
@@ -136,7 +138,7 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
     claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
     while True:
         try:
-            get_active_lease_registry().acquire(session_id, run_id, workspace_id=workspace_id)
+            registry.acquire(session_id, run_id, workspace_id=workspace_id)
             return
         except ActiveLeaseConflictError as exc:
             if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
@@ -186,13 +188,6 @@ class ActiveLeaseRegistry:
                 return self._holders.get(self._key(session_id, workspace_id))
             matches = [run_id for (scope, sid), run_id in self._holders.items() if sid == session_id]
             return matches[0] if len(matches) == 1 else None
-
-
-_REGISTRY = ActiveLeaseRegistry()
-
-
-def get_active_lease_registry() -> ActiveLeaseRegistry:
-    return _REGISTRY
 
 
 @dataclass(slots=True)
@@ -451,6 +446,8 @@ class DaytonaSessionManager:
         self._volume_config = volume_config
         self._bindings = bindings
         self._binding_authority = BindingGenerationAuthority()
+        # Claims are scoped to this resource owner, never shared between application compositions.
+        self._active_leases = ActiveLeaseRegistry()
         self._admission = admission or DaytonaAdmission()
         self._dispatcher = dispatcher
         self._sandbox_spec = sandbox_spec
@@ -483,6 +480,11 @@ class DaytonaSessionManager:
             volume_config=volume_config,
             sandbox_spec=sandbox_spec,
         )
+
+    @property
+    def active_leases(self) -> ActiveLeaseRegistry:
+        """Return the claim owner scoped to this Session manager."""
+        return self._active_leases
 
     def _observe_binding(self, binding: SandboxBinding | None) -> None:
         """Publish the latest durable generation to synchronous native guards."""
@@ -768,7 +770,9 @@ class DaytonaSessionManager:
         run_id = request.run_id or uuid4()
         session_id = request.session_id
         await self._cancel_idle_stop(session_id, workspace_id=request.workspace_id, deadline=deadline)
-        await _claim_session_lease(session_id, run_id, workspace_id=request.workspace_id, deadline=deadline)
+        await _claim_session_lease(
+            self._active_leases, session_id, run_id, workspace_id=request.workspace_id, deadline=deadline
+        )
         claim_held = True
         permit: DaytonaAdmissionPermit | None = None
         try:
@@ -809,7 +813,7 @@ class DaytonaSessionManager:
                     permit.release()
             finally:
                 if claim_held:
-                    get_active_lease_registry().release(session_id, run_id, workspace_id=request.workspace_id)
+                    self._active_leases.release(session_id, run_id, workspace_id=request.workspace_id)
             raise
 
     @staticmethod
@@ -846,7 +850,7 @@ class DaytonaSessionManager:
                 try:
                     owner.permit.release()
                 finally:
-                    get_active_lease_registry().release(
+                    self._active_leases.release(
                         owner.request.session_id,
                         owner.run_id,
                         workspace_id=owner.request.workspace_id,
@@ -989,7 +993,7 @@ class DaytonaSessionManager:
             return
 
         owner.permit.release()
-        get_active_lease_registry().release(
+        self._active_leases.release(
             owner.session_id,
             owner.run_id,
             workspace_id=owner.workspace_id,
@@ -1285,7 +1289,7 @@ class DaytonaSessionManager:
                 permit.release()
             finally:
                 self._mark_sandbox_released(lease.sandbox_id)
-                get_active_lease_registry().release(session_id, run_id, workspace_id=workspace_id)
+                self._active_leases.release(session_id, run_id, workspace_id=workspace_id)
 
         lease._on_release = _clear_active
 
@@ -1970,7 +1974,7 @@ class DaytonaSessionManager:
         """Stop an idle Sandbox only after identity and active-lease rechecks."""
         await asyncio.sleep(delay)
         workspace_scope = UUID(workspace_id) if workspace_id is not None else None
-        if get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1988,7 +1992,7 @@ class DaytonaSessionManager:
         if binding is None or binding.sandbox_id != sandbox_id or binding.provider_state != "running":
             return
         sandbox = await self._get_bound_sandbox(sandbox_id)
-        if sandbox is None or get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if sandbox is None or self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
 
         # Keep the provider stop request owned if a new acquire cancels this
@@ -2001,7 +2005,7 @@ class DaytonaSessionManager:
         except asyncio.CancelledError:
             await asyncio.shield(stop_task)
             raise
-        if get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -2370,6 +2374,5 @@ __all__ = [
     "InterpreterLease",
     "LeaseRequest",
     "binding_matches_expected",
-    "get_active_lease_registry",
     "workspace_volume_subpath",
 ]
