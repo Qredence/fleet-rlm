@@ -373,6 +373,9 @@ def _sanitize_mlflow_value(
     if depth >= 8:
         return "[redacted depth]"
     normalized_key = _normalize_trace_key(key)
+    # Readable engineering traces remain explicitly policy-controlled. The
+    # switch applies equally to provider reasoning and system-prompt fields;
+    # the sanitizer still redacts secrets and bounds every retained value.
     if (
         normalized_key in {"reasoning", "reasoning_content", "chain_of_thought", "thinking", "system_prompt"}
         and not _TRACE_CONTENT_ENABLED

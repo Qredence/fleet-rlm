@@ -98,9 +98,7 @@ content visibility.
 
 > Migration note: the `mlflow.trace_content_mode` setting is removed. Existing
 > `fleet.toml` files that still set `trace_content_mode = "safe"` will fail
-> validation with an unknown-key error; delete the key. Trace content is now
-> bounded and sanitized by default; set `mlflow.trace_content_enabled = false`
-> explicitly for operational-only traces.
+> validation with an unknown-key error; delete the key.
 
 PostHog product analytics are policy-controlled by the optional `[posthog]`
 section. `posthog.enabled` switches analytics on or off, `posthog.project_token_env`
