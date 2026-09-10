@@ -372,7 +372,7 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 
 **Done when:** a resource has one obvious owner at every lifecycle state and the process-global owner collections are materially reduced.
 
-## P2.3 - Remove the unselected Session runtime model
+## P2.3 - Remove the unselected Session runtime model — complete
 
 **Status: complete (2026-09-10).** Production `RLMRunner` creates a fresh
 DSPy program, direct tool bindings, callbacks, and worker executor for each
@@ -399,7 +399,7 @@ were deleted with their production integrations and direct tests.
 
 **Done when:** cross-Turn correctness depends on PostgreSQL/Volume/committed history rather than a resident DSPy object graph, unless that behavior is explicitly retained as a product feature.
 
-## P2.4 - Keep only one code-execution implementation
+## P2.4 - Keep only one code-execution implementation — complete
 
 **Status: complete (2026-09-10).** Removed native Turn preparation and the
 runner's native branch, `TurnScopedRuntimeLease`, duplicate worker builder, and
