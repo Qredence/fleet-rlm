@@ -744,20 +744,109 @@ def _safe_observed_usage(value: object, *, filter_unknown: bool) -> dict[str, di
     return result
 
 
+_USAGE_REQUIRED_KEYS = frozenset({"iterations", "observed_lm_usage", "duration_ms"})
+_EXTRA_USAGE_KEYS = frozenset({"recursive_call_count", "delegation_metrics"})
+
+
+def _validated_lm_call_count(value: object, *, path: str) -> dict[str, JsonValue]:
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        raise ValueError(f"{path} must be an object with string keys")
+    entry = cast(Mapping[str, object], value)
+    role = entry.get("role")
+    if not isinstance(role, str) or not role:
+        raise ValueError(f"{path}.role must be a non-empty string")
+    return {
+        "role": role,
+        "recursive_depth": _nonnegative_integer(entry.get("recursive_depth"), field=f"{path}.recursive_depth"),
+        "count": _nonnegative_integer(entry.get("count"), field=f"{path}.count"),
+    }
+
+
+def _safe_extra_metric(value: object, *, path: str, depth: int = 0) -> JsonValue:
+    """Validate non-required delegation telemetry without trusting its shape.
+
+    Extra snapshot keys ride along for forward compatibility, but persisted
+    and SSE-projected usage must stay bounded and finite even for
+    hand-crafted payloads.
+    """
+    if depth > 8:
+        raise ValueError(f"{path} exceeds the delegation nesting bound")
+    if value is None or isinstance(value, (bool, int, str)):
+        if isinstance(value, str) and len(value) > 65536:
+            raise ValueError(f"{path} exceeds the delegation string bound")
+        return value
+    if isinstance(value, float):
+        if not isfinite(value):
+            raise ValueError(f"{path} must contain finite JSON numbers")
+        return value
+    if isinstance(value, (list, tuple)):
+        if len(value) > 4096:
+            raise ValueError(f"{path} exceeds the delegation breadth bound")
+        checked_items = [
+            _safe_extra_metric(item, path=f"{path}[{index}]", depth=depth + 1) for index, item in enumerate(value)
+        ]
+        return tuple(checked_items)
+    if isinstance(value, Mapping):
+        if len(value) > 256:
+            raise ValueError(f"{path} exceeds the delegation breadth bound")
+        checked: dict[str, JsonValue] = {}
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{path} must contain only string keys")
+            checked[key] = _safe_extra_metric(item, path=f"{path}.{key}", depth=depth + 1)
+        return checked
+    raise ValueError(f"{path} must contain JSON-safe delegation telemetry")
+
+
+def _validated_delegation_metrics(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("delegation_metrics must be a JSON object")
+    metrics = cast(Mapping[str, object], value)
+    raw_counts = metrics.get("lm_call_counts")
+    if not isinstance(raw_counts, (list, tuple)):
+        raise ValueError("delegation_metrics.lm_call_counts must be a list")
+    normalized: dict[str, Any] = {
+        "lm_call_counts": [
+            _validated_lm_call_count(item, path=f"delegation_metrics.lm_call_counts[{index}]")
+            for index, item in enumerate(raw_counts)
+        ],
+        "delegated_input_bytes": _nonnegative_integer(
+            metrics.get("delegated_input_bytes"), field="delegation_metrics.delegated_input_bytes"
+        ),
+    }
+    for key, item in metrics.items():
+        if not isinstance(key, str):
+            raise ValueError("delegation_metrics must contain only string keys")
+        if key in normalized:
+            continue
+        normalized[key] = _safe_extra_metric(item, path=f"delegation_metrics.{key}")
+    return normalized
+
+
 def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
     """Validate and normalize the exact public/durable RLM usage shape."""
-    expected = {"iterations", "observed_lm_usage", "duration_ms"}
-    if set(value) != expected:
-        raise ValueError("usage must contain exactly iterations, observed_lm_usage, and duration_ms")
+    keys = set(value)
+    if not keys >= _USAGE_REQUIRED_KEYS or keys - _USAGE_REQUIRED_KEYS - _EXTRA_USAGE_KEYS:
+        raise ValueError(
+            "usage must contain exactly iterations, observed_lm_usage, and duration_ms, "
+            "with only recursive_call_count and delegation_metrics as optional extras"
+        )
     observed = value["observed_lm_usage"]
     if not isinstance(observed, Mapping):
         raise ValueError("observed_lm_usage must be a JSON object")
     normalized = _safe_observed_usage(observed, filter_unknown=False)
-    return RLMUsage(
+    usage = RLMUsage(
         iterations=_nonnegative_integer(value["iterations"], field="iterations"),
         observed_lm_usage=normalized,
         duration_ms=_nonnegative_integer(value["duration_ms"], field="duration_ms"),
     )
+    if "recursive_call_count" in value:
+        usage["recursive_call_count"] = _nonnegative_integer(
+            value["recursive_call_count"], field="recursive_call_count"
+        )
+    if "delegation_metrics" in value:
+        usage["delegation_metrics"] = _validated_delegation_metrics(value["delegation_metrics"])
+    return usage
 
 
 def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]]:
@@ -791,8 +880,20 @@ def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]
     return merged
 
 
-def observed_usage(prediction: Any, *, duration_ms: int, lms: tuple[Any, ...] = ()) -> RLMUsage:
-    """Read conservative usage from public Prediction surfaces without estimates."""
+def observed_usage(
+    prediction: Any,
+    *,
+    duration_ms: int,
+    lms: tuple[Any, ...] = (),
+    delegation: Mapping[str, object] | None = None,
+) -> RLMUsage:
+    """Read conservative usage from public Prediction surfaces without estimates.
+
+    ``delegation`` is an optional pre-built mapping carrying
+    ``recursive_call_count`` and/or ``delegation_metrics`` (for example from a
+    recursive-call summary). It is merged after token handling and validated by
+    ``validate_rlm_usage``; ``None`` keeps the historical three-key payload.
+    """
     trajectory = getattr(prediction, "trajectory", None)
     iterations = (
         len(trajectory)
@@ -811,13 +912,21 @@ def observed_usage(prediction: Any, *, duration_ms: int, lms: tuple[Any, ...] = 
     if not observed_lm_usage and lms:
         with contextlib.suppress(ValueError):
             observed_lm_usage = _history_token_usage(lms)
-    return validate_rlm_usage(
-        {
-            "iterations": iterations,
-            "observed_lm_usage": observed_lm_usage,
-            "duration_ms": duration_ms,
-        }
-    )
+    payload: dict[str, object] = {
+        "iterations": iterations,
+        "observed_lm_usage": observed_lm_usage,
+        "duration_ms": duration_ms,
+    }
+    if delegation is not None:
+        if not isinstance(delegation, Mapping):
+            raise ValueError("delegation must be a mapping or None")
+        unknown = set(delegation) - {"recursive_call_count", "delegation_metrics"}
+        if unknown:
+            raise ValueError(f"delegation carries unsupported keys: {sorted(str(key) for key in unknown)}")
+        for key in ("recursive_call_count", "delegation_metrics"):
+            if key in delegation:
+                payload[key] = delegation[key]
+    return validate_rlm_usage(payload)
 
 
 _RLM_EXTRACTION_FALLBACK_REASONING = "Extract forced final output"

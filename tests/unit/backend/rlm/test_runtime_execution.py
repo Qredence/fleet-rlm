@@ -309,7 +309,13 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert isinstance(factory.tools[0], dspy.Tool)
     assert stream.outcome.usage["iterations"] == 1
     assert stream.outcome.usage["observed_lm_usage"] == {"root": {"prompt_tokens": 4, "completion_tokens": 2}}
-    assert set(stream.outcome.usage) == {"iterations", "observed_lm_usage", "duration_ms"}
+    assert set(stream.outcome.usage) == {
+        "iterations",
+        "observed_lm_usage",
+        "duration_ms",
+        "recursive_call_count",
+        "delegation_metrics",
+    }
     assert len(contexts) == 1
     assert contexts[0]["lm"] is context.execution.models.root_lm
     assert contexts[0]["track_usage"] is True

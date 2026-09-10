@@ -333,3 +333,73 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
     assert stream.outcome.terminal_status == "cancelled"
     assert stream.outcome.public_error_message == "Turn cancelled"
     assert stream.outcome.usage == {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
+
+
+def test_delegation_usage_falls_back_to_started_calls_without_executor() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+    from fleet_rlm.rlm.runtime import _delegation_usage
+
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0)
+    metrics.record_recursive_call()
+    metrics.record_recursive_batch()
+    context = SimpleNamespace(delegation=SimpleNamespace(metrics=metrics))
+
+    out = _delegation_usage(context)
+
+    assert out["recursive_call_count"] == 2
+    assert out["delegation_metrics"]["lm_call_counts"] == [{"role": "root", "recursive_depth": 0, "count": 1}]
+
+
+def test_delegation_usage_prefers_executor_reserved_count() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.recursion import DelegationMetrics, RecursiveCallSummary
+    from fleet_rlm.rlm.runtime import _delegation_usage
+
+    metrics = DelegationMetrics()
+    summary = RecursiveCallSummary(
+        call_count=5,
+        delegated_prompt_chars=0,
+        maximum_prompt_chars=0,
+        child_iterations=0,
+        depth_fallback_count=0,
+        termination_modes=(),
+        delegation_metrics=metrics.snapshot(),
+    )
+    executor = SimpleNamespace(summary=lambda: summary)
+    context = SimpleNamespace(delegation=SimpleNamespace(metrics=metrics))
+
+    out = _delegation_usage(context, executor)
+
+    assert out["recursive_call_count"] == 5
+
+
+def test_outcome_usage_with_delegation_commits_to_usage_part() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+    from fleet_rlm.rlm.result import observed_usage
+    from fleet_rlm.sessions.committed_turn import UsagePart
+
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0)
+    metrics.record_delegated_input_bytes(64)
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+    usage = observed_usage(
+        prediction,
+        duration_ms=7,
+        lms=(SimpleNamespace(model="m", history=[{"usage": {"prompt_tokens": 8, "completion_tokens": 2}}]),),
+        delegation={"recursive_call_count": 1, "delegation_metrics": metrics.snapshot().as_dict()},
+    )
+
+    part = UsagePart(value=usage)
+
+    assert part.value["observed_lm_usage"]["m"]["input_tokens"] == 8
+    assert part.value["delegation_metrics"]["delegated_input_bytes"] == 64
+    assert tuple(part.value["delegation_metrics"]["lm_call_counts"]) == (
+        {"role": "root", "recursive_depth": 0, "count": 1},
+    )
+    assert part.value["recursive_call_count"] == 1
