@@ -136,8 +136,13 @@ def build_app(*, corpus: Path, telemetry: Path, recursive: bool) -> FastAPI:
             },
         }
         value = {"answer": expected_answer, "evidence": required_evidence, "uncertainty": uncertainty}
+        # Mirror the real backend: single-field programs commit a text answer,
+        # so the stream carries text frames (not a structured-result chunk).
+        body_text = json.dumps(value, ensure_ascii=True)
         chunks = (
-            {"type": "data-structured-result", "data": {"value": value}},
+            {"type": "text-start", "id": "text-fake"},
+            {"type": "text-delta", "id": "text-fake", "delta": body_text},
+            {"type": "text-end", "id": "text-fake"},
             {"type": "data-usage", "data": {"usage": usage}},
             {"type": "finish", "finishReason": "stop"},
         )

@@ -24,8 +24,8 @@ def _trial(case_id: str, arm: str = "D") -> Trial:
     return Trial(case_id, "suitable", 1, arm, ("A", "B", "C", "D"))  # type: ignore[arg-type]
 
 
-def _stream(case, *, finish: bool = True, header: bool = True, error: bool = False) -> tuple[dict[str, str], bytes]:
-    usage = {
+def _usage() -> dict[str, object]:
+    return {
         "observed_lm_usage": {
             "root": {"input_tokens": 32, "output_tokens": 16},
             "child": {"input_tokens": 16, "output_tokens": 8},
@@ -42,6 +42,10 @@ def _stream(case, *, finish: bool = True, header: bool = True, error: bool = Fal
             ],
         },
     }
+
+
+def _stream(case, *, finish: bool = True, header: bool = True, error: bool = False) -> tuple[dict[str, str], bytes]:
+    usage = _usage()
     chunks: list[dict[str, object]] = [
         {"type": "tool-input-available", "toolName": "rlm_query", "input": {"prompt_count": 1}},
         {"type": "data-usage", "data": {"usage": usage}},
@@ -123,6 +127,69 @@ def test_api_runner_uses_public_sse_and_sanitized_lifecycle_telemetry(tmp_path: 
     assert result.delegated_bytes == 64
     assert result.cleanup_confirmed is True
     assert result.resource_shape == (4, 8, 8)
+
+
+def test_api_runner_accepts_single_field_text_answer(tmp_path: Path) -> None:
+    """Real backends commit a text answer; no structured-result chunk exists."""
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+    blob = json.dumps(
+        {
+            "answer": case.expected_answer,
+            "evidence": list(case.required_evidence),
+            "uncertainty": case.required_uncertainty,
+        }
+    )
+    split = len(blob) // 2
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            token = request.headers["x-fleet-phase4-trial"]
+            telemetry.write_text(
+                json.dumps(
+                    {
+                        "event": "turn_cleanup",
+                        "trial": token,
+                        "cleanup": True,
+                        "created": 1,
+                        "deleted": 1,
+                        "sandbox_count": 1,
+                        "sandbox_seconds": 1,
+                        "shape": [4, 8, 8],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            chunks: list[dict[str, object]] = [
+                {"type": "text-start", "id": "text-1"},
+                {"type": "text-delta", "id": "text-1", "delta": blob[:split]},
+                {"type": "text-delta", "id": "text-1", "delta": blob[split:]},
+                {"type": "text-end", "id": "text-1"},
+                {"type": "data-usage", "data": {"usage": _usage()}},
+                {"type": "finish", "finishReason": "stop"},
+            ]
+            body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks)
+            body += "data: [DONE]\n\n"
+            headers = {"x-vercel-ai-ui-message-stream": "v1"}
+            return httpx.Response(200, headers=headers, content=body.encode(), request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is True
+    assert result.answer == case.expected_answer
+    assert result.cited_evidence == case.required_evidence
+    assert result.input_tokens == 48
+    assert result.cleanup_confirmed is True
 
 
 def test_trial_records_use_a_repeat_specific_bounded_label() -> None:

@@ -118,8 +118,11 @@ def _parse_result(value: object, source_ids: set[str]) -> tuple[str, tuple[str, 
     normalized: list[str] = []
     for item in evidence_items:
         candidate = item.strip().strip("[]")
+        # Unknown citations are model-content facts for the scorer
+        # (evidence_valid=false), not transport failures: drop them here
+        # and let score_trial penalize the missing required evidence.
         if candidate not in source_ids:
-            raise ValueError("citation is not available in the sealed source material")
+            continue
         if candidate not in normalized:
             normalized.append(candidate)
     if not normalized:
