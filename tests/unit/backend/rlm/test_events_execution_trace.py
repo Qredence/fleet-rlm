@@ -126,3 +126,68 @@ def test_record_phase_success_marks_token_usage_observed_from_prediction_usage()
     final = outputs[-1]
     assert final["observed_lm_usage"] == {"gpt-test": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}}
     assert final["token_usage_status"] == "observed"
+
+
+def test_record_phase_success_backfills_usage_from_lm_histories() -> None:
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+
+    metrics = DelegationMetrics()
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    prediction = SimpleNamespace(
+        trajectory=[{"reasoning": "r", "code": "c", "output": "o"}],
+        get_lm_usage=lambda: {},
+    )
+    root = SimpleNamespace(
+        model="test-root",
+        history=[{"usage": {"prompt_tokens": 10, "completion_tokens": 4}}],
+    )
+
+    record_phase_success(phase, prediction, 0.0, None, metrics, lms=(root, None))
+
+    final = outputs[-1]
+    assert final["request_status"] == "completed"
+    assert final["token_usage_status"] == "observed"
+    assert final["observed_lm_usage"] == {"test-root": {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14}}
+
+
+def test_record_phase_success_prefers_tracker_usage_over_histories() -> None:
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+
+    metrics = DelegationMetrics()
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    prediction = SimpleNamespace(
+        trajectory=[{"reasoning": "r", "code": "c", "output": "o"}],
+        get_lm_usage=lambda: {"test-root": {"input_tokens": 100, "output_tokens": 50}},
+    )
+    root = SimpleNamespace(
+        model="test-root",
+        history=[{"usage": {"prompt_tokens": 10, "completion_tokens": 4}}],
+    )
+
+    record_phase_success(phase, prediction, 0.0, None, metrics, lms=(root,))
+
+    final = outputs[-1]
+    assert final["token_usage_status"] == "observed"
+    assert final["observed_lm_usage"] == {"test-root": {"input_tokens": 100, "output_tokens": 50}}
+
+
+def test_record_phase_success_counts_shared_histories_once() -> None:
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+
+    metrics = DelegationMetrics()
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+    shared = [{"usage": {"prompt_tokens": 10, "completion_tokens": 4}}]
+    first = SimpleNamespace(model="test-root", history=shared)
+    second = SimpleNamespace(model="test-proxy", history=shared)
+
+    record_phase_success(phase, prediction, 0.0, None, metrics, lms=(first, second))
+
+    final = outputs[-1]
+    assert final["observed_lm_usage"] == {"test-root": {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14}}

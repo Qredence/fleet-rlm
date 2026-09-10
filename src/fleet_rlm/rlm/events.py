@@ -1203,6 +1203,7 @@ def record_phase_success(
     metrics: Any,
     *,
     wrap_up: Mapping[str, object] | None = None,
+    lms: tuple[Any, ...] = (),
 ) -> Any:
     """
     Record successful completion details and recursive delegation metrics for a trace phase.
@@ -1214,12 +1215,14 @@ def record_phase_success(
         recursive_executor (RecursiveRLMExecutor | None): Executor providing recursive-call metrics.
         metrics (Any): Execution metrics used when recursive metrics are unavailable.
         wrap_up (Mapping[str, object] | None): Bounded final-answer reserve diagnostics from the Root adapter.
+        lms (tuple[Any, ...]): Language models whose histories backfill usage when
+            the DSPy usage tracker yields nothing. Tracker data always wins.
 
     Returns:
         Any: The original prediction.
     """
     termination_mode = rlm_termination_mode(prediction)
-    usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000))
+    usage = observed_usage(prediction, duration_ms=int((time.perf_counter() - started) * 1000), lms=lms)
     summary = recursive_summary(recursive_executor, metrics)
     # Token telemetry is truthful: "observed" only when a Prediction carries
     # normalized token fields or an LM callback actually saw token usage;
@@ -1330,6 +1333,7 @@ class ExecutionTraceAssembler:
                 self.recursive_executor,
                 context.delegation.metrics,
                 wrap_up=adapter.wrap_up_summary(),
+                lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
             )
 
     @staticmethod

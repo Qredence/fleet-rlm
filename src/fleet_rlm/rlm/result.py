@@ -760,7 +760,38 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
     )
 
 
-def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
+def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]]:
+    """Aggregate observed token counts from LM histories without estimates.
+
+    The DSPy usage tracker can miss calls that bypass its thread-local
+    collection (worker threads, isolated adapter copies). Histories are
+    written from the same provider responses, so they are a sound fallback
+    when the tracker yields nothing. Tracker data always wins; this never
+    merges or double-counts.
+    """
+    from fleet_rlm.rlm.recursion import normalize_lm_token_usage
+
+    merged: dict[str, dict[str, JsonValue]] = {}
+    seen: set[int] = set()
+    for index, lm in enumerate(lms):
+        history = getattr(lm, "history", ())
+        if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
+            continue
+        if id(history) in seen:
+            continue
+        seen.add(id(history))
+        totals: dict[str, int] = {}
+        for entry in history:
+            raw = entry.get("usage") if isinstance(entry, Mapping) else getattr(entry, "usage", None)
+            for key, value in normalize_lm_token_usage(raw if isinstance(raw, Mapping) else None).items():
+                totals[key] = totals.get(key, 0) + value
+        if totals:
+            name = getattr(lm, "model", None) or f"lm-{index}"
+            merged[str(name)] = dict(totals)
+    return merged
+
+
+def observed_usage(prediction: Any, *, duration_ms: int, lms: tuple[Any, ...] = ()) -> RLMUsage:
     """Read conservative usage from public Prediction surfaces without estimates."""
     trajectory = getattr(prediction, "trajectory", None)
     iterations = (
@@ -777,6 +808,9 @@ def observed_usage(prediction: Any, *, duration_ms: int) -> RLMUsage:
     if isinstance(raw_usage, Mapping):
         with contextlib.suppress(ValueError):
             observed_lm_usage = _safe_observed_usage(raw_usage, filter_unknown=True)
+    if not observed_lm_usage and lms:
+        with contextlib.suppress(ValueError):
+            observed_lm_usage = _history_token_usage(lms)
     return validate_rlm_usage(
         {
             "iterations": iterations,
