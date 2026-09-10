@@ -147,9 +147,10 @@ classification must be completed before claiming a Phase 6 quality campaign.
   Sandbox was deleted. Host-tool and representative RLM live execution, sealed
   receipts, and operator policy promotion remain open. Existing names and
   configuration remain rollback references. The opt-in aggregate verifier now
-  checks/probes both candidate images and runs the existing Session MVP and
-  SemanticChild recursive lanes through verifier-only Settings overrides; it
-  writes one bounded receipt and never changes the configured references.
+  checks/probes both candidate images, then runs the narrow Session host-tool/RLM
+  stream proof and SemanticChild recursive lane through verifier-only Settings
+  overrides; it writes one bounded receipt and never changes the configured
+  references.
   The 2026-09-10 candidate run remains non-promotable: image probes passed, but
   the Session MVP failed during its first RLM Turn, before recursive evidence.
 

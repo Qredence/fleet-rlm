@@ -90,9 +90,10 @@ prerequisite.
 
 P2.7 requires one sealed receipt covering both immutable candidates before either
 configured reference changes. The opt-in controller checks the provider image
-contract and disposable import probe for each candidate, then runs the existing
-Session host-tool/RLM and SemanticChild recursive-RLM scenarios with verifier-only
-settings copies. It never changes `.env`, deployment configuration, or a snapshot.
+contract and disposable import probe for each candidate, then runs the focused
+Session host-tool/RLM stream proof and SemanticChild recursive-RLM scenario with
+verifier-only settings copies. It never changes `.env`, deployment configuration,
+or a snapshot.
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/live_p27_snapshot_verify.py \

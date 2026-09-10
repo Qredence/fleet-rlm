@@ -31,6 +31,7 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
+_P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
 _LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _APPROVED_MODELS = frozenset(
@@ -201,23 +202,31 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         policy = require_live_execution()
     except FleetConfigurationError:
         pytest.fail("Phase 1 stream canary requires runtime.live_enabled=true")
-    if active_profile(policy) != "daytona" or policy.run_environment != "daytona":
-        pytest.fail("Phase 1 stream canary requires the normal daytona profile")
+    candidate_snapshot = os.environ.get(_P27_SESSION_SNAPSHOT_ENV)
+    permitted_profiles = {"daytona"}
+    if candidate_snapshot:
+        # P2.7 only overrides the selected Session image. The recursive profile
+        # remains a Daytona Session profile and is allowed solely for that
+        # aggregate candidate-certification path.
+        permitted_profiles.add("daytona-recursive")
+    if active_profile(policy) not in permitted_profiles or policy.run_environment != "daytona":
+        pytest.fail("Phase 1 stream canary requires an allowed Daytona profile")
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
         pytest.fail("Phase 1 stream canary requires the committed Root and Sub policy")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):
         pytest.fail("Phase 1 stream canary is missing configured provider credentials")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'phase1-stream.db').resolve()}"
     upgrade_to_head(database_url)
-    return policy.model_copy(
-        update={
-            "database_url": database_url,
-            "volume_name": f"fleet-rlm-phase1-stream-{uuid4()}",
-            "rlm_max_iters": 5,
-            "rlm_max_llm_calls": 8,
-            "turn_timeout_seconds": 840,
-        }
-    )
+    overrides: dict[str, object] = {
+        "database_url": database_url,
+        "volume_name": f"fleet-rlm-phase1-stream-{uuid4()}",
+        "rlm_max_iters": 5,
+        "rlm_max_llm_calls": 8,
+        "turn_timeout_seconds": 840,
+    }
+    if candidate_snapshot:
+        overrides["daytona_snapshot"] = candidate_snapshot
+    return policy.model_copy(update=overrides)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
