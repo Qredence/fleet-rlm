@@ -463,10 +463,11 @@ DSPy and retain the four analysis packages; SemanticChild adds no Python
 packages. Runtime verification imports and checks the versions of the selected
 profile's declared dependencies. A socket-free `python -I -S` subprocess
 regression proves broker history/context reconstruction and typed SUBMIT
-without DSPy. New immutable images have **not** been created or verified;
-configured names and old images are unchanged. Existing image definitions
-will fail the new definition comparison. Creation under unused versioned names,
-disposable provider probes, sealed receipts and operator promotion remain open.
+without DSPy. New immutable Session `fleet-rlm-python313-v10` and
+SemanticChild `fleet-rlm-python313-child-v5` images were created and passed
+runtime probes; each probe's disposable Sandbox was deleted. Configured names
+and prior images are unchanged rollback references. Host-tool and representative
+RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 

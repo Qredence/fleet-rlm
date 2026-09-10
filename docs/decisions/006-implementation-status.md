@@ -130,9 +130,12 @@ classification must be completed before claiming a Phase 6 quality campaign.
   analysis packages, SemanticChild adds no Python packages. The runtime probe
   checks imports and exact versions from the selected profile. A standard-library-only
   subprocess executes broker setup, committed history, attachment reconstruction
-  and typed SUBMIT with no DSPy available. Immutable image creation, provider
-  probes, receipts and promotion remain open. Existing names/configuration were
-  not changed; previously created images now predate this source definition.
+  and typed SUBMIT with no DSPy available. New immutable Session
+  `fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5`
+  images were created and their runtime probes passed; each disposable probe
+  Sandbox was deleted. Host-tool and representative RLM live execution, sealed
+  receipts, and operator policy promotion remain open. Existing names and
+  configuration remain rollback references.
 
 The Phase 1 retained-broker decision remains authoritative. This continuation
 does not complete Phase 2 or certify native containment, filesystem SDK parity,
