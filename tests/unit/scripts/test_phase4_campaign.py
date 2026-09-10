@@ -334,3 +334,24 @@ def test_bootstrap_and_decision_require_complete_nonregressing_evidence() -> Non
     assert oracle["expected_answer_sha256"]
     assert oracle["required_uncertainty_sha256"]
     assert oracle["forbidden_claims_sha256"]
+
+
+def test_worker_evidence_drops_unknown_citations_for_scorer() -> None:
+    from scripts.benchmarks.phase4_arm_worker import _parse_result
+
+    source_ids = {"G1", "G2"}
+    answer, cited, _ = _parse_result(
+        {"answer": "uses [G1] and [ZZ9]", "evidence": ["G1", "ZZ9"], "uncertainty": ""},
+        source_ids,
+    )
+    assert cited == ("G1",)
+    assert "G1" in answer
+    # Malformed transport shapes stay fatal instead of becoming scorer facts.
+    with pytest.raises(ValueError):
+        _parse_result({"answer": "x", "evidence": [1], "uncertainty": ""}, source_ids)
+    cases = load_cases(_CASES)
+    case = next(item for item in cases if item.identifier == "p4-suitable-01")
+    trial = next(t for t in partial_schedule(cases) if t.arm == "B")
+    scored = score_trial(case, trial, replace(_observation(case), cited_evidence=()), PublicRateCard(), _envelope())
+    assert scored.evidence_valid is False
+    assert scored.verified_success is False

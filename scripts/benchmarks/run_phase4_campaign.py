@@ -699,6 +699,28 @@ def _prior_receipt_spend(path: Path = PRIOR_RECEIPT_PATH) -> tuple[float | None,
     return numeric, "observed"
 
 
+_DEBUG_LOG_TAIL_BYTES = 256 * 1024
+
+
+def _retain_service_debug(service: Phase4ApiService, label: str) -> None:
+    """Copy bounded service diagnostics beside the receipt (operator-local)."""
+    try:
+        debug_dir = REPO_ROOT / ".scratch" / "benchmark-reports"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        if service.log_path.is_file():
+            with service.log_path.open("rb") as handle:
+                handle.seek(0, os.SEEK_END)
+                handle.seek(max(0, handle.tell() - _DEBUG_LOG_TAIL_BYTES))
+                tail = handle.read()
+            (debug_dir / f"phase4-debug-{label.lower()}-{stamp}.log").write_bytes(tail)
+        if service.telemetry_path.is_file():
+            telemetry = service.telemetry_path.read_bytes()[-_DEBUG_LOG_TAIL_BYTES:]
+            (debug_dir / f"phase4-debug-{label.lower()}-{stamp}.ndjson").write_bytes(telemetry)
+    except OSError:
+        pass
+
+
 def _mark_service_cleanup_failure(rows: tuple[Any, ...]) -> tuple[Any, ...]:
     """Make a process cleanup failure visible to the mechanical decision."""
     if not rows:
@@ -1073,7 +1095,14 @@ def run(args: argparse.Namespace) -> int:
                 runner=runner,
             )
     finally:
-        for service in services.values():
+        for label, service in services.items():
+            # Operator-local diagnostics only: retain a bounded server-log tail
+            # and the sanitized telemetry beside the receipt so failed C/D
+            # trials can be root-caused after the ephemeral workdir is removed.
+            # These files may contain prompt text; they stay under .scratch and
+            # never enter the content-safe receipt.
+            if not service.fake and (live or partial_live):
+                _retain_service_debug(service, label)
             service_cleanup_confirmed = service.stop() and service_cleanup_confirmed
         if remove_baseline:
             service_cleanup_confirmed = _remove_baseline(baseline_root) and service_cleanup_confirmed

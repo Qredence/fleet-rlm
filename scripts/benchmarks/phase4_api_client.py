@@ -19,7 +19,12 @@ class Phase4ApiClientError(RuntimeError):
     """A bounded public API or telemetry failure."""
 
 
-_PUBLIC_CHUNK_TYPES = frozenset({"data-structured-result", "data-usage", "error", "finish"})
+_PUBLIC_CHUNK_TYPES = frozenset({"data-structured-result", "data-usage", "text-delta", "error", "finish"})
+
+# Bound for joining text-delta frames into one answer candidate. Single-field
+# programs commit a text answer, so the client must accept the same bound the
+# structured parser enforces without retaining unbounded stream text.
+_MAX_TEXT_BYTES = 51_200
 
 
 def _error_observation(
@@ -75,9 +80,10 @@ def _parse_sse(lines: Any) -> tuple[list[dict[str, Any]], str]:
             raise Phase4ApiClientError("stream_malformed")
         if finish_count:
             raise Phase4ApiClientError("stream_terminal_order")
-        # Tool chunks, text/reasoning chunks, and status frames are public but
-        # irrelevant to this receipt.  Only retain bounded result/usage/error
-        # frames; no provider response or reasoning content is persisted.
+        # Tool chunks, reasoning chunks, and status frames are public but
+        # irrelevant to this receipt.  Retain bounded result/usage/error
+        # frames plus text deltas (single-field programs commit a text
+        # answer); no provider response or reasoning content is persisted.
         if kind.startswith("tool-"):
             continue
         if kind not in _PUBLIC_CHUNK_TYPES:
@@ -416,8 +422,34 @@ class Phase4ApiTrialRunner:
                     usage = candidate
             if chunk.get("type") == "data-structured-result" and isinstance(chunk.get("data"), Mapping):
                 structured = chunk["data"].get("value", "")
+        if not structured:
+            # Single-field programs commit a text answer and never emit a
+            # structured-result chunk. Join the bounded text deltas so real
+            # backend streams score the same contract as structured results.
+            deltas: list[str] = []
+            text_bytes = 0
+            text_overflow = False
+            for chunk in chunks:
+                if chunk.get("type") != "text-delta":
+                    continue
+                delta = chunk.get("delta")
+                if not isinstance(delta, str) or not delta:
+                    continue
+                text_bytes += len(delta.encode("utf-8"))
+                if text_bytes > _MAX_TEXT_BYTES:
+                    text_overflow = True
+                    break
+                deltas.append(delta)
+            if text_overflow:
+                answer, cited, uncertainty = "", (), ""
+                finish_reason = "error"
+            else:
+                structured = "".join(deltas)
         try:
-            answer, cited, uncertainty = _parse_result(structured, set(case.sources))
+            if finish_reason != "error":
+                answer, cited, uncertainty = _parse_result(structured, set(case.sources))
+            else:
+                answer, cited, uncertainty = "", (), ""
         except ValueError:
             answer, cited, uncertainty = "", (), ""
             finish_reason = "error"
