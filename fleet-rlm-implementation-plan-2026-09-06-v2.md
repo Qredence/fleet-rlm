@@ -66,7 +66,7 @@ These rules apply to every phase below.
 9. **Keep live/certification evidence separate from deterministic unit tests.** A unit fake must not duplicate a provider campaign, and a provider campaign must not become the ordinary test suite.
 10. **No new agent framework layer.** Do not add Flex, ReActV2, another `dspy.Module` wrapper, grandchildren, or another orchestration loop during this migration.
 11. **Warm capacity is optional optimization.** It stays disabled until recursive demand and quality/cost evidence justify it.
-12. **The plan stays short.** When a task is completed, update the ADR006 status ledger and remove obsolete implementation detail from this plan instead of turning this file into another receipt archive.
+12. **The plan stays short and reports completion.** When a task is completed, mark its heading/status as **complete** in this plan with a concise dated outcome, then update the ADR006 status ledger with the supporting evidence. Remove obsolete implementation detail instead of turning this file into another receipt archive.
 
 ## 3. What is already strong and should not be redesigned
 
