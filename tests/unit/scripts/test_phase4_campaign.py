@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from scripts.benchmarks import run_phase4_campaign
 from scripts.benchmarks.campaign import CampaignPreflight
 from scripts.benchmarks.phase4_campaign import (
     PublicRateCard,
@@ -355,3 +357,123 @@ def test_worker_evidence_drops_unknown_citations_for_scorer() -> None:
     scored = score_trial(case, trial, replace(_observation(case), cited_evidence=()), PublicRateCard(), _envelope())
     assert scored.evidence_valid is False
     assert scored.verified_success is False
+
+
+def _write_prior_receipt(path: Path, payload: object) -> Path:
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def test_prior_receipt_null_spend_bounds_unknown_rows(tmp_path: Path) -> None:
+    reservation = run_phase4_campaign._envelope().upper_bound_usd(PublicRateCard())
+    assert reservation > 0
+    receipt_path = _write_prior_receipt(
+        tmp_path / "prior.json",
+        {
+            "observed_spend_usd": None,
+            "rows": [
+                {"observed_cost_usd": "0.00008512"},
+                {"observed_cost_usd": "0.00098868"},
+                {"observed_cost_usd": None},
+            ],
+        },
+    )
+
+    spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+
+    assert status == "bounded_upper"
+    assert spend is not None
+    assert spend == pytest.approx(float(Decimal("0.00008512") + Decimal("0.00098868") + reservation))
+
+
+def test_prior_receipt_all_known_rows_yields_exact_sum(tmp_path: Path) -> None:
+    receipt_path = _write_prior_receipt(
+        tmp_path / "prior.json",
+        {
+            "observed_spend_usd": None,
+            "rows": [
+                {"observed_cost_usd": "0.00008512"},
+                {"observed_cost_usd": "0.00098868"},
+            ],
+        },
+    )
+
+    spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+
+    assert status == "bounded_upper"
+    assert spend == pytest.approx(0.00008512 + 0.00098868)
+
+
+def test_prior_receipt_unreadable_still_blocks_admission(tmp_path: Path) -> None:
+    receipt_path = tmp_path / "prior.json"
+    receipt_path.write_text("{not json", encoding="utf-8")
+
+    spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+
+    assert spend is None
+    assert status == "unreadable"
+
+
+def test_prior_receipt_empty_rows_stays_blocking(tmp_path: Path) -> None:
+    receipt_path = _write_prior_receipt(tmp_path / "prior.json", {"observed_spend_usd": None, "rows": []})
+
+    spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+
+    assert spend is None
+    assert status == "unknown"
+
+
+def test_prior_receipt_all_unknown_rows_bounded_above_zero(tmp_path: Path) -> None:
+    reservation = run_phase4_campaign._envelope().upper_bound_usd(PublicRateCard())
+    receipt_path = _write_prior_receipt(
+        tmp_path / "prior.json",
+        {"observed_spend_usd": None, "rows": [{"observed_cost_usd": None}, {"observed_cost_usd": None}]},
+    )
+
+    spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+
+    assert status == "bounded_upper"
+    assert spend is not None
+    assert spend == pytest.approx(float(2 * reservation))
+    assert spend > 0
+
+
+def test_prior_receipt_invalid_rows_still_block_admission(tmp_path: Path) -> None:
+    for rows in (
+        [{"observed_cost_usd": 0.5}],
+        [{"observed_cost_usd": "-0.1"}],
+        [{"observed_cost_usd": "nan"}],
+        [{"observed_cost_usd": "oops"}],
+        ["not-a-mapping"],
+        "not-a-list",
+    ):
+        receipt_path = _write_prior_receipt(tmp_path / "prior.json", {"observed_spend_usd": None, "rows": rows})
+        spend, status = run_phase4_campaign._prior_receipt_spend(receipt_path)
+        assert spend is None, rows
+        assert status in {"unknown", "invalid"}, rows
+
+
+def test_prior_receipt_top_level_spend_takes_precedence_over_rows(tmp_path: Path) -> None:
+    receipt_path = _write_prior_receipt(
+        tmp_path / "prior.json",
+        {"observed_spend_usd": "0.125", "rows": [{"observed_cost_usd": None}]},
+    )
+
+    assert run_phase4_campaign._prior_receipt_spend(receipt_path) == (0.125, "observed")
+
+
+def test_campaign_metadata_discloses_bounded_prior_status() -> None:
+    specs = arm_specs(baseline_revision="9b526f50f0aeec37ca399bc8ef19ec8a95d3bead", candidate_revision="a" * 40)
+
+    metadata = run_phase4_campaign._campaign_metadata(
+        envelope=run_phase4_campaign._envelope(),
+        specs=specs,
+        name="phase4-test",
+        target="databricks-gcp-standard",
+        mode="live",
+        prior_spend=0.06093188,
+        prior_status="bounded_upper",
+    )
+
+    assert metadata["prior_receipt_status"] == "bounded_upper"
+    assert metadata["prior_observed_spend_usd"] == "0.06093188"

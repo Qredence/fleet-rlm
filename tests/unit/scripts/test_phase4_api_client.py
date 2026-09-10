@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -14,7 +15,7 @@ from scripts.benchmarks.phase4_api_client import (
     _record_label,
     _telemetry,
 )
-from scripts.benchmarks.phase4_campaign import Trial, load_cases
+from scripts.benchmarks.phase4_campaign import PublicRateCard, Trial, load_cases
 from scripts.benchmarks.run_phase4_campaign import _prior_receipt_spend
 
 _CASES = Path(__file__).resolve().parents[3] / "scripts" / "benchmarks" / "phase4_cases.json"
@@ -385,3 +386,27 @@ def test_prior_receipt_spend_rejects_non_finite_amount(tmp_path: Path) -> None:
     receipt.write_text(json.dumps({"observed_spend_usd": "1e10000"}), encoding="utf-8")
 
     assert _prior_receipt_spend(receipt) == (None, "invalid")
+
+
+def test_prior_receipt_with_rows_bounds_unknown_spend(tmp_path: Path) -> None:
+    from scripts.benchmarks import run_phase4_campaign as driver
+
+    receipt = tmp_path / "prior.json"
+    receipt.write_text(
+        json.dumps(
+            {
+                "observed_spend_usd": None,
+                "rows": [
+                    {"observed_cost_usd": "0.00008512"},
+                    {"observed_cost_usd": None},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    spend, status = _prior_receipt_spend(receipt)
+
+    assert status == "bounded_upper"
+    assert spend is not None
+    assert spend == pytest.approx(float(driver._envelope().upper_bound_usd(PublicRateCard()) + Decimal("0.00008512")))

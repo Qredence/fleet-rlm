@@ -60,6 +60,7 @@ from fleet_rlm.rlm.events import (
     has_reasoning,
     observe_tool,
     reconcile_trajectory,
+    recursive_summary,
 )
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
@@ -1124,6 +1125,27 @@ def _public_failure_message(exc: BaseException) -> str:
     return "Turn failed"
 
 
+def _delegation_usage(context: RLMExecutionContext, executor: RecursiveRLMExecutor | None = None) -> dict[str, Any]:
+    """Build the delegation telemetry mapping merged into outcome usage.
+
+    The recursive executor is only available on the completed path; the
+    cancelled/failed paths fall back to the shared delegation metrics so the
+    SSE data-usage event still carries call counts and delegated bytes.  When
+    no reserved call count survived (cancel/fail), derive the count from
+    started child/batch calls so the payload never claims zero delegation
+    next to nonzero call counts.
+    """
+    summary = recursive_summary(executor, context.delegation.metrics)
+    call_count = summary.call_count
+    if not call_count:
+        snapshot = summary.delegation_metrics
+        call_count = snapshot.recursive_child_calls + snapshot.recursive_batch_calls
+    return {
+        "recursive_call_count": call_count,
+        "delegation_metrics": summary.delegation_metrics.as_dict(),
+    }
+
+
 class _RunRuntimeLease:
     """Release Run-local program callbacks and worker resources exactly once."""
 
@@ -1250,6 +1272,7 @@ class RLMRunner:
                         prediction[-1] if prediction else None,
                         duration_ms=duration_ms,
                         lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                        delegation=_delegation_usage(context),
                     ),
                     public_error_message="Turn cancelled",
                     duration_ms=duration_ms,
@@ -1274,6 +1297,7 @@ class RLMRunner:
                         prediction[-1] if prediction else None,
                         duration_ms=duration_ms,
                         lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                        delegation=_delegation_usage(context),
                     ),
                     public_error_message=_public_failure_message(exc),
                     duration_ms=duration_ms,
@@ -1339,6 +1363,7 @@ class RLMRunner:
                     prediction[-1],
                     duration_ms=duration_ms,
                     lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                    delegation=_delegation_usage(context, _recursive_executor),
                 ),
                 artifact_candidates=context.capabilities.drain_artifact_candidates(),
                 memory_candidates=context.capabilities.drain_memory_candidates(),

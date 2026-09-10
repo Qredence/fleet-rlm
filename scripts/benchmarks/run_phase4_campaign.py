@@ -668,12 +668,56 @@ def _dry_runner(trial: Trial, case: Any) -> TrialObservation:
     )
 
 
+def _bounded_prior_spend(payload: Mapping[str, Any]) -> tuple[float | None, str]:
+    """Bound a null/unknown prior spend from the receipt rows.
+
+    Known ``observed_cost_usd`` values are summed exactly; each
+    unknown-cost row contributes one sealed-envelope
+    ``upper_bound_usd`` reservation.  This is a planning-assumption
+    bound, not a measured ceiling: the envelope prices admission, it
+    does not cap provider-reported actuals, so a pathological unknown
+    trial could have cost more.  Exposure is bounded in practice by the
+    downstream cumulative cap.  An empty or rowless receipt stays
+    blocking — a bound over zero rows would admit at zero.
+    """
+    rows = payload.get("rows")
+    if not isinstance(rows, list) or not rows:
+        return None, "unknown"
+    reservation = _envelope().upper_bound_usd(PublicRateCard())
+    total = Decimal(0)
+    for row in rows:
+        if not isinstance(row, Mapping):
+            return None, "invalid"
+        raw_cost = row.get("observed_cost_usd")
+        if raw_cost is None:
+            total += reservation
+            continue
+        if not isinstance(raw_cost, str):
+            return None, "invalid"
+        try:
+            amount = Decimal(raw_cost)
+        except ArithmeticError:
+            return None, "invalid"
+        if not amount.is_finite() or amount < 0:
+            return None, "invalid"
+        total += amount
+    numeric = float(total)
+    if not math.isfinite(numeric):
+        return None, "invalid"
+    return numeric, "bounded_upper"
+
+
 def _prior_receipt_spend(path: Path = PRIOR_RECEIPT_PATH) -> tuple[float | None, str]:
     """Read only the prior receipt's bounded spend ledger.
 
-    An incomplete receipt with an unknown spend is itself an admission
-    blocker for a paid campaign: treating the missing value as zero would
-    weaken the cumulative cap.  The dry-run path intentionally bypasses this
+    A receipt whose top-level spend is null/unknown falls back to a
+    mechanical planning-assumption bound derived from its rows (known
+    costs plus one sealed-envelope reservation per unknown-cost row),
+    so a prior run that halted on unknown cost does not permanently
+    block ``--live`` admission.  Missing, unreadable, invalid, or
+    rowless receipts still return ``None`` and remain admission
+    blockers, and the bound is still checked against the cumulative
+    cap downstream.  The dry-run path intentionally bypasses this
     check because it never contacts a provider.
     """
     if not path.is_file():
@@ -686,7 +730,7 @@ def _prior_receipt_spend(path: Path = PRIOR_RECEIPT_PATH) -> tuple[float | None,
         return None, "invalid"
     raw = payload.get("observed_spend_usd")
     if not isinstance(raw, str):
-        return None, "unknown"
+        return _bounded_prior_spend(payload)
     try:
         amount = Decimal(raw)
     except ArithmeticError:

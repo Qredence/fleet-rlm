@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from fleet_rlm.rlm.events import record_phase_failure
+from fleet_rlm.rlm.result import observed_usage, validate_rlm_usage
 
 
 def test_record_phase_failure_preserves_sanitized_last_lm_call_structure() -> None:
@@ -191,3 +194,159 @@ def test_record_phase_success_counts_shared_histories_once() -> None:
 
     final = outputs[-1]
     assert final["observed_lm_usage"] == {"test-root": {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14}}
+
+
+def test_observed_usage_merges_delegation_keys_through_validate_round_trip() -> None:
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0)
+    metrics.record_delegated_input_bytes(512)
+    prediction = SimpleNamespace(trajectory=[{"reasoning": "r", "code": "c", "output": "o"}], get_lm_usage=lambda: {})
+
+    usage = observed_usage(
+        prediction,
+        duration_ms=120,
+        delegation={"recursive_call_count": 1, "delegation_metrics": metrics.snapshot().as_dict()},
+    )
+
+    assert usage["recursive_call_count"] == 1
+    delegation_metrics = usage["delegation_metrics"]
+    assert delegation_metrics["delegated_input_bytes"] == 512
+    assert delegation_metrics["lm_call_counts"] == [{"role": "root", "recursive_depth": 0, "count": 1}]
+    # Full snapshot extras (latency, token status) survive; only the two
+    # required keys are normalized.
+    assert delegation_metrics["token_usage_status"] == "unavailable"
+    assert validate_rlm_usage(dict(usage)) == usage
+
+
+def test_observed_usage_without_delegation_keeps_historical_shape() -> None:
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+
+    usage = observed_usage(prediction, duration_ms=50)
+
+    assert set(usage) == {"iterations", "observed_lm_usage", "duration_ms"}
+    assert validate_rlm_usage(dict(usage)) == usage
+
+
+def test_observed_usage_keeps_tracker_tokens_alongside_delegation() -> None:
+    prediction = SimpleNamespace(
+        trajectory=[],
+        get_lm_usage=lambda: {"gpt-test": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}},
+    )
+
+    usage = observed_usage(
+        prediction,
+        duration_ms=10,
+        delegation={
+            "recursive_call_count": 0,
+            "delegation_metrics": {"lm_call_counts": [], "delegated_input_bytes": 0},
+        },
+    )
+
+    assert usage["observed_lm_usage"] == {"gpt-test": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}}
+    assert usage["recursive_call_count"] == 0
+
+
+def test_validate_rlm_usage_rejects_invalid_delegation_values() -> None:
+    base: dict[str, object] = {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
+
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "recursive_call_count": -1})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "recursive_call_count": "1"})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "recursive_call_count": True})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "delegation_metrics": {"lm_call_counts": [], "delegated_input_bytes": -5}})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "delegation_metrics": {"lm_call_counts": [], "delegated_input_bytes": "0"}})
+    with pytest.raises(ValueError):
+        validate_rlm_usage(
+            {
+                **base,
+                "delegation_metrics": {
+                    "lm_call_counts": [{"role": "root", "recursive_depth": 0, "count": -1}],
+                    "delegated_input_bytes": 0,
+                },
+            }
+        )
+    with pytest.raises(ValueError):
+        validate_rlm_usage(
+            {
+                **base,
+                "delegation_metrics": {
+                    "lm_call_counts": [{"role": "", "recursive_depth": 0, "count": 0}],
+                    "delegated_input_bytes": 0,
+                },
+            }
+        )
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "delegation_metrics": {"delegated_input_bytes": 0}})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "delegation_metrics": "none"})
+    with pytest.raises(ValueError):
+        validate_rlm_usage({**base, "unknown_key": 1})
+
+
+def test_observed_usage_rejects_non_mapping_delegation() -> None:
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+
+    with pytest.raises(ValueError):
+        observed_usage(prediction, duration_ms=1, delegation="none")  # type: ignore[arg-type]
+
+
+def test_validate_rlm_usage_rejects_malformed_call_count_entries() -> None:
+    base: dict[str, object] = {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
+
+    def check(entries: object) -> None:
+        with pytest.raises(ValueError):
+            validate_rlm_usage({**base, "delegation_metrics": {"lm_call_counts": entries, "delegated_input_bytes": 0}})
+
+    check([{"recursive_depth": 0, "count": 1}])
+    check([{"role": "root", "count": 1}])
+    check([{"role": "root", "recursive_depth": 0}])
+    check(["not-a-mapping"])
+    check([{"role": "root", "recursive_depth": "0", "count": 1}])
+    check({"role": "root"})
+
+
+def test_validate_rlm_usage_drops_extra_call_count_keys() -> None:
+    base: dict[str, object] = {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
+
+    usage = validate_rlm_usage(
+        {
+            **base,
+            "delegation_metrics": {
+                "lm_call_counts": [{"role": "root", "recursive_depth": 0, "count": 2, "future": 1}],
+                "delegated_input_bytes": 0,
+            },
+        }
+    )
+
+    assert usage["delegation_metrics"]["lm_call_counts"] == [{"role": "root", "recursive_depth": 0, "count": 2}]
+
+
+def test_observed_usage_rejects_unknown_delegation_keys() -> None:
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+
+    with pytest.raises(ValueError, match="unsupported keys"):
+        observed_usage(prediction, duration_ms=1, delegation={"delegation_metric": {}})
+
+
+def test_tokens_plus_delegation_payload_validates() -> None:
+    prediction = SimpleNamespace(
+        trajectory=[],
+        get_lm_usage=lambda: {"gpt-test": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6}},
+    )
+
+    usage = observed_usage(
+        prediction,
+        duration_ms=10,
+        delegation={
+            "recursive_call_count": 0,
+            "delegation_metrics": {"lm_call_counts": [], "delegated_input_bytes": 0},
+        },
+    )
+
+    assert validate_rlm_usage(dict(usage)) == usage

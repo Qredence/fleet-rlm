@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from fleet_rlm.json_types import JsonValue
 
@@ -13,6 +13,8 @@ class RLMUsage(TypedDict):
     iterations: int
     observed_lm_usage: dict[str, dict[str, JsonValue]]
     duration_ms: int
+    recursive_call_count: NotRequired[int]
+    delegation_metrics: NotRequired[dict[str, Any]]
 
 
 def empty_rlm_usage() -> RLMUsage:
