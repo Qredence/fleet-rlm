@@ -115,12 +115,12 @@ classification must be completed before claiming a Phase 6 quality campaign.
   pre-warm, idle-stop, and late-cleanup checks use that same owner. The
   provider adapter's root-replacement index still overlaps `DaytonaRuntime`
   root ownership and remains open.
-- P2.3: production RLM execution now builds a fresh DSPy program, direct Tool
-  bindings, callbacks, and worker executor for each Run. Sequential-Run
-  coverage proves durable committed history, not Python state, is the
-  cross-Turn input. `DaytonaRuntime` retains broker roots independently. The
-  registry module and compatibility-provider hooks remain while their direct
-  tests and non-production seams are removed.
+- P2.3: complete. Production RLM execution builds a fresh DSPy program,
+  direct Tool bindings, callbacks, and worker executor for each Run.
+  Sequential-Run coverage proves durable committed history, not Python state,
+  is the cross-Turn input. `DaytonaRuntime` retains broker roots independently.
+  The resident registry, program fingerprints, generations, and stable Tool
+  proxy rebinding were deleted with their integrations and direct tests.
 - P2.4: deleted the native Turn preparation branch, duplicate runner worker
   and lease implementation, plus the production-composition native context
   factory and cancellation owner. Execution contexts reject unselected

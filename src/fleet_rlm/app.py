@@ -115,14 +115,6 @@ async def _local_db_lifespan(
                 if shutdown_error is None:
                     shutdown_error = exc
 
-        runtime_registry = getattr(detached, "session_runtime_registry", None)
-        if runtime_registry is not None:
-            try:
-                await runtime_registry.shutdown(drain_seconds=30)
-            except BaseException as exc:
-                if shutdown_error is None:
-                    shutdown_error = exc
-
         preparation = getattr(detached, "run_preparation", None)
         close_preparation = getattr(preparation, "aclose", None)
         if callable(close_preparation):

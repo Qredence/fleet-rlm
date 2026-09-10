@@ -21,7 +21,6 @@ from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
 from fleet_rlm.observability.mlflow import MLflowRuntime
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
@@ -103,11 +102,6 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     if catalog is None:
         raise _composition_unavailable()
     return catalog
-
-
-def get_session_runtime_registry(request: Request) -> SessionRLMRegistry | None:
-    """Return the process-local resident runtime registry when composed."""
-    return get_ready_runtime_inventory(request).session_runtime_registry
 
 
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
@@ -201,7 +195,6 @@ TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
-SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
 SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
 RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
@@ -224,7 +217,6 @@ __all__ = [
     "RuntimeInventoryIfReadyDep",
     "SessionCatalogDep",
     "SessionPrewarmDep",
-    "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",
     "TraceFeedbackServiceDep",
