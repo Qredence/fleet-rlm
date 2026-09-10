@@ -484,6 +484,12 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 An opt-in aggregate certification controller now preserves the configured
 rollback references while it checks and probes both immutable candidates and
 runs the existing Session MVP and SemanticChild recursive evidence lanes.
+The 2026-09-10 live attempt did not pass: both disposable image probes succeeded,
+but the candidate-scoped Session MVP failed in its first RLM Turn. Its bounded
+aggregate receipt is `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r2.json`;
+the retained diagnostic receipt is `.scratch/p27-debug-mvp-test-20260910.json`.
+Do not promote either image until a representative Session host-tool/RLM proof
+and the SemanticChild recursive proof both pass in one sealed aggregate receipt.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 
