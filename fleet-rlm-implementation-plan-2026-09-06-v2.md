@@ -311,6 +311,13 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
+**Progress (2026-09-10):** P2.1, P2.3, P2.4, and P2.5 are complete. P2.2 is
+partially complete: process-global cleanup and active-claim ownership are gone,
+but the provider adapter still duplicates `DaytonaRuntime` root-replacement
+indexing. P2.6 remains an SDK-parity audit. P2.7 has reduced image definitions
+and verified new disposable runtime probes, but still needs representative live
+host-tool/RLM evidence, sealed receipts, and operator promotion.
+
 ## P2.1 - Remove the duplicate `runtime/daytona` package boundary — complete
 
 **Status: complete (2026-09-10).** `runtime/daytona/` and every
@@ -348,7 +355,9 @@ registry and preventing separate compositions from sharing admission state.
 The provider adapter's root-replacement index still overlaps the public
 `DaytonaRuntime` root owner and remains open.
 
-**Rationale:** `session_manager.py`, Run-environment owners, lease helpers, provider task sets, late-acquisition maps, cleanup supervisors, and binding watchers currently overlap.
+**Rationale:** `session_manager.py`, Run-environment owners, lease helpers,
+provider task sets, late-acquisition maps, cleanup supervisors, and the
+provider adapter's root index still overlap.
 
 **Implement:** define the minimal ownership chain for the selected Phase 1 architecture:
 
@@ -417,7 +426,7 @@ implementation remains in the source tree.
 
 ## P2.5 - Reduce DSPy compatibility code to compatibility only
 
-**Status: locally implemented (2026-09-10).** `FleetJSONAdapter` and its shared
+**Status: complete (2026-09-10).** `FleetJSONAdapter` and its shared
 sync/async repair/finalization policy now belong to the existing `program.py`
 owner, alongside `DeadlineLMProxy`; accounting remains in `budget.py`.
 Retry and wrap-up field insertion share one collision-safe helper. The pinned
@@ -485,7 +494,8 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
-**Phase 2 exit:** one runtime graph, one provider package, one execution implementation, fewer resident/global owners.
+**Phase 2 exit (pending P2.2, P2.6, and P2.7):** one runtime graph, one
+provider package, one execution implementation, fewer resident/global owners.
 
 ---
 
