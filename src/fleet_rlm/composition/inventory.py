@@ -33,7 +33,6 @@ from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.program import RLMModelBundle
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
@@ -135,7 +134,6 @@ class RuntimeInventory:
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
     run_environment_resources: RuntimeProcessResources | None = None
     model_bundle: RLMModelBundle | None = None
-    session_runtime_registry: SessionRLMRegistry | None = None
     workspace_volume_gateway: WorkspaceVolumeGateway | None = None
     workspace_file_service: WorkspaceFileService | None = None
     # Composition-owned Daytona sync-bridge dispatcher (QRE-154); disposed

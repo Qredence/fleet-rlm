@@ -169,15 +169,6 @@ async def _finish_daytona_disposal(
             with contextlib.suppress(BaseException):
                 await close_runner(drain_seconds=1)
 
-        registry = getattr(inventory, "session_runtime_registry", None)
-        if registry is not None:
-            with contextlib.suppress(BaseException):
-                await registry.shutdown(drain_seconds=1)
-            wait_deferred = getattr(registry, "wait_deferred_closes", None)
-            if callable(wait_deferred):
-                with contextlib.suppress(BaseException):
-                    await wait_deferred(timeout=1)
-
         preparation = getattr(inventory, "run_preparation", None)
         close_preparation = getattr(preparation, "aclose", None)
         if callable(close_preparation):
@@ -199,7 +190,6 @@ async def _finish_daytona_disposal(
             not components_settled
             or cleanup_pending
             or bool(getattr(preparation, "has_pending_acquisitions", False))
-            or bool(getattr(registry, "has_deferred_closes", False))
             or bool(resources is not None and resources.has_pending_cleanup())
             or has_pending_lease_ownership()
         )
@@ -797,18 +787,7 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     if callable(close_runner):
         await phase(close_runner(drain_seconds=30))
 
-    runtime_registry = getattr(inventory, "session_runtime_registry", None)
     deferred_settled = not errors
-    if runtime_registry is not None:
-        shutdown_result = await phase(runtime_registry.shutdown(drain_seconds=30))
-        if shutdown_result is phase_failed:
-            deferred_settled = False
-            logger.warning("Session runtime shutdown reported an error; provider ownership is retained")
-        wait_deferred = getattr(runtime_registry, "wait_deferred_closes", None)
-        if callable(wait_deferred):
-            result = await phase(wait_deferred(timeout=30))
-            if result is phase_failed or result is False:
-                deferred_settled = False
 
     preparation = getattr(inventory, "run_preparation", None)
     close_preparation = getattr(preparation, "aclose", None)
@@ -887,7 +866,6 @@ def build_run_preparation(
         skill_catalog (SkillCatalog): Skills available to live capabilities.
         settings (Settings): Runtime and budget configuration.
         models (RLMModelBundle): Models used for run execution.
-        session_runtime_registry (SessionRLMRegistry | None): Optional registry for session-scoped runtime state.
 
     Returns:
         DefaultRunPreparer: The configured run preparer.

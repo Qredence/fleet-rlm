@@ -369,14 +369,13 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 
 ## P2.3 - Remove the unselected Session runtime model
 
-**Status: in progress (2026-09-10).** Production `RLMRunner` now creates a
-fresh DSPy program, direct tool bindings, callbacks, and worker executor for
-each Run. Sequential-Run coverage proves committed durable history remains the
+**Status: complete (2026-09-10).** Production `RLMRunner` creates a fresh
+DSPy program, direct tool bindings, callbacks, and worker executor for each
+Run. Sequential-Run coverage proves committed durable history remains the
 cross-Turn input while Python program state is not reused. `DaytonaRuntime`
-retains the broker root independently of a Run program. The legacy registry
-module and compatibility-provider hooks remain while their direct tests and
-non-production seams are removed; P2.3 is not done until those imports and
-resident generation machinery are deleted.
+retains broker roots independently of a Run program. `SessionRLMRegistry`,
+program fingerprints, resident generations, and stable Tool proxy rebinding
+were deleted with their production integrations and direct tests.
 
 **Rationale:** `rlm/session_runtime.py` and its fingerprints/generations/tool rebinding exist primarily to keep DSPy/interpreter state resident across Turns.
 

@@ -64,7 +64,6 @@ from fleet_rlm.daytona.session_manager import (
     LeaseRequest,
 )
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
-from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.skills.catalog import SkillCatalog
@@ -253,7 +252,6 @@ class _CompatibilityQuarantine:
 class _DaytonaEnvironmentProvider:
     resources: DaytonaRuntimeResources
     settings: Settings
-    session_runtime_registry: SessionRLMRegistry | None = None
     _resident_root_leases: dict[tuple[UUID, UUID], RootSessionLease] = field(default_factory=dict, init=False)
     _resident_context_keys: dict[tuple[UUID, UUID], tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]] = (
         field(default_factory=dict, init=False)
@@ -1001,9 +999,6 @@ class _DaytonaEnvironmentProvider:
             had_previous = owner is not None
             force_new = had_previous or key in self._tainted_root_keys
 
-            if owner is not None and self.session_runtime_registry is not None:
-                self.session_runtime_registry.mark_tainted(SessionKey(workspace_id=str(key[0]), session_id=str(key[1])))
-
             # ``DaytonaRuntime`` is the canonical provider lifecycle boundary.
             # Keep the local map only as a preparation/sink index; admission,
             # Sandbox replacement, and root cleanup remain owned by the facade.
@@ -1027,10 +1022,6 @@ class _DaytonaEnvironmentProvider:
                     # bind the provider owner.  Fence the resident RLM too;
                     # otherwise it could reuse an interpreter whose provider
                     # lookup already failed on the next Turn.
-                    if self.session_runtime_registry is not None:
-                        self.session_runtime_registry.mark_tainted(
-                            SessionKey(workspace_id=str(key[0]), session_id=str(key[1]))
-                        )
                     raise
                 try:
                     self._bind_runtime_root(key, runtime_owner)
@@ -1133,8 +1124,6 @@ class _DaytonaEnvironmentProvider:
         # Its deferred state close still owns the RetainableEnvironmentRelease
         # that ultimately closes this root; closing it here would terminate an
         # interpreter while that worker is still executing.
-        if self.session_runtime_registry is not None and self.session_runtime_registry.has_deferred_closes:
-            return False
         first_error: BaseException | None = None
         owner_deadline = asyncio.get_running_loop().time() + drain_seconds
         async with self._resident_root_transition_lock:
@@ -1194,12 +1183,6 @@ class _DaytonaEnvironmentProvider:
 
     def _taint_resident_runtime(self, run: ClaimedRun) -> None:
         """Fence a resident runtime when provider setup proves its root unhealthy."""
-        key = SessionKey(
-            workspace_id=str(run.access.workspace_id),
-            session_id=str(run.session_id),
-        )
-        if self.session_runtime_registry is not None:
-            self.session_runtime_registry.mark_tainted(key)
         self._mark_provider_root_tainted((run.access.workspace_id, run.session_id))
 
     async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
@@ -1354,6 +1337,9 @@ class _DaytonaEnvironmentProvider:
 
             sandbox_spec = getattr(self.resources, "sandbox_spec", None)
             image_identity = environment_manifest(sandbox_spec).digest if sandbox_spec is not None else None
+            resident_release = None
+            if not isinstance(getattr(self.resources, "runtime", None), DaytonaRuntime) and created_root:
+                resident_release = release_root
             return RunEnvironment(
                 interpreter=lease.interpreter,
                 attachment_sink=sink,
@@ -1371,11 +1357,7 @@ class _DaytonaEnvironmentProvider:
                 # DaytonaRuntime retains the broker root independently of a
                 # Run's DSPy program. Compatibility resources retain the old
                 # callback ownership until their tests migrate.
-                resident_release=(
-                    None
-                    if isinstance(getattr(self.resources, "runtime", None), DaytonaRuntime)
-                    else (release_root if created_root else None)
-                ),
+                resident_release=resident_release,
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),

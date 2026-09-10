@@ -243,57 +243,6 @@ async def test_reused_provider_failure_quarantines_root(monkeypatch: pytest.Monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("failure_mode", ["none", "raises"])
-async def test_production_runtime_lookup_failure_quarantines_before_root_publication(
-    monkeypatch: pytest.MonkeyPatch,
-    failure_mode: str,
-) -> None:
-    """A pre-publication provider failure fences admission and rotates the registry."""
-    from fleet_rlm.daytona.runtime import DaytonaRuntime
-    from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState
-
-    provider, manager, platform = _provider(monkeypatch)
-    resources = provider.resources
-    resources.runtime = DaytonaRuntime(resources)
-    session_id = uuid4()
-    workspace_id = uuid4()
-    key = SessionKey(workspace_id=str(workspace_id), session_id=str(session_id))
-
-    async def factory(state_key: SessionKey, fingerprint: str) -> SessionRLMState:
-        return SessionRLMState(state_key, fingerprint, object(), object())
-
-    registry = SessionRLMRegistry(factory)
-    provider.session_runtime_registry = registry
-    resident = await registry.acquire(key, "fingerprint")
-    if failure_mode == "none":
-        platform.return_none = True
-    else:
-        platform.raise_once = True
-
-    expected_error = "Sandbox is unavailable" if failure_mode == "none" else "provider lookup failed"
-    with pytest.raises(RuntimeError, match=expected_error):
-        await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
-
-    assert manager.quarantined == manager.acquired
-    assert manager.released == manager.acquired
-    assert resources.runtime.roots == ()
-    assert provider._resident_root_leases == {}
-    assert resident.tainted
-    platform.return_none = False
-
-    fresh_environment = await provider.acquire(
-        _turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf")
-    )
-    assert len(manager.acquired) == 2
-    fresh = await registry.acquire(key, "fingerprint")
-    assert fresh is not resident
-    await fresh_environment.release()
-    assert fresh_environment.resident_release is None
-    await resources.runtime.close_root_session(workspace_id, session_id)
-    await provider.aclose()
-    await registry.shutdown()
-
-
 @pytest.mark.asyncio
 async def test_resident_root_close_survives_caller_cancellation() -> None:
     import asyncio
@@ -399,48 +348,3 @@ async def test_resident_root_release_and_close_are_idempotent() -> None:
     assert owner.closed is True
     assert releases == [lease]
     assert closed == [owner]
-
-
-@pytest.mark.asyncio
-async def test_reused_provider_failure_taints_the_session_runtime_registry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """P52.3(d): provider proof of an unhealthy root taints the Session runtime registry."""
-    from fleet_rlm.rlm.session_runtime import SessionKey, SessionRLMRegistry, SessionRLMState
-
-    class _Interpreter:
-        def __init__(self) -> None:
-            self.namespace: dict[str, object] = {}
-            self.close_calls = 0
-
-        def close(self) -> None:
-            self.close_calls += 1
-
-    built: list[SessionRLMState] = []
-
-    async def factory(key: SessionKey, fingerprint: str) -> SessionRLMState:
-        state = SessionRLMState(key, fingerprint, object(), _Interpreter())
-        built.append(state)
-        return state
-
-    registry = SessionRLMRegistry(factory)
-    provider, _manager, platform = _provider(monkeypatch)
-    provider.session_runtime_registry = registry
-
-    session_id = uuid4()
-    workspace_id = uuid4()
-    key = SessionKey(workspace_id=str(workspace_id), session_id=str(session_id))
-    resident = await registry.acquire(key, "fingerprint-a")
-
-    first = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
-    await first.release()
-    platform.return_none = True
-
-    with pytest.raises(RuntimeError, match="Sandbox is unavailable"):
-        await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
-
-    # The provider's unhealthy-root proof tainted the resident registry state,
-    # and the next acquire rotates to a fresh generation.
-    assert resident.tainted
-    fresh = await registry.acquire(key, "fingerprint-a")
-    assert fresh is not resident
-    assert len(built) == 2
-    assert provider._resident_root_leases == {}
