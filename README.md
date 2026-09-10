@@ -79,6 +79,15 @@ Startup never applies migrations automatically — initialize the database expli
 uv run fleet cli
 ```
 
+For an explicitly selected policy, pass its non-secret profile name to both
+launchers. The Phase 4 campaign profile is opt-in and does not change ordinary
+defaults:
+
+```bash
+uv run fleet-rlm serve-api --profile phase4-campaign --port 8000
+uv run fleet cli --profile phase4-campaign
+```
+
 **Backend only:**
 
 ```bash
@@ -101,6 +110,20 @@ uv run fleet doctor daytona
 
 > **Profile mismatch fails fast.** `fleet cli` requires a Daytona profile that matches your credentials. Select profiles with `/profiles` in the TUI or edit `default_profile`, then restart Fleet.
 
+FastAPI is Fleet's canonical backend interface. `fleet cli` supervises that
+backend and attaches the pi-tui client; the TUI does not define a second
+execution path. An explicit `--profile NAME` is validated before provider,
+database, Daytona, or TUI initialization. The existing `default_profile`
+selection remains unchanged when the option is omitted, and explicit profiles
+cannot be combined with `--reload`.
+
+The Phase 4 campaign sends candidate and frozen-baseline arms C/D through the
+public FastAPI/SSE transport. Arms A/B remain direct DSPy ablations so they are
+deliberate non-recursive comparisons rather than production transport
+certification. The earlier receipt at
+`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
+incomplete, and superseded; it is not value proof.
+
 ## How a turn works
 
 ```text
@@ -119,8 +142,9 @@ The root agent can answer directly, delegate to sub-LMs, or fan out bounded recu
 
 | Command | What it does |
 | --- | --- |
-| `uv run fleet cli` | Start backend + pi-tui terminal (Daytona profile required) |
-| `uv run fleet web` | Start backend only on port 8000 |
+| `uv run fleet cli` | Start the canonical FastAPI backend + pi-tui terminal (Daytona profile required) |
+| `uv run fleet web` | Start the canonical FastAPI backend only on port 8000 |
+| `uv run fleet-rlm serve-api --profile NAME` | Start the backend with an explicit non-secret profile |
 | `uv run fleet doctor daytona` | Opt-in disposable probe of provider, DB, mounts, interpreter |
 | `uv run python scripts/db_init.py` | Initialize or upgrade database to Alembic head |
 | `make check` | Default validation lane (backend + TUI) |

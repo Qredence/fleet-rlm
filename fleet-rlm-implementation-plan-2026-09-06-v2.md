@@ -711,6 +711,27 @@ creation/deletion, and cleanup measurements come from the same transport used
 by Fleet. Arms A and B remain intentionally direct DSPy ablations; they do not
 claim to certify the FastAPI production path.
 
+The API-first campaign slice is now implemented locally. `serve-api`,
+`fleet web`, and the supervised `fleet cli` accept an explicit `--profile` and load
+that profile before resource initialization; explicit profile selection is
+rejected with `--reload`. The campaign driver supervises disposable candidate
+and frozen-baseline FastAPI services, waits for `/health` and `/health/ready`,
+uses one Session per trial, parses only the public UI-v1 SSE chunks, and joins
+process groups before cleanup. A credential-free fake service exercises the
+same HTTP/SSE client and lifecycle observer. The local protocol receipt at
+`.scratch/benchmark-reports/phase4-api-dry-run-20260910-v8.json` contains all
+144 scheduled attempts (12 cases × 3 repeats × 4 balanced rotations), but it is
+fixture transport evidence only and is not provider value proof.
+
+The immutable prior receipt at
+`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` remains failed,
+incomplete, and superseded. Its top-level observed spend is unknown, so the
+live driver refuses to treat it as zero when applying the cumulative US$50
+cap. Until a defensible prior spend observation is available, no paid trial is
+admitted. Consequently P4.5 live evidence, the mechanical P4.6 decision, and
+the Phase 4 exit remain open; no live certification or recursive-default
+change is claimed.
+
 The follow-up failure-accounting slice keeps single-capsule measurements and
 successful access identifiers even when execution fails, without treating those
 accesses as a valid answer. Ownership cancellation remains fatal, and an

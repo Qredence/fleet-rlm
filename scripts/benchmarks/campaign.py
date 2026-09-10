@@ -69,7 +69,14 @@ class CampaignBudget:
     further admissions; it never releases budget based on an assumed zero.
     """
 
-    def __init__(self, policy: CampaignPreflight, *, started_at: float, cleanup_reserve_seconds: int = 900) -> None:
+    def __init__(
+        self,
+        policy: CampaignPreflight,
+        *,
+        started_at: float,
+        cleanup_reserve_seconds: int = 900,
+        initial_spent_usd: float = 0.0,
+    ) -> None:
         policy.validate()
         if not math.isfinite(started_at):
             raise ValueError("campaign start must be finite")
@@ -78,7 +85,9 @@ class CampaignBudget:
         self.policy = policy
         self.deadline = started_at + policy.max_elapsed_seconds
         self.admission_deadline = self.deadline - cleanup_reserve_seconds
-        self._spent = Decimal(0)
+        self._spent = self._amount(initial_spent_usd)
+        if self._spent > self._amount(policy.total_spend_cap):
+            raise ValueError("initial campaign spend exceeds the declared cap")
         self._reserved: Decimal | None = None
         self._admissions = 0
         self._halted = False

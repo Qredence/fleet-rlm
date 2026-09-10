@@ -213,16 +213,31 @@ class TrialObservation:
     error_category: str | None = None
 
     def observed_cost(self, rates: PublicRateCard, envelope: TrialEnvelope) -> Decimal | None:
-        values = (self.input_tokens, self.output_tokens, self.cache_read_tokens, self.sandbox_seconds)
-        if any(type(value) is not int or value < 0 for value in values):
+        input_tokens = self.input_tokens
+        output_tokens = self.output_tokens
+        cache_read_tokens = self.cache_read_tokens
+        sandbox_seconds = self.sandbox_seconds
+        sandbox_count = self.sandbox_count
+        if any(
+            type(value) is not int or value < 0
+            for value in (input_tokens, output_tokens, cache_read_tokens, sandbox_seconds)
+        ):
             return None
-        if type(self.sandbox_count) is not int or self.sandbox_count < 0:
+        if (
+            input_tokens > envelope.input_tokens
+            or output_tokens > envelope.output_tokens
+            or cache_read_tokens > envelope.cache_read_tokens
+        ):
             return None
-        if self.sandbox_seconds == 0:
-            if self.sandbox_count != 0 or self.resource_shape is not None:
+        if type(sandbox_count) is not int or sandbox_count < 0:
+            return None
+        if sandbox_seconds == 0:
+            if sandbox_count != 0 or self.resource_shape is not None:
                 return None
         else:
-            if self.sandbox_count < 1 or self.sandbox_count > envelope.sandbox_count:
+            if sandbox_count < 1 or sandbox_count > envelope.sandbox_count:
+                return None
+            if sandbox_seconds > envelope.sandbox_seconds * sandbox_count:
                 return None
             if (
                 not isinstance(self.resource_shape, tuple)
@@ -231,11 +246,11 @@ class TrialObservation:
             ):
                 return None
         model = (
-            Decimal(self.input_tokens) * rates.input_usd_per_million / _TOKEN_DIVISOR
-            + Decimal(self.output_tokens) * rates.output_usd_per_million / _TOKEN_DIVISOR
-            + Decimal(self.cache_read_tokens) * rates.cache_read_usd_per_million / _TOKEN_DIVISOR
+            Decimal(input_tokens) * rates.input_usd_per_million / _TOKEN_DIVISOR
+            + Decimal(output_tokens) * rates.output_usd_per_million / _TOKEN_DIVISOR
+            + Decimal(cache_read_tokens) * rates.cache_read_usd_per_million / _TOKEN_DIVISOR
         )
-        sandbox_hours = Decimal(self.sandbox_seconds * self.sandbox_count) / Decimal(3600)
+        sandbox_hours = Decimal(sandbox_seconds * sandbox_count) / Decimal(3600)
         shape = self.resource_shape
         sandbox = Decimal(0)
         if shape is not None:
@@ -691,13 +706,19 @@ def execute_campaign(
     rates: PublicRateCard | None = None,
     started_at: float | None = None,
     clock: Callable[[], float] | None = None,
+    initial_spent_usd: float = 0.0,
 ) -> tuple[ScoredTrial, ...]:
     """Run a serial campaign through one pre-admission/settlement owner."""
     simulated = started_at is not None
     started = time.monotonic() if started_at is None else started_at
     clock = clock or time.monotonic
     rates = rates or PublicRateCard()
-    budget = CampaignBudget(preflight, started_at=started, cleanup_reserve_seconds=900)
+    budget = CampaignBudget(
+        preflight,
+        started_at=started,
+        cleanup_reserve_seconds=900,
+        initial_spent_usd=initial_spent_usd,
+    )
     by_id = {case.identifier: case for case in cases}
     output: list[ScoredTrial] = []
     upper = float(envelope.upper_bound_usd(rates))
@@ -733,10 +754,37 @@ def execute_campaign(
                 error_category="runner_failed",
             )
         scored = score_trial(by_id[trial.case_id], trial, observation, rates, envelope)
+        metrics_complete = all(
+            value is not None
+            for value in (
+                observation.input_tokens,
+                observation.output_tokens,
+                observation.cache_read_tokens,
+                observation.sandbox_seconds,
+                observation.sandbox_count,
+                observation.latency_ms,
+                observation.root_lm_calls,
+                observation.child_lm_calls,
+                observation.delegated_bytes,
+            )
+        )
+        resource_shape_complete = (
+            observation.sandbox_seconds == 0 and observation.sandbox_count == 0 and observation.resource_shape is None
+        ) or (
+            isinstance(observation.sandbox_seconds, int)
+            and observation.sandbox_seconds > 0
+            and isinstance(observation.sandbox_count, int)
+            and observation.sandbox_count > 0
+            and observation.resource_shape is not None
+        )
         try:
             budget.settle(
-                actual_usd=float(scored.observed_cost_usd) if scored.observed_cost_usd is not None else None,
-                cleanup_confirmed=observation.cleanup_confirmed,
+                actual_usd=(
+                    float(scored.observed_cost_usd)
+                    if scored.observed_cost_usd is not None and metrics_complete and resource_shape_complete
+                    else None
+                ),
+                cleanup_confirmed=observation.cleanup_confirmed and metrics_complete and resource_shape_complete,
             )
         except CampaignAdmissionError:
             output.append(scored)

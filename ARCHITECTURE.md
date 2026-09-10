@@ -56,6 +56,21 @@ and do not construct stores, engines, models, or provider clients. The SSE
 layer projects typed, transport-neutral Runtime Events into the public client
 stream.
 
+The FastAPI HTTP/SSE service is the canonical execution interface. `fleet web`
+and `fleet-rlm serve-api` launch that service; `fleet cli` supervises the same
+backend and attaches the pi-tui client. A launcher may select a validated
+non-secret TOML profile explicitly with `--profile NAME`; omitted selection
+retains `config.default_profile`. Explicit profile loading occurs before
+provider, database, Daytona, or client initialization, and explicit profiles
+are incompatible with Uvicorn `--reload`.
+
+The Phase 4 campaign preserves this transport boundary. Its candidate (D) and
+frozen-baseline (C) arms are isolated FastAPI processes reached through the
+public attachment, Session, Turn, and SSE endpoints. The A and B arms are
+direct DSPy ablations by design; they compare model behavior without claiming
+to certify the API transport. There is no public arm selector or alternate
+in-process campaign execution path.
+
 ### Composition
 
 `src/fleet_rlm/composition/` constructs the process-scoped runtime graph. The
@@ -197,7 +212,9 @@ HTTP types and the backend's public SSE contract; it owns no model, provider,
 or execution lifecycle. The stream client validates framing and terminal
 ordering, live and durable projections converge through the client reducer,
 and presenters own interaction rather than backend semantics. Its specialized
-tooling and validation rules live in `tools/fleet-tui/AGENTS.md`.
+tooling and validation rules live in `tools/fleet-tui/AGENTS.md`. It is an
+operator-facing client of the canonical FastAPI service, not a campaign driver
+and not a second runtime.
 
 ## Dependency boundaries
 

@@ -31,6 +31,10 @@ def _add_serve_command(
             "authentication and will expose the local API on the network"
         ),
     )
+    serve.add_argument(
+        "--profile",
+        help="explicit non-secret Fleet policy profile (defaults to config.default_profile)",
+    )
     if supervise_tui:
         serve.add_argument("tui_args", nargs=argparse.REMAINDER)
     serve.set_defaults(
@@ -90,6 +94,9 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
         _run_doctor(parser, args.doctor_provider)
         return
 
+    if args.profile is not None and args.reload:
+        parser.error("--reload cannot be combined with an explicit --profile")
+
     try:
         require_safe_bind_host(
             args.host,
@@ -104,24 +111,35 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
         if tui_args[:1] == ("--",):
             tui_args = tui_args[1:]
         try:
-            supervise(
-                host=args.host,
-                port=args.port,
-                reload=args.reload,
-                run_environment=args.run_environment,
-                tui_args=tui_args,
-            )
+            supervise_kwargs: dict[str, Any] = {
+                "host": args.host,
+                "port": args.port,
+                "reload": args.reload,
+                "run_environment": args.run_environment,
+                "tui_args": tui_args,
+            }
+            if args.profile is not None:
+                supervise_kwargs["profile"] = args.profile
+            supervise(**supervise_kwargs)
         except SupervisorError as exc:
             parser.exit(1, f"fleet: error: {exc}\n")
         return
-    import uvicorn
+    if args.profile is None:
+        import uvicorn
 
-    uvicorn.run(
-        "fleet_rlm.main:app",
-        host=args.host,
-        port=args.port,
-        reload=args.reload,
-    )
+        uvicorn.run(
+            "fleet_rlm.main:app",
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+        )
+        return
+    from fleet_rlm.cli.server import ProfileReloadError, serve_api
+
+    try:
+        serve_api(host=args.host, port=args.port, reload=args.reload, profile=args.profile)
+    except ProfileReloadError as exc:
+        parser.error(str(exc))
 
 
 _DOCTOR_ACTIONS = {

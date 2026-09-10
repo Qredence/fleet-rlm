@@ -61,11 +61,11 @@ def _profile_for_run_environment(run_environment: str) -> str:
         raise SupervisorError(f"unsupported Fleet run environment: {run_environment}") from exc
 
 
-def _selected_runtime_policy(run_environment: str) -> Settings:
+def _selected_runtime_policy(run_environment: str, *, profile: str | None = None) -> Settings:
     """Load the selected policy once and require it to match the launcher."""
     recommended_profile = _profile_for_run_environment(run_environment)
     try:
-        settings = load_runtime_settings()
+        settings = load_runtime_settings() if profile is None else load_runtime_settings(profile=profile)
     except Exception as exc:
         raise SupervisorError(f"Fleet runtime policy could not be loaded: {exc}") from exc
     if settings.run_environment != run_environment:
@@ -426,14 +426,20 @@ def supervise(
     port: int,
     reload: bool,
     run_environment: str,
+    profile: str | None = None,
     tui_args: Sequence[str] = (),
     repo_root: Path | None = None,
 ) -> None:
     """Run the selected backend and repository pi-tui client together."""
+    if profile is not None and reload:
+        raise SupervisorError("--reload cannot be combined with an explicit --profile")
     root = repo_root or Path(__file__).resolve().parents[3]
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
-    runtime_settings = _selected_runtime_policy(run_environment)
+    if profile is None:
+        runtime_settings = _selected_runtime_policy(run_environment)
+    else:
+        runtime_settings = _selected_runtime_policy(run_environment, profile=profile)
     if run_environment == "daytona":
         _validate_daytona_database(root, settings=runtime_settings)
     logs = root / ".fleet_rlm" / "logs"
@@ -442,18 +448,33 @@ def supervise(
     log_path = logs / f"backend-{timestamp}.log"
     latest_log_path = logs / "latest.log"
     api_url = _api_url(host, port)
-    backend_command = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "fleet_rlm.main:app",
-        "--host",
-        host,
-        "--port",
-        str(port),
-    ]
-    if reload:
-        backend_command.append("--reload")
+    if profile is None:
+        backend_command = [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "fleet_rlm.main:app",
+            "--host",
+            host,
+            "--port",
+            str(port),
+        ]
+        if reload:
+            backend_command.append("--reload")
+    else:
+        backend_command = [
+            sys.executable,
+            "-m",
+            "fleet_rlm.cli.server",
+            "--host",
+            host,
+            "--port",
+            str(port),
+            "--profile",
+            profile,
+        ]
+        if reload:
+            backend_command.append("--reload")
     backend_env = dict(os.environ)
     # The backend resolves the committed TOML policy itself; do not pin an
     # ambient profile override into the child process environment.
