@@ -8,7 +8,8 @@ committed profiles and their provider environment names are listed in the
 
 | Profile | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |
-| `daytona-recursive` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local scope |
+| `daytona-recursive` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable scope |
+| `daytona-managed` | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | TLS Lakebase `fleet_app` |
 
 Daytona is the full Fleet solution with Workspace Volume Scope and Turn Commit
 promotion. Private deterministic tests use an in-memory composition and do not

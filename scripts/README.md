@@ -33,6 +33,7 @@
 | `daytona_snapshot.py` | Explicitly create or check the immutable Fleet Daytona Snapshot |
 | `daytona_warm_pool.py` | Plan, inspect, or explicitly reconcile the clean SemanticChild Daytona warm pool |
 | `inventory_db_heads.py` | Retain a read-only, content-free Alembic-head inventory for one named database target |
+| `lakebase_preflight.py` | Run a read-only, sanitized managed PostgreSQL role, privilege, and storage-separation preflight |
 | `codex_feedback_loop.py` | Run the local Codex feedback-loop probes |
 | `deployment_observability.py` | Inspect deployment observability inputs |
 | `circleci_trigger_release.py` | Trigger and await the GitHub Actions PyPI release from CircleCI |
@@ -105,8 +106,15 @@ with each candidate configuration, then label that active policy explicitly:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
+  --campaign baseline-20260910 --target daytona-disposable \
+  --max-elapsed-seconds 1800 --max-admissions 23 \
+  --max-sandbox-concurrency 4 --spend-cap 25 \
   --variant baseline --output .scratch/benchmark-reports/rlm-latency-baseline.json
 ```
+
+Live benchmark campaigns require the explicit non-secret campaign/target
+references and all four bounded limits shown above. The target is a label, not
+a URL; credentials and provider content stay in the configured environment.
 
 `prepare-evaluation` and `evaluate` default to the probe-verified
 `databricks:/databricks-qwen35-122b-a10b` judge endpoint. Override it with
@@ -214,7 +222,9 @@ never runs from a Fleet Turn.
 
 ```bash
 uv run python scripts/daytona_warm_pool.py plan
-uv run python scripts/daytona_warm_pool.py check
+uv run python scripts/daytona_warm_pool.py check \
+  --campaign semantic-child-inspection --spend-cap 1 --elapsed-seconds 300 \
+  --admission-limit 1 --sandbox-concurrency 1
 uv run python scripts/daytona_warm_pool.py reconcile \
   --campaign semantic-child-rollout --spend-cap 10 --elapsed-seconds 1800 \
   --admission-limit 1 --sandbox-concurrency 1
@@ -249,3 +259,21 @@ digests, planner topology, costs and fixture scale; SQL parameters, predicates,
 private names and exception text are excluded. The fixture is synthetic and does
 not establish representative deployment performance. Skipped, incomplete or
 failed campaigns cannot produce a passing certification result.
+
+### Managed PostgreSQL preflight
+
+`lakebase_preflight.py` is a read-only readiness gate. It requires
+`FLEET_LIVE=1`, an explicit URL environment-variable reference, and a new
+write-once receipt path. It validates TLS, the durable `fleet_app` role,
+Alembic head, required schema/table privileges, and (when both endpoints expose
+hosts) that MLflow is stored separately. The selected MLflow URI is resolved
+from the active policy when omitted, and the command fails closed if separation
+cannot be proven. It never migrates or writes database rows and does not retain
+connection URLs.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/lakebase_preflight.py \
+  --target lakebase-production \
+  --mlflow-tracking-uri http://127.0.0.1:5001 \
+  --receipt .scratch/evidence/lakebase-preflight-<run-id>.json
+```

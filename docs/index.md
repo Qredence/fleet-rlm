@@ -46,6 +46,7 @@ contracts and dated validation evidence.
 - [Reference index](reference/index.md)
 - [Source layout](reference/source-layout.md)
 - [Database](reference/database.md)
+- [Workspace Agent filesystem operation audit](reference/workspace-agent-operation-audit.md)
 
 ## Source of truth
 
