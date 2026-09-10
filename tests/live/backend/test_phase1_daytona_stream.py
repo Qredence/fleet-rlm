@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import os
 import tempfile
@@ -24,6 +23,7 @@ from fleet_rlm.config.loader import active_profile, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
+from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
@@ -44,7 +44,6 @@ _APPROVED_MODELS = frozenset(
     }
     for name in (base, f"openai/{base}")
 )
-_CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 _ATTACHMENT_CONTENT = "phase-one capsule witness: CEDAR-17\n"
 _CONTRACT_ID = "fleet.phase1-daytona-stream"
 
@@ -302,68 +301,6 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
             if name == call_name:
                 shapes.append({"args": len(node.args), "keywords": sorted(key.arg for key in node.keywords if key.arg)})
     return shapes
-
-
-async def _retry_cleanup(operation: Any) -> bool:
-    """Retry an asynchronous cleanup operation until it succeeds or all configured attempts fail.
-
-    Parameters:
-        operation (Any): Asynchronous cleanup operation to execute.
-
-    Returns:
-        bool: `True` if the operation succeeds, `False` after all attempts fail.
-    """
-    for delay in (*_CLEANUP_RETRY_DELAYS, None):
-        try:
-            await operation()
-            return True
-        except Exception:
-            if delay is None:
-                return False
-            await asyncio.sleep(delay)
-    return False
-
-
-async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
-    """
-    Delete tracked sandboxes and the owned volume, returning labels for cleanup failures.
-
-    Parameters:
-        resources (Any): Resource manager containing tracked sandboxes and cleanup clients.
-        volume_name (str): Name of the volume to delete.
-
-    Returns:
-        tuple[str, ...]: Cleanup failure labels, including "sandbox", "tracking", or "volume".
-    """
-    failures: list[str] = []
-    for sandbox_id in sorted(set(resources._sandbox_ids)):
-
-        async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
-            """Delete the specified Daytona sandbox if it exists.
-
-            Parameters:
-                sandbox_id (str): Identifier of the sandbox to delete.
-            """
-            sandbox = await resources.platform.get(sandbox_id)
-            if sandbox is not None:
-                await resources.platform.delete(sandbox)
-
-        if not await _retry_cleanup(delete_sandbox):
-            failures.append("sandbox")
-    try:
-        resources._sandbox_ids.clear()
-    except Exception:
-        failures.append("tracking")
-
-    async def delete_volume() -> None:
-        """Delete the configured volume if it exists."""
-        volume = await resources.client.volume.get(volume_name, create=False)
-        if volume is not None:
-            await resources.client.volume.delete(volume)
-
-    if not await _retry_cleanup(delete_volume):
-        failures.append("volume")
-    return tuple(failures)
 
 
 def _write_receipt(payload: dict[str, object]) -> None:

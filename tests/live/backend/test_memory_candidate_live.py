@@ -24,7 +24,7 @@ from fleet_rlm.daytona.broker import sync_sandbox
 from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
 from fleet_rlm.workspace.paths import volume_paths_from_settings
 from tests.live.backend._database import upgrade_to_head
-from tests.live.backend.test_fleet_rlm_daytona_mvp import (
+from tests.live.backend._mvp_support import (
     _SECRET_NAMES,
     _assert_secret_free,
     _assert_sse_stop,
@@ -33,6 +33,7 @@ from tests.live.backend.test_fleet_rlm_daytona_mvp import (
     _sse_chunks,
     _strict_cleanup,
 )
+from tests.live.backend._tool_chunks import _paired_tool_chunks
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 
@@ -118,35 +119,6 @@ def _write_receipt(payload: dict[str, object]) -> None:
         path = Path(raw_path).expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2, sort_keys=True) + chr(10), encoding="utf-8")
-
-
-def _tool_chunks(chunks: list[dict[str, Any]], tool_name: str, chunk_type: str) -> list[dict[str, Any]]:
-    return [chunk for chunk in chunks if chunk.get("type") == chunk_type and chunk.get("toolName") == tool_name]
-
-
-def _paired_tool_chunks(
-    chunks: list[dict[str, Any]], tool_name: str
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Pair one tool's input chunks with their output/error chunks by toolCallId.
-
-    The SSE projection carries ``toolName`` only on ``tool-input-available`` frames
-    (matching both the in-repo ``ToolOutputAvailable`` model and the AI SDK stream
-    protocol); outputs pair to their tool strictly through ``toolCallId``.
-    """
-
-    inputs = _tool_chunks(chunks, tool_name, "tool-input-available")
-    call_ids = {str(chunk.get("toolCallId")) for chunk in inputs}
-    outputs = [
-        chunk
-        for chunk in chunks
-        if chunk.get("type") == "tool-output-available" and str(chunk.get("toolCallId")) in call_ids
-    ]
-    errors = [
-        chunk
-        for chunk in chunks
-        if chunk.get("type") == "tool-output-error" and str(chunk.get("toolCallId")) in call_ids
-    ]
-    return inputs, outputs, errors
 
 
 def _live_qre140_settings(tmp_path: Path) -> Settings:

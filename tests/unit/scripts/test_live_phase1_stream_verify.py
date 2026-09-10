@@ -6,12 +6,32 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from xml.etree import ElementTree
 
 import pytest
 
 from scripts import live_phase1_stream_verify as verifier
 
 _LOAD_REPO_ENV = verifier._load_repo_env
+
+
+def test_live_pytest_lanes_skip_without_operator_opt_in(tmp_path: Path) -> None:
+    """Even an installed, credentialed checkout must keep live pytest opt-in."""
+    report = tmp_path / "live-opt-out.xml"
+    env = {key: value for key, value in os.environ.items() if not (key.startswith("FLEET_") and "EVIDENCE" in key)}
+    env.update(FLEET_LIVE="0", FLEET_DAYTONA_API_KEY="", FLEET_OPENAI_API_KEY="", FLEET_DATABASE_URL="")
+    result = subprocess.run(
+        ["uv", "run", "--no-sync", "pytest", "tests/live/backend", "-q", "-n", "0", "--tb=no", f"--junitxml={report}"],
+        cwd=Path(__file__).resolve().parents[3],
+        env=env,
+        capture_output=True,
+        timeout=25,
+        check=False,
+    )
+    assert result.returncode == 0, "live opt-out collection/execution failed"
+    cases = list(ElementTree.parse(report).iter("testcase"))
+    assert cases
+    assert all(case.find("skipped") is not None for case in cases)
 
 
 @pytest.fixture(autouse=True)

@@ -19,7 +19,7 @@ import pytest
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest
 from fleet_rlm.runtime.bindings import SandboxBinding
-from tests.unit.backend.test_session_manager import _manager
+from tests.support.session_manager import _manager
 
 
 class _FailOnceBackend:

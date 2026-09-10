@@ -525,6 +525,12 @@ one execution implementation, fewer resident/global owners.
 
 # Phase 3 - Test-suite consolidation
 
+**Status: implementation in progress (2026-09-10).** The pre-move ownership
+inventory, consolidation/deletion decisions, and validation are recorded in
+`docs/testing/phase3-consolidation-ledger.md`. Domain consolidation and shared
+scenario extraction are implemented; full-gate and affected live receipts are
+required before marking this phase complete.
+
 The goal is **not** to concatenate hundreds of tests into a few giant files. The goal is to organize tests around stable behavior contracts and remove repeated setup/assertions for internals that no longer exist.
 
 ## P3.1 - Inventory tests by behavior owner

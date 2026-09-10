@@ -27,6 +27,7 @@ _LIVE_TEST = "tests/live/backend/test_phase2_daytona_recursive.py::test_phase2_d
 _CANDIDATE_PATHS = (
     "scripts/live_phase2_recursive_verify.py",
     "tests/live/backend/test_phase2_daytona_recursive.py",
+    "tests/live/backend/_cleanup.py",
     "tests/unit/scripts/test_live_phase2_recursive_verify.py",
 )
 _REPO_ROOT = Path(__file__).resolve().parents[1]

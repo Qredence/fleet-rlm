@@ -6,6 +6,21 @@ database lanes remain explicit.
 
 ## Suite inventory
 
+The [Phase 3 consolidation ledger](../testing/phase3-consolidation-ledger.md)
+records the pre-move ownership inventory, scenario dispositions, and validation.
+
+Add regressions to the existing behavior-owning test file by default. Create a
+new file only for a distinct contract, fixture/process boundary, generated-contract
+lane, or live marker. Coverage is a coarse floor, not a reason to test every
+internal branch. Retain independent concurrency, durability, privacy, and provider
+assertions even when nearby tests use similar setup.
+
+Shared setup belongs in small `tests/support` modules, existing domain fakes,
+or a narrowly scoped fixture. Do not import collected test functions or fixtures
+from another `test_*.py` module. Local SQLite and live PostgreSQL wrappers call
+ordinary shared scenario functions; their fixture lifetimes and certification
+claims remain distinct.
+
 | Suite | Path | Purpose |
 | --- | --- | --- |
 | Backend unit | `tests/unit/backend/` | domain, adapters, configuration, routes, runtime modules |
@@ -134,6 +149,29 @@ uv run alembic check
 Private deterministic tests may create ephemeral schemas explicitly.
 
 ## Credentialed Daytona gates
+
+### Focused certification matrix
+
+Run only lanes affected by a change, including changes to their shared support
+modules. Every row proves a provider-specific fact; deterministic scenario replay
+does not substitute for its live evidence. Keep one matched quality/performance
+campaign through the existing benchmark helpers, rather than repeating campaign
+accounting in individual pytest modules.
+
+| Contract | Operator entry point / evidence | Why live evidence is necessary |
+| --- | --- | --- |
+| Context containment and whole-Sandbox deletion | `test_daytona_containment.py`, `test_daytona_deletion_lifecycle.py`; explicitly requested bounded evidence | Provider process survival and deletion observation cannot be inferred from fake responses. |
+| Snapshot capabilities, Session host tools, recursive child | `scripts/live_p27_snapshot_verify.py`; aggregate JSON receipt | Both immutable images must import and execute through real Daytona and the configured LM. |
+| Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
+| Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
+| PostgreSQL contention and migration rehearsal | `scripts/benchmarks/certify_postgres.py --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
+| Configured MLflow export | `scripts/benchmarks/certify_mlflow.py --backend configured`; JSON receipt | Backend authentication, export and retrieval cannot be proved by fail-soft unit mocks. |
+| Matched quality/performance | Existing benchmark campaign helpers and fixed dataset; comparison receipt | Real model quality, latency and cost require matched provider runs. Fixture-only Phase 6 cases are not a completed campaign. |
+
+The live pytest opt-out contract is exercised in an isolated subprocess: all
+live cases must skip without operator opt-in. Stable verifier arguments, pytest
+node IDs, evidence environment variables and receipt schemas remain supported.
+Sharing fixtures must not change the meaning of a previously recorded receipt.
 
 Live pytest suites remain separately marked and require explicit live test
 environment setup. The live verifier scripts instead use `runtime.live_enabled`

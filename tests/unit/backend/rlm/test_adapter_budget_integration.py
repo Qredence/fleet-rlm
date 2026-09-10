@@ -12,7 +12,7 @@ from dspy.utils.exceptions import LMServerError
 from fleet_rlm.rlm.budget import AdapterBudget, BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle
-from tests.unit.backend.rlm.test_fleet_json_adapter import _IterationActionSignature, _ScriptedLM
+from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
 GOOD = '{"reasoning":"done","code":"SUBMIT(answer=1)"}'
 
