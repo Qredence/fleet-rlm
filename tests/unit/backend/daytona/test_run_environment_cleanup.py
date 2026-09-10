@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fleet_rlm.runtime.daytona import run_environment
+from fleet_rlm.composition import daytona_run_preparation as run_environment
 
 
 def test_settled_resource_cleanup_snapshot_iteration() -> None:

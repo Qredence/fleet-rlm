@@ -311,7 +311,14 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
-## P2.1 - Remove the duplicate `runtime/daytona` package boundary
+## P2.1 - Remove the duplicate `runtime/daytona` package boundary — complete
+
+**Status: complete (2026-09-10).** `runtime/daytona/` and every
+production/test import of it were removed. Turn preparation now lives in
+`composition/daytona_run_preparation.py`; composition retains the Daytona-backed Workspace
+gateway wiring in `composition/daytona_workspace_gateway.py`. P2.2 reduces the
+remaining overlapping lifecycle owners.
+
 
 **Rationale:** Daytona-specific runtime code currently exists both under `daytona/` and `runtime/daytona/`, including a ~104 KB `run_environment.py`. This creates an artificial ownership layer without a second provider.
 
