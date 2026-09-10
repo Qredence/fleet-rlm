@@ -112,8 +112,18 @@ explicitly available:
 
 ```bash
 uv run python scripts/benchmark_daytona_lifecycle.py --output <receipt.json>
-uv run python scripts/benchmarks/run_rlm_latency.py benchmark   --api-url http://127.0.0.1:8000   --mlflow-url http://127.0.0.1:5001   --experiment-id 1 --variant p7-refactor   --runs 20 --warmups 3 --output <receipt.json>
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
+  --api-url http://127.0.0.1:8000 --mlflow-url http://127.0.0.1:5001 \
+  --experiment-id 1 --variant p7-refactor --runs 20 --warmups 3 \
+  --campaign p7-refactor-20260910 --target daytona-disposable \
+  --max-elapsed-seconds 1800 --max-admissions 23 \
+  --max-sandbox-concurrency 4 --spend-cap 25 --output <receipt.json>
 ```
+
+Provider-backed campaigns fail closed unless the operator supplies the
+bounded campaign and target references plus elapsed-time, admission,
+sandbox-concurrency, and total-spend limits. The target is a non-secret label;
+URLs and credentials remain outside receipts.
 
 The phase breakdown command is a local ignored helper because it joins MLflow
 trace timings to `fleet_runs` timestamps without retaining private payloads.

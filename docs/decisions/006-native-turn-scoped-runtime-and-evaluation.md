@@ -440,7 +440,7 @@ Implementation/evidence recorded through Phase 6:
 - [x] Additive lineage/status constraints, settlement/publication behavior, and generated Runtime Event/TUI contracts remain covered by the local checks.
 - [x] Native built-ins stay native; capsule children receive bounded selected input and cannot become final publication authority.
 - [x] Scripted lifecycle, adapter replay, and credentialed live operator lanes are explicitly distinguished.
-- [x] Session and SemanticChild snapshot definitions are immutable, `.env`-resolved, and have retained no-Volume runtime-probe receipts.
+- [ ] Session and SemanticChild snapshot definitions are immutable and `.env`-resolved, with historical no-Volume runtime-probe receipts retained. The configured v7/v2 identities still drift from the current contract; replacement identities `fleet-rlm-python313-v9` and `fleet-rlm-python313-child-v4` passed actual-SDK disposable probes on 2026-09-10, while sealed receipt retention and deployment-reference promotion remain open.
 
 Open acceptance gates:
 

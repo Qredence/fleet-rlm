@@ -97,7 +97,7 @@ Keep the native DSPy built-ins `llm_query`, `llm_query_batched`, `print`, and `S
 | Quality tooling | Dataset, scorers, judges, alignment, annotations, prompt registry, monitoring scripts | Reuse and certify; these are not greenfield features |
 | GEPA development evidence | `optimization/gepa_runner.py`, `mlflow_observability.py`, `evidence.py` | Preserve the explicit non-promotable smoke distinction |
 
-The historical reviewed baseline pinned Daytona 0.207.0. The continuation checkout pins 0.210.0 and still selects the legacy execution path. Resident RLM/fingerprint machinery and full Session-context copying to children remain. Migration `019fe0010001` now implements Sandbox Binding lineage and Session status checks; deployed reconciliation remains a certification gate. The corrected exclusive PostgreSQL campaign is now retained separately; the remaining database gate is deployed-head reconciliation and representative deployed workload evidence, not the disposable contention campaign itself.
+The historical reviewed baseline pinned Daytona 0.207.0. The continuation checkout pins 0.210.0 and still selects the legacy execution path. Resident RLM/fingerprint machinery and full Session-context copying to children remain. Migration `019fe0010001` plus additive follow-ups `01a087800001` and `01a087800002` now implement Sandbox Binding lineage, warm-pool ownership, and generation fencing; deployed reconciliation remains a certification gate. The corrected exclusive PostgreSQL campaign is now retained separately; the remaining database gate is deployed-head reconciliation and representative deployed workload evidence, not the disposable contention campaign itself.
 
 The reviewed MLflow code already starts DSPy autologging, sanitizes and bounds trace values, supports local and configured Databricks destinations, and links preparation/execution traces. The revised work is to certify correctness, reduce overlap, tighten privacy/error behavior, and connect this existing tooling to the migration and recursive value gates.
 
@@ -121,16 +121,24 @@ The old A-G plan is fully incorporated: A -> Phases 1/1.1/2; B -> 3; C and F1 ->
 
 ### Current todo state
 
-| Phase | Local implementation / validation | Retained evidence | Remaining external gate |
-| --- | --- | --- | --- |
-| P1 / P1.1 | Schema, contention harnesses, SDK/MLflow receipt tools, campaign recorder | Disposable PostgreSQL and local MLflow receipts | Deployed heads and managed MLflow are intentionally outside this milestone; live legacy baseline remains operator-run |
-| P2 | Program, budget, adapter, trace-attribution and event-parity contracts | Focused execution-core suite | Provider-backed semantic baseline only |
-| P3 | Native adapter, authority fencing, whole-sandbox cleanup, versioned attachment schema | Historical native no-go receipt | Disposable remote containment, matched broker/native timing, concurrent trace parentage and campaign attachment |
-| P4 | Immutable profiles, manifests, snapshot checks, Session prewarm, child warm-pool operator reconciler | Snapshot and local unit receipts | Organization capability/capacity canary, child cold-fallback consumption and measured capacity value |
+The working candidate is `c9531b32e5b861d94d9e085b9914980e29c9885b` plus a
+dirty local worktree. It is intentionally not a promotion identity. Every
+operator receipt must record its own clean candidate SHA, dirty state,
+resolved policy/lock/image/dataset/scorer identities, and exercised assertions
+before it can supersede the evidence listed below.
+
+| Phase | Implementation state | Local validation command | Retained evidence | Candidate/configuration identity | Remaining external gate |
+| --- | --- | --- | --- | --- | --- |
+| P1 / P1.1 | Schema, import/preflight, contention harnesses, SDK/MLflow receipt tools, campaign recorder | `make check`; focused migration/import and observability suites | Disposable PostgreSQL and local MLflow receipts | Dirty local candidate; pinned DSPy 3.3.1, MLflow 3.16.0, Daytona 0.210.0 | Deployed heads and managed MLflow are intentionally outside this milestone; live legacy baseline and PostgreSQL/Lakebase import rehearsals remain operator-run |
+| P2 | Program, budget, adapter, trace-attribution and event-parity contracts | Focused `tests/unit/backend/rlm` suite; `make check` | Focused execution-core suite | Dirty local candidate; resolved runtime policy captured only in per-campaign receipts | Provider-backed semantic baseline only |
+| P3 | Native adapter, binding-generation fences, pre-commit native containment, whole-sandbox cleanup, versioned attachment schema | Native adapter, run-environment, and cancellation regressions | Historical native no-go receipt | Dirty local candidate; exact snapshot/image and provider response must be retained per live lane | Disposable remote containment, matched broker/native timing, concurrent trace parentage and campaign attachment |
+| P4 | Immutable profiles, manifests, readiness checks, Session prewarm, exact-ID child warm-pool ownership/reconciler | Doctor/profile, warm-pool, and ownership persistence regressions | Snapshot and local unit receipts | Dirty local candidate; immutable snapshot/manifest digests are operator receipt fields | Organization capability/capacity canary, actual child claim evidence, and measured capacity value |
+| P5 | Fresh native-context construction, generation fencing, pre-commit context cleanup, durable Session resource ownership | Preparation/settlement, Session manager, and stale-recovery regressions | Local clean-up and continuity foundations | Dirty local candidate; clean policy/image/database identity required before cutover | Actual SDK detached-process containment, durable Volume continuity, Lakebase rehearsal, matched behavior evidence, then authorized native promotion and legacy/broker subtraction |
 
 - [ ] Complete every local implementation task through Recursive RLM v2 (Phase 6). Foundational surfaces exist, but their presence does not close the unchecked tasks below.
-- [x] The Session and SemanticChild immutable snapshots are resolved from `.env`, checked against the Daytona contract, and have retained disposable runtime-probe receipts.
-- [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 543 TUI tests; 78.37% backend coverage against the 75% threshold).
+- [ ] The Session and SemanticChild immutable snapshots are resolved from `.env` and historical disposable runtime-probe receipts are retained. The configured v7/v2 identities still report image-definition drift and remain untouched rollback references. New immutable identities `fleet-rlm-python313-v9` and `fleet-rlm-python313-child-v4` were created and their actual-SDK runtime probes passed on 2026-09-10 (including DSPy import, manifest, Python, user, working-directory, and cleanup checks); the live receipt/configuration switch and promotion candidate are still open.
+- [x] The final local repository gate passed (`make check`, including generated contracts, boundaries, docs, and 543 TUI tests; 78.61% backend coverage against the 75% threshold).
+- [x] The current dirty local implementation candidate passed `make check` on 2026-09-10 after the binding-generation, Lakebase preflight, doctor-readiness, warm-pool campaign/request validation, native cancellation, disabled-check ordering, snapshot-mismatch action, managed-profile database policy, and pinned-image dependency additions: 78.61% backend coverage, current API/stream/profile contracts, and 543 TUI tests. This is local integration evidence only; it does not replace a sealed candidate receipt or any live/provider gate.
 - [ ] Deployed Alembic-head reconciliation, native remote-containment, mounted-profile, warm-capacity, matched native-versus-broker lifecycle, and matched semantic-quality gates remain open. The exclusive disposable PostgreSQL contention and query-plan receipt is complete; the standalone Daytona lifecycle benchmark measured 31.212-second p95 create-through-first-execution and therefore retains Session Sandboxes.
 - [ ] Native cutover, safe program promotion/rollback, and resident/broker subtraction remain blocked on those gates.
 
@@ -168,11 +176,12 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 
 **Files:** `persistence/models.py`, `persistence/database.py`, `persistence/repositories/turns.py`, `sandbox_bindings.py`, `outbox.py`, migrations and database tests.
 
-- [ ] **P1A.01** Inventory Alembic heads in the current continuation/main target and deployed databases, including any deployment of the earlier database-correctness branch. The disposable certification target retained head `019fe0010001`, but deployed database heads have not been retained in a durable receipt; select an additive/merge migration strategy only after that reconciliation. Never rewrite applied history.
+- [ ] **P1A.01** Inventory Alembic heads in the current continuation/main target and deployed databases, including any deployment of the earlier database-correctness branch. The disposable certification target retained historical head `019fe0010001`, while the current repository head is `01a087800002`; deployed database heads have not been retained in a durable receipt. Select an additive/merge migration strategy only after that reconciliation. Never rewrite applied history.
 
-  Repository inventory is complete: one linear head `019fe0010001`, following
-  `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2` and baseline
-  `019f5b3c96bd`. `scripts/inventory_db_heads.py` now supplies the required
+  Repository inventory is complete: one linear head `01a087800002`, following
+  `01a087800001`, `019fe0010001`, `019fdb010001`, `019fa2e4b7c1`,
+  `019f8c1d2e3f`, `019f7950a1b2` and baseline `019f5b3c96bd`.
+  `scripts/inventory_db_heads.py` now supplies the required
   read-only, write-once, content-free per-target receipt (`fleet.db-head-inventory/v1`):
   non-secret target label, current heads, database version, repository comparison,
   and an explicit no-rewrite strategy. It never migrates or retains a database URL.
@@ -222,10 +231,22 @@ See [ADR 006 implementation status](docs/decisions/006-implementation-status.md)
 - [x] **P1B.04** Add bounded timing and failure-category observations for claim, commit, recovery, and outbox work. Facade observations finish after transaction scope exits and publish only operation, duration and closed outcome categories through logs and existing active trace spans. Tests cover private-value sentinels, cancellation, database errors and unavailable observation sinks.
 
 The earlier persistence validation remains historical local evidence. The
-current final gate is recorded above (`make check`, 78.37% backend coverage and
+latest local gate is recorded above (`make check`, 78.61% backend coverage and
 543 TUI tests). Phase 1 remains open for deployed revision reconciliation and
 representative deployed workload measurements; the exclusive disposable
 PostgreSQL plan receipt is retained separately.
+
+The operator-only SQLite-to-PostgreSQL import scaffold was hardened on
+2026-09-09: it creates and integrity-checks a backup, rejects SQLite
+foreign-key violations and invalid canonical statuses without repair, upgrades
+an empty target and confirms its Alembic head, but rejects an existing Fleet
+schema that is not already at that candidate head. It includes durable warm-pool ownership
+in the content-free count/digest manifest, normalizes backend-specific UUID and
+timestamp representations before hashing, and verifies a content-free sample
+Session/Run/Turn reconstruction after import. It permits an older source that
+legitimately lacks that newly introduced empty table. Its unit rejection lanes
+passed locally. A disposable PostgreSQL import rehearsal and the Lakebase
+maintenance-window execution remain explicit operator gates.
 
 **Exit:** missing lineage is database-enforced, deployed migration history is respected, concurrency tests retain evidence, and observability does not participate in settlement.
 
@@ -461,7 +482,7 @@ The previously inspected exact Daytona 0.210.0 implementation invokes output han
 - [x] **P3C.01** Use synchronous, fast output callbacks that feed a bounded event bridge. Do not pass un-awaited async callbacks to this SDK version.
 - [x] **P3C.02** Enforce byte bounds before output accumulates indefinitely. Replay tests cover output overflow, bounded event delivery and slow-consumer behavior; remote SDK accumulation/containment remains a live gate.
 - [x] **P3C.03** Apply an absolute host deadline and a bounded provider execution timeout. Include connection establishment, tool waits, execution, and cleanup; never use an unbounded timeout accidentally.
-- [ ] **P3C.04** Test cancellation during context creation, execution, native sub-LM calls, host callbacks, and finalization. Context, host-callback, and finalizer ownership fences are implemented, but a native sub-LM cancellation proof remains open.
+- [ ] **P3C.04** Test cancellation during context creation, execution, native sub-LM calls, host callbacks, and finalization. Context, host-callback, and finalizer ownership fences are implemented. Local native-adapter regression coverage now revokes the exact binding generation during a host-mediated sub-LM callback and proves that the late return cannot resume execution, publish `SUBMIT`, or acquire another callback; context deletion and gateway cleanup still occur. The complete actual-SDK cancellation matrix remains open.
 - [ ] **P3C.05** Probe long-running and detached subprocesses after cancellation and context deletion. Durable binding-state fencing before native deletion, followed by quarantine after confirmed deletion, is now implemented and covered by unit regressions. The retained receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` confirms whole-sandbox deletion/quarantine after a detached process survived context deletion; the live v2 remote-containment/fencing proof remains open and native production remains blocked.
 - [x] **P3C.06** Preserve no-success/no-publication behavior after authority loss. Test no delayed mutation after a subsequent Run begins.
 - [x] **P3C.07** Use separate sandboxes for tenant/Session security isolation. Test same-Session overlapping Runs are rejected; different Sessions can execute concurrently without shared bindings. Session runtime tests serialize same-key execution and retain distinct interpreters for different keys; the live lane confirmed distinct sandboxes and concurrent execution for different Sessions.
@@ -509,15 +530,15 @@ Two images are sufficient initially: Session analysis and lean child analysis. T
 - [x] **P4A.06** Add a runtime manifest: schema version, image definition digest, base digest, Python executable/version, dependency digest, helper protocol, declared capabilities, and default resources.
 - [x] **P4A.07** Verify the manifest plus a small executable/import probe on a new sandbox generation. The retained probes are no-Volume evidence scoped to the verified identity; a manifest is metadata, not proof that arbitrary generated code is authorized.
 - [x] **P4A.08** Expose bounded capability metadata to the RLM so it knows which packages/tools exist. Do not inject credentials, full dependency dumps, or infrastructure identifiers into prompts.
-- [x] **P4A.09** Verify native interpreter startup on each built profile. Add only the small helper/client actually required by Phase 3; never bake Fleet backend, DSPy host orchestration, DB code, or credentials into the image. The 2026-09-08 Session and SemanticChild runtime probes passed against their immutable v7/v2 snapshots and deleted their disposable sandboxes.
-- [x] **P4A.10** Publish new immutable snapshot names only when contents/resources change. The `.env`-resolved `fleet-rlm-python313-v7` and `fleet-rlm-python313-child-v2` identities are retained while active bindings may reference them; v6/child-v1 remain rollback targets.
+- [ ] **P4A.09** Verify native interpreter startup on each built profile. Add only the small helper/client actually required by Phase 3; never bake Fleet backend, DB code, or credentials into the image. Historical 2026-09-08 no-Volume probes passed for the then-current v7/v2 definitions, while the current immutable `v9` and `child-v4` probes passed on 2026-09-10 after pinning DSPy 3.3.1 in the image dependency contract. A versioned live receipt and configured-profile promotion remain open.
+- [ ] **P4A.10** Publish new immutable snapshot names only when contents/resources change. The `.env`-resolved v7/v2 identities remain immutable rollback references; `fleet-rlm-python313-v9` and `fleet-rlm-python313-child-v4` now carry the current definitions and passed disposable runtime probes. Switching deployment references and retaining the sealed operator receipt remain explicit gates.
 
 ### 4B. SDK/API-driven operator reconciliation
 
 - [x] **P4B.01** Reuse the current snapshot script and CLI composition. Add non-mutating plan/check behavior and an explicit operator apply path; do not create parallel provisioning commands with different rules.
 - [x] **P4B.02** Use Daytona's public Image/Snapshot SDK surfaces for creation and inspection. Keep SDK/API version assumptions explicit; rolling documentation is not proof a feature is available in the deployed backend.
 - [x] **P4B.03** Make checks fail on definition drift rather than overwriting existing snapshot identities. Treat activation, retirement, and warm-pool changes as explicit operator actions.
-- [ ] **P4B.04** Extend `fleet doctor daytona` with actual snapshot, region, runtime-manifest, interpreter, mount, and optional capacity readiness. Report unavailable features without pretending they were exercised.
+- [ ] **P4B.04** Extend `fleet doctor daytona` with actual snapshot, region, runtime-manifest, interpreter, mount, and optional capacity readiness. Report unavailable features without pretending they were exercised. Local readiness now reports `pass`, `fail`, `unsupported`, or `not-exercised` for snapshot, manifest, imports, region, mount, and capacity; configured imports and scoped mounts are observed during the disposable doctor lane, while snapshot/region/capacity remain `not-exercised` without provider evidence. Provider-backed readiness remains open.
 - [ ] **P4B.05** Implement and test warm-pool plan/check/reconcile behavior in this phase, with an explicitly authorized canary where available. `scripts/daytona_warm_pool.py` now provides the policy-owned plan/check/reconcile seam for the clean SemanticChild snapshot, rejects ambiguous matches, and defaults to disabled/zero capacity. The live canary remains required before this item closes. Keep routine paid capacity disabled until eligibility, containment and actual Phase 6 demand/value are certified. Image correctness must not depend on warm capacity.
 - [x] **P4B.06** Document the official Daytona Skill as implementation assistance and optional MCP as developer/operator tooling. Runtime/provisioning source of truth remains committed definitions plus SDK/API calls, not an interactive MCP transcript.
 - [x] **P4B.07** Test packaging so installed Fleet distributions contain every dependency manifest and required helper asset. The wheel/sdist artifact matrix covers required manifests, helper assets, isolated profile loading, and forbidden payloads.
@@ -529,10 +550,10 @@ Daytona documents warm-pool matching on snapshot, region, default resources and 
 - [x] **P4C.01** Reuse existing Session prewarm in the consolidated manager. Trigger it only for a bounded high-intent action such as new Session/attachment preparation, not every UI interaction.
 - [x] **P4C.02** Give active Runs priority over prewarm; bound prewarm concurrency and idle retention. Measurement of useful hits and wasted sandbox seconds remains a live evidence task.
 - [x] **P4C.03** Keep Volume-backed Session sandboxes on prewarm/start/reuse, not provider warm pools. Default to idle stop when no runtime-memory persistence is required.
-- [ ] **P4C.04** Implement the child warm-pool policy and its eligibility/cold-fallback path now. Run an explicitly authorized capacity canary only after confirming organization support; routine activation waits for measured Phase 6 recursive demand.
-- [ ] **P4C.05** Validate the actual SDK creation request for eligibility. Avoid accidentally passing disqualifying volumes, custom envs, secrets, users, or resource overrides.
-- [x] **P4C.06** Reconcile desired capacity through the operator path. `scripts/daytona_warm_pool.py` uses the pinned SDK's `AsyncDaytona.warm_pool` client, has an explicit apply mode, and remains outside Fleet Turn composition.
-- [ ] **P4C.07** Delete used child sandboxes; do not return tenant-used contexts/files to a shared warm pool. Record cleanup separately from pool replenishment.
+- [ ] **P4C.04** Implement the child warm-pool policy and its eligibility/cold-fallback path now. The local child factory can explicitly fall back from an unavailable immutable SemanticChild snapshot to a scoped, Volume-backed WorkspaceChild under the same admission permit and deadline; the default remains fail-closed. Run an explicitly authorized capacity canary only after confirming organization support; routine activation waits for measured Phase 6 recursive demand.
+- [x] **P4C.05** Validate the actual pinned SDK warm-pool request at the operator boundary. The request validator rejects disqualifying volumes, custom envs, secrets, users, or resource overrides. Remaining gate: live provider confirmation that the serialized request is accepted as eligible, followed by a bounded disposable create/delete canary.
+- [x] **P4C.06** Reconcile desired capacity through the operator path. `scripts/daytona_warm_pool.py` uses the pinned SDK's `AsyncDaytona.warm_pool` client, has an explicit apply mode, and remains outside Fleet Turn composition. Provider discovery first narrows by immutable snapshot/target, then Fleet proves authority against the exact provider pool ID and persists campaign, candidate, manifest, reconciliation generation, and ownership status; a matching but unowned or stale record fails closed unless an operator explicitly adopts it. A SQLite persistence regression records a retired same-definition pool alongside the live pool and proves lookup cannot authorize the stale provider identity.
+- [x] **P4C.07** Delete used child sandboxes; do not return tenant-used contexts/files to a shared warm pool. SemanticChild lease tests prove a volume-less ephemeral child is provider-deleted after use, and the owned child-cleanup path waits for deletion/absence before restoring admission. Pool replenishment remains a provider-owned observation, not child cleanup.
 - [ ] **P4C.08** Record observable claim/readiness metadata accurately. Since claimed warm identifiers may be cleared, do not infer a warm hit solely from a fast create time.
 - [ ] **P4C.09** Specify lifecycle units explicitly. Idle auto-delete and wall-clock TTL are not interchangeable; use only parameters supported by 0.210.0 and the deployed backend, and verify expiry behavior.
 - [ ] **P4C.10** Evaluate pool sizes against demand, quota, cold-start latency, idle spend, and parent admission capacity. Do not hard-code a pool of three without workload evidence.
@@ -561,7 +582,7 @@ Daytona documents warm-pool matching on snapshot, region, default resources and 
 - [x] **P5A.07** Use the existing durable cleanup/recovery intents only for obligations not represented elsewhere. Store exact resource/context identity, expected generation, action, retry state, and sanitized failure category.
 - [x] **P5A.08** Keep cleanup obligations alive after Session/Run deletion; avoid cascading away the only record of an external resource. Cleanup intent ownership must not grant authority to publish outputs.
 - [x] **P5A.09** For ambiguous creation with no returned ID, retain bounded in-flight ownership and reconcile with an operation identity/labels where supported. Document the remaining discoverability limit; a database intent cannot invent an unknown sandbox ID.
-- [ ] **P5A.10** Test crash windows around create, bind, context startup, commit, delete, and cleanup acknowledgment. Repeated recovery must not delete a replacement or duplicate committed output.
+- [ ] **P5A.10** Test crash windows around create, bind, context startup, commit, delete, and cleanup acknowledgment. Local coverage now proves that cleanup for `old-sandbox` generation 1 cannot upsert or quarantine an already-installed `replacement-sandbox` generation 2, and that a binding-commit failure deletes the unpublished created Sandbox and restores admission. The remaining context-startup, delete-acknowledgment, and duplicate-output crash proofs remain open.
 
 ### 5B. Complete Turn-scoped execution path
 
@@ -569,10 +590,10 @@ Daytona documents warm-pool matching on snapshot, region, default resources and 
 - [x] **P5B.02** Build a fresh native RLM through the existing `RLMFactory` per Run, with the existing shared TurnBudget and fresh LM proxies, tools, output contract, and callbacks.
 - [x] **P5B.03** Acquire a fresh explicit interpreter context for that Run. Use the existing authorized attachment/history/memory projections rather than reconstructing DSPy REPLHistory.
 - [x] **P5B.04** Preserve within-Turn iteration state. End cross-Turn Python globals, tool aliases, callbacks, model configuration, and output-schema reuse.
-- [ ] **P5B.05** Keep durable file/history continuity. Test Turn A writes a durable file; Turn B receives a new context and reads the file while Turn A's Python-only variable is absent.
-- [ ] **P5B.06** Test stop/start and full sandbox replacement with the same authorized Volume scope. Verify history, file checksums, memory metadata, and artifact lookup still work.
+- [ ] **P5B.05** Keep durable file/history continuity. Local native-adapter coverage uses two distinct contexts to prove Python-only state is absent in the replacement while the same durable-Volume callback can read data written by the first context. A real scoped-Volume/history receipt remains required.
+- [ ] **P5B.06** Test stop/start and full sandbox replacement with the same authorized Volume scope. Verify history, file checksums, memory metadata, and artifact lookup still work. The deterministic two-context continuity regression is only a foundation; stop/start, checksum, memory, artifact, and actual provider replacement evidence remain open.
 - [x] **P5B.07** Classify mutable scratch versus promoted immutable artifacts. Preserve existing promotion/locking/checksum behavior; do not claim failed Runs roll back arbitrary filesystem writes.
-- [ ] **P5B.08** Integrate quiescence and cleanup into the existing settlement owner/order. Revoke useful-work capability, drain child/tool work, validate outputs, close owned context, and commit only when the established success obligations are satisfied.
+- [x] **P5B.08** Integrate quiescence and cleanup into the existing settlement owner/order. The native pre-commit boundary now closes the exact context, callback gateway, and tainted root owner before `RunLifecycle.finish` can publish artifacts or commit durable success; a failed containment action blocks success and later drain retains retryable cleanup ownership. Existing stream drain, budget settlement, output/artifact validation, and post-commit resource release keep their owners. Unit regressions prove ordering and the no-commit-on-native-cleanup-failure path. The actual-SDK containment gate remains P3C.04/P3C.05 evidence, not an implied local production promotion.
 - [x] **P5B.09** Verify generated HTTP/settings/stream contracts and the maintained TUI. Same-Session overlap remains forbidden; cross-Session concurrency remains available.
 
 ### 5C. Explicit resident-runtime and broker subtraction
@@ -588,14 +609,14 @@ Daytona documents warm-pool matching on snapshot, region, default resources and 
 
 **Files:** `daytona/workspace_agent/`, workspace gateway, storage, artifact and memory-promotion adapters. Audit required guarantees before replacement; do not delete atomicity, path safety or locking simply because a similarly named SDK method exists.
 
-- [ ] **P5D.01** Inventory each Workspace Agent operation and its required guarantees: path confinement, symlink handling, bounded reads, checksum verification, lock ownership, compare-and-swap, atomic replacement, and publication ordering.
+- [x] **P5D.01** Inventory each Workspace Agent operation and its required guarantees: path confinement, symlink handling, bounded reads, checksum verification, lock ownership, compare-and-swap, atomic replacement, and publication ordering. The maintained [Workspace Agent filesystem operation audit](docs/reference/workspace-agent-operation-audit.md) maps every protocol operation to its trusted caller, currently owned guarantees, and the exact missing SDK-equivalence evidence. It explicitly retains custom lock/CAS/atomic publication code until that evidence exists.
 - [ ] **P5D.02** Use public `sandbox.fs` upload/download/list/stat/search APIs where they preserve those guarantees. Use streaming/batched operations where they materially reduce copying or network round trips.
 - [ ] **P5D.03** Preserve custom bounded local helpers for atomic memory/promotion or race-resistant filesystem operations not provided equivalently by the SDK. SDK file upload is not automatically a transactional publish primitive.
 - [ ] **P5D.04** Keep model-driven repeated parsing/search close to the data in sandbox Python. Do not route every local read/grep through a host network request.
 - [ ] **P5D.05** Verify transfer cancellation, size limits, checksums, duplicate requests, and per-file batch errors. Keep client timeout distinct from confirmed server stop.
 - [ ] **P5D.06** Reduce Workspace Agent source transfer/handshake/duplicate caches only after equivalent tests pass. Record operations removed and network calls saved.
 
-- [ ] **P5M.01** Preserve linked preparation/execution trace compatibility while adding runtime variant, program/image identity and Fleet Run correlation. Record final Fleet settlement status separately from individual span status.
+- [x] **P5M.01** Preserve linked preparation/execution trace compatibility while adding runtime variant, program/image identity and Fleet Run correlation. Execution roots record bounded opaque `fleet.runtime_variant`, `fleet.program_fingerprint`, and `fleet.image_identity` tags/metadata alongside the existing Run/Session and one-way preparation link; malformed or oversized identities are omitted. Normal finish, failure, cancellation, timeout, and claim-revocation paths now annotate the durable Fleet settlement as bounded `settlement_status`/`settlement_durable` attributes without changing the individual span state. Local trace regressions cover the separation; campaign attachment and configured-backend evidence remain part of P5M.02–P5M.05.
 - [ ] **P5M.02** Use existing phase spans to measure claim/preparation, RLM execution, result/artifact validation, durable commit and immediate cleanup. Log later recovery cleanup in separately linked operational work; do not keep a user trace open indefinitely.
 - [ ] **P5M.03** Ensure a completed model answer cannot produce a committed-success observation before Fleet settlement succeeds. Conversely, exporter failure after commit cannot turn a completed Fleet Run into a failed Run.
 - [x] **P5M.04** Test trace correlation and parentage across two sequential Turns in one Session and concurrent Runs in different Sessions. Verify no callbacks, tools, proxies or trace context survive into the wrong invocation.

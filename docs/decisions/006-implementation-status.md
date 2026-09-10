@@ -83,10 +83,11 @@ the preceding phases. The 2026-09-08 continuation now closes the corrected
 exclusive PostgreSQL campaign and retains a bounded local MLflow receipt; all
 remaining provider, semantic-quality and rollout gates stay explicitly open.
 
-- P1A.01 repository inventory: one head, `019fe0010001`, with linear ancestry
-  through `019fdb010001`, `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2`
-  and baseline `019f5b3c96bd`. No repository merge revision is indicated.
-  Deployed database heads have not been inspected.
+- P1A.01 repository inventory: one head, `01a087800002`, with linear ancestry
+  through additive `01a087800001`, `019fe0010001`, `019fdb010001`,
+  `019fa2e4b7c1`, `019f8c1d2e3f`, `019f7950a1b2` and baseline
+  `019f5b3c96bd`. No repository merge revision is indicated. Deployed database
+  heads have not been inspected.
 - The focused binding/Turn lineage migration, database compatibility, claim
   constraint classification and claim adapter parity lane passed 32 tests.
   This is local evidence only; P1A.01 deployed reconciliation remains open.
@@ -102,7 +103,7 @@ remaining provider, semantic-quality and rollout gates stay explicitly open.
   and optional existing trace spans. Arguments, results and exception text
   are excluded; privacy, cancellation and broken-sink regressions pass.
 - Earlier validation covered 37 focused persistence tests and a passing local
-  repository gate. The current gate result is recorded above with 78.37%
+  repository gate. The current gate result is recorded above with 78.61%
   backend coverage and 543 TUI tests. Phase 1 remains open for deployed
   database evidence; later phases are not promoted by either local or
   disposable-target results. Progress is checked in the consolidated plan.
@@ -204,11 +205,13 @@ implementation and evidence requirements are satisfied.
 - Phase 0: ADR vocabulary and the three evidence lanes already exist. The runtime
   benchmark now captures installed Daytona, DSPy and MLflow identities.
 - Phase 1: additive migration `019fe0010001` adds Sandbox Binding Workspace and
-  composite Session/Workspace lineage, and the Session status CHECK. Dirty-data
-  preflight runs before DDL. SQLite upgrade, enforcement, downgrade and row
-  preservation tests exist. The exclusive disposable PostgreSQL receipt now
-  retains six contention scenarios and five bounded query-plan paths; deployed
-  heads and representative deployed workloads remain unverified.
+  composite Session/Workspace lineage, with follow-ups `01a087800001` for
+  durable warm-pool ownership and `01a087800002` for monotonic binding
+  generations. The Session status CHECK remains enforced. Dirty-data preflight
+  runs before DDL. SQLite upgrade, enforcement, downgrade and row preservation
+  tests exist. The exclusive disposable PostgreSQL receipt now retains six
+  contention scenarios and five bounded query-plan paths; deployed heads and
+  representative deployed workloads remain unverified.
 - Phase 1.1: Daytona and its six generated clients are pinned/resolved to 0.210.0.
   DSPy remains 3.3.1; MLflow and its skinny/tracing distributions are now pinned/resolved to 3.16.0.
   The organization header compatibility code remains necessary in the installed
@@ -260,17 +263,18 @@ implementation and evidence requirements are satisfied.
 - Phase 4: a reproducible, non-secret `DaytonaEnvironmentManifest` now describes
   the three logical profiles. Session and Workspace children share the analysis
   image and Volume eligibility; semantic children have the lean image contract
-  and are the sole generic-pool-eligible profile. On 2026-09-07, the
+  and are the sole generic-pool-eligible profile. The historical 2026-09-07
   `.env`-resolved Daytona 0.210.0 operator lane created and checked immutable
-  `fleet-rlm-python313-v7` (4 vCPU / 8 GiB / 8 GiB) and
-  `fleet-rlm-python313-child-v2` (2 vCPU / 4 GiB / 4 GiB); both disposable
-  no-Volume runtime probes verified their baked manifests, Python 3.13.13,
-  non-root user, working directory and `git`, then confirmed probe Sandbox
-  deletion. The prior v6/child-v1 identities remain immutable rollback targets.
-  Volume mounts, pool reconciliation, backend capability checks and
-  paid capacity remain unverified. The full doctor stopped earlier at the
-  repository database/Alembic prerequisite; that is a separate unresolved
-  live gate.
+  v7/v2 identities and confirmed disposable no-Volume probe deletion. The
+  configured v7/v2 identities still report image-definition drift and remain
+  rollback references. New immutable identities `fleet-rlm-python313-v9` and
+  `fleet-rlm-python313-child-v4` were created and passed actual-SDK disposable
+  runtime probes (including DSPy import and cleanup) on 2026-09-10; sealed
+  receipt retention and configuration promotion remain open.
+  The prior v6/child-v1 identities remain immutable rollback targets. Volume
+  mounts, pool reconciliation, backend capability checks and paid capacity
+  remain unverified. The full doctor stopped earlier at the repository
+  database/Alembic prerequisite; that is a separate unresolved live gate.
 - Phase 5: generation-aware Session ownership, Session prewarm, disposable child
   leases and fenced cleanup remain the provider seams. Native RLM/context/binding
   mechanics remain feasibility-only; `runtime.variant` exposes only `legacy`
@@ -306,7 +310,7 @@ or authorize paid capacity.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
 - [x] Phase 5 fresh per-Run native RLM/context/binding/worker mechanics are available through an explicit feasibility seam; the single selectable runtime remains `legacy`.
 - [x] Phase 6 bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered all-or-nothing batches, explicit read-only partial sibling outcomes, and typed child outcomes are implemented.
-- [x] Repository-wide local validation passed: `make check` (exit 0), 78.37% backend coverage against a 75% threshold, generated-contract checks, 543 TUI tests, and documentation/boundary checks.
+- [x] Repository-wide local validation passed: `make check` (exit 0), 78.61% backend coverage against a 75% threshold, generated-contract checks, 543 TUI tests, and documentation/boundary checks.
 
 ### Certification still open
 
@@ -345,7 +349,7 @@ these tests. The corrected Phase 3 receipt is retained, but its detached-process
 probe remains a native-production no-go; the failed MVP semantic sample and the
 local MLflow receipt likewise leave model-quality and exporter gates open.
 
-The final local validation passed `make check` (exit 0, 78.37% backend
+The final local validation passed `make check` (exit 0, 78.61% backend
 coverage; the 75% threshold was met), including generated API and stream
 checks, 543 TUI tests, boundary checks and documentation checks. The retained
 live receipts are scoped evidence for their individual lanes; they do not
