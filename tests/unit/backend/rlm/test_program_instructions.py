@@ -24,7 +24,7 @@ def test_default_fleet_signature_uses_composed_recursive_fragments() -> None:
     assert fragments.tools == TOOL_RLM_INSTRUCTIONS
     assert fragments.recursion == RECURSION_RLM_INSTRUCTIONS
     assert FleetRLMSignature.instructions == fragments.compose()
-    assert "rlm_query(prompt=prompt)" in FleetRLMSignature.instructions
+    assert "rlm_query(capsule=capsule)" in FleetRLMSignature.instructions
     assert "6. Verify within the same action" in FleetRLMSignature.instructions
 
 
@@ -32,7 +32,7 @@ def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment(
     recursive = FleetRLMSignature.instructions
     nonrecursive = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
 
-    assert "rlm_query(prompt=prompt)" not in nonrecursive
+    assert "rlm_query(capsule=capsule)" not in nonrecursive
     assert "5. Verify within the same action" in nonrecursive
     assert RECURSION_RLM_INSTRUCTIONS in recursive
     assert RECURSION_RLM_INSTRUCTIONS not in nonrecursive
@@ -52,8 +52,8 @@ def test_custom_output_fields_stay_stable_while_fleet_policy_is_composed() -> No
     assert recursive is not CustomResult
     assert recursive.input_fields.keys() == CustomResult.input_fields.keys()
     assert recursive.output_fields.keys() == CustomResult.output_fields.keys()
-    assert "rlm_query(prompt=prompt)" in recursive.instructions
-    assert "rlm_query(prompt=prompt)" not in nonrecursive.instructions
+    assert "rlm_query(capsule=capsule)" in recursive.instructions
+    assert "rlm_query(capsule=capsule)" not in nonrecursive.instructions
 
 
 def test_fragment_composition_preserves_established_instruction_text() -> None:

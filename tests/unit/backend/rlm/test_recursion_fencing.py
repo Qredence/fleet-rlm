@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from typing import Any
@@ -77,8 +78,8 @@ def test_child_acall_wait_is_fenced_by_the_absolute_deadline(
     executor = _executor(recorder, deadline=deadline, observer=events.append)
 
     began = time.monotonic()
-    with pytest.raises(TimeoutError, match="recursive child deadline exceeded"):
-        executor.tool(prompt="hanging child")
+    outcome = executor.tool(capsule={"task": "hanging child"})
+    assert outcome["status"] == "timed_out"
     elapsed = time.monotonic() - began
 
     # Bounded by the one absolute deadline, never unbounded.
@@ -136,8 +137,8 @@ async def test_cancellation_swallowing_child_is_retained_not_blocking(
     executor = _executor(recorder, deadline=deadline)
 
     began = time.monotonic()
-    with pytest.raises(TimeoutError, match="recursive child deadline exceeded"):
-        executor.tool(prompt="swallowing child")
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.tool(capsule={"task": "swallowing child"})
     elapsed = time.monotonic() - began
 
     # The fence fired and the Tool returned bounded; cancellation was sent
@@ -181,7 +182,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     from fleet_rlm.rlm.recursion import RecursiveBatchError
 
     with pytest.raises((TimeoutError, RecursiveBatchError)) as raised:
-        executor.batched_tool(prompts=["hanging"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["hanging"]])
     if isinstance(raised.value, RecursiveBatchError):
         assert isinstance(raised.value.__cause__, TimeoutError)
     assert time.monotonic() - began < 2.0
@@ -205,12 +206,12 @@ def test_completed_child_is_not_disturbed_by_the_fence(
         async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
             del interpreter
             await asyncio.sleep(0)
-            return dspy.Prediction(answer=f"echo:{prompt}", trajectory=[])
+            return dspy.Prediction(answer=f"echo:{json.loads(prompt)['task']}", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: PromptChild())
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    assert executor.tool(prompt="fast child") == "echo:fast child"
+    assert executor.tool(capsule={"task": "fast child"})["answer"] == "echo:fast child"
     assert recorder.close_calls.get(1) == 1
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
@@ -235,8 +236,9 @@ def test_child_lm_deadline_error_keeps_its_own_classification(
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: LmDeadlineChild())
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    with pytest.raises(TimeoutError, match="recursive child LM deadline exceeded"):
-        executor.tool(prompt="lm deadline child")
+    outcome = executor.tool(capsule={"task": "lm deadline child"})
+    assert outcome["status"] == "timed_out"
+    assert outcome["error_category"] == "timeout"
     assert recorder.close_calls.get(1) == 1
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
@@ -275,7 +277,7 @@ def test_val_rec_015_claim_loss_before_allocation_performs_no_reservation_or_acq
     authority.revoke()
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="claimed slice")
+        executor.tool(capsule={"task": "claimed slice"})
 
     assert recorder.call_indexes == []
     summary = executor.summary()
@@ -298,13 +300,13 @@ def test_val_rec_015_claim_loss_rejects_every_subsequent_recursive_call() -> Non
         options=RecursiveRLMOptions(max_calls=4),
     )
 
-    assert executor.tool(prompt="held slice") == "held-ok"
+    assert executor.tool(capsule={"task": "held slice"})["answer"] == "held-ok"
     authority.revoke()
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(prompt="late single")
+        executor.tool(capsule={"task": "late single"})
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.batched_tool(prompts=["late batch"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["late batch"]])
 
     # The completed call is the only reservation and acquisition ever made.
     assert recorder.call_indexes == [1]
@@ -340,7 +342,7 @@ async def test_val_rec_015_claim_loss_during_blocked_child_discards_result_and_f
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
-        [{"reasoning": "delegate", "code": "answer = rlm_query(prompt='claimed slice')"}],
+        [{"reasoning": "delegate", "code": "answer = rlm_query(capsule={'task': 'claimed slice'})"}],
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)

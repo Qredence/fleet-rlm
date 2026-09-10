@@ -29,6 +29,7 @@ contracted child-runtime owner (deterministic owner lanes live in
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from collections.abc import Callable
@@ -163,7 +164,7 @@ def _executor(
     )
 
 
-def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
+def test_val_rec_012_authority_failure_cancels_queued_acquisition_before_any_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """VAL-REC-012 (first-failure trigger): with one worker slot, a
@@ -213,9 +214,9 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
 
     class FailingChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
-            if prompt == "fail":
+            if json.loads(prompt)["task"] == "fail":
                 first_failure.set()
-                raise ValueError("provider failure")
+                raise ChildRuntimeAuthorizationError("authority revoked")
             raise AssertionError("queued sibling must never execute")
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: FailingChild())
@@ -227,11 +228,11 @@ def test_val_rec_012_first_failure_cancels_queued_acquisition_before_any_lease(
 
     began = time.monotonic()
     with pytest.raises(RecursiveBatchError) as raised:
-        executor.batched_tool(prompts=["fail", "queued"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["fail", "queued"]])
     assert time.monotonic() - began < 5
 
     # One all-or-nothing batch failure caused by the first child failure.
-    assert isinstance(raised.value.__cause__, ValueError)
+    assert isinstance(raised.value.__cause__, ChildRuntimeAuthorizationError)
     # Only the running child reached the factory; the queued sibling never
     # acquired a lease, and the failed child's lease already settled.
     assert recorder.call_indexes == [1]
@@ -276,7 +277,7 @@ def test_val_rec_012_deadline_cancels_queued_acquisition_and_join_waits_for_runn
 
     began = time.monotonic()
     with pytest.raises(TimeoutError, match="batch deadline exceeded"):
-        executor.batched_tool(prompts=["blocked", "queued-a", "queued-b"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["blocked", "queued-a", "queued-b"]])
     assert time.monotonic() - began < 1.5
     assert started.is_set()
     # Only the running child acquired a lease; queued siblings never did.
@@ -327,7 +328,7 @@ def test_val_rec_016_revoked_authority_cancels_queued_sibling_and_retains_runnin
 
     def run_batch() -> None:
         try:
-            executor.batched_tool(prompts=["running", "queued"])
+            executor.batched_tool(capsules=[{"task": task} for task in ["running", "queued"]])
         except BaseException as exc:
             result["error"] = exc
 
@@ -368,7 +369,10 @@ async def test_val_rec_016_runner_cancellation_terminal_outcome_with_same_fence(
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "batch", "code": "answers = rlm_query_batched(prompts=['alpha', 'beta'])"},
+            {
+                "reasoning": "batch",
+                "code": "answers = rlm_query_batched(capsules=[{'task': 'alpha'}, {'task': 'beta'}])",
+            },
             {"reasoning": "submit", "code": "SUBMIT(answer='root-done')"},
         ],
         adapter=adapter,
@@ -401,7 +405,7 @@ async def test_val_rec_016_runner_cancellation_terminal_outcome_with_same_fence(
 
     class BlockingAlphaChild:
         def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
-            if prompt == "alpha":
+            if json.loads(prompt)["task"] == "alpha":
                 started.set()
                 assert release.wait(10)
             return dspy.Prediction(answer="late", trajectory=[])
@@ -480,9 +484,9 @@ def test_val_rec_017_expired_deadline_performs_no_allocation() -> None:
     )
 
     with pytest.raises(TimeoutError, match="deadline exceeded"):
-        executor.tool(prompt="late child request")
+        executor.tool(capsule={"task": "late child request"})
     with pytest.raises(TimeoutError, match="deadline exceeded"):
-        executor.batched_tool(prompts=["late"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["late"]])
 
     assert recorder.call_indexes == []
     assert recorder.leases == []
@@ -531,7 +535,7 @@ def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
 
     began = time.monotonic()
     with pytest.raises(TimeoutError, match="recursive child batch deadline exceeded"):
-        executor.batched_tool(prompts=["blocked"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["blocked"]])
     elapsed = time.monotonic() - began
     assert started.is_set()
     # Bounded by the one absolute deadline, with a small tolerance.
@@ -726,7 +730,7 @@ def test_val_rec_026_fleet_executor_closes_child_lease_exactly_once() -> None:
         recorder,
     )
 
-    assert executor.tool(prompt="classify selected row") == "child-ok"
+    assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
 
     interpreter = recorder.interpreters[1]
     assert recorder.close_calls.get(1) == 1
@@ -748,8 +752,9 @@ def test_val_rec_026_executor_terminal_child_failure_still_settles_lease_once() 
         behavior="interpreter_error",
     )
 
-    with pytest.raises(CodeInterpreterError):
-        executor.tool(prompt="terminal child failure")
+    outcome = executor.tool(capsule={"task": "terminal child failure"})
+    assert outcome["status"] == "failed"
+    assert outcome["answer"] == ""
 
     interpreter = recorder.interpreters[1]
     # DSPy propagated the failure without touching shutdown; the owner closed.
@@ -787,7 +792,7 @@ def test_val_rec_030_valid_child_answer_cannot_override_failed_cleanup() -> None
     )
 
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised:
-        executor.tool(prompt="valid child")
+        executor.tool(capsule={"task": "valid child"})
     # The typed cleanup failure chains the original close error.
     assert raised.value.__cause__ is original
     # The fatal cleanup error is re-observed on every later check and blocks
@@ -795,7 +800,7 @@ def test_val_rec_030_valid_child_answer_cannot_override_failed_cleanup() -> None
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         executor.raise_if_cleanup_failed()
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
-        executor.tool(prompt="second call after fatal cleanup")
+        executor.tool(capsule={"task": "second call after fatal cleanup"})
     # Cleanup ran exactly once; repeated close re-surfaces without rerunning.
     lease = lease_holder["lease"]
     assert recorder.close_calls.get(1) == 1

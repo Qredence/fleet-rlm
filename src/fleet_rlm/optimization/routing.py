@@ -33,7 +33,6 @@ RoutingClass = Literal[
     "semantic_batched",
     "recursive_child",
     "recursive_batch",
-    "recursive_depth_fallback",
 ]
 
 _EXPECTED_ORDER: tuple[RoutingClass, ...] = (
@@ -42,7 +41,6 @@ _EXPECTED_ORDER: tuple[RoutingClass, ...] = (
     "semantic_batched",
     "recursive_child",
     "recursive_batch",
-    "recursive_depth_fallback",
 )
 
 _ROUTE_DECISION_TREE = """Decision tree:
@@ -51,8 +49,6 @@ _ROUTE_DECISION_TREE = """Decision tree:
 3. Use llm_query_batched for two or more independent bounded judgments.
 4. Use rlm_query only for a self-contained subproblem that needs iterative Python exploration.
 5. Use rlm_query_batched for independent subproblems where each needs iterative Python exploration.
-6. A recursive child request beyond RLM_NATIVE_CHILD_DEPTH uses
-   the bounded Sub-LM fallback; it never allocates another child Sandbox.
 """
 
 
@@ -74,7 +70,6 @@ class RoutingFacts:
     tool_counts: Mapping[str, int] = field(default_factory=dict)
     native_child_count: int = 0
     max_native_child_depth: int = 0
-    depth_fallback_count: int = 0
     child_iterations: int = 0
     recursive_prompt_chars: int = 0
     latency_ms: int = 0
@@ -131,11 +126,10 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
         "204",
     ),
     RoutingScenario(
-        "recursive-depth-fallback",
-        "Call rlm_query with this self-contained child instruction: 'Call rlm_query(prompt=\"Classify "
-        'the label phosphorus as an element; return only element or not element") and return its fallback '
-        "answer'. Use the returned answer as the final answer.",
-        "recursive_depth_fallback",
+        "recursive-native-semantic",
+        "Call rlm_query(capsule={'task': 'Use native llm_query to classify phosphorus as an element; "
+        "return only element or not element'}). Check the typed outcome status and use its answer.",
+        "recursive_child",
         "element",
     ),
     RoutingScenario(
@@ -157,8 +151,6 @@ def routing_decision_tree() -> str:
 def classify_routing_facts(facts: RoutingFacts) -> RoutingClass:
     """Classify one execution from observable facts without CoT access."""
     counts = {str(key): int(value) for key, value in facts.tool_counts.items()}
-    if facts.depth_fallback_count > 0:
-        return "recursive_depth_fallback"
     if counts.get("rlm_query_batched", 0) > 0 or facts.recursive_batch_calls > 0:
         return "recursive_batch"
     if counts.get("rlm_query", 0) > 0 or facts.native_child_count > 0 or facts.max_native_child_depth > 0:
@@ -180,9 +172,8 @@ def facts_from_recursive_summary(
     """Project the owned recursive summary into routing evidence."""
     return RoutingFacts(
         tool_counts=dict(tool_counts or {}),
-        native_child_count=summary.call_count - summary.depth_fallback_count,
-        max_native_child_depth=1 if summary.call_count > summary.depth_fallback_count else 0,
-        depth_fallback_count=summary.depth_fallback_count,
+        native_child_count=summary.call_count,
+        max_native_child_depth=1 if summary.call_count else 0,
         recursive_batch_calls=summary.recursive_batch_calls,
         child_iterations=summary.child_iterations,
         recursive_prompt_chars=summary.maximum_prompt_chars,
@@ -204,7 +195,6 @@ def facts_from_execution_details(
     max_depth = 0
     prompt_chars = 0
     child_iterations = 0
-    depth_fallback_count = 0
     recursive_batch_calls = 0
     peak_child_concurrency = 0
     for detail in details:
@@ -228,14 +218,11 @@ def facts_from_execution_details(
                 raw_peak = output.get("peak_child_concurrency", 0)
                 if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
                     peak_child_concurrency = max(peak_child_concurrency, raw_peak)
-                if output.get("termination_mode") == "depth_fallback":
-                    depth_fallback_count += 1
     native_child_count = max_depth > 0
     return RoutingFacts(
         tool_counts=counts,
         native_child_count=int(native_child_count),
         max_native_child_depth=max_depth,
-        depth_fallback_count=depth_fallback_count,
         child_iterations=child_iterations,
         recursive_prompt_chars=prompt_chars,
         latency_ms=latency_ms,

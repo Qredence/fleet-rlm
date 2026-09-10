@@ -300,7 +300,7 @@ def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> 
     before = service.read()
 
     assert before.default_profile == "daytona-recursive"
-    assert set(before.available_profiles) == {"daytona-recursive", "daytona-managed"}
+    assert set(before.available_profiles) == {"daytona-recursive", "daytona-managed", "phase4-campaign"}
 
     # Re-selecting a committed profile is accepted and keeps the persisted
     # default_profile line canonical. The revision is a content hash, so a

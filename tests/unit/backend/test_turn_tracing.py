@@ -871,7 +871,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(prompt="classify selected row") == "child-ok"
+        assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
 
     assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
     recursive_inputs = [
@@ -883,7 +883,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
         {
             "recursive_depth": 1,
             "call_index": 1,
-            "prompt_chars": len("classify selected row"),
+            "prompt_chars": 180,
         }
     ]
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
@@ -928,7 +928,10 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.batched_tool(prompts=["first", "second"]) == ["child-ok", "child-ok"]
+        assert [item["answer"] for item in executor.batched_tool(capsules=[{"task": "first"}, {"task": "second"}])] == [
+            "child-ok",
+            "child-ok",
+        ]
 
     assert calls.start_span_names[0] == "fleet_turn"
     assert calls.start_span_names.count("RLM.recursive_call") == 2
@@ -973,7 +976,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
         pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised,
         turn_trace(uuid4(), uuid4(), enabled=True),
     ):
-        executor.tool(prompt="classify selected row")
+        executor.tool(capsule={"task": "classify selected row"})
 
     assert trace_failure_category(raised.value) == "cleanup_failed"
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
@@ -1006,8 +1009,8 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
         deadline=time.monotonic() + 30,
     )
 
-    with pytest.raises(RuntimeError, match="interpreter setup failed"), turn_trace(uuid4(), uuid4(), enabled=True):
-        executor.tool(prompt="slice")
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert executor.tool(capsule={"task": "slice"})["status"] == "failed"
 
     failed_outputs = [
         payload
@@ -1017,12 +1020,11 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     assert failed_outputs[-1]["failure_category"] == "unknown"
 
 
-def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     import time
 
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RLM_NATIVE_CHILD_DEPTH,
         RecursiveRLMOptions,
     )
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
@@ -1031,21 +1033,27 @@ def test_recursive_depth_fallback_span_records_mode(monkeypatch: pytest.MonkeyPa
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
-            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
-            dspy.utils.DummyLM([{"answer": "fallback-answer"}], adapter=adapter),
+            dspy.utils.DummyLM(
+                [
+                    {"reasoning": "semantic", "code": "value = llm_query('selected judgment')"},
+                    {"reasoning": "submit", "code": "SUBMIT(answer=value)"},
+                ],
+                adapter=adapter,
+            ),
+            dspy.utils.DummyLM([{"answer": "semantic-answer"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=None,
+        child_runtime_factory=_in_process_child_runtime,
         deadline=time.monotonic() + 30,
-        depth=RLM_NATIVE_CHILD_DEPTH,
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(prompt="outer slice") == "fallback-answer"
+        assert "semantic-answer" in executor.tool(capsule={"task": "outer slice"})["answer"]
 
     assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
     outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
-    assert any(payload["termination_mode"] == "depth_fallback" for payload in outputs)
+    assert any(payload["termination_mode"] == "typed_submit" for payload in outputs)
+    assert executor.summary().depth_fallback_count == 0
 
 
 def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1053,32 +1061,28 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
 
     from fleet_rlm.rlm.program import RLMModelBundle
     from fleet_rlm.rlm.recursion import (
-        RLM_NATIVE_CHILD_DEPTH,
         RecursiveRLMOptions,
     )
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
+
+    def timeout_factory(_call_index: int):
+        raise TimeoutError("child acquisition timed out")
+
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
             dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
         ),
         options=RecursiveRLMOptions(),
-        child_runtime_factory=None,
+        child_runtime_factory=timeout_factory,
         deadline=time.monotonic() + 30,
-        depth=RLM_NATIVE_CHILD_DEPTH,
     )
 
-    def _boom(self: RecursiveRLMExecutor, prompt: str) -> str:
-        del self, prompt
-        raise TimeoutError("child timed out")
-
-    monkeypatch.setattr(RecursiveRLMExecutor, "_plain_sub_lm", _boom)
-
-    with pytest.raises(TimeoutError), turn_trace(uuid4(), uuid4(), enabled=True):
-        executor.tool(prompt="slice")
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        assert executor.tool(capsule={"task": "slice"})["status"] == "timed_out"
 
     failed_outputs = [
         payload

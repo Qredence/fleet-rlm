@@ -91,10 +91,13 @@ The execution levels are distinct:
   `rlm_query_batched` to run isolated iterative child RLMs.
 
 The Root begins at native depth zero. Direct recursive children run at depth
-one. A child cannot create a grandchild RLM; further delegation uses the
-bounded Sub-LM fallback. Child batches preserve input order, reserve shared
-budgets atomically, and settle all-or-nothing. Children return evidence for
-Root verification and synthesis, not final authority.
+one and receive no Fleet recursive tools; further semantic work uses native
+DSPy calls. Root exposes only `rlm_query(capsule=...)` and
+`rlm_query_batched(capsules=...)`. Child batches preserve input order and reserve
+shared budgets atomically. Ordinary fully cleaned-up failures return typed
+partial outcomes; cancellation, authorization, and cleanup failures remain
+fatal. Children return evidence for Root verification and synthesis, not final
+authority.
 
 Recursive work is scheduled on the injected application event loop under one
 Turn-owned semaphore. The scheduler creates neither child event-loop threads
@@ -107,10 +110,17 @@ Selected-input capsules use byte-accurate allocations and typed child results.
 Their read-only input reader reuses prepared Session/Project text capabilities,
 checks the cumulative byte allowance and supplied checksum, and reports only
 successfully accessed reference identifiers. Inline fragment delivery is tracked
-separately. These identifiers prove access, not that a claim is true. Artifact
-locators currently require Root to select their contents into bounded fragments;
-they do not independently grant a child storage authority. The remaining legacy
-recursive tool variants and their removal are tracked in Phase 4 of the plan.
+separately. Child answers cite canonical `[reference-N]` or `[fragment-N]`
+identifiers. Fleet rejects undeclared/unread citations and omitted required
+citations, returning validated `cited_evidence` separately from the access
+ledger. These identifiers prove access, not that a claim is true. Selected
+`artifact://<UUID>` locators use the Turn-bound ArtifactReader for authorization
+and checksum verification, with the remaining byte allowance checked before
+fetching content. Reads run on the application loop; an owned child worker waits
+for actual read settlement, and revoked authority prevents late delivery. An
+Artifact locator never grants independent storage authority. Recursive execution
+does not build a Session snapshot, copy committed history, or construct a
+nested Fleet executor. The existing Root history boundary is unchanged.
 
 DSPy creates invocation-local `REPLHistory` and owns trajectory semantics.
 Fleet supplies committed `dspy.History` and Turn-local bindings without

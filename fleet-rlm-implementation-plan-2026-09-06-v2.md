@@ -658,7 +658,13 @@ renames capsule allocation to bytes, replaces the duplicate capsule result type
 with typed `ChildOutcome`/`ChildUsage`, records child-local LM usage, and stops
 echoing unread authorization references as evidence. Selected Session/Project
 text reads have a bounded access ledger; inline delivery is separate from reads.
-Artifact URI resolution and validated child citation claims remain unfinished.
+Selected Artifact UUIDs now resolve through the existing Turn-bound
+ArtifactReader, with authorization/integrity checks and a pre-fetch byte limit.
+Actual delivered read bytes are included in child input accounting. Child citation claims now use
+canonical bracketed reference/fragment identifiers and are validated against
+actual access/delivery before an answer is returned. Required citations cannot
+be silently omitted; `cited_evidence` is separate from access and is not a claim
+of semantic verification.
 
 The recursive scheduler now uses the application loop, one semaphore, and owned
 blocking native child execution, without private child loops or a recursive
@@ -669,10 +675,56 @@ has not been exercised: the existing recursive verifier requires a clean,
 committed candidate. Local checkpoint commits are now operator-authorized;
 publication and deployment remain outside the approved scope.
 
-P4.4 tool-surface collapse, the P4.5 four-arm runner/corpus/statistical gate,
-and P4.6 legacy deletion/default decision remain open. Campaign admission
-reservations are implemented and tested, but are not yet wired to that runner.
-No Phase 4 paid runs have been launched and no recursion default has changed.
+P4.4 is locally complete: Root exposes exactly the two typed capsule tools and
+the active routing evaluator no longer presents a depth-fallback route. P4.5
+now has a sealed 12-case corpus, balanced 144-trial schedule, four immutable
+arm specifications (including the frozen `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`
+baseline), public-rate reservations, content-safe receipts, and task-clustered
+bootstrap/retention logic. The explicit `phase4-campaign` profile constrains
+the root to six iterations/eight LM calls and children to four/four. No paid
+campaign has been launched. P4.5 live evidence and P4.6's resulting
+retention/deletion/default decision therefore remain open; no recursion default
+has changed.
+
+P4.4 migration is complete locally: Root registration exposes only
+`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)`, both returning
+typed outcomes. The batch returns ordered ordinary partial failures, and capsule
+children receive no Fleet recursion tool. Unused capsule/read-only tool
+constructors and properties are removed. Recursive Session snapshot construction,
+immutable history-copy wrappers, nested executors, prompt-only batch execution,
+and Fleet depth fallback have also been deleted. Capsule children use native
+semantic calls under the child budget. Deterministic callers and contract
+fixtures and credentialed live caller signatures are migrated; executing those
+live callers and the full completion audit remain open. The deletion revision passed `make check` after a batch deadline
+race was fixed by rechecking parent authority/deadline before return. Later
+live-caller and citation changes passed a fresh full `make check`. The subsequent
+Artifact wiring passed focused Root-to-child tests for successful scoped reads,
+missing/malformed references, and authority revocation during a read. Its full
+`make check` also passed (79.0% coverage; 543 TUI tests). No live evidence has
+been collected for these revisions.
+Earlier `make check` receipts above do not certify this later migration.
+
+The Phase 4 adapter boundary is explicit: arms C and D submit their isolated
+Session/attachment Turns through the FastAPI ASGI application and consume the
+public SSE stream, so lifecycle, authority, selected-input delivery, Daytona
+creation/deletion, and cleanup measurements come from the same transport used
+by Fleet. Arms A and B remain intentionally direct DSPy ablations; they do not
+claim to certify the FastAPI production path.
+
+The follow-up failure-accounting slice keeps single-capsule measurements and
+successful access identifiers even when execution fails, without treating those
+accesses as a valid answer. Ownership cancellation remains fatal, and an
+unsettled worker cannot be converted into an ordinary partial result. The
+redundant executor constructed for each capsule has been removed; selected
+access and usage are invocation-local without a copied Session snapshot.
+
+Pricing preflight verified the official Databricks base-region conversion of
+US$0.07/DBU in the [pricing page's published data](https://www.databricks.com/en-pricing-assets/page-data/product/pricing/foundation-model-serving/page-data.json).
+At the listed V4 Flash rates
+of 2 input / 4 output DBU per million tokens, that is US$0.14 input / US$0.28
+output per million tokens in base regions. Regional applicability and complete
+worst-case admission bounds remain required before paid work; these figures
+alone are not a certified campaign cost bound.
 
 The agreed pilot is 12 tasks (six multi-document/data, three conflicting or
 incomplete-evidence, three simple controls), three repeats, four arms: at most

@@ -69,6 +69,7 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
             "defaults",
             "daytona-recursive",
             "daytona-managed",
+            "phase4-campaign",
         }
         daytona_fields = next(scope for scope in body["scopes"] if scope["name"] == "daytona-recursive")["fields"]
         fields_by_path = {field["path"]: field["value"] for field in daytona_fields}
