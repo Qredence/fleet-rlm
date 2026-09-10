@@ -342,8 +342,11 @@ provider-retention collections. `DaytonaRuntimeResources` now owns those
 records and exposes the shutdown wait used by composition. The next slice
 moves both late-acquisition and late-lease maps into `DaytonaSessionManager`
 and removes their redundant manager back-references. Shutdown now reports an
-unscheduled foreign-loop acquisition as pending. The process-global active
-Session claim registry and root-replacement owner overlap remain open.
+unscheduled foreign-loop acquisition as pending. Active Session claims are now
+owned by each `DaytonaSessionManager`, eliminating the process-global claim
+registry and preventing separate compositions from sharing admission state.
+The provider adapter's root-replacement index still overlaps the public
+`DaytonaRuntime` root owner and remains open.
 
 **Rationale:** `session_manager.py`, Run-environment owners, lease helpers, provider task sets, late-acquisition maps, cleanup supervisors, and binding watchers currently overlap.
 

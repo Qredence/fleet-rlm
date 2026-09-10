@@ -17,7 +17,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest, get_active_lease_registry
+from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest
 from fleet_rlm.runtime.bindings import SandboxBinding
 from tests.unit.backend.test_session_manager import _manager
 
@@ -63,7 +63,7 @@ async def test_prewarm_persists_binding_and_leaves_sandbox_running() -> None:
     assert binding.provider_state == "running"
     # The Sandbox stays running (release never deletes) and is reusable.
     assert not mgr.has_pending_ownership
-    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
     # A follow-up acquisition reuses the same bound sandbox instead of creating.
     lease = await mgr.acquire(
         LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
@@ -145,7 +145,7 @@ async def test_prewarm_release_failure_is_not_reported_as_success() -> None:
     assert isinstance(binding, SandboxBinding)
     assert binding.provider_state == "running"
     assert backend.close_calls == 1, "pre-warm release must have attempted interpreter shutdown once"
-    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
     assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
 
     assert await mgr.aclose(drain_seconds=5.0) is True
@@ -171,14 +171,14 @@ async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
     assert backend.close_calls == 1
     # The retry owner keeps the admission permit and PREWARM claim until the
     # interpreter shutdown succeeds.
-    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
     assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
 
     settled = await mgr.aclose(drain_seconds=5.0)
 
     assert settled is True
     assert backend.close_calls == 2, "drain must retry the failed interpreter shutdown"
-    assert get_active_lease_registry().holder(session_id, workspace_id=workspace_id) is None
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
     assert not mgr.has_pending_ownership
 
 
@@ -295,7 +295,7 @@ async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.Monke
 
     mgr, _platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
-    registry = get_active_lease_registry()
+    registry = mgr.active_leases
     registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
     monkeypatch.setattr(session_manager, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
     loop = asyncio.get_running_loop()
@@ -324,7 +324,7 @@ async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
 
     mgr, _platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
-    registry = get_active_lease_registry()
+    registry = mgr.active_leases
     registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
     loop = asyncio.get_running_loop()
     started = loop.time()

@@ -17,7 +17,6 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend.test_fleet_rlm_daytona_mvp import (
@@ -103,12 +102,12 @@ def _wait_for_release(resources: Any, session_id: UUID, *, permits: int, portal:
     while time.perf_counter() < deadline:
         if (
             resources.daytona_admission._semaphore._value == permits
-            and get_active_lease_registry().holder(session_id) is None
+            and resources.session_manager.active_leases.holder(session_id) is None
         ):
             return
         time.sleep(0.25)
     assert resources.daytona_admission._semaphore._value == permits
-    assert get_active_lease_registry().holder(session_id) is None
+    assert resources.session_manager.active_leases.holder(session_id) is None
 
 
 def test_daytona_deadline_cleanup_through_fastapi(

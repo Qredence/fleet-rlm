@@ -16,7 +16,6 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-from fleet_rlm.daytona.session_manager import get_active_lease_registry
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._evidence import candidate_identity, write_receipt
@@ -74,7 +73,9 @@ def _install_cancel_during_first_execute(
     ) -> Any:
         ledger["calls"] = int(ledger.get("calls") or 0) + 1
         if ledger["calls"] == 1:
-            run_id = get_active_lease_registry().holder(session_id)
+            run_id = app.state.runtime_inventory.run_environment_resources.session_manager.active_leases.holder(
+                session_id
+            )
             assert run_id is not None, "cancel canary requires an active Run lease"
             ledger["run_id"] = str(run_id)
             assert client.portal is not None
@@ -162,12 +163,12 @@ def test_daytona_cancel_during_execution_through_fastapi(
             while time.perf_counter() < release_deadline:
                 if (
                     resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
-                    and get_active_lease_registry().holder(session_id) is None
+                    and resources.session_manager.active_leases.holder(session_id) is None
                 ):
                     break
                 time.sleep(0.25)
             assert resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
-            assert get_active_lease_registry().holder(session_id) is None
+            assert resources.session_manager.active_leases.holder(session_id) is None
             sandbox_ids.update(resources._sandbox_ids)
         finally:
             assert client.portal is not None

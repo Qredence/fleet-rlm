@@ -110,8 +110,11 @@ classification must be completed before claiming a Phase 6 quality campaign.
 - P2.2: late acquisition/lease records now belong to the existing Session
   manager, with no module-global maps or redundant manager back-references.
   Shutdown cannot report success while an unscheduled foreign-loop acquisition
-  remains owned. Regressions cover manager isolation and this pending state.
-  Active Session claims and root-replacement overlap remain open.
+  remains owned. Active Session claims are now owned by each
+  `DaytonaSessionManager`, rather than a process-global registry; release,
+  pre-warm, idle-stop, and late-cleanup checks use that same owner. The
+  provider adapter's root-replacement index still overlaps `DaytonaRuntime`
+  root ownership and remains open.
 - P2.3: audited resident reuse, history preservation and failed-Turn rotation
   contracts. The registry/tool/fingerprint graph remains; existing mechanics
   are not evidence that cross-Turn Python state is a required product feature.
