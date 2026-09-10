@@ -40,18 +40,17 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
     assert f"FLEET_SNAPSHOT_DEPENDENCIES_SHA256={digest}" in dockerfile
     assert "WORKDIR /home/daytona" in dockerfile
     assert snapshot_execution_dependencies() == (
-        "dspy==3.3.1",
         "mpmath==1.4.1",
         "numpy==2.5.1",
         "pandas==3.0.5",
         "beautifulsoup4==4.15.0",
     )
-    install_line = "pip install beautifulsoup4==4.15.0 dspy==3.3.1 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
+    install_line = "pip install beautifulsoup4==4.15.0 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
     assert install_line in dockerfile
     assert dockerfile.index(install_line) < dockerfile.index("USER daytona")
     assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
     assert dockerfile.index("apt-get install") < dockerfile.index("USER daytona")
-    assert "dspy==3.3.1" in dockerfile
+    assert "dspy" not in dockerfile
 
 
 def test_default_snapshot_envelope_stays_fixed() -> None:
@@ -64,7 +63,6 @@ def test_default_snapshot_envelope_stays_fixed() -> None:
 
 def test_dependency_import_names_map_distribution_to_module() -> None:
     assert snapshot_dependency_import_names() == (
-        ("dspy", "dspy", "3.3.1"),
         ("mpmath", "mpmath", "1.4.1"),
         ("numpy", "numpy", "2.5.1"),
         ("pandas", "pandas", "3.0.5"),
@@ -114,7 +112,14 @@ def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
         )
     )
     assert semantic.image_kind == "lean-child"
-    assert semantic.dependencies == ("dspy==3.3.1",)
+    assert semantic.dependencies == ()
+    semantic_image = build_snapshot_image(
+        DaytonaSandboxSpec(
+            "fleet-child-test-v1", cpu=2, memory_gib=4, disk_gib=4, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        )
+    ).dockerfile()
+    assert "pip install" not in semantic_image
+    assert "dspy" not in semantic_image
     assert not semantic.volume_allowed and semantic.warm_pool_eligible
     assert semantic.resources == (2, 4, 4)
     assert semantic.digest != session.digest

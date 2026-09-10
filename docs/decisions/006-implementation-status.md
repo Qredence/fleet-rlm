@@ -105,6 +105,58 @@ classification must be completed before claiming a Phase 6 quality campaign.
   intentionally unchanged for the next P2.2 migration. Broker execution and
   shutdown semantics are unchanged.
 
+### Phase 2.2–2.7 retained-broker continuation (2026-09-10)
+
+- P2.2: late acquisition/lease records now belong to the existing Session
+  manager, with no module-global maps or redundant manager back-references.
+  Shutdown cannot report success while an unscheduled foreign-loop acquisition
+  remains owned. Regressions cover manager isolation and this pending state.
+  Active Session claims and root-replacement overlap remain open.
+- P2.3: audited resident reuse, history preservation and failed-Turn rotation
+  contracts. The registry/tool/fingerprint graph remains; existing mechanics
+  are not evidence that cross-Turn Python state is a required product feature.
+- P2.4: deleted the native Turn preparation branch and duplicate runner worker
+  and lease implementation. Execution contexts reject unselected variants.
+  Provider adapter/context factory and cancellation ownership remain for
+  feasibility tests and still require subtraction from production composition.
+- P2.5: Fleet's JSON repair/finalization adapter moved to `rlm/program.py`;
+  sync and async drivers retain one shared policy. Field insertion is shared,
+  budget accounting stays in `budget.py`, and pinned DSPy marker/type/callback
+  adaptation remains in `compat_3_3_1.py`. No model, version or retry-policy change.
+- P2.6: the Workspace operation audit still lacks provider-backed substitution
+  parity. Path/inode/bounds/CAS/atomicity owners remain intact.
+- P2.7: future image definitions remove DSPy; Session/WorkspaceChild retain
+  analysis packages, SemanticChild adds no Python packages. The runtime probe
+  checks imports and exact versions from the selected profile. A standard-library-only
+  subprocess executes broker setup, committed history, attachment reconstruction
+  and typed SUBMIT with no DSPy available. Immutable image creation, provider
+  probes, receipts and promotion remain open. Existing names/configuration were
+  not changed; previously created images now predate this source definition.
+
+The Phase 1 retained-broker decision remains authoritative. This continuation
+does not complete Phase 2 or certify native containment, filesystem SDK parity,
+remote image behavior, or live model quality. Independent reviewer acceptance
+is still required.
+
+Validation for this continuation:
+
+- Focused manager/prewarm, adapter/budget/factory, resident reuse and Turn
+  preparation tests passed. Snapshot-definition/probe, history/context,
+  socket-free broker and adapter benchmark replay regressions passed.
+- Unrestricted `make check` did not pass: loopback binding is prohibited in
+  this workspace sandbox, causing the broker network test and 11 CLI supervisor
+  tests to fail. A stale benchmark adapter import discovered in that run was
+  corrected and its two replay tests passed afterward.
+- `UV_CACHE_DIR=/private/tmp/fleet-uv-cache UV_NO_SYNC=1
+  PYTEST_ADDOPTS='--ignore=tests/unit/backend/test_cli_supervisor.py -k not\ co_located_worker'
+  make check` passed with **78.09% backend coverage** and **543 TUI tests**.
+  This excludes the entire CLI supervisor module and the broker network test;
+  it is a restricted local gate, not an unrestricted pass. Lint/format/type,
+  API/generated client, source-tree, dependency-boundary and docs checks passed.
+- Credential-free image plans generated for proposed v10/v5 names. No image
+  creation, live provider/model/database lane, deployment or promotion ran.
+- `git diff --check` passed and the staging index remained empty.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08

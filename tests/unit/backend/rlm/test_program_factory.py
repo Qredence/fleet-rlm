@@ -490,8 +490,8 @@ def test_private_dspy_imports_are_confined_to_compat_layer() -> None:
 def test_compatibility_implementation_has_one_versioned_home() -> None:
     from pathlib import Path
 
-    from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter
+    from fleet_rlm.rlm.program import FleetJSONAdapter
 
     root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "rlm"
     assert not (root / "_dspy_compat.py").exists()
-    assert FleetJSONAdapter.__module__ == "fleet_rlm.rlm.compat_3_3_1"
+    assert FleetJSONAdapter.__module__ == "fleet_rlm.rlm.program"

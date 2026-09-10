@@ -13,8 +13,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
-from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter
-from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions, build_native_rlm
 
 
 class _ActionSignature(dspy.Signature):

@@ -20,7 +20,9 @@ remain Turn-local. Failures and taint force rotation before reuse.
 
 The native Daytona interpreter adapter, fresh per-Run contexts, and selected-input
 capsules in ADR 006 are separate feasibility mechanics. Their presence in source
-does not enable native production. Context deletion has not established remote
+does not enable native production. Turn preparation and the RLM runner accept
+only retained broker execution; the native worker/lease branch has been removed.
+Context deletion has not established remote
 detached-process containment. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
 owns dated evidence and remaining gates; this page describes current ownership.
 
@@ -214,11 +216,12 @@ remain transport-neutral until the API SSE adapter projects them.
 
 ## DSPy RLM contract
 
-The migration target uses a fresh InterpreterContext per Turn and distinguishes
+The historical migration target uses a fresh InterpreterContext per Turn and distinguishes
 Volume-less SemanticChild from restricted-data WorkspaceChild. See
 [ADR 004](docs/decisions/004-turn-interpreter-context.md). These are target
-contracts; the selected `legacy` runtime retains its existing Session reuse
-until the native cutover gates pass. [ADR 005](docs/decisions/005-runtime-variant.md)
+contracts; the Phase 1 decision retains broker execution and existing Session
+reuse while resident-state subtraction remains open. Native execution is not
+a pending selectable alternative. [ADR 005](docs/decisions/005-runtime-variant.md)
 defines the single execution-architecture selector.
 
 Fleet uses the repository-pinned DSPy implementation as the behavioral source

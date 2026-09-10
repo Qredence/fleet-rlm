@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import math
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -83,9 +82,9 @@ class _PreparedTurnResources:
     async def aclose_pre_commit(self) -> None:
         """Close the narrow execution boundary required before success commit.
 
-        Native context/gateway cleanup contains remote authority. It must settle
-        before durable success, but attachment removal, capabilities, and
-        provider lease release remain post-settlement owners.
+        Explicit pre-commit obligations must settle before durable success.
+        Retained broker preparation currently registers none; attachment removal,
+        capabilities and provider lease release remain post-settlement owners.
         """
         await self._aclose_indices(self.pre_commit_cleanup_indices)
 
@@ -325,7 +324,7 @@ class DefaultRunPreparer:
         session_runtime_registry: SessionRLMRegistry | None = None,
         wrap_up_seconds: float = 300.0,
         budget_limits: BudgetLimits | None = None,
-        runtime_variant: Literal["legacy", "native-turn-scoped"] = "legacy",
+        runtime_variant: Literal["legacy"] = "legacy",
     ) -> None:
         self._models = models
         self._options = options
@@ -336,9 +335,9 @@ class DefaultRunPreparer:
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._budget_limits = budget_limits or BudgetLimits()
         self._session_runtime_registry = session_runtime_registry
-        if runtime_variant not in {"legacy", "native-turn-scoped"}:
-            raise ValueError("runtime_variant is invalid")
-        self._runtime_variant = runtime_variant
+        if runtime_variant != "legacy":
+            raise ValueError("only retained broker execution is supported")
+        self._runtime_variant: Literal["legacy"] = runtime_variant
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         """
@@ -410,32 +409,11 @@ class DefaultRunPreparer:
             turn_environment_release = RetainableEnvironmentRelease(environment.release)
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
-        native_interpreter: RLMInterpreter | None = environment.interpreter
-        native_interpreter_cleanup: AsyncCleanup | None = None
 
         async def remove_staged() -> None:
             await self._remove_staged(environment.attachment_sink, staged)
 
         try:
-            if self._runtime_variant == "native-turn-scoped":
-                factory = environment.native_interpreter_factory
-                if factory is None:
-                    raise RunPreparationUnavailableError("native Turn-scoped interpreter is unavailable")
-                try:
-                    created = factory(deadline=deadline)
-                    if inspect.isawaitable(created):
-                        created = await created
-                    if not isinstance(created, tuple) or len(created) != 2:
-                        raise TypeError("native interpreter factory returned an invalid owner")
-                    candidate, cleanup = created
-                    if candidate is None or not callable(cleanup):
-                        raise TypeError("native interpreter factory returned an invalid owner")
-                    native_interpreter = candidate
-                    native_interpreter_cleanup = cleanup
-                except RunPreparationError:
-                    raise
-                except Exception as exc:
-                    raise RunPreparationUnavailableError("native Turn-scoped interpreter is unavailable") from exc
             self._check_deadline(deadline)
             with turn_phase_span(
                 "Turn.stage_attachments",
@@ -501,11 +479,6 @@ class DefaultRunPreparer:
             if capabilities is not None:
                 cleanups.append(capabilities.aclose)
             cleanups.append(remove_staged)
-            # Resources close in reverse registration order. The native
-            # context/gateway must settle before any root or preparation-gate
-            # release can make the Session sandbox reusable.
-            if native_interpreter_cleanup is not None:
-                cleanups.append(native_interpreter_cleanup)
             await asyncio.shield(_PreparedTurnResources(tuple(cleanups)).aclose())
             raise
 
@@ -517,14 +490,7 @@ class DefaultRunPreparer:
         if turn_environment_release is not None:
             cleanups.append(turn_environment_release.release)
         cleanups.extend((capabilities.aclose, remove_staged))
-        # See the exception path above: native context containment is the
-        # first cleanup action, never a best-effort tail after root release.
-        if native_interpreter_cleanup is not None:
-            cleanups.append(native_interpreter_cleanup)
-        resources = _PreparedTurnResources(
-            tuple(cleanups),
-            frozenset({len(cleanups) - 1}) if native_interpreter_cleanup is not None else frozenset(),
-        )
+        resources = _PreparedTurnResources(tuple(cleanups))
         try:
             turn_budget = TurnBudget(
                 deadline=deadline if math.isfinite(deadline) else None,
@@ -581,7 +547,7 @@ class DefaultRunPreparer:
             execution=ExecutionRuntime(
                 models=turn_models,
                 options=self._options,
-                interpreter=native_interpreter,
+                interpreter=environment.interpreter,
                 cancellation_requested=run.cancellation_requested,
                 deadline=deadline,
                 wrap_up_seconds=self._wrap_up_seconds,
