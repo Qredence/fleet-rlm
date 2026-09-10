@@ -1,5 +1,6 @@
 [config]
 schema_version = 1
+# The committed policy is [defaults] itself; profiles override only deployment-specific values.
 default_profile = "daytona-recursive"
 
 [defaults.application]

@@ -385,13 +385,16 @@ def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
     assert span.attributes["api_key"] == "[redacted]"
 
 
-def test_trace_sanitizer_preserves_authorized_content_and_input_key_names(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_trace_sanitizer_preserves_authorized_content_and_input_key_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
 
     sanitized = tracing._sanitize_mlflow_value(
         {
             "system_prompt": "BEGIN SYSTEM\nUse the workspace tools.",
             "reasoning_content": "I will inspect the selected trace first.",
+            "reasoning_preview": "Provider hidden reasoning preview.",
             "input_keys": ["messages", "prompt", "kwargs"],
             "prompt": "Explain the captured execution.",
         }
@@ -400,6 +403,7 @@ def test_trace_sanitizer_preserves_authorized_content_and_input_key_names(monkey
     assert sanitized == {
         "system_prompt": "BEGIN SYSTEM\nUse the workspace tools.",
         "reasoning_content": "I will inspect the selected trace first.",
+        "reasoning_preview": "Provider hidden reasoning preview.",
         "input_keys": ["messages", "prompt", "kwargs"],
         "prompt": "Explain the captured execution.",
     }

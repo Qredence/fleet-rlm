@@ -16,6 +16,40 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 0 stabilization baseline (2026-09-10)
+
+- P0.1: the deterministic unit lane initially failed because the editable
+  `config/fleet.toml` no longer carried its canonical-policy comment, which
+  the comment-preserving policy writer must preserve. The comment was restored
+  in the source policy; the assertion was retained as the regression contract.
+- P0.2: MLflow trace content is bounded and readable by default, including
+  provider reasoning/chain-of-thought and system-prompt fields in the authorized
+  engineering trace destination. Set `mlflow.trace_content_enabled = false`
+  for operational-only traces. Public typed Runtime Events remain a separately
+  bounded API/SSE contract and do not inherit MLflow capture policy.
+- P0.3: until the Phase 1 containment decision, do not add runtime variants,
+  recursion-depth or Tool families, warm-capacity behavior, persistence tables,
+  or feature flags. Route correctness work through existing owners.
+- P0.4 baseline, collected from tracked Python files (excluding `__pycache__`):
+
+  | Metric | Baseline |
+  | --- | ---: |
+  | `src/fleet_rlm` Python files | 174 |
+  | Unit / contract / e2e / freeze Python test files | 251 / 37 / 2 / 3 |
+  | Deterministic unit collection / wall time | 2,752 selected (84 deselected) / 27.534 s (`make test-unit`, Apple Silicon local) |
+  | Source bytes | 2,567,700 |
+  | Production-selectable runtime variants | 1 (`legacy`) |
+  | Model-facing recursive Tool names | 5 (`rlm_query`, `rlm_query_batched`, and three capsule migration variants) |
+  | Explicit scheduler/executor-owning modules | 7 (`rlm`, `daytona`, and MLflow owners) |
+
+  Largest source modules: `rlm/session_runtime.py` (115,129 bytes),
+  `runtime/daytona/run_environment.py` (103,874), `workspace/storage.py`
+  (103,767), `daytona/session_manager.py` (102,336), `rlm/recursion.py`
+  (101,675), `workspace/memory.py` (96,111), `daytona/broker.py` (94,567),
+  `rlm/runtime.py` (86,756), `chat/turn_runtime.py` (63,596), and
+  `daytona/runtime.py` (63,425). Re-run this same inventory after the Phase 2
+  and Phase 3 deletion work; it is a baseline, not a quality claim.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08

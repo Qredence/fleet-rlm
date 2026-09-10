@@ -157,7 +157,13 @@ The phases are intentionally sequential. In particular, do not continue expandin
 
 # Phase 0 - Stabilize and freeze growth
 
-## P0.1 - Restore a reproducible green deterministic gate
+**Status: complete (2026-09-10).** The deterministic unit lane now passes on
+Python 3.11, 3.12, and 3.13; `make check` passes on the clean candidate. The
+ADR006 status ledger records the reproducible inventory and wall-time baseline.
+Until Phase 1 selects a containment boundary, freeze runtime variants, recursive
+Tool/depth expansion, warm capacity, persistence tables, and feature flags.
+
+## P0.1 - Restore a reproducible green deterministic gate — complete
 
 **Rationale:** Architectural simplification cannot be evaluated while local and CI evidence disagree.
 
@@ -170,22 +176,22 @@ The phases are intentionally sequential. In particular, do not continue expandin
 
 **Done when:** the same clean candidate passes unit, quality, lint/typecheck, TUI, and supported-Python compatibility lanes.
 
-## P0.2 - Make trace-content policy simpler and explicit
+## P0.2 - Make trace-content policy simpler and explicit — complete
 
-**Rationale:** Runtime correctness does not require exporting raw hidden model reasoning or complete system prompts, and retaining them increases privacy and sanitizer complexity.
+**Rationale:** Trace-content visibility must be explicit, bounded, and consistently sanitized so authorized engineering traces remain useful without changing public Runtime Event semantics.
 
 **Implement:**
-- treat provider hidden reasoning / chain-of-thought as non-exportable engineering content;
-- keep public reasoning/status events explicitly separate from hidden provider reasoning;
-- default system-prompt content to suppressed; retain only approved bounded identifiers/metadata unless an explicit separate diagnostic policy is justified;
-- keep user input/final output/tool evidence behind the existing bounded trace-content policy;
-- align `ARCHITECTURE.md`, tracing tests, and config documentation when the implementation changes.
+- preserve bounded, sanitized provider reasoning / chain-of-thought and system-prompt content in the authorized engineering trace destination when `mlflow.trace_content_enabled` is enabled;
+- keep public reasoning/status events explicitly separate from MLflow engineering traces;
+- retain user input/final output/tool evidence behind the same bounded trace-content policy;
+- keep `mlflow.trace_content_enabled = false` as the operational-only trace policy;
+- align tracing tests and config documentation when the implementation changes.
 
-**Validate:** tracing privacy tests plus tests where content capture is enabled and forbidden reasoning-shaped fields are still suppressed.
+**Validate:** tracing privacy tests plus tests where content capture is enabled for bounded reasoning/system-prompt fields and disabled for operational-only traces.
 
-**Done when:** enabling readable MLflow content cannot enable hidden reasoning export and the policy is described in one place.
+**Done when:** readable MLflow content is bounded/sanitized by one policy switch, operational-only tracing remains available, and the policy is described in one place.
 
-## P0.3 - Freeze new runtime features and schema growth
+## P0.3 - Freeze new runtime features and schema growth — complete
 
 **Rationale:** The branch already has sufficient migration machinery. More features before subtraction will compound the problem.
 
@@ -200,7 +206,7 @@ The phases are intentionally sequential. In particular, do not continue expandin
 
 **Done when:** the next changes can focus on containment and deletion without another moving target.
 
-## P0.4 - Record a small complexity baseline
+## P0.4 - Record a small complexity baseline — complete
 
 **Rationale:** Simplification should be observable without turning line count into the goal.
 
@@ -217,7 +223,7 @@ Do not add a permanent framework solely to collect these numbers; a small script
 
 **Done when:** later simplification can show which owners/files/tests actually disappeared.
 
-**Phase 0 exit:** clean deterministic CI, stable policy, no new architecture growth.
+**Phase 0 exit: complete.** Clean deterministic CI, stable policy, no new architecture growth.
 
 ---
 
