@@ -1318,7 +1318,11 @@ class RLMRunner:
             outcome.append(
                 RLMOutcome(
                     terminal_status="cancelled",
-                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    usage=observed_usage(
+                        prediction[-1] if prediction else None,
+                        duration_ms=duration_ms,
+                        lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                    ),
                     public_error_message="Turn cancelled",
                     duration_ms=duration_ms,
                 )
@@ -1338,7 +1342,11 @@ class RLMRunner:
             outcome.append(
                 RLMOutcome(
                     terminal_status=_terminal_status(exc),
-                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    usage=observed_usage(
+                        prediction[-1] if prediction else None,
+                        duration_ms=duration_ms,
+                        lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                    ),
                     public_error_message=_public_failure_message(exc),
                     duration_ms=duration_ms,
                 )
@@ -1401,7 +1409,11 @@ class RLMRunner:
             RLMOutcome(
                 terminal_status="completed",
                 prediction=result,
-                usage=observed_usage(prediction[-1], duration_ms=duration_ms),
+                usage=observed_usage(
+                    prediction[-1],
+                    duration_ms=duration_ms,
+                    lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                ),
                 artifact_candidates=context.capabilities.drain_artifact_candidates(),
                 memory_candidates=context.capabilities.drain_memory_candidates(),
                 execution_details=tuple(observations.details),

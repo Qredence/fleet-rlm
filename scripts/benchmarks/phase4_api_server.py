@@ -13,6 +13,7 @@ import argparse
 import contextvars
 import inspect
 import json
+import os
 import re
 import sys
 import time
@@ -88,6 +89,24 @@ def _shape(resources: Any, profile: object) -> tuple[int, int, int] | None:
 
 class LifecycleObserver:
     """Patch the selected Daytona platform with a bounded local observer."""
+
+    # Default root-close deadline. Provider deletes take seconds each, so a
+    # tight deadline converts slow-but-complete cleanup into a safety fault.
+    # Operators may raise it via the environment for diagnosis; slowness then
+    # surfaces in the latency gates instead of masking as a cleanup failure.
+    # Leaks (created != deleted) still fail regardless of the deadline.
+    CLOSE_DEADLINE_DEFAULT_SECONDS: Final = 30.0
+
+    @staticmethod
+    def close_deadline_seconds() -> float:
+        """Return the operator-overridable root-close deadline in seconds."""
+        try:
+            configured = float(os.environ.get("FLEET_P4_CLOSE_DEADLINE_S", "").strip())
+        except ValueError:
+            return LifecycleObserver.CLOSE_DEADLINE_DEFAULT_SECONDS
+        if not 1.0 <= configured <= 600.0:
+            return LifecycleObserver.CLOSE_DEADLINE_DEFAULT_SECONDS
+        return configured
 
     def __init__(self, app: Any, path: Path) -> None:
         self.app = app
@@ -213,7 +232,9 @@ class LifecycleObserver:
             )
             return
         try:
-            await close_root(LocalScope().workspace_id, session_id, deadline=time.monotonic() + 30.0)
+            await close_root(
+                LocalScope().workspace_id, session_id, deadline=time.monotonic() + self.close_deadline_seconds()
+            )
         except BaseException as exc:
             _write_event(
                 self.path,

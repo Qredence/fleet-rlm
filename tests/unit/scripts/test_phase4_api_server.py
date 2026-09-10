@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.benchmarks import run_phase4_campaign
-from scripts.benchmarks.phase4_api_server import _bounded_trial, _campaign_settings, _shape
+from scripts.benchmarks.phase4_api_server import LifecycleObserver, _bounded_trial, _campaign_settings, _shape
 from scripts.benchmarks.run_phase4_campaign import Phase4CampaignError, _validate_candidate_url
 
 
@@ -95,3 +95,13 @@ def test_baseline_policy_overlay_selects_campaign_profile_without_mutating_candi
 
     assert 'default_profile = "phase4-campaign"' in (baseline / "config" / "fleet.toml").read_text()
     assert (candidate / "config" / "fleet.toml").read_text() == source
+
+
+def test_close_deadline_defaults_and_rejects_bad_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FLEET_P4_CLOSE_DEADLINE_S", raising=False)
+    assert LifecycleObserver.close_deadline_seconds() == 30.0
+    monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", "120")
+    assert LifecycleObserver.close_deadline_seconds() == 120.0
+    for value in ("bogus", "", "0", "-5", "9999"):
+        monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", value)
+        assert LifecycleObserver.close_deadline_seconds() == 30.0
