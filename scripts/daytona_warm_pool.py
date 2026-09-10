@@ -48,12 +48,46 @@ def _campaign(args: argparse.Namespace) -> WarmPoolCampaign | None:
     )
 
 
+def _require_operator_preflight(args: argparse.Namespace, plan: WarmPoolPlan) -> WarmPoolCampaign:
+    """Require bounded campaign limits for an enabled provider operation."""
+    campaign = _campaign(args)
+    if campaign is None:
+        raise WarmPoolError("enabled warm-pool operations require a complete campaign preflight")
+    campaign.validate()
+    if not plan.target:
+        raise WarmPoolError("check and reconcile require an explicit warm-pool region or target")
+    return campaign
+
+
 async def _run(args: argparse.Namespace) -> dict[str, object]:
     command = args.command
-    settings = load_runtime_settings() if command == "plan" else require_live_execution()
+    # Resolve the policy before requiring the live switch so the committed
+    # disabled/zero-capacity check remains a safe local no-op. Provider access
+    # is gated only after an enabled policy has been established.
+    settings = load_runtime_settings()
     plan = WarmPoolPlan.from_settings(settings)
     if command == "plan":
         return {"action": "plan", **asdict(plan)}
+    # The committed policy is disabled/zero by default. A read-only check must
+    # preserve that safe no-op and remain usable without campaign credentials
+    # or limits. Mutating reconciliation is the only path that requires the
+    # full operator preflight.
+    if not plan.enabled:
+        return {
+            "action": "disabled",
+            "pool_id": None,
+            "desired_size": 0,
+            "current_size": None,
+            "warm_hit_status": "unknown",
+            "snapshot": plan.snapshot,
+            "target": plan.target,
+            "manifest_sha256": plan.manifest_sha256,
+        }
+    settings = require_live_execution()
+    # A read-only provider check still consumes operator/provider quota and
+    # must be attributable to a bounded campaign.  The disabled policy exits
+    # above so local plan/check remain safe no-ops when capacity is off.
+    campaign = _require_operator_preflight(args, plan)
     client = build_daytona_client(settings)
     engine = create_async_engine_from_url(settings.database_url or "")
     try:
@@ -64,7 +98,7 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
             client.warm_pool,
             plan,
             apply=command == "reconcile",
-            campaign=_campaign(args),
+            campaign=campaign,
             ownership_store=ownership_store,
             candidate_sha=candidate_sha,
             adopt=args.adopt,

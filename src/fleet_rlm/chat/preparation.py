@@ -74,17 +74,30 @@ class RunPreparationUnavailableError(RunPreparationError):
 @dataclass(slots=True)
 class _PreparedTurnResources:
     cleanups: tuple[AsyncCleanup, ...]
+    pre_commit_cleanup_indices: frozenset[int] = frozenset()
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _close_error: BaseException | None = field(default=None, init=False)
     _completed_cleanups: set[int] = field(default_factory=set, init=False, repr=False)
 
+    async def aclose_pre_commit(self) -> None:
+        """Close the narrow execution boundary required before success commit.
+
+        Native context/gateway cleanup contains remote authority. It must settle
+        before durable success, but attachment removal, capabilities, and
+        provider lease release remain post-settlement owners.
+        """
+        await self._aclose_indices(self.pre_commit_cleanup_indices)
+
     async def aclose(self) -> None:
+        await self._aclose_indices(frozenset(range(len(self.cleanups))), close_all=True)
+
+    async def _aclose_indices(self, indices: frozenset[int], *, close_all: bool = False) -> None:
         async with self._lock:
             if self._closed:
                 return
             first_error: BaseException | None = None
-            for index in reversed(range(len(self.cleanups))):
+            for index in sorted(indices, reverse=True):
                 if index in self._completed_cleanups:
                     continue
                 cleanup = self.cleanups[index]
@@ -103,8 +116,9 @@ class _PreparedTurnResources:
                 # transient provider/gate failure.
                 self._close_error = RuntimeError("prepared Turn cleanup failed")
                 raise self._close_error from first_error
-            self._close_error = None
-            self._closed = True
+            if close_all:
+                self._close_error = None
+                self._closed = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +144,7 @@ class PreparedTurn:
     # preparation. Never persisted, never projected into SSE/product events.
     preparation_trace_id: str | None = None
     preparation_span_id: str | None = None
+    image_identity: str | None = None
 
     @property
     def resources(self) -> _PreparedTurnResources:
@@ -140,6 +155,10 @@ class PreparedTurn:
         if self.post_commit_memory_promotion is not None:
             await self.post_commit_memory_promotion.wait_owned()
         await self._resources.aclose()
+
+    async def aclose_before_commit(self) -> None:
+        """Contain native execution resources before a successful Turn commits."""
+        await self._resources.aclose_pre_commit()
 
 
 # Historical spellings retained while callers migrate to the Turn terminology.
@@ -263,6 +282,7 @@ class RunEnvironment:
     # legacy environments leave this unset and retain their existing resident
     # interpreter path.
     native_interpreter_factory: Callable[..., Any] | None = None
+    image_identity: str | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -501,7 +521,10 @@ class DefaultRunPreparer:
         # first cleanup action, never a best-effort tail after root release.
         if native_interpreter_cleanup is not None:
             cleanups.append(native_interpreter_cleanup)
-        resources = _PreparedTurnResources(tuple(cleanups))
+        resources = _PreparedTurnResources(
+            tuple(cleanups),
+            frozenset({len(cleanups) - 1}) if native_interpreter_cleanup is not None else frozenset(),
+        )
         try:
             turn_budget = TurnBudget(
                 deadline=deadline if math.isfinite(deadline) else None,
@@ -592,6 +615,7 @@ class DefaultRunPreparer:
             result_snapshot_sink=environment.result_snapshot_sink,
             post_commit_memory_promotion=environment.post_commit_memory_promotion,
             memory_intent_builder=environment.memory_intent_builder,
+            image_identity=environment.image_identity,
         )
 
     async def aclose(self) -> bool:

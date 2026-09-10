@@ -70,12 +70,73 @@ class ReadyFakeDoctorDependencies(FakeDoctorDependencies):
         self._record("rlm")
 
 
+class SnapshotMismatchDoctorDependencies(FakeDoctorDependencies):
+    async def create_sandbox(self, **kwargs: Any) -> Any:
+        sandbox = await super().create_sandbox(**kwargs)
+        sandbox.snapshot = "different-snapshot"
+        return sandbox
+
+
+class UnsupportedProbeDoctorDependencies(FakeDoctorDependencies):
+    verify_mount = None
+    execute = None
+
+
 def doctor_settings() -> Settings:
     return Settings(
         daytona_api_key="test-daytona-key",
         daytona_snapshot="fleet-test-v1",
         database_url="sqlite+aiosqlite:///:memory:",
     )
+
+
+def test_profile_readiness_distinguishes_unexercised_and_unsupported() -> None:
+    from fleet_rlm.daytona.diagnostics import profile_readiness_steps
+
+    steps = profile_readiness_steps(capacity_supported=None)
+    assert [(step.name, step.status, step.ok) for step in steps] == [
+        ("snapshot", "not-exercised", False),
+        ("manifest", "pass", True),
+        ("imports", "not-exercised", False),
+        ("region", "not-exercised", False),
+        ("mount", "not-exercised", False),
+        ("capacity", "unsupported", False),
+    ]
+
+
+def test_profile_readiness_distinguishes_failed_optional_probes() -> None:
+    from fleet_rlm.daytona.diagnostics import profile_readiness_steps
+
+    steps = profile_readiness_steps(imports_failed=True, mount_failed=True)
+    statuses = {step.name: step.status for step in steps}
+    assert statuses["imports"] == "fail"
+    assert statuses["mount"] == "fail"
+
+
+def test_profile_readiness_accepts_explicit_probe_statuses() -> None:
+    from fleet_rlm.daytona.diagnostics import profile_readiness_steps
+
+    steps = profile_readiness_steps(imports_status="unsupported", mount_status="fail")
+    statuses = {step.name: (step.status, step.ok) for step in steps}
+    assert statuses["imports"] == ("unsupported", False)
+    assert statuses["mount"] == ("fail", False)
+
+
+@pytest.mark.parametrize("status", ("pass", "fail", "unsupported", "not-exercised"))
+def test_profile_readiness_accepts_explicit_snapshot_probe_status(status: str) -> None:
+    from fleet_rlm.daytona.diagnostics import profile_readiness_steps
+
+    snapshot = next(step for step in profile_readiness_steps(snapshot_status=status) if step.name == "snapshot")
+
+    assert snapshot.status == status
+    assert snapshot.ok is (status == "pass")
+
+
+def test_failed_doctor_step_derives_explicit_fail_status() -> None:
+    from fleet_rlm.daytona.diagnostics import DaytonaDoctorStep
+
+    assert DaytonaDoctorStep("database", False, "failed").status == "fail"
+    assert DaytonaDoctorStep("imports", True, "unavailable", status="unsupported").ok is False
 
 
 @pytest.mark.asyncio
@@ -112,6 +173,10 @@ async def test_daytona_doctor_reports_all_steps_and_deletes_disposable_sandbox()
     assert labels["doctor_id"]
     assert labels["workspace_id"]
     assert dependencies.created["expected_mount"].volume_subpath.startswith("workspaces/")
+    readiness = {step.name: step for step in result.readiness}
+    assert readiness["imports"].status == "pass"
+    assert readiness["mount"].status == "pass"
+    assert readiness["region"].status == "not-exercised"
 
 
 @pytest.mark.asyncio
@@ -128,6 +193,69 @@ async def test_daytona_doctor_fails_settings_without_provider_operations() -> No
     assert result.failure_category == "settings"
     assert [(step.name, step.ok) for step in result.steps] == [("settings", False)]
     assert dependencies.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_at, expected", [("mount", "mount"), ("interpreter", "imports")])
+async def test_daytona_doctor_marks_attempted_optional_probe_failures(
+    fail_at: str,
+    expected: str,
+) -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    result = await run_daytona_doctor(
+        doctor_settings(),
+        dependencies=FakeDoctorDependencies(fail_at=fail_at, error=RuntimeError("probe failed")),
+    )
+    readiness = {step.name: step for step in result.readiness}
+    assert readiness[expected].status == "fail"
+    if expected == "mount":
+        assert readiness["imports"].status == "not-exercised"
+    else:
+        assert readiness["mount"].status == "pass"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_at", ("database", "provider", "create"))
+async def test_daytona_doctor_keeps_unreached_probes_not_exercised(fail_at: str) -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    result = await run_daytona_doctor(
+        doctor_settings(),
+        dependencies=FakeDoctorDependencies(fail_at=fail_at, error=RuntimeError("probe failed")),
+    )
+    readiness = {step.name: step for step in result.readiness}
+    assert readiness["snapshot"].status == "not-exercised"
+    assert readiness["mount"].status == "not-exercised"
+    assert readiness["imports"].status == "not-exercised"
+
+
+@pytest.mark.asyncio
+async def test_daytona_doctor_reports_unavailable_probe_hooks_as_unsupported() -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    result = await run_daytona_doctor(doctor_settings(), dependencies=UnsupportedProbeDoctorDependencies())
+
+    assert result.ok is True
+    readiness = {step.name: step for step in result.readiness}
+    assert readiness["mount"].status == "unsupported"
+    assert readiness["imports"].status == "unsupported"
+
+
+@pytest.mark.asyncio
+async def test_daytona_doctor_marks_snapshot_mismatch_in_readiness() -> None:
+    from fleet_rlm.daytona.diagnostics import run_daytona_doctor
+
+    result = await run_daytona_doctor(
+        doctor_settings(),
+        dependencies=SnapshotMismatchDoctorDependencies(),
+    )
+
+    assert result.ok is False
+    assert result.failure_category == "snapshot_mismatch"
+    assert next(step for step in result.steps if not step.ok).name == "sandbox"
+    readiness = {step.name: step for step in result.readiness}
+    assert readiness["snapshot"].status == "fail"
 
 
 @pytest.mark.asyncio

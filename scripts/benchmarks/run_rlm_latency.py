@@ -11,6 +11,7 @@ import argparse
 import gzip
 import hashlib
 import json
+import math
 import os
 import statistics
 import sys
@@ -42,6 +43,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from fleet_rlm.daytona.broker import _EXECUTION_STAT_KEYS
 from scripts.benchmarks import judges as _judges
+from scripts.benchmarks.campaign import CampaignPreflight, CampaignPreflightError
 from scripts.benchmarks.corpus_chain import (
     CORPUS_SEEDS,
     CORPUS_WORKLOAD_ID,
@@ -187,6 +189,59 @@ class BenchmarkError(RuntimeError):
     """A live benchmark precondition or Turn contract failed."""
 
 
+class CampaignLimitError(BenchmarkError):
+    """A campaign safety bound was reached and the run must stop immediately."""
+
+
+def _remaining_campaign_seconds(deadline: float) -> float:
+    """Return the remaining wall-clock budget or fail closed at the deadline."""
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise CampaignLimitError("campaign elapsed-time limit reached")
+    return remaining
+
+
+def _campaign_timeout(
+    timeout_seconds: float | None,
+    *,
+    deadline: float | None = None,
+) -> float | None:
+    """Bound one blocking request by both its configured timeout and campaign deadline."""
+    if deadline is None:
+        return timeout_seconds
+    remaining = _remaining_campaign_seconds(deadline)
+    return remaining if timeout_seconds is None else min(timeout_seconds, remaining)
+
+
+def _campaign_preflight(args: argparse.Namespace) -> CampaignPreflight:
+    """Require explicit bounded limits before a provider-backed campaign."""
+    values = (
+        getattr(args, "campaign", None),
+        getattr(args, "campaign_target", None),
+        getattr(args, "max_elapsed_seconds", None),
+        getattr(args, "max_admissions", None),
+        getattr(args, "max_sandbox_concurrency", None),
+        getattr(args, "spend_cap", None),
+    )
+    if any(value is None for value in values):
+        raise BenchmarkError(
+            "live benchmark requires campaign, target, elapsed, admissions, concurrency, and spend limits"
+        )
+    try:
+        campaign = CampaignPreflight(
+            name=args.campaign,
+            target=args.campaign_target,
+            max_elapsed_seconds=args.max_elapsed_seconds,
+            max_admissions=args.max_admissions,
+            max_sandbox_concurrency=args.max_sandbox_concurrency,
+            total_spend_cap=args.spend_cap,
+        )
+        campaign.validate()
+    except CampaignPreflightError as exc:
+        raise BenchmarkError(str(exc)) from exc
+    return campaign
+
+
 def percentile(values: Sequence[float], percentile_value: int) -> float:
     """
     Calculate a deterministic nearest-rank percentile for a sequence of values.
@@ -308,7 +363,11 @@ def _configure_judge_environment(judge_model: str) -> None:
     os.environ.setdefault("OPENAI_BASE_URL", base_url)
 
 
-def _sse_chunks(response: httpx.Response) -> Iterator[dict[str, Any]]:
+def _sse_chunks(
+    response: httpx.Response,
+    *,
+    deadline: float | None = None,
+) -> Iterator[dict[str, Any]]:
     """
     Parse valid JSON objects from Server-Sent Event data lines.
 
@@ -319,6 +378,8 @@ def _sse_chunks(response: httpx.Response) -> Iterator[dict[str, Any]]:
         dict[str, Any]: JSON object payloads from valid, non-terminal data events.
     """
     for line in response.iter_lines():
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         if not line.startswith("data: "):
             continue
         payload = line[6:].strip()
@@ -361,21 +422,33 @@ def _append_trajectory_value(values: list[str], value: object) -> None:
         values.append(value[:remaining])
 
 
-def _upload_corpus(client: httpx.Client, corpus_path: Path, *, seed: int) -> str:
+def _upload_corpus(
+    client: httpx.Client,
+    corpus_path: Path,
+    *,
+    seed: int,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
+) -> str:
     """Upload the host-generated corpus as a bounded compressed Attachment."""
     with corpus_path.open("rb") as handle:
         compressed = gzip.compress(handle.read(), mtime=0)
-    response = client.post(
-        "/api/attachments",
-        files={
+    request_kwargs: dict[str, Any] = {
+        "files": {
             "attachment": (
                 f"fleet-corpus-{seed}.ndjson.gz",
                 compressed,
                 "application/gzip",
             )
-        },
-    )
+        }
+    }
+    request_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
+    if request_timeout is not None:
+        request_kwargs["timeout"] = request_timeout
+    response = client.post("/api/attachments", **request_kwargs)
     response.raise_for_status()
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     payload = response.json()
     if not isinstance(payload, Mapping) or not isinstance(payload.get("id"), str):
         raise BenchmarkError("Fleet corpus attachment response is malformed")
@@ -410,6 +483,8 @@ def run_turn(
     *,
     nonce: str,
     attachment_ids: Sequence[str] = (),
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """
     Execute one Fleet Turn and collect its response, timing, usage, trace identifiers, and tool-call counts.
@@ -428,9 +503,6 @@ def run_turn(
         BenchmarkError: If the Turn reports an error, is aborted, or finishes for a reason other than `stop`.
             The exception preserves partial trace_id and run_id values when available.
     """
-    session = client.post("/api/sessions", json={"title": f"latency-{nonce}"})
-    session.raise_for_status()
-    session_id = str(session.json()["id"])
     prompt = f"{query}\n\nBenchmark nonce: {nonce}. It has no semantic meaning."
     answer_parts: list[str] = []
     answer: str | None = None
@@ -442,6 +514,7 @@ def run_turn(
     recursive_calls = 0
     recursive_batch_calls = 0
     peak_child_concurrency = 0
+    concurrency_observed = False
     requested_attachment_ids = {str(value) for value in attachment_ids}
     attachment_accessed = False
     trajectory = {"codes": [], "outputs": []}
@@ -449,14 +522,29 @@ def run_turn(
     termination_mode: str | None = None
     started = time.perf_counter()
     try:
-        with client.stream(
-            "POST",
-            f"/api/sessions/{session_id}/turns",
-            json={"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
-            headers={"Idempotency-Key": f"rlm-latency-{uuid4()}"},
-        ) as response:
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
+        session_kwargs: dict[str, Any] = {"json": {"title": f"latency-{nonce}"}}
+        session_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
+        if session_timeout is not None:
+            session_kwargs["timeout"] = session_timeout
+        session = client.post("/api/sessions", **session_kwargs)
+        session.raise_for_status()
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
+        session_id = str(session.json()["id"])
+        stream_kwargs: dict[str, Any] = {
+            "json": {"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
+            "headers": {"Idempotency-Key": f"rlm-latency-{uuid4()}"},
+        }
+        stream_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
+        if stream_timeout is not None:
+            stream_kwargs["timeout"] = stream_timeout
+        with client.stream("POST", f"/api/sessions/{session_id}/turns", **stream_kwargs) as response:
             response.raise_for_status()
-            for chunk in _sse_chunks(response):
+            if deadline is not None:
+                _remaining_campaign_seconds(deadline)
+            for chunk in _sse_chunks(response, deadline=deadline):
                 if first_event_ms is None:
                     first_event_ms = (time.perf_counter() - started) * 1000
                 metadata = chunk.get("messageMetadata")
@@ -483,8 +571,9 @@ def run_turn(
                     recursive_batch_calls += int(tool_name == "rlm_query_batched")
                 elif chunk_type == "tool-output-available" and isinstance(chunk.get("output"), Mapping):
                     raw_peak = chunk["output"].get("peak_child_concurrency")
-                    if isinstance(raw_peak, int) and not isinstance(raw_peak, bool):
+                    if isinstance(raw_peak, int) and not isinstance(raw_peak, bool) and raw_peak >= 0:
                         peak_child_concurrency = max(peak_child_concurrency, raw_peak)
+                        concurrency_observed = True
                 elif chunk_type == "data-attachment" and isinstance(chunk.get("data"), Mapping):
                     data = chunk["data"]
                     accessed_id = data.get("attachment_id", data.get("attachmentId"))
@@ -497,10 +586,17 @@ def run_turn(
                     raise BenchmarkError(str(chunk.get("errorText") or chunk.get("reason") or "Turn failed"))
                 elif chunk_type == "finish" and chunk.get("finishReason") != "stop":
                     raise BenchmarkError("Turn did not finish with stop")
+            if deadline is not None:
+                _remaining_campaign_seconds(deadline)
     except Exception as exc:
-        # Preserve partial trace_id and run_id for failed streams
+        # Preserve partial provider observations as well as trace/run IDs for
+        # failed streams. Campaign limits must account for work that failed
+        # after provider execution began.
         exc.trace_id = trace_id  # type: ignore[attr-defined]
         exc.run_id = run_id  # type: ignore[attr-defined]
+        exc.usage = usage  # type: ignore[attr-defined]
+        exc.peak_child_concurrency = peak_child_concurrency  # type: ignore[attr-defined]
+        exc.concurrency_observed = concurrency_observed  # type: ignore[attr-defined]
         raise
     return {
         "answer": answer if answer is not None else "".join(answer_parts),
@@ -514,13 +610,19 @@ def run_turn(
         "recursive_calls": recursive_calls,
         "recursive_batch_calls": recursive_batch_calls,
         "peak_child_concurrency": peak_child_concurrency,
+        "concurrency_observed": concurrency_observed,
         "termination_mode": termination_mode,
         "attachment_accessed": attachment_accessed,
         "trajectory": trajectory,
     }
 
 
-def _active_policy(client: httpx.Client) -> dict[str, Any]:
+def _active_policy(
+    client: httpx.Client,
+    *,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     """
     Retrieve the active Fleet policy and its root and sub-model settings.
 
@@ -533,8 +635,12 @@ def _active_policy(client: httpx.Client) -> dict[str, Any]:
     Raises:
         BenchmarkError: If Fleet settings do not expose a valid active profile.
     """
-    response = client.get("/api/settings")
+    request_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
+    request_kwargs = {"timeout": request_timeout} if request_timeout is not None else {}
+    response = client.get("/api/settings", **request_kwargs)
     response.raise_for_status()
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     payload = response.json()
     profile = payload.get("active_profile")
     scope = next(
@@ -557,7 +663,13 @@ def _active_policy(client: httpx.Client) -> dict[str, Any]:
     }
 
 
-def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str | None:
+def _execution_trace_id(
+    mlflow_url: str,
+    experiment_id: str,
+    run_id: str,
+    *,
+    deadline: float | None = None,
+) -> str | None:
     """
     Finds the MLflow trace for a Fleet run containing the execution span.
 
@@ -573,16 +685,27 @@ def _execution_trace_id(mlflow_url: str, experiment_id: str, run_id: str) -> str
 
     mlflow.set_tracking_uri(mlflow_url)
     _flush_trace_exports_once(mlflow)
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     for _attempt in range(20):
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         traces = mlflow.search_traces(
             locations=[experiment_id],
             filter_string=f"tag.`fleet.run_id` = '{run_id}'",
             return_type="list",
         )
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         for trace in traces:
             if any(span.name == "RLM.execute" for span in trace.data.spans):
+                if deadline is not None:
+                    _remaining_campaign_seconds(deadline)
                 return str(trace.info.trace_id)
-        time.sleep(0.25)
+        if deadline is None:
+            time.sleep(0.25)
+        else:
+            time.sleep(min(0.25, _remaining_campaign_seconds(deadline)))
     return None
 
 
@@ -617,7 +740,12 @@ def _attach_trace_identity(row: dict[str, Any], execution_trace_id: str | None) 
     return row
 
 
-def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, Any]:
+def _execution_trace_diagnostics(
+    mlflow_url: str,
+    trace_id: str,
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     """
     Collect bounded diagnostics from an MLflow execution trace for benchmark comparisons.
 
@@ -632,11 +760,17 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
             and error category when the trace cannot be inspected.
     """
     try:
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         import mlflow
 
         mlflow.set_tracking_uri(mlflow_url)
         _flush_trace_exports_once(mlflow)
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         trace = mlflow.get_trace(trace_id)
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         spans = list(trace.data.spans)
         repair_error_count = 0
         detail_overflowed = False
@@ -657,6 +791,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
         sandbox_execute_span_count = 0
         broker_metrics = _new_broker_metrics()
         for span in spans:
+            if deadline is not None:
+                _remaining_campaign_seconds(deadline)
             outputs = getattr(span, "outputs", None)
             if isinstance(outputs, Mapping):
                 result_kind = outputs.get("result_kind")
@@ -676,6 +812,8 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
                     _merge_broker_metrics(broker_metrics, _broker_metrics(outputs))
             elif span.name == "sandbox.execute":
                 sandbox_execute_span_count += 1
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         return {
             "root_lm_span_count": len(root_lm_spans),
             "root_lm_wall_time_ms": round(sum(root_lm_wall_times), 3),
@@ -688,11 +826,21 @@ def _execution_trace_diagnostics(mlflow_url: str, trace_id: str) -> dict[str, An
             "sandbox_execute_span_count": sandbox_execute_span_count,
             "broker_metrics": broker_metrics,
         }
+    except CampaignLimitError:
+        raise
     except Exception as exc:
         return {"status": "unavailable", "error_category": type(exc).__name__}
 
 
-def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str, sample: str) -> None:
+def _tag_trace(
+    mlflow_url: str,
+    trace_id: str,
+    *,
+    workload_id: str,
+    variant: str,
+    sample: str,
+    deadline: float | None = None,
+) -> None:
     """Tag an MLflow trace with Fleet workload, performance variant, and sample metadata.
 
     Parameters:
@@ -702,13 +850,23 @@ def _tag_trace(mlflow_url: str, trace_id: str, *, workload_id: str, variant: str
         variant (str): Performance variant associated with the trace.
         sample (str): Sample category associated with the trace.
     """
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     import mlflow
 
     mlflow.set_tracking_uri(mlflow_url)
     client = mlflow.MlflowClient()
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     client.set_trace_tag(trace_id, "fleet.workload_id", workload_id)
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     client.set_trace_tag(trace_id, "fleet.perf_variant", variant)
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
     client.set_trace_tag(trace_id, "fleet.sample_kind", sample)
+    if deadline is not None:
+        _remaining_campaign_seconds(deadline)
 
 
 def _aggregate(rows: Sequence[Mapping[str, Any]], *, workload_id: str = EVIDENCE_WORKLOAD_ID) -> dict[str, Any]:
@@ -884,7 +1042,108 @@ def _usage_totals(value: object) -> dict[str, int]:
     return result
 
 
-def _metrics_query(mlflow_url: str, experiment_id: str, *, workload_id: str, variant: str) -> dict[str, Any]:
+def _observed_spend(value: object) -> tuple[float, bool]:
+    """Aggregate nested provider costs without double-counting totals.
+
+    Fleet's canonical ``RLMUsage`` stores per-model observations under
+    ``observed_lm_usage``. At each usage-entry mapping, a reported ``cost``
+    takes precedence over ``input_cost``/``output_cost``; child mappings are
+    not visited after a cost-bearing entry. The boolean is false when no
+    complete finite observation exists, allowing a live campaign to fail
+    closed instead of silently treating an unknown spend as zero.
+    """
+    if not isinstance(value, Mapping):
+        return 0.0, False
+    observed = value.get("observed_lm_usage")
+    if not isinstance(observed, (Mapping, list, tuple)):
+        return 0.0, False
+    total = 0.0
+    entries = 0
+    complete = True
+
+    def number(item: object) -> float | None:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        numeric = float(item)
+        return numeric if math.isfinite(numeric) and numeric >= 0 else None
+
+    def visit(item: object) -> None:
+        nonlocal total, entries, complete
+        if isinstance(item, Mapping):
+            has_cost = "cost" in item
+            cost_value = item.get("cost")
+            input_cost = item.get("input_cost")
+            output_cost = item.get("output_cost")
+            is_entry = any(
+                key in item for key in ("cost", "input_cost", "output_cost", "prompt_tokens", "input_tokens")
+            )
+            if is_entry:
+                entries += 1
+                if has_cost:
+                    # An explicitly reported total is authoritative, but a
+                    # malformed total cannot be silently replaced with zero
+                    # or a partial component sum.
+                    cost = number(cost_value)
+                else:
+                    input_total = number(input_cost)
+                    output_total = number(output_cost)
+                    # Both components are required when no provider total is
+                    # available. Treating a missing side as zero understates
+                    # spend and defeats the campaign cap.
+                    if input_total is None or output_total is None:
+                        complete = False
+                        return
+                    cost = input_total + output_total
+                if cost is None:
+                    complete = False
+                    return
+                total += cost
+                return
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, (list, tuple)):
+            for child in item:
+                visit(child)
+
+    visit(observed)
+    return total, bool(entries) and complete
+
+
+def _enforce_campaign_observations(
+    row: Mapping[str, Any],
+    campaign: CampaignPreflight,
+    observed_spend: float,
+) -> float:
+    """Require complete spend and concurrency evidence for one attempted Turn."""
+    cost, spend_observed = _observed_spend(row.get("usage"))
+    if not spend_observed:
+        raise CampaignLimitError("campaign spend observation was unavailable")
+    observed_spend += cost
+    if observed_spend > campaign.total_spend_cap:
+        raise CampaignLimitError("campaign total-spend limit reached")
+
+    peak = row.get("peak_child_concurrency")
+    concurrency_observed = row.get("concurrency_observed")
+    if concurrency_observed is None:
+        # Keep compatibility with bounded rows produced by older callers,
+        # while still treating an absent or malformed peak as unknown.
+        concurrency_observed = isinstance(peak, int) and not isinstance(peak, bool) and peak >= 0
+    if concurrency_observed is not True or not isinstance(peak, int) or isinstance(peak, bool) or peak < 0:
+        raise CampaignLimitError("campaign sandbox-concurrency observation was unavailable")
+    if peak > campaign.max_sandbox_concurrency:
+        raise CampaignLimitError("campaign sandbox-concurrency limit reached")
+    return observed_spend
+
+
+def _metrics_query(
+    mlflow_url: str,
+    experiment_id: str,
+    *,
+    workload_id: str,
+    variant: str,
+    timeout_seconds: float | None = None,
+    deadline: float | None = None,
+) -> dict[str, Any]:
     """
     Query MLflow latency metrics for the configured Fleet workload and performance variant.
 
@@ -910,6 +1169,9 @@ def _metrics_query(mlflow_url: str, experiment_id: str, *, workload_id: str, var
     }
     results: dict[str, Any] = {}
     for span_name in ("fleet_turn", "RLM.root_lm", "tool.llm_query_batched"):
+        request_timeout = 30.0 if timeout_seconds is None else timeout_seconds
+        if deadline is not None:
+            request_timeout = min(request_timeout, _remaining_campaign_seconds(deadline))
         payload = {
             **common,
             "filters": [
@@ -918,13 +1180,20 @@ def _metrics_query(mlflow_url: str, experiment_id: str, *, workload_id: str, var
                 f'span.name = "{span_name}"',
             ],
         }
+        request_kwargs: dict[str, Any] = {
+            "json": payload,
+            "timeout": request_timeout,
+        }
         response = httpx.post(
             f"{mlflow_url.rstrip('/')}/api/3.0/mlflow/traces/metrics",
-            json=payload,
-            timeout=30,
+            **request_kwargs,
         )
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
         response.raise_for_status()
         results[span_name] = response.json()
+        if deadline is not None:
+            _remaining_campaign_seconds(deadline)
     return results
 
 
@@ -941,30 +1210,59 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         and MLflow span metrics.
     """
     _require_live()
+    campaign = _campaign_preflight(args)
+    if args.warmups + args.runs > campaign.max_admissions:
+        raise BenchmarkError("campaign admission limit is smaller than the requested benchmark samples")
+    campaign_started = time.monotonic()
+    campaign_deadline = campaign_started + campaign.max_elapsed_seconds
+    _remaining_campaign_seconds(campaign_deadline)
     workload_id = str(args.workload)
     corpus_case: CorpusCase | None = make_corpus_case(args.corpus_seed) if workload_id == CORPUS_WORKLOAD_ID else None
     workload = corpus_workload(corpus_case) if corpus_case is not None else LATENCY_WORKLOAD
     rows: list[dict[str, Any]] = []
+    observed_spend = 0.0
     with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
-        policy = _active_policy(client)
+        policy = _active_policy(
+            client,
+            timeout_seconds=min(args.timeout, _remaining_campaign_seconds(campaign_deadline)),
+            deadline=campaign_deadline,
+        )
         with tempfile.TemporaryDirectory(prefix="fleet-corpus-") as temp_dir:
             attachment_ids: tuple[str, ...] = ()
             if corpus_case is not None:
                 corpus_path = Path(temp_dir) / "corpus.ndjson"
                 write_corpus(corpus_case, corpus_path)
-                attachment_ids = (_upload_corpus(client, corpus_path, seed=corpus_case.seed),)
+                attachment_ids = (
+                    _upload_corpus(
+                        client,
+                        corpus_path,
+                        seed=corpus_case.seed,
+                        timeout_seconds=min(args.timeout, _remaining_campaign_seconds(campaign_deadline)),
+                        deadline=campaign_deadline,
+                    ),
+                )
             for index in range(args.warmups + args.runs):
+                _remaining_campaign_seconds(campaign_deadline)
                 sample = "warmup" if index < args.warmups else "measured"
                 nonce = f"{args.variant}-{sample}-{uuid4()}"
                 sample_started = time.perf_counter()
                 row: dict[str, Any] = {}
                 try:
-                    row = run_turn(client, workload, nonce=nonce, attachment_ids=attachment_ids)
+                    row = run_turn(
+                        client,
+                        workload,
+                        nonce=nonce,
+                        attachment_ids=attachment_ids,
+                        timeout_seconds=min(args.timeout, _remaining_campaign_seconds(campaign_deadline)),
+                        deadline=campaign_deadline,
+                    )
+                    _remaining_campaign_seconds(campaign_deadline)
                     execution_trace_id = (
                         _execution_trace_id(
                             args.mlflow_url,
                             args.experiment_id,
                             str(row["run_id"]),
+                            deadline=campaign_deadline,
                         )
                         if row.get("run_id")
                         else None
@@ -973,6 +1271,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                     row["trace_diagnostics"] = _execution_trace_diagnostics(
                         args.mlflow_url,
                         str(row["trace_id"]),
+                        deadline=campaign_deadline,
                     )
                     if row.get("trace_id"):
                         _tag_trace(
@@ -981,6 +1280,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                             workload_id=workload_id,
                             variant=args.variant,
                             sample=sample,
+                            deadline=campaign_deadline,
                         )
                     if corpus_case is not None:
                         diagnostics = row.get("trace_diagnostics")
@@ -997,16 +1297,22 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         row["corpus_quality_passed"] = validation.passed and evidence.passed
                         if not row["corpus_quality_passed"]:
                             raise BenchmarkError("corpus report or execution evidence validation failed")
+                except CampaignLimitError:
+                    raise
                 except Exception as exc:
                     # Extract partial trace_id and run_id from stream failures
                     partial_trace_id = getattr(exc, "trace_id", None) or row.get("trace_id")
                     partial_run_id = getattr(exc, "run_id", None) or row.get("run_id")
+                    partial_usage = getattr(exc, "usage", None)
+                    partial_peak = getattr(exc, "peak_child_concurrency", None)
+                    partial_concurrency_observed = getattr(exc, "concurrency_observed", None)
                     # Collect diagnostics for failed runs when trace_id is available
                     diagnostics = {}
                     if partial_trace_id:
                         diagnostics = _execution_trace_diagnostics(
                             args.mlflow_url,
                             str(partial_trace_id),
+                            deadline=campaign_deadline,
                         )
                     row = {
                         **row,
@@ -1015,6 +1321,15 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         "error_category": type(exc).__name__,
                         "trace_id": partial_trace_id,
                         "run_id": partial_run_id,
+                        "usage": partial_usage if partial_usage is not None else row.get("usage"),
+                        "peak_child_concurrency": (
+                            partial_peak if partial_peak is not None else row.get("peak_child_concurrency")
+                        ),
+                        "concurrency_observed": (
+                            partial_concurrency_observed
+                            if partial_concurrency_observed is not None
+                            else row.get("concurrency_observed")
+                        ),
                         "trace_diagnostics": diagnostics if diagnostics else row.get("trace_diagnostics"),
                     }
                 row["workload_id"] = workload_id
@@ -1022,7 +1337,12 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                     row["corpus_seed"] = corpus_case.seed
                 row["sample_kind"] = sample
                 rows.append(row)
+                observed_spend = _enforce_campaign_observations(row, campaign, observed_spend)
+                _remaining_campaign_seconds(campaign_deadline)
+            _remaining_campaign_seconds(campaign_deadline)
+    _remaining_campaign_seconds(campaign_deadline)
     aggregate = _aggregate(rows, workload_id=workload_id)
+    _remaining_campaign_seconds(campaign_deadline)
     metrics: dict[str, Any]
     try:
         metrics = _metrics_query(
@@ -1030,9 +1350,15 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             args.experiment_id,
             workload_id=workload_id,
             variant=args.variant,
+            timeout_seconds=args.timeout,
+            deadline=campaign_deadline,
         )
+    except CampaignLimitError:
+        raise
     except Exception as exc:
+        _remaining_campaign_seconds(campaign_deadline)
         metrics = {"status": "unavailable", "error_category": type(exc).__name__}
+    _remaining_campaign_seconds(campaign_deadline)
     return {
         "schema": RECEIPT_SCHEMA,
         "generated_at": datetime.now(UTC).isoformat(),
@@ -1041,6 +1367,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "corpus_seed": corpus_case.seed if corpus_case is not None else None,
         "active_policy": policy,
         "warmups": args.warmups,
+        "campaign_preflight": campaign.as_dict(),
         "aggregate": aggregate,
         "mlflow_span_metrics": metrics,
     }
@@ -1318,6 +1645,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
     parser.add_argument("--experiment-id", default="1")
     parser.add_argument("--variant", default="baseline")
+    parser.add_argument("--campaign", help="Explicit bounded live campaign reference")
+    parser.add_argument(
+        "--target",
+        "--campaign-target",
+        dest="campaign_target",
+        help="Explicit non-secret provider target reference",
+    )
+    parser.add_argument("--max-elapsed-seconds", type=int)
+    parser.add_argument("--max-admissions", type=int)
+    parser.add_argument("--max-sandbox-concurrency", type=int)
+    parser.add_argument("--spend-cap", type=float)
     parser.add_argument("--workload", choices=WORKLOAD_CHOICES, default=EVIDENCE_WORKLOAD_ID)
     parser.add_argument("--corpus-seed", choices=CORPUS_SEEDS, type=int, default=CORPUS_SEEDS[0])
     parser.add_argument("--warmups", type=int, default=3)

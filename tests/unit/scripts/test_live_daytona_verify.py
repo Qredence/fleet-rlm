@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from dotenv import dotenv_values
 
 from scripts import live_daytona_verify as verifier
 
@@ -20,8 +21,16 @@ def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> No
 
 def _set_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Populate the selected TOML profile's provider names without real credentials."""
+    dotenv_org_id = (dotenv_values(".env").get("FLEET_DAYTONA_ORG_ID") or "").strip()
     for name in verifier.active_profile_contract().provider_environment_names:
-        value = "https://gateway.example.test/v1" if name.endswith("BASE_URL") else f"secret-{name.lower()}"
+        # Organization identity is deliberately dotenv-only in the runtime
+        # loader, so keep the process override consistent when a repository
+        # ``.env`` is present.  CI without that file still gets a harmless
+        # sentinel value.
+        if name == "FLEET_DAYTONA_ORG_ID" and dotenv_org_id:
+            value = dotenv_org_id
+        else:
+            value = "https://gateway.example.test/v1" if name.endswith("BASE_URL") else f"secret-{name.lower()}"
         monkeypatch.setenv(name, value)
 
 

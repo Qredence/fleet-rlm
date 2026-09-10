@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -1044,6 +1045,24 @@ async def test_acquire_starts_stopped_sandbox() -> None:
 
 
 @pytest.mark.asyncio
+async def test_restarting_stopped_sandbox_advances_binding_generation() -> None:
+    """A stopped identity cannot be reused by an older native process."""
+    mgr, plat, store, _volumes = _manager()
+    req = _request()
+    lease = await _acquire(mgr, req)
+    await mgr.release(lease)
+    current = await store.get(req.session_id)
+    assert current is not None
+    await store.upsert(replace(current, provider_state="stopped"))
+    plat.sandboxes[lease.sandbox_id].state = "stopped"
+
+    restarted = await _acquire(mgr, req)
+
+    assert restarted.sandbox_id == lease.sandbox_id
+    assert restarted.binding_generation > lease.binding_generation
+
+
+@pytest.mark.asyncio
 async def test_acquire_maps_lifecycle_provider_failure_without_replacement() -> None:
     mgr, plat, _store, _volumes = _manager()
     req = _request()
@@ -1165,18 +1184,179 @@ async def test_native_retirement_deletes_reused_root_and_preserves_volume_scope(
 
 
 @pytest.mark.asyncio
-async def test_native_retirement_does_not_overwrite_a_newer_binding() -> None:
-    from dataclasses import replace
+async def test_binding_persistence_failure_deletes_unpublished_created_sandbox() -> None:
+    """A crash between provider create and binding commit cannot leak a sandbox."""
+    platform = _FakePlatform()
+    admission = DaytonaAdmission(max_active_leases=1)
+    mgr, _plat, store, _volumes = _manager(platform=platform, admission=admission)
+    request = _request()
 
+    async def fail_binding(_binding: SandboxBinding) -> SandboxBinding:
+        raise RuntimeError("binding commit interrupted")
+
+    store.upsert = fail_binding  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="binding commit interrupted"):
+        await _acquire(mgr, request)
+
+    assert platform.deleted == ["sb-1"]
+    assert platform.sandboxes == {}
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+
+
+@pytest.mark.asyncio
+async def test_lease_construction_failure_fences_persisted_replacement_before_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-commit construction failure cannot leave the new row running."""
+    platform = _FakePlatform()
+    mgr, _plat, store, _volumes = _manager(platform=platform)
+    request = _request()
+    first = await _acquire(mgr, request)
+    await mgr.release(first)
+    platform.sandboxes.clear()
+
+    def fail_construction(*args: Any, **kwargs: Any) -> Any:
+        del args, kwargs
+        raise RuntimeError("interpreter construction interrupted")
+
+    monkeypatch.setattr("fleet_rlm.daytona.session_manager._build_interpreter", fail_construction)
+
+    with pytest.raises(RuntimeError, match="interpreter construction interrupted"):
+        await _acquire(mgr, request)
+
+    current = await store.get(request.session_id)
+    assert current is not None
+    assert current.sandbox_id == "sb-2"
+    assert current.generation > first.binding_generation
+    assert current.provider_state == "quarantined"
+    assert "sb-2" not in platform.sandboxes
+
+
+@pytest.mark.asyncio
+async def test_native_retirement_does_not_overwrite_a_newer_binding() -> None:
     mgr, platform, store, _volumes = _manager()
     request = _request()
     native = await _acquire(mgr, request)
     native.requires_sandbox_deletion = True
-    replacement = replace(await store.get(request.session_id), sandbox_id="replacement")
+    current = await store.get(request.session_id)
+    assert current is not None
+    replacement = replace(current, sandbox_id="replacement", generation=current.generation + 1)
     await store.upsert(replacement)
     await mgr.release(native)
     assert platform.deleted == [native.sandbox_id]
     assert await store.get(request.session_id) == replacement
+
+
+@pytest.mark.asyncio
+async def test_quarantine_preserves_replacement_binding_generation() -> None:
+    """A non-native lease must fence its own generation after replacement."""
+    mgr, _platform, store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+
+    current = await store.get(request.session_id)
+    assert current is not None
+    replacement = SandboxBinding(
+        session_id=current.session_id,
+        sandbox_id=current.sandbox_id,
+        workspace_id=current.workspace_id,
+        volume_id=current.volume_id,
+        volume_subpath=current.volume_subpath,
+        mount_path=current.mount_path,
+        provider_state=current.provider_state,
+        generation=current.generation + 1,
+        last_verified_at=current.last_verified_at,
+    )
+    await store.upsert(replacement)
+    lease.binding_generation = replacement.generation
+
+    await mgr.release_and_quarantine(lease, request)
+
+    fenced = await store.get(request.session_id)
+    assert fenced is not None
+    assert fenced.generation == replacement.generation
+    assert fenced.provider_state == "quarantined"
+
+
+@pytest.mark.asyncio
+async def test_replacement_revokes_old_native_binding_authority() -> None:
+    mgr, _platform, store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    current = await store.get(request.session_id)
+    assert current is not None
+    assert mgr.is_binding_current(
+        session_id=request.session_id,
+        workspace_id=request.workspace_id,
+        sandbox_id=lease.sandbox_id,
+        generation=lease.binding_generation,
+    )
+
+    try:
+        replacement = await mgr.replace(current, workspace_id=request.workspace_id, user_id=request.user_id)
+
+        assert replacement.generation > lease.binding_generation
+        assert not mgr.is_binding_current(
+            session_id=request.session_id,
+            workspace_id=request.workspace_id,
+            sandbox_id=lease.sandbox_id,
+            generation=lease.binding_generation,
+        )
+    finally:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_refresh_binding_authority_fails_closed_for_fenced_state() -> None:
+    mgr, _platform, store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    current = await store.get(request.session_id)
+    assert current is not None
+    await store.upsert(replace(current, provider_state="stopped"))
+
+    assert not await mgr.refresh_binding_authority(
+        session_id=request.session_id,
+        workspace_id=request.workspace_id,
+        sandbox_id=lease.sandbox_id,
+        generation=lease.binding_generation,
+    )
+    assert not mgr.is_binding_current(
+        session_id=request.session_id,
+        workspace_id=request.workspace_id,
+        sandbox_id=lease.sandbox_id,
+        generation=lease.binding_generation,
+    )
+    await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_binding_watch_revokes_generation_replaced_in_durable_store() -> None:
+    mgr, _platform, store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+    stop_watch = mgr.start_binding_watch(
+        session_id=request.session_id,
+        workspace_id=request.workspace_id,
+        sandbox_id=lease.sandbox_id,
+        generation=lease.binding_generation,
+        interval_seconds=0.01,
+    )
+    try:
+        current = await store.get(request.session_id)
+        assert current is not None
+        await store.upsert(replace(current, sandbox_id="external-replacement", generation=current.generation + 1))
+        await asyncio.sleep(0.05)
+        assert not mgr.is_binding_current(
+            session_id=request.session_id,
+            workspace_id=request.workspace_id,
+            sandbox_id=lease.sandbox_id,
+            generation=lease.binding_generation,
+        )
+    finally:
+        await stop_watch()
+        await mgr.release(lease)
 
 
 @pytest.mark.asyncio

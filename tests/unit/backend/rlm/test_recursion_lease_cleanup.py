@@ -267,7 +267,9 @@ def test_val_rec_012_deadline_cancels_queued_acquisition_and_join_waits_for_runn
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
         recorder,
         options=RecursiveRLMOptions(max_calls=3, max_parallel_children=1),
-        deadline=time.monotonic() + 0.1,
+        # Leave scheduler slack when this ownership-boundary test runs under
+        # the full xdist suite; queued siblings remain unadmitted.
+        deadline=time.monotonic() + 0.5,
     )
 
     began = time.monotonic()

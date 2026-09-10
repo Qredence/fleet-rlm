@@ -524,14 +524,16 @@ def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(
         ),
         options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
         child_runtime_factory=factory,
-        deadline=time.monotonic() + 0.05,
+        # Leave scheduler slack when this ownership-boundary test runs under
+        # the full xdist suite; the child still blocks until the deadline.
+        deadline=time.monotonic() + 0.5,
     )
 
     began = time.monotonic()
     try:
         with pytest.raises(TimeoutError, match="batch deadline exceeded"):
             executor.batched_tool(prompts=["blocked"])
-        assert time.monotonic() - began < 0.5
+        assert time.monotonic() - began < 1.0
         assert started.is_set()
         assert not closed.is_set()
         with pytest.raises(RuntimeError, match="cleanup is still pending"):

@@ -211,7 +211,10 @@ class Settings(BaseModel):
     ] = Field(default=None)
     daytona_org_id: Annotated[
         str | None,
-        FleetFieldPolicy(toml_path="daytona.org_id", group="Daytona", label="Organization ID", editor="text", rank=46),
+        FleetFieldPolicy(
+            toml_path=None,
+            doc="Daytona organization ID resolved at runtime from daytona.org_id_env",
+        ),
     ] = Field(default=None)
     daytona_warm_pool_enabled: Annotated[
         bool,
@@ -1162,6 +1165,13 @@ _ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
         label="SemanticChild snapshot environment variable",
         rank=116,
         resolves_to="daytona_child_snapshot",
+    ),
+    EnvironmentReferenceSpec(
+        toml_path="daytona.org_id_env",
+        group="Daytona",
+        label="Organization ID environment variable",
+        rank=46,
+        resolves_to="daytona_org_id",
     ),
     EnvironmentReferenceSpec(
         toml_path="mlflow.experiment_name_env",

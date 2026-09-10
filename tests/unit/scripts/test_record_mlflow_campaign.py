@@ -163,6 +163,16 @@ def test_load_receipt_rejects_unsupported_schema(tmp_path) -> None:
         load_receipt(source)
 
 
+def test_load_receipt_rejects_non_boolean_dirty_provenance(tmp_path) -> None:
+    receipt = _runtime_receipt()
+    body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
+    body["source_dirty"] = "false"
+    source = _write(tmp_path, seal(body))
+
+    with pytest.raises(CampaignRecordError, match="source_dirty"):
+        load_receipt(source)
+
+
 def test_record_requires_live_opt_in(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEET_LIVE", raising=False)
     source = _write(tmp_path, _runtime_receipt())

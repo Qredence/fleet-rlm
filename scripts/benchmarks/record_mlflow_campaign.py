@@ -69,8 +69,13 @@ def load_receipt(path: Path) -> dict[str, Any]:
     for field in ("source_revision", "runtime_variant"):
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise CampaignRecordError(f"benchmark receipt field {field} is missing")
+    if type(receipt.get("source_dirty")) is not bool:
+        raise CampaignRecordError("benchmark receipt source_dirty field is invalid")
     if not isinstance(receipt.get("passed"), bool):
         raise CampaignRecordError("receipt field passed must be boolean")
+    identities = receipt.get("identities")
+    if identities is not None and not isinstance(identities, Mapping):
+        raise CampaignRecordError("benchmark receipt identities must be an object")
     return receipt
 
 

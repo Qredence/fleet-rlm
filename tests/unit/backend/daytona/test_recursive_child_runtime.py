@@ -333,6 +333,30 @@ async def test_semantic_child_requires_a_configured_snapshot_before_provider_acq
 
 
 @pytest.mark.asyncio
+async def test_semantic_child_can_fall_back_to_volume_backed_workspace_child() -> None:
+    platform = _Platform(_Sandbox("workspace-fallback", _Fs(set())))
+    factory = recursive_child_runtime.build_child_runtime_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        semantic_child_available=False,
+        semantic_child_fallback=True,
+    )
+
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    assert platform.create_calls[0]["profile"] is DaytonaEnvironmentProfile.WORKSPACE_CHILD
+    assert platform.create_calls[0]["volume_id"] == "shared-volume"
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
 async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

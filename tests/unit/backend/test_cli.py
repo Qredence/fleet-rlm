@@ -103,6 +103,40 @@ def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
     )
 
 
+def test_fleet_doctor_snapshot_mismatch_has_specific_action(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from fleet_rlm.daytona import diagnostics
+
+    result = diagnostics.DaytonaDoctorResult(
+        ok=False,
+        steps=(
+            diagnostics.DaytonaDoctorStep(
+                "sandbox",
+                False,
+                "The disposable Sandbox snapshot did not match the configured Fleet snapshot.",
+                "snapshot_mismatch",
+            ),
+        ),
+        failure_category="snapshot_mismatch",
+    )
+
+    async def run(_settings: object) -> diagnostics.DaytonaDoctorResult:
+        return result
+
+    monkeypatch.setattr(diagnostics, "run_daytona_doctor", run)
+
+    with pytest.raises(SystemExit) as error:
+        fleet_main(["doctor", "daytona"])
+
+    assert error.value.code == 1
+    assert (
+        "action: reconcile the configured immutable Daytona snapshot with the provider Sandbox."
+        in capsys.readouterr().out
+    )
+
+
 def test_fleet_doctor_reports_invalid_environment_without_traceback(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

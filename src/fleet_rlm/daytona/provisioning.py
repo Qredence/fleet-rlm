@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -43,6 +44,52 @@ class DaytonaEnvironmentProfile(StrEnum):
     SESSION = "session"
     SEMANTIC_CHILD = "semantic-child"
     WORKSPACE_CHILD = "workspace-child"
+
+
+class MissingImportOutcome(StrEnum):
+    """Bounded outcomes for optional image import observations."""
+
+    MISSING = "missing"
+    IMPORT_ERROR = "import-error"
+    VERSION_MISMATCH = "version-mismatch"
+
+
+@dataclass(frozen=True, slots=True)
+class MissingImportObservation:
+    """Content-free evidence that one profile import check failed."""
+
+    module: str
+    profile: DaytonaEnvironmentProfile
+    outcome: MissingImportOutcome
+
+    def as_dict(self) -> dict[str, str]:
+        return {"module": self.module, "profile": self.profile.value, "outcome": self.outcome.value}
+
+
+_IMPORT_NAME = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$", re.IGNORECASE)
+
+
+def normalize_missing_import_observation(
+    module: str,
+    profile: DaytonaEnvironmentProfile | str,
+    outcome: MissingImportOutcome | str = MissingImportOutcome.MISSING,
+) -> MissingImportObservation:
+    """Normalize a bounded module/profile/outcome observation.
+
+    Invalid or overlong provider-derived names are rejected rather than
+    retained, keeping receipts deterministic and free of exception content.
+    """
+    normalized_module = module.strip().lower()
+    if len(normalized_module) > 128 or not _IMPORT_NAME.fullmatch(normalized_module):
+        raise ValueError("missing-import module must be a normalized import name")
+    try:
+        normalized_profile = (
+            profile if isinstance(profile, DaytonaEnvironmentProfile) else DaytonaEnvironmentProfile(profile)
+        )
+        normalized_outcome = outcome if isinstance(outcome, MissingImportOutcome) else MissingImportOutcome(outcome)
+    except ValueError as exc:
+        raise ValueError("missing-import profile or outcome is invalid") from exc
+    return MissingImportObservation(normalized_module, normalized_profile, normalized_outcome)
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +174,7 @@ def environment_manifest(
     if not isinstance(profile, DaytonaEnvironmentProfile):
         raise TypeError("profile must be a DaytonaEnvironmentProfile")
     semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
-    dependencies = () if semantic else snapshot_execution_dependencies()
+    dependencies = snapshot_execution_dependencies(profile)
     digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")
     return DaytonaEnvironmentManifest(
         profile=profile,
@@ -308,14 +355,21 @@ def snapshot_execution_dependencies(
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
 ) -> tuple[str, ...]:
     """Load the exact generated-code packages baked into the Snapshot."""
-    if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
-        return ()
     content = files("fleet_rlm.daytona").joinpath(_SNAPSHOT_REQUIREMENTS).read_text(encoding="utf-8")
     dependencies = tuple(
         line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
     )
     if not dependencies or any("==" not in dependency or dependency.count("==") != 1 for dependency in dependencies):
         raise RuntimeError("Snapshot dependencies must use exact non-empty == pins")
+    if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+        # Native child execution still constructs/executes DSPy RLM code in the
+        # sandbox.  Keep the child image lean by omitting the optional analysis
+        # libraries, but never omit the pinned runtime kernel itself.
+        dependencies = tuple(
+            dependency for dependency in dependencies if dependency.split("==", 1)[0].strip().lower() == "dspy"
+        )
+        if not dependencies:
+            raise RuntimeError("SemanticChild snapshot dependencies must include pinned dspy")
     return dependencies
 
 
@@ -788,10 +842,13 @@ __all__ = [
     "DaytonaEnvironmentProfile",
     "DaytonaSandboxSpec",
     "ExpectedWorkspaceMount",
+    "MissingImportObservation",
+    "MissingImportOutcome",
     "SandboxProvisioner",
     "VolumeConfig",
     "build_snapshot_image",
     "environment_manifest",
+    "normalize_missing_import_observation",
     "snapshot_dependency_import_names",
     "snapshot_dependency_sha256",
     "snapshot_execution_dependencies",

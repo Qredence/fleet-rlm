@@ -85,6 +85,8 @@ def require_daytona_settings(settings: Settings) -> None:
     missing: list[str] = []
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         missing.append("FLEET_DAYTONA_API_KEY")
+    if not (settings.daytona_org_id or "").strip():
+        missing.append("FLEET_DAYTONA_ORG_ID")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
     if settings.rlm_recursion_enabled and not (settings.daytona_child_snapshot or "").strip():

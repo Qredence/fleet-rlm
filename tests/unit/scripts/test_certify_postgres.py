@@ -11,7 +11,7 @@ from scripts.benchmarks.certify_postgres import SCENARIOS, preflight, summarize_
 def _report():
     suite = Element("testsuite")
     properties = SubElement(suite, "properties")
-    for name, value in (("server_version_num", "170011"), ("alembic_heads", "01a087800001")):
+    for name, value in (("server_version_num", "170011"), ("alembic_heads", "01a087800002")):
         SubElement(properties, "property", name=f"fleet.postgres.{name}", value=value)
     for name in SCENARIOS:
         SubElement(suite, "testcase", name=name)
