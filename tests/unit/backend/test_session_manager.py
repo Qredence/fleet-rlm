@@ -964,6 +964,53 @@ async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup()
 
 
 @pytest.mark.asyncio
+async def test_late_acquisition_shutdown_is_scoped_to_its_manager() -> None:
+    platform = _BlockingCreatePlatform(expected_entries=1)
+    owner, *_ = _manager(platform=platform)
+    unrelated, *_ = _manager()
+    request = _request()
+    acquisition = asyncio.create_task(_acquire(owner, request))
+    assert await asyncio.to_thread(platform.all_entered.wait, 2)
+    acquisition.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await acquisition
+
+    try:
+        assert owner.has_pending_ownership
+        assert not unrelated.has_pending_ownership
+        assert await unrelated.aclose(drain_seconds=0)
+        assert not await owner.aclose(drain_seconds=0)
+        assert platform.deleted == []
+    finally:
+        platform.release_creates.set()
+        assert await owner.aclose(drain_seconds=2)
+
+    assert not owner.has_pending_ownership
+    assert platform.deleted == ["sb-1"]
+    assert platform.backends[0].close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_shutdown_reports_unscheduled_foreign_loop_acquisition_pending(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager, *_ = _manager()
+    foreign_loop = asyncio.new_event_loop()
+    # A provider loop that has stopped cannot service cleanup on this loop.
+    acquisition = foreign_loop.create_task(asyncio.sleep(0))
+    permit = await manager._admission.acquire(deadline=asyncio.get_running_loop().time() + 2)
+    monkeypatch.setattr(manager, "_schedule_late_acquisition_owner", lambda _owner: True)
+    try:
+        manager._adopt_late_acquisition(acquisition, permit, _request(), uuid4())
+        assert manager.has_pending_ownership
+        assert not await manager.aclose(drain_seconds=0)
+    finally:
+        acquisition.cancel()
+        await asyncio.to_thread(foreign_loop.run_until_complete, asyncio.gather(acquisition, return_exceptions=True))
+        foreign_loop.close()
+        monkeypatch.undo()
+        assert await manager.aclose(drain_seconds=2)
+
+
+@pytest.mark.asyncio
 async def test_cancelled_admission_wait_restores_session_claim() -> None:
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)

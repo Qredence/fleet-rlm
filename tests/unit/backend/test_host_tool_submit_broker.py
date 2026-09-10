@@ -28,6 +28,61 @@ class _RecordingTool:
         return f"loaded:{name}"
 
 
+def test_broker_history_context_and_submit_need_only_standard_library(tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.daytona.broker import BROKER_SERVER_CODE, remote_submit_setup_code
+    from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+    from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+
+    body = b"prepared evidence"
+    attachment = tmp_path / "context.txt"
+    attachment.write_bytes(body)
+    capsule = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                uuid4(), attachment.name, "text/plain", len(body), hashlib.sha256(body).hexdigest(), str(attachment)
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
+    raw = capsule.to_sandbox()
+    source = BROKER_SERVER_CODE
+    for name, value in {
+        "__BROKER_SECRET__": repr("test-secret"),
+        "__BROKER_PORT__": "0",
+        "__MAX_REQUEST_BYTES__": "100000",
+        "__MAX_OUTPUT_CHARS__": "100000",
+        "__CONTEXT_MOUNT_ROOT__": repr(str(tmp_path)),
+        "__CONTEXT_MANIFEST_SHA256__": repr(hashlib.sha256(raw).hexdigest()),
+    }.items():
+        source = source.replace(name, value)
+    broker_path = tmp_path / "broker.py"
+    broker_path.write_text(source)
+    history = CommittedSessionHistory([{"request": "earlier", "answer": "41"}])
+    code = "\n".join(
+        (
+            remote_submit_setup_code([{"name": "answer", "type": "str"}]),
+            history.sandbox_setup(),
+            history.sandbox_assignment("history", repr(history.to_sandbox())),
+            capsule.sandbox_setup(),
+            capsule.sandbox_assignment("attachments", repr(raw)),
+            "assert attachments[0]['data'] == context == 'prepared evidence'",
+            "SUBMIT(answer=str(int(history.messages[0]['answer']) + 1))",
+        )
+    )
+    harness = (
+        "import importlib.util, runpy\n"
+        "assert importlib.util.find_spec('dspy') is None\n"
+        f"broker = runpy.run_path({str(broker_path)!r}, run_name='fleet_probe')\n"
+        f"result = broker['_execute']({{'code': {code!r}}})\n"
+        "assert result.get('error') is None, result\n"
+        "assert result['final'] == {'answer': '42'}, result\n"
+    )
+    result = subprocess.run([sys.executable, "-I", "-S", "-c", harness], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
+
+
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
     """
     Verify that a co-located broker preserves interpreter state and services callbacks across executions.
@@ -57,7 +112,9 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
     server_path = tmp_path / "broker.py"
     server_path.write_text(source, encoding="utf-8")
     process = subprocess.Popen(
-        [sys.executable, str(server_path)],
+        # The production broker/setup must run without host site-packages,
+        # including DSPy. Only the host owns RLM orchestration.
+        [sys.executable, "-I", "-S", str(server_path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -81,6 +138,16 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
 
         broker.register_tools({"llm_query_batched": llm_query_batched})
         broker.execute_code(broker.submit_setup_code([{"name": "answer", "type": "str"}]))
+        from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+
+        history = CommittedSessionHistory([{"request": "earlier", "answer": "41"}])
+        restored = broker.execute_code(
+            history.sandbox_setup()
+            + "\n"
+            + history.sandbox_assignment("history", repr(history.to_sandbox()))
+            + "\nassert history.messages == [{'request': 'earlier', 'answer': '41'}]"
+        )
+        assert restored.error is None
         streamed: list[str] = []
         output = broker.execute_code(
             'import time\nprint("one", flush=True)\ntime.sleep(0.05)\nprint("two", flush=True)',
@@ -95,7 +162,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         assert streamed_stats["output_poll_count"] <= 8
 
         first = broker.execute_with_callbacks(
-            run_code=lambda: broker.execute_code("value = 41"),
+            run_code=lambda: broker.execute_code("value = int(history.messages[0]['answer'])"),
             tool_executor=lambda name, args, kwargs: (
                 llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
             ),

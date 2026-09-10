@@ -362,14 +362,9 @@ def snapshot_execution_dependencies(
     if not dependencies or any("==" not in dependency or dependency.count("==") != 1 for dependency in dependencies):
         raise RuntimeError("Snapshot dependencies must use exact non-empty == pins")
     if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
-        # Native child execution still constructs/executes DSPy RLM code in the
-        # sandbox.  Keep the child image lean by omitting the optional analysis
-        # libraries, but never omit the pinned runtime kernel itself.
-        dependencies = tuple(
-            dependency for dependency in dependencies if dependency.split("==", 1)[0].strip().lower() == "dspy"
-        )
-        if not dependencies:
-            raise RuntimeError("SemanticChild snapshot dependencies must include pinned dspy")
+        # DSPy and LM orchestration run on the host. Semantic children need
+        # only Python's standard library for the broker and selected inputs.
+        return ()
     return dependencies
 
 
@@ -423,24 +418,22 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     )
     manifest = environment_manifest(spec, manifest_profile)
     image_profile = manifest.profile
-    image = (
-        Image.base(spec.base_image)
-        .run_commands(
-            "apt-get update && apt-get install -y --no-install-recommends "
-            "git ca-certificates && rm -rf /var/lib/apt/lists/*",
-            "groupadd --gid 1000 daytona",
-            "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
-            "chown -R daytona:daytona /home/daytona",
-        )
-        .pip_install(list(snapshot_execution_dependencies(image_profile)))
-        .env(
-            {
-                "PYTHONUNBUFFERED": "1",
-                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
-            }
-        )
-        .workdir("/home/daytona")
+    image = Image.base(spec.base_image).run_commands(
+        "apt-get update && apt-get install -y --no-install-recommends "
+        "git ca-certificates && rm -rf /var/lib/apt/lists/*",
+        "groupadd --gid 1000 daytona",
+        "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
+        "chown -R daytona:daytona /home/daytona",
     )
+    dependencies = snapshot_execution_dependencies(image_profile)
+    if dependencies:
+        image = image.pip_install(list(dependencies))
+    image = image.env(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
+        }
+    ).workdir("/home/daytona")
     # v5 is retained as a rollback image whose existing provider definition
     # predates the runtime manifest. New immutable images carry the manifest
     # and its digest so runtime probes can validate the actual profile.

@@ -339,8 +339,11 @@ remaining overlapping lifecycle owners.
 **Status: in progress (2026-09-10).** The first migration removes the
 process-global Run-environment cleanup, client-close, late-lookup, and
 provider-retention collections. `DaytonaRuntimeResources` now owns those
-records and exposes the shutdown wait used by composition. Session-manager
-lease ownership remains the next migration target.
+records and exposes the shutdown wait used by composition. The next slice
+moves both late-acquisition and late-lease maps into `DaytonaSessionManager`
+and removes their redundant manager back-references. Shutdown now reports an
+unscheduled foreign-loop acquisition as pending. The process-global active
+Session claim registry and root-replacement owner overlap remain open.
 
 **Rationale:** `session_manager.py`, Run-environment owners, lease helpers, provider task sets, late-acquisition maps, cleanup supervisors, and binding watchers currently overlap.
 
@@ -363,6 +366,14 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 
 ## P2.3 - Remove the unselected Session runtime model
 
+**Status: audited, open (2026-09-10).** Retained broker composition still uses
+`SessionRLMRegistry`; sequential reuse, per-Turn LM/tool rebinding, failed-Turn
+rotation and durable-history preservation have executable contracts in
+`test_session_runtime_reuse.py`. These tests establish current behavior, not
+a product requirement for cross-Turn Python state. This slice preserves them.
+Removing resident state still requires a coherent broker lease-transfer and
+fresh-program migration with the same settlement guarantees; P2.3 is not done.
+
 **Rationale:** `rlm/session_runtime.py` and its fingerprints/generations/tool rebinding exist primarily to keep DSPy/interpreter state resident across Turns.
 
 **Implement if Phase 1 selects Run-scoped DSPy state:**
@@ -382,6 +393,13 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 
 ## P2.4 - Keep only one code-execution implementation
 
+**Status: in progress (2026-09-10).** Removed native Turn preparation and the
+runner's native branch, `TurnScopedRuntimeLease`, and duplicate worker builder.
+Prepared execution rejects all variants except `legacy`. Provider-native
+adapter/context factories and their cancellation cleanup still exist as
+feasibility machinery; moving useful probes out of production composition and
+deleting the remaining adapter path is still required before P2.4 is done.
+
 **Rationale:** The branch currently carries broker execution plus a native interpreter path. Keeping both permanently defeats the migration.
 
 **Implement:**
@@ -394,6 +412,15 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 **Done when:** a developer does not have to understand two Python execution engines to change Fleet.
 
 ## P2.5 - Reduce DSPy compatibility code to compatibility only
+
+**Status: locally implemented (2026-09-10).** `FleetJSONAdapter` and its shared
+sync/async repair/finalization policy now belong to the existing `program.py`
+owner, alongside `DeadlineLMProxy`; accounting remains in `budget.py`.
+Retry and wrap-up field insertion share one collision-safe helper. The pinned
+iteration-marker interpretation, private DSPy type imports, version guard,
+callback projection and interpreter contracts remain in `compat_3_3_1.py`.
+Adapter consumers and the ownership test use the new home. Validation is
+recorded in the ADR006 continuation ledger; no DSPy version or retry policy changed.
 
 **Rationale:** `rlm/compat_3_3_1.py` currently includes both pinned-version adaptation and substantial Fleet retry/finalization policy.
 
@@ -408,6 +435,13 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 
 ## P2.6 - Simplify Workspace file execution selectively
 
+**Status: audited, open (2026-09-10).** The operation audit still has no
+provider-backed read/list/stat substitution proof. Those operations require
+confinement, inode revalidation, bounds and cursor/checksum behavior beyond
+matching an SDK method name. Custom filesystem code is retained. Local
+Workspace Agent regressions cannot certify SDK parity; no replacement or
+phase completion is claimed.
+
 **Rationale:** The custom Workspace Agent has stronger write/patch semantics than generic Volume APIs in some places, but read/list/search wrappers may duplicate Daytona SDK functionality.
 
 **Implement:** use the existing operation audit to classify each operation:
@@ -420,6 +454,19 @@ Then migrate responsibilities one at a time and delete the old owner immediately
 **Done when:** there is no custom remote filesystem operation whose only reason for existence is historical.
 
 ## P2.7 - Minimize Daytona snapshot dependencies
+
+**Status: in progress (2026-09-10).** Audited Fleet's two `SandboxSerializable`
+implementations, the pinned DSPy serialization prelude, and broker setup:
+committed history and attachment context reconstruct using the standard
+library and broker helpers. Future Session/WorkspaceChild definitions omit
+DSPy and retain the four analysis packages; SemanticChild adds no Python
+packages. Runtime verification imports and checks the versions of the selected
+profile's declared dependencies. A socket-free `python -I -S` subprocess
+regression proves broker history/context reconstruction and typed SUBMIT
+without DSPy. New immutable images have **not** been created or verified;
+configured names and old images are unchanged. Existing image definitions
+will fail the new definition comparison. Creation under unused versioned names,
+disposable provider probes, sealed receipts and operator promotion remain open.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 

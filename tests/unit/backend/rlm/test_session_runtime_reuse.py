@@ -148,30 +148,11 @@ async def test_runner_preserves_an_explicit_empty_runtime_registry() -> None:
     await registry.shutdown()
 
 
-@pytest.mark.asyncio
-async def test_native_turn_scoped_selector_builds_fresh_bundle_without_resident_registry() -> None:
-    """The native migration lane must not acquire or publish resident Session state."""
-    session_id, workspace_id = uuid4(), uuid4()
-    interpreter = _Interpreter()
-    factory = _Factory([], interpreter)
-    registry = SessionRLMRegistry()
-    runner = RLMRunner(factory=factory, runtime_registry=registry)
-    context = _context(session_id, workspace_id, interpreter, "native", uuid4(), dspy.History(messages=[]))
-    context = replace(
-        context,
-        execution=replace(context.execution, runtime_variant="native-turn-scoped"),
-    )
-
-    stream = runner.stream(context)
-    _ = [event async for event in stream]
-    assert stream.outcome is not None and stream.outcome.succeeded
-    stream.mark_committed()
-    await stream.aclose()
-
-    assert len(factory.programs) == 1
-    assert registry.get(SessionKey(str(workspace_id), str(session_id))) is None
-    assert stream._runtime_lease_holder[0].__class__.__name__ == "TurnScopedRuntimeLease"
-    await runner.aclose()
+@pytest.mark.parametrize("variant", ["native-turn-scoped", "native", "unknown"])
+def test_execution_context_rejects_unselected_runtime(variant: str) -> None:
+    context = _context(uuid4(), uuid4(), _Interpreter(), "request", uuid4(), dspy.History(messages=[]))
+    with pytest.raises(ValueError, match="only retained broker execution"):
+        replace(context.execution, runtime_variant=variant)
 
 
 @pytest.mark.asyncio

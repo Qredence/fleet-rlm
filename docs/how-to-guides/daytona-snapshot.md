@@ -15,7 +15,7 @@ an operator currently has selected.
 The historical `.env`-resolved Session and SemanticChild identities are
 `fleet-rlm-python313-v7` and `fleet-rlm-python313-child-v2`. They remain
 immutable rollback references, but their provider image definitions currently
-drift from this checkout. The current immutable candidates
+drift from this checkout. The previously verified immutable candidates
 `fleet-rlm-python313-v9` and `fleet-rlm-python313-child-v4` carry Python
 3.13.13, the pinned `python:3.13.13-slim-bookworm` base, the `daytona`
 non-root user, `/home/daytona` as the working directory, the pinned DSPy
@@ -23,6 +23,14 @@ non-root user, `/home/daytona` as the working directory, the pinned DSPy
 8 GiB Session or lean 2 CPU / 4 GiB / 4 GiB SemanticChild resource shape.
 SemanticChild cannot mount a Workspace Volume. WorkspaceChild remains
 Volume-scoped and uses the Session image contract.
+
+The P2.7 source definition now omits remote DSPy: orchestration stays on the
+host, Session/WorkspaceChild retain the four analysis packages, and
+SemanticChild uses the standard library. The v9/v4 candidates therefore also
+predate this definition. New unused immutable names must be created and
+verified before promotion; this source change has not rebuilt or selected any
+provider image. The commands below illustrate proposed v10/v5 names, whose
+availability must be checked by the operator.
 
 Snapshot provisioning is an explicit operator action. Application startup does
 not create, overwrite, or delete snapshots, and an existing immutable name is
@@ -40,19 +48,19 @@ needed:
 
 ```bash
 uv run python scripts/daytona_snapshot.py plan \
-  --profile session --name fleet-rlm-python313-v7
+  --profile session --name fleet-rlm-python313-v10
 uv run python scripts/daytona_snapshot.py plan \
-  --profile semantic-child --name fleet-rlm-python313-child-v2
+  --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py create \
-  --profile session --name fleet-rlm-python313-v7
+  --profile session --name fleet-rlm-python313-v10
 uv run python scripts/daytona_snapshot.py create \
-  --profile semantic-child --name fleet-rlm-python313-child-v2
+  --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py check \
-  --profile session --name fleet-rlm-python313-v7
+  --profile session --name fleet-rlm-python313-v10
 uv run python scripts/daytona_snapshot.py check \
-  --profile semantic-child --name fleet-rlm-python313-child-v2
+  --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
 
 `plan` is credential-free and prints only the profile, resource contract, and
@@ -66,12 +74,13 @@ After creation, verify each image in a disposable no-Volume Sandbox:
 
 ```bash
 uv run python scripts/daytona_snapshot.py verify-runtime \
-  --profile session --name fleet-rlm-python313-v7
+  --profile session --name fleet-rlm-python313-v10
 uv run python scripts/daytona_snapshot.py verify-runtime \
-  --profile semantic-child --name fleet-rlm-python313-child-v2
+  --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
 
-The probe verifies the baked manifest, Python version, non-root user, working
+The probe verifies the baked manifest, each declared package's import and exact
+version, Python version, non-root user, working
 directory, and `git` toolchain, then deletes the disposable Sandbox and checks
 that the identity is gone. This is separate from the Fleet doctor: the doctor
 also checks configured Volume/database/LLM readiness and can stop at an earlier

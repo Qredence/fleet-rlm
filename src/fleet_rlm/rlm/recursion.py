@@ -31,10 +31,11 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
-from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, FleetJSONAdapter, _RLMTraceCallback, is_native_rlm
+from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
+    FleetJSONAdapter,
     RLMModelBundle,
     RLMOptions,
     build_native_rlm,
