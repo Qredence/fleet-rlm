@@ -95,6 +95,16 @@ classification must be completed before claiming a Phase 6 quality campaign.
   owner overlap still present in `composition/daytona_run_preparation.py`,
   `daytona/session_manager.py`, and the lease/cleanup helpers.
 
+### Phase 2.2 resource-ownership reduction (2026-09-10)
+
+- `DaytonaRuntimeResources` now owns its late sandbox-cleanup tasks,
+  client-close task, and provider-retained environment providers. Composition
+  observes that exact resource owner during deferred shutdown; it no longer
+  consults process-global Run-environment task collections.
+- Session-manager lease ownership and root-replacement collections remain
+  intentionally unchanged for the next P2.2 migration. Broker execution and
+  shutdown semantics are unchanged.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08
