@@ -132,8 +132,11 @@ classification must be completed before claiming a Phase 6 quality campaign.
   sync and async drivers retain one shared policy. Field insertion is shared,
   budget accounting stays in `budget.py`, and pinned DSPy marker/type/callback
   adaptation remains in `compat_3_3_1.py`. No model, version or retry-policy change.
-- P2.6: the Workspace operation audit still lacks provider-backed substitution
-  parity. Path/inode/bounds/CAS/atomicity owners remain intact.
+- P2.6: complete. The pinned Daytona SDK capability gate proves filesystem
+  download/list APIs lack Fleet's bounded cursor controls, while upload/delete
+  expose no append, patch, checksum/CAS, or atomic-publication contract. The
+  operation audit therefore retains the Workspace Agent as the sole filesystem
+  semantics owner; no custom operation exists only for historical reasons.
 - P2.7: future image definitions remove DSPy; Session/WorkspaceChild retain
   analysis packages, SemanticChild adds no Python packages. The runtime probe
   checks imports and exact versions from the selected profile. A standard-library-only

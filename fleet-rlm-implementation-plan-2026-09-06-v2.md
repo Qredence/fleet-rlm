@@ -311,8 +311,7 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
-**Progress (2026-09-10):** P2.1 through P2.5 are complete. P2.6 remains an
-SDK-parity audit. P2.7 has reduced image definitions
+**Progress (2026-09-10):** P2.1 through P2.6 are complete. P2.7 has reduced image definitions
 and verified new disposable runtime probes, but still needs representative live
 host-tool/RLM evidence, sealed receipts, and operator promotion.
 
@@ -442,14 +441,14 @@ recorded in the ADR006 continuation ledger; no DSPy version or retry policy chan
 
 **Done when:** upgrading DSPy primarily requires reviewing one small compatibility seam, not a large Fleet policy module.
 
-## P2.6 - Simplify Workspace file execution selectively
+## P2.6 - Simplify Workspace file execution selectively — complete
 
-**Status: audited, open (2026-09-10).** The operation audit still has no
-provider-backed read/list/stat substitution proof. Those operations require
-confinement, inode revalidation, bounds and cursor/checksum behavior beyond
-matching an SDK method name. Custom filesystem code is retained. Local
-Workspace Agent regressions cannot certify SDK parity; no replacement or
-phase completion is claimed.
+**Status: complete (2026-09-10).** The pinned Daytona SDK capability gate now
+proves its filesystem API lacks Fleet's bounded download and cursor controls,
+and has no append, patch, checksum/CAS, or atomic-publication contract. The
+operation audit therefore classifies every custom Workspace operation as
+semantic rather than historical. No unsafe SDK substitution was made; the
+Workspace Agent remains the sole filesystem semantics owner.
 
 **Rationale:** The custom Workspace Agent has stronger write/patch semantics than generic Volume APIs in some places, but read/list/search wrappers may duplicate Daytona SDK functionality.
 
@@ -459,6 +458,10 @@ phase completion is claimed.
 - delete the replaced protocol/client/server code in the same change.
 
 **Validate:** path traversal/symlink safety, checksum/CAS behavior, write atomicity, and read/list parity.
+
+The pinned-SDK capability gate and operation audit must also prove that no
+current custom operation is historical; path traversal, symlink, checksum/CAS,
+atomicity, and bounded-read contracts remain mandatory.
 
 **Done when:** there is no custom remote filesystem operation whose only reason for existence is historical.
 
@@ -490,8 +493,8 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
-**Phase 2 exit (pending P2.6 and P2.7):** one runtime graph, one provider
-package, one execution implementation, fewer resident/global owners.
+**Phase 2 exit (pending P2.7):** one runtime graph, one provider package,
+one execution implementation, fewer resident/global owners.
 
 ---
 
