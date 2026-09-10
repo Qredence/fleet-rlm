@@ -50,6 +50,39 @@ classification must be completed before claiming a Phase 6 quality campaign.
   `daytona/runtime.py` (63,425). Re-run this same inventory after the Phase 2
   and Phase 3 deletion work; it is a baseline, not a quality claim.
 
+### Phase 1 containment decision (2026-09-10)
+
+- P1.1 reduced the provider proof to
+  `tests/live/backend/test_daytona_containment.py`. It creates one disposable
+  sandbox/context, starts an ordinary child and a detached process-session
+  child, deletes the context, observes their markers, then verifies whole
+  Sandbox deletion. Four operator-gated runs retained bounded receipts at
+  `.fleet-evidence/receipts/adr006/p1-containment-20260910T074746.json` and
+  `p1-containment-repeat{1,2,3}-20260910T074746.json`.
+- P1.2 inspected the pinned Daytona `0.210.0` public interpreter surface:
+  `create_context`, `delete_context`, `list_contexts`, and `run_code`. Its
+  smallest relevant cleanup operation, `delete_context`, is not process-tree
+  containment: all four runs observed the ordinary child completing, context
+  deletion succeeding, the detached child surviving, and the disposable
+  Sandbox subsequently absent. Process/PTY session controls cannot target a
+  Code Interpreter context, so no provider-supported whole-tree mechanism is
+  available for reusable native contexts in this pinned SDK.
+- P1.3 ran the existing whole-Sandbox lifecycle benchmark. The sealed receipt
+  `.fleet-evidence/receipts/adr006/p1-turn-scoped-benchmark-20260910T074812.json`
+  completed all 20 measured deletion checks, but its create-through-first-
+  execution p95 was 33.296085 s against the 10 s threshold. It therefore
+  selected `retained_session`, not a Turn-scoped Sandbox. The benchmark emitted
+  broker-cleanup-pending warnings during interpreter shutdown; Sandbox deletion
+  still completed and this observation remains a Phase 2 cleanup-owner concern.
+- P1.4 decision: **B — retained broker execution boundary**. Option A is
+  rejected because native context deletion does not contain detached process
+  sessions. Option C is deferred because its matched lifecycle lane misses the
+  approved latency threshold despite confirmed whole-Sandbox deletion. Rollback
+  is the previous complete release/config/image/database-compatible state; it
+  does not retain a second runtime in one process. The legacy broker remains
+  the sole selectable runtime while Phase 2 removes only owners that are
+  independent of this selected boundary.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08
@@ -368,7 +401,7 @@ Executable evidence lives in:
 - `tests/unit/backend/daytona/test_native_interpreter.py`
 - `tests/unit/backend/daytona/test_run_environment_root_lease.py`
 - `tests/unit/backend/test_host_tool_submit_broker.py`
-- `tests/live/backend/test_phase3_daytona_native.py`
+- `tests/live/backend/test_daytona_containment.py`
 - `scripts/benchmarks/attach_phase3_receipt.py`
 - `scripts/benchmarks/certify_mlflow.py`
 - `scripts/benchmarks/certify_postgres.py`
