@@ -474,7 +474,17 @@ runtime probes; each probe's disposable Sandbox was deleted. Configured names
 and prior images are unchanged rollback references. Host-tool and representative
 RLM live execution, sealed receipts, and operator policy promotion remain open.
 
+An opt-in aggregate certification controller now preserves the configured
+rollback references while it checks and probes both immutable candidates and
+runs the existing Session MVP and SemanticChild recursive evidence lanes.
+
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
+
+**Certification contract:** certify only immutable Session and SemanticChild
+candidates; preserve the configured snapshot references until manual promotion;
+reject mutable names, dirty candidates, failing probes, and malformed receipts
+before promotion. The existing snapshot probe plus MVP and recursive verifiers
+are the supported evidence paths.
 
 **Next work:**
 1. Run the selected versioned Session and SemanticChild images through a

@@ -86,6 +86,27 @@ that the identity is gone. This is separate from the Fleet doctor: the doctor
 also checks configured Volume/database/LLM readiness and can stop at an earlier
 prerequisite.
 
+## P2.7 reduced-image certification and promotion
+
+P2.7 requires one sealed receipt covering both immutable candidates before either
+configured reference changes. The opt-in controller checks the provider image
+contract and disposable import probe for each candidate, then runs the existing
+Session host-tool/RLM and SemanticChild recursive-RLM scenarios with verifier-only
+settings copies. It never changes `.env`, deployment configuration, or a snapshot.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/live_p27_snapshot_verify.py \
+  --session-snapshot fleet-rlm-python313-v10 \
+  --child-snapshot fleet-rlm-python313-child-v5 \
+  --output .fleet-evidence/receipts/adr006/p27-reduced-snapshots-<run-id>.json
+```
+
+After a reviewer accepts the bounded receipt and applicable CI result, an operator
+updates the deployment's two declared snapshot references atomically, restarts by
+the normal deployment procedure, and runs the existing doctor/readiness check.
+Rollback restores the previous pair of references and restarts; do not rebuild,
+rename, or delete immutable snapshots.
+
 ## Runtime profiles and rollback
 
 The profile contract is deliberately explicit:

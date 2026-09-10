@@ -17,9 +17,12 @@ from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import active_profile, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError
+from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
+P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
+P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
 _LIVE_TEST = "tests/live/backend/test_phase2_daytona_recursive.py::test_phase2_daytona_recursive_through_fastapi"
 _CANDIDATE_PATHS = (
     "scripts/live_phase2_recursive_verify.py",
@@ -79,6 +82,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="new JSON receipt below the ignored evidence directory",
     )
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument("--session-snapshot", help="immutable Session snapshot for P2.7 certification")
+    parser.add_argument("--child-snapshot", help="immutable SemanticChild snapshot for P2.7 certification")
     return parser
 
 
@@ -367,6 +372,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.timeout_seconds <= 0 or not _path_is_allowed(output):
         print("Phase 2 recursive canary precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
+    if (args.session_snapshot is None) != (args.child_snapshot is None):
+        print("Phase 2 recursive canary snapshot precondition failed.", file=sys.stderr)
+        return EXIT_PRECONDITION
+    try:
+        snapshots = (
+            None
+            if args.session_snapshot is None
+            else (validate_snapshot_name(args.session_snapshot), validate_snapshot_name(args.child_snapshot or ""))
+        )
+    except ValueError:
+        print("Phase 2 recursive canary snapshot precondition failed.", file=sys.stderr)
+        return EXIT_PRECONDITION
     _load_repo_env()
     try:
         settings = require_live_execution()
@@ -392,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
     test_receipt_path = Path(temporary_name)
     child_env = dict(os.environ)
     child_env[EVIDENCE_ENV] = str(test_receipt_path)
+    if snapshots is not None:
+        child_env[P27_SESSION_SNAPSHOT_ENV], child_env[P27_CHILD_SNAPSHOT_ENV] = snapshots
     try:
         try:
             completed = subprocess.run(
