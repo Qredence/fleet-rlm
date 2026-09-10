@@ -29,7 +29,7 @@ def test_checker_accepts_the_narrow_storage_transport_exception(tmp_path: Path) 
 
 def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> None:
     _write(tmp_path, "workspace/workspace.py", "from fleet_rlm.chat import turn_runtime\n")
-    _write(tmp_path, "daytona/run_environment.py", "def prepare():\n    from fleet_rlm.chat import preparation\n")
+    _write(tmp_path, "daytona/provider.py", "def prepare():\n    from fleet_rlm.chat import preparation\n")
     _write(tmp_path, "persistence/repositories/outbox.py", "from fleet_rlm.rlm.result import Result\n")
     _write(tmp_path, "rlm/runtime.py", "import fastapi\n")
     _write(tmp_path, "chat/preparation.py", "import fastapi\n")
@@ -41,7 +41,7 @@ def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> No
 
     assert "workspace/workspace.py:1" in rendered
     assert "workspace must not import chat" in rendered
-    assert "daytona/run_environment.py:2" in rendered
+    assert "daytona/provider.py:2" in rendered
     assert "daytona must not import chat" in rendered
     assert "persistence/repositories/outbox.py:1" in rendered
     assert "persistence must not import rlm" in rendered
@@ -96,12 +96,12 @@ def test_checker_reports_daytona_memory_content_even_without_imports(tmp_path: P
 
 
 def test_main_reports_current_legacy_edges_with_nonzero_status(tmp_path: Path, capsys) -> None:
-    _write(tmp_path, "daytona/run_environment.py", "from fleet_rlm.chat import preparation\n")
+    _write(tmp_path, "daytona/provider.py", "from fleet_rlm.chat import preparation\n")
 
     assert main(["--root", str(tmp_path)]) == 1
     captured = capsys.readouterr()
     assert "Dependency boundary check failed" in captured.err
-    assert "daytona/run_environment.py:1" in captured.err
+    assert "daytona/provider.py:1" in captured.err
 
 
 def test_main_accepts_a_clean_destination_tree(tmp_path: Path, capsys) -> None:

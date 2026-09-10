@@ -83,6 +83,18 @@ classification must be completed before claiming a Phase 6 quality campaign.
   the sole selectable runtime while Phase 2 removes only owners that are
   independent of this selected boundary.
 
+### Phase 2.1 provider package consolidation (2026-09-10)
+
+- Removed the duplicate `runtime/daytona/` package. Turn preparation now lives
+  in `composition/daytona_run_preparation.py`; composition retains the Daytona-backed
+  Workspace gateway wiring in `composition/daytona_workspace_gateway.py`.
+  Composition, deterministic/live tests, release validation, and source-layout
+  documentation were updated accordingly.
+- This is a package-boundary consolidation only. It does not add an owner or
+  alter broker execution. P2.2 remains responsible for reducing the lifecycle
+  owner overlap still present in `composition/daytona_run_preparation.py`,
+  `daytona/session_manager.py`, and the lease/cleanup helpers.
+
 ### MLflow 3.16 continuation
 
 Baseline: `063bea648`. Full completion remains the target. The 2026-09-08

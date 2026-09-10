@@ -78,11 +78,11 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
 @pytest.mark.asyncio
 async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: pytest.MonkeyPatch) -> None:
     """Partial live composition cleanup must also run for task cancellation."""
+    import fleet_rlm.composition.daytona_run_preparation as run_environment
     import fleet_rlm.composition.live as composition
     import fleet_rlm.daytona.provisioning as provisioning
     import fleet_rlm.persistence.database as database
     import fleet_rlm.rlm.compat_3_3_1 as dspy_contract
-    import fleet_rlm.runtime.daytona.run_environment as run_environment
 
     class Engine:
         def __init__(self) -> None:

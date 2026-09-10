@@ -1,8 +1,8 @@
 """Daytona runtime composition and process-lifetime resource ownership.
 
 Composition constructs Modules; it contains no Turn behavior.  The per-Turn
-environment/capability adapters live in ``runtime.daytona.run_environment``
-and the Workspace Volume gateway assembly in ``runtime.daytona.workspace_gateway``.
+environment/capability adapters live in ``composition.daytona_run_preparation``
+and the Workspace Volume gateway assembly in ``composition.daytona_workspace_gateway``.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import FastAPI
 
 from fleet_rlm.chat.preparation import DefaultRunPreparer
+from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.composition.inventory import (
     CompositionError,
     RuntimeDatabaseLifecycle,
@@ -42,7 +43,6 @@ from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
-from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
@@ -161,11 +161,11 @@ async def _finish_daytona_disposal(
     composition_loop: asyncio.AbstractEventLoop | None,
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
-    from fleet_rlm.runtime.daytona.run_environment import (
+    from fleet_rlm.composition.daytona_run_preparation import (
         has_pending_resource_cleanup,
         wait_resource_cleanup,
     )
+    from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
     while asyncio.get_running_loop().time() < retry_deadline:
@@ -416,7 +416,7 @@ async def run_deferred_orphan_cleanup(
     the readiness-critical path. Failures and timeouts are logged and left for a
     later startup.
     """
-    from fleet_rlm.runtime.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
+    from fleet_rlm.composition.daytona_workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 
     committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
     completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
@@ -489,6 +489,11 @@ async def build_daytona_composition(
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.composition.daytona_run_preparation import resolve_settings
+    from fleet_rlm.composition.daytona_workspace_gateway import (
+        DaytonaWorkspaceGateway,
+        DaytonaWorkspaceVolumeGateway,
+    )
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
@@ -501,11 +506,6 @@ async def build_daytona_composition(
     from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
-    from fleet_rlm.runtime.daytona.run_environment import resolve_settings
-    from fleet_rlm.runtime.daytona.workspace_gateway import (
-        DaytonaWorkspaceGateway,
-        DaytonaWorkspaceVolumeGateway,
-    )
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
 
@@ -902,7 +902,7 @@ def build_run_preparation(
     Returns:
         DefaultRunPreparer: The configured run preparer.
     """
-    from fleet_rlm.runtime.daytona.run_environment import (
+    from fleet_rlm.composition.daytona_run_preparation import (
         _DaytonaEnvironmentProvider,
         _LiveCapabilityPreparer,
     )
