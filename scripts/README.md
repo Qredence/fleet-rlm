@@ -18,7 +18,7 @@
 | `live_phase1_stream_verify.py` | Run the narrow one-Turn Phase 1 native DSPy stream canary on the normal Daytona profile |
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
-| `live_p27_snapshot_verify.py` | Seal the opt-in P2.7 reduced-snapshot receipt from provider probes and existing Session/child live lanes |
+| `live_p27_snapshot_verify.py` | Seal the opt-in P2.7 reduced-snapshot receipt from provider probes, the focused Session lane, and the SemanticChild lane |
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
 | `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |

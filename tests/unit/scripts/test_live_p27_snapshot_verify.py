@@ -48,7 +48,12 @@ def test_seals_aggregate_receipt_after_both_existing_lanes(tmp_path: Path, monke
     monkeypatch.setattr(verifier, "load_dotenv", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(verifier, "require_live_execution", lambda: object())
     monkeypatch.setattr(verifier, "_candidate", lambda: ("a" * 40, "p27-cert"))
-    monkeypatch.setattr(verifier, "_run", lambda *_args: None)
+    invocations: list[tuple[list[str], dict[str, str]]] = []
+
+    def record_run(command, _timeout, env):
+        invocations.append((command, env.copy()))
+
+    monkeypatch.setattr(verifier, "_run", record_run)
     monkeypatch.setattr(verifier, "_assert_success_receipt", lambda _path: None)
 
     def fake_asyncio_run(coro):
@@ -72,3 +77,21 @@ def test_seals_aggregate_receipt_after_both_existing_lanes(tmp_path: Path, monke
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["passed"] is True
     assert receipt["images"] == images
+    assert len(invocations) == 2
+    session_command, session_env = invocations[0]
+    recursive_command, recursive_env = invocations[1]
+    assert any(
+        item.endswith("test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi")
+        for item in session_command
+    )
+    assert session_env["FLEET_P27_SESSION_SNAPSHOT"] == "fleet-rlm-python313-v10"
+    assert session_env["FLEET_P27_CHILD_SNAPSHOT"] == "fleet-rlm-python313-child-v5"
+    assert "FLEET_PHASE1_STREAM_EVIDENCE_PATH" in session_env
+    assert any(
+        item.endswith("test_phase2_daytona_recursive.py::test_phase2_daytona_recursive_through_fastapi")
+        for item in recursive_command
+    )
+    assert recursive_env["FLEET_P27_SESSION_SNAPSHOT"] == "fleet-rlm-python313-v10"
+    assert recursive_env["FLEET_P27_CHILD_SNAPSHOT"] == "fleet-rlm-python313-child-v5"
+    assert "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH" in recursive_env
+    assert "FLEET_PHASE1_STREAM_EVIDENCE_PATH" not in recursive_env

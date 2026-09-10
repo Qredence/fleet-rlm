@@ -147,22 +147,23 @@ def main(argv: list[str] | None = None) -> int:
         print("P2.7 snapshot certification precondition failed.", file=sys.stderr)
         return 2
 
+    session_receipt: Path | None = None
     recursive_receipt: Path | None = None
-    mvp_receipt: Path | None = None
     try:
         images = asyncio.run(_verify_snapshot_candidates(session, child))
+        descriptor, session_name = tempfile.mkstemp(dir=output.parent, suffix=".json", text=True)
+        os.close(descriptor)
+        session_receipt = Path(session_name)
         descriptor, recursive_name = tempfile.mkstemp(dir=output.parent, suffix=".json", text=True)
         os.close(descriptor)
         recursive_receipt = Path(recursive_name)
-        descriptor, mvp_name = tempfile.mkstemp(dir=output.parent, suffix=".json", text=True)
-        os.close(descriptor)
-        mvp_receipt = Path(mvp_name)
-        mvp_env = os.environ.copy()
-        mvp_env.update(
+        scenario_env = os.environ.copy()
+        scenario_env.update(
             {
                 "FLEET_LIVE": "1",
                 "FLEET_P27_SESSION_SNAPSHOT": session,
-                "FLEET_LIVE_EVIDENCE_PATH": str(mvp_receipt),
+                "FLEET_P27_CHILD_SNAPSHOT": child,
+                "FLEET_PHASE1_STREAM_EVIDENCE_PATH": str(session_receipt),
             }
         )
         _run(
@@ -170,25 +171,18 @@ def main(argv: list[str] | None = None) -> int:
                 "uv",
                 "run",
                 "pytest",
-                "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi",
+                "tests/live/backend/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi",
                 "-q",
                 "-n",
                 "0",
                 f"--timeout={args.timeout_seconds}",
             ],
             args.timeout_seconds,
-            mvp_env,
+            scenario_env,
         )
-        _assert_success_receipt(mvp_receipt)
-        recursive_env = os.environ.copy()
-        recursive_env.update(
-            {
-                "FLEET_LIVE": "1",
-                "FLEET_P27_SESSION_SNAPSHOT": session,
-                "FLEET_P27_CHILD_SNAPSHOT": child,
-                "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH": str(recursive_receipt),
-            }
-        )
+        _assert_success_receipt(session_receipt)
+        scenario_env["FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"] = str(recursive_receipt)
+        scenario_env.pop("FLEET_PHASE1_STREAM_EVIDENCE_PATH")
         _run(
             [
                 "uv",
@@ -201,7 +195,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"--timeout={args.timeout_seconds}",
             ],
             args.timeout_seconds,
-            recursive_env,
+            scenario_env,
         )
         _assert_success_receipt(recursive_receipt)
         payload: dict[str, object] = {
@@ -232,9 +226,10 @@ def main(argv: list[str] | None = None) -> int:
         print("P2.7 snapshot certification failed; inspect the bounded receipt.", file=sys.stderr)
         return 3
     finally:
-        for path in (recursive_receipt, mvp_receipt):
-            if path is not None:
-                path.unlink(missing_ok=True)
+        if session_receipt is not None:
+            session_receipt.unlink(missing_ok=True)
+        if recursive_receipt is not None:
+            recursive_receipt.unlink(missing_ok=True)
     print(f"P2.7 snapshot certification passed; bounded receipt: {output}")
     return 0
 

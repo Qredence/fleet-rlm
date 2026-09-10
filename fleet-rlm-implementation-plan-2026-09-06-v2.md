@@ -475,8 +475,10 @@ and prior images are unchanged rollback references. Host-tool and representative
 RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 An opt-in aggregate certification controller now preserves the configured
-rollback references while it checks and probes both immutable candidates and
-runs the existing Session MVP and SemanticChild recursive evidence lanes.
+rollback references while it checks and probes both immutable candidates, then
+runs a narrow Session host-tool/RLM stream proof and the SemanticChild recursive
+proof as separate evidence lanes. The broad Session MVP remains an independent
+lifecycle/durability proof and is not a P2.7 snapshot-dependency prerequisite.
 The 2026-09-10 live attempt did not pass: both disposable image probes succeeded,
 but the candidate-scoped Session MVP failed in its first RLM Turn. Its bounded
 aggregate receipt is `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r2.json`;
@@ -489,8 +491,8 @@ and the SemanticChild recursive proof both pass in one sealed aggregate receipt.
 **Certification contract:** certify only immutable Session and SemanticChild
 candidates; preserve the configured snapshot references until manual promotion;
 reject mutable names, dirty candidates, failing probes, and malformed receipts
-before promotion. The existing snapshot probe plus MVP and recursive verifiers
-are the supported evidence paths.
+before promotion. The existing snapshot probe, focused Session stream verifier,
+and focused recursive verifier are the supported evidence paths.
 
 **Next work:**
 1. Run the selected versioned Session and SemanticChild images through a
