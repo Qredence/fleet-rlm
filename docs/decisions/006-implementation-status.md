@@ -124,8 +124,9 @@ classification must be completed before claiming a Phase 6 quality campaign.
 - P2.4: deleted the native Turn preparation branch, duplicate runner worker
   and lease implementation, plus the production-composition native context
   factory and cancellation owner. Execution contexts reject unselected
-  variants. `NativeInterpreterBackend` remains an unreferenced direct-test
-  feasibility probe and is not part of production composition.
+  variants. The unreferenced `NativeInterpreterBackend` feasibility probe,
+  native binding-watch support, benchmark, and direct tests were deleted, so
+  the broker is the sole code-execution implementation in the source tree.
 - P2.5: Fleet's JSON repair/finalization adapter moved to `rlm/program.py`;
   sync and async drivers retain one shared policy. Field insertion is shared,
   budget accounting stays in `budget.py`, and pinned DSPy marker/type/callback

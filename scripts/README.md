@@ -21,7 +21,6 @@
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
 | `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
-| `benchmarks/run_native_long_context.py` | Measure native whole-value URL context at 1/5/10 MiB and emit the paging decision receipt |
 | `benchmarks/run_rlm_latency.py` | Compare live Fleet RLM configuration variants and run the MLflow-native five-task quality gate |
 | `benchmarks/attach_phase3_receipt.py` | Attach a validated, bounded Daytona native-feasibility receipt and capability metrics to an existing MLflow campaign run |
 | `benchmarks/record_mlflow_campaign.py` | Record one sealed runtime/adapter benchmark receipt as an explicit MLflow tracking run with identity params, full-run metrics, and evidence-lane tags |
