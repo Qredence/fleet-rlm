@@ -48,7 +48,6 @@ def test_seals_aggregate_receipt_after_both_existing_lanes(tmp_path: Path, monke
     monkeypatch.setattr(verifier, "load_dotenv", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(verifier, "require_live_execution", lambda: object())
     monkeypatch.setattr(verifier, "_candidate", lambda: ("a" * 40, "p27-cert"))
-    monkeypatch.setattr(verifier, "_RECURSIVE_EVIDENCE_ROOT", tmp_path / "recursive")
     monkeypatch.setattr(verifier, "_run", lambda *_args: None)
     monkeypatch.setattr(verifier, "_assert_success_receipt", lambda _path: None)
 

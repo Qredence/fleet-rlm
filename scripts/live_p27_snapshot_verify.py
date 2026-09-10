@@ -29,7 +29,6 @@ else:  # pragma: no cover - direct operator invocation
 RECEIPT_SCHEMA = "fleet.daytona-p27-snapshot-certification/v1"
 _ROOT = Path(__file__).resolve().parents[1]
 _EVIDENCE_ROOT = _ROOT / ".fleet-evidence" / "receipts" / "adr006"
-_RECURSIVE_EVIDENCE_ROOT = _ROOT / ".scratch" / "fleet-rlm-recursive-runtime" / "evidence"
 _FORBIDDEN = ("prompt", "answer", "code", "credential", "sandbox_id", "volume_id", "broker", "trace", "http")
 
 
@@ -112,10 +111,11 @@ async def _verify_snapshot_candidates(session: str, child: str) -> dict[str, dic
         await client.close()
 
 
-def _run(command: list[str], timeout_seconds: int) -> None:
+def _run(command: list[str], timeout_seconds: int, env: dict[str, str]) -> None:
     completed = subprocess.run(
         command,
         cwd=_ROOT,
+        env=env,
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -151,45 +151,57 @@ def main(argv: list[str] | None = None) -> int:
     mvp_receipt: Path | None = None
     try:
         images = asyncio.run(_verify_snapshot_candidates(session, child))
-        _RECURSIVE_EVIDENCE_ROOT.mkdir(parents=True, exist_ok=True)
-        descriptor, recursive_name = tempfile.mkstemp(dir=_RECURSIVE_EVIDENCE_ROOT, suffix=".json", text=True)
+        descriptor, recursive_name = tempfile.mkstemp(dir=output.parent, suffix=".json", text=True)
         os.close(descriptor)
         recursive_receipt = Path(recursive_name)
         descriptor, mvp_name = tempfile.mkstemp(dir=output.parent, suffix=".json", text=True)
         os.close(descriptor)
         mvp_receipt = Path(mvp_name)
+        mvp_env = os.environ.copy()
+        mvp_env.update(
+            {
+                "FLEET_LIVE": "1",
+                "FLEET_P27_SESSION_SNAPSHOT": session,
+                "FLEET_LIVE_EVIDENCE_PATH": str(mvp_receipt),
+            }
+        )
         _run(
             [
                 "uv",
                 "run",
-                "python",
-                "scripts/live_daytona_verify.py",
-                "--output",
-                str(mvp_receipt),
-                "--timeout-seconds",
-                str(args.timeout_seconds),
-                "--session-snapshot",
-                session,
+                "pytest",
+                "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi",
+                "-q",
+                "-n",
+                "0",
+                f"--timeout={args.timeout_seconds}",
             ],
             args.timeout_seconds,
+            mvp_env,
         )
         _assert_success_receipt(mvp_receipt)
+        recursive_env = os.environ.copy()
+        recursive_env.update(
+            {
+                "FLEET_LIVE": "1",
+                "FLEET_P27_SESSION_SNAPSHOT": session,
+                "FLEET_P27_CHILD_SNAPSHOT": child,
+                "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH": str(recursive_receipt),
+            }
+        )
         _run(
             [
                 "uv",
                 "run",
-                "python",
-                "scripts/live_phase2_recursive_verify.py",
-                "--output",
-                str(recursive_receipt),
-                "--timeout-seconds",
-                str(args.timeout_seconds),
-                "--session-snapshot",
-                session,
-                "--child-snapshot",
-                child,
+                "pytest",
+                "tests/live/backend/test_phase2_daytona_recursive.py::test_phase2_daytona_recursive_through_fastapi",
+                "-q",
+                "-n",
+                "0",
+                f"--timeout={args.timeout_seconds}",
             ],
             args.timeout_seconds,
+            recursive_env,
         )
         _assert_success_receipt(recursive_receipt)
         payload: dict[str, object] = {
