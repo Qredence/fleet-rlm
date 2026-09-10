@@ -150,6 +150,8 @@ classification must be completed before claiming a Phase 6 quality campaign.
   checks/probes both candidate images and runs the existing Session MVP and
   SemanticChild recursive lanes through verifier-only Settings overrides; it
   writes one bounded receipt and never changes the configured references.
+  The 2026-09-10 candidate run remains non-promotable: image probes passed, but
+  the Session MVP failed during its first RLM Turn, before recursive evidence.
 
 The Phase 1 retained-broker decision remains authoritative. This continuation
 does not complete Phase 2 or certify native containment, filesystem SDK parity,
