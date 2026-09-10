@@ -420,7 +420,7 @@ implementation remains in the source tree.
 
 **Done when:** a developer does not have to understand two Python execution engines to change Fleet.
 
-## P2.5 - Reduce DSPy compatibility code to compatibility only
+## P2.5 - Reduce DSPy compatibility code to compatibility only — complete
 
 **Status: complete (2026-09-10).** `FleetJSONAdapter` and its shared
 sync/async repair/finalization policy now belong to the existing `program.py`
@@ -453,12 +453,18 @@ phase completion is claimed.
 
 **Rationale:** The custom Workspace Agent has stronger write/patch semantics than generic Volume APIs in some places, but read/list/search wrappers may duplicate Daytona SDK functionality.
 
-**Implement:** use the existing operation audit to classify each operation:
-- keep custom code for path confinement, CAS/checksum, locking, atomic replace, or other guarantees not matched by the SDK;
-- replace only simple read/list/stat/search paths where SDK parity is proven;
-- delete the replaced protocol/client/server code in the same change.
+**Next work:**
+1. Add a disposable live SDK probe that records the exact `sandbox.fs` list,
+   file-info, and download semantics for a mounted Workspace path, including
+   traversal, symlink, missing-path, page/bounds, and cancellation cases.
+2. Compare each result to the operation-audit guarantee, not merely the SDK
+   method name. Preserve only bounded, sanitized receipts.
+3. Replace a read/list/stat/search operation only after its complete contract
+   passes; delete the matching Agent protocol/client/server code in the same
+   change. Retain the custom operation if any guarantee differs.
 
-**Validate:** path traversal/symlink safety, checksum/CAS behavior, write atomicity, and read/list parity.
+**Validate:** path traversal/symlink safety, checksum/CAS behavior, write
+atomicity, SDK read/list/stat parity, and cleanup of every disposable probe.
 
 **Done when:** there is no custom remote filesystem operation whose only reason for existence is historical.
 
@@ -480,13 +486,19 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 
-**Implement:**
-- search every `SandboxSerializable`/setup-code path for remote `dspy` imports;
-- if no runtime import is required, remove DSPy from Session/SemanticChild snapshot requirements;
-- retain only packages generated Python is expected to use;
-- regenerate immutable snapshot identities instead of mutating existing names.
+**Next work:**
+1. Run the selected versioned Session and SemanticChild images through a
+   disposable live host-tool and representative RLM probe, retaining only
+   bounded/redacted evidence.
+2. Seal versioned receipts containing image identity, dependency verification,
+   history/context reconstruction, typed `SUBMIT`, host-tool authorization,
+   RLM result, and confirmed Sandbox cleanup.
+3. Have an operator promote the configured snapshot references only after the
+   receipts pass review; keep current images as rollback references.
 
-**Validate:** snapshot import probe, typed `SUBMIT`, committed history/context reconstruction, host tools, and representative RLM execution.
+**Validate:** snapshot import probe, typed `SUBMIT`, committed history/context
+reconstruction, host tools, representative RLM execution, and confirmed
+cleanup.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
