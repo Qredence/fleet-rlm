@@ -1,11 +1,14 @@
-"""Unit coverage for the Phase 1 live proof's async strict cleanup."""
+"""Live proof cleanup owns provider operations and reports failures truthfully."""
 
 from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
 
-from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
+import pytest
+
+from tests.live.backend import _cleanup
+from tests.live.backend._cleanup import _strict_cleanup
 
 
 class _Platform:
@@ -67,3 +70,24 @@ def test_strict_cleanup_awaits_provider_operations_before_returning() -> None:
     assert volume.get_calls == [("phase1-volume", False)]
     assert len(volume.delete_calls) == 1
     assert resources._sandbox_ids == []
+
+
+@pytest.mark.parametrize("failed_resource", ["sandbox", "volume"])
+def test_cleanup_failure_is_reported_and_other_resources_still_settle(monkeypatch, failed_resource) -> None:
+    monkeypatch.setattr(_cleanup, "_CLEANUP_RETRY_DELAYS", ())
+    platform, volume = _Platform(), _VolumeClient()
+    resources = SimpleNamespace(_sandbox_ids=["sandbox-a"], platform=platform, client=SimpleNamespace(volume=volume))
+
+    async def fail(_resource):
+        raise RuntimeError("private provider diagnostic must not enter the receipt")
+
+    monkeypatch.setattr(platform if failed_resource == "sandbox" else volume, "delete", fail)
+
+    failures = asyncio.run(_strict_cleanup(resources, "owned-volume"))
+
+    assert failures == (failed_resource,)
+    assert resources._sandbox_ids == []
+    if failed_resource == "sandbox":
+        assert len(volume.delete_calls) == 1
+    else:
+        assert platform.delete_calls == ["sandbox-a"]

@@ -70,7 +70,7 @@ Regenerate from the owning source: `make api-sync`, `make stream-sync`, or `make
 ## Validation
 
 Use the smallest validation lane that proves the change, then escalate when the affected contract requires it.
-Repeat or broaden passing checks only for new changes, failures, or unresolved concerns. Add tests for meaningful behavior or regression risks, not to restate implementation.
+Repeat or broaden passing checks only for new changes, failures, or unresolved concerns. Add meaningful regressions to the existing behavior-owning test file by default; create a new file only for a distinct contract, fixture/process boundary, generated-contract lane, or live marker. Coverage is a coarse floor, not a reason to test every internal branch.
 For documentation or agent-instruction-only changes, run `make check-docs` and `git diff --check`. Code lanes below apply when their code or executable contracts change.
 
 ### Focused Python changes

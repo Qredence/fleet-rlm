@@ -9,34 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-
-def _turn():
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
-
-    async def not_cancelled() -> bool:
-        return False
-
-    return ClaimedRun(
-        uuid4(),
-        uuid4(),
-        TurnAccess(uuid4(), uuid4()),
-        TurnInput("hello"),
-        SessionHistory(),
-        not_cancelled,
-        _RunClaimToken(uuid4()),
-    )
-
-
-def _outcome(*, candidates=()):
-    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-
-    return RLMOutcome(
-        "completed",
-        PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
-        usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
-        artifact_candidates=candidates,
-    )
+from tests.support.turn_lifecycle import claimed_run, completed_outcome
 
 
 @pytest.mark.asyncio
@@ -44,7 +17,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
-    turn = _turn()
+    turn = claimed_run()
     data = b"artifact"
     candidate = ArtifactCandidate(
         uuid4(),
@@ -88,7 +61,9 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
     task = asyncio.create_task(
         RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
-            _outcome(candidates=(candidate,)),
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2}, candidates=(candidate,)
+            ),
             artifact_sink=sink,
         )
     )
@@ -107,7 +82,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
 async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
-    turn = _turn()
+    turn = claimed_run()
     write_started, release_write = asyncio.Event(), asyncio.Event()
 
     class Store:
@@ -137,7 +112,9 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
     task = asyncio.create_task(
         RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
-            _outcome(),
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
             result_snapshot_sink=snapshot,
         )
     )
@@ -156,7 +133,7 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
-    turn = _turn()
+    turn = claimed_run()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
     remove_started, release_remove = asyncio.Event(), asyncio.Event()
 
@@ -190,7 +167,9 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
     task = asyncio.create_task(
         RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
             turn,
-            _outcome(),
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
             result_snapshot_sink=snapshot,
         )
     )
@@ -213,7 +192,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> None:
     from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunLifecycleService
 
-    turn = _turn()
+    turn = claimed_run()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
 
     class Store:
@@ -247,7 +226,9 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
     task = asyncio.create_task(
         RunLifecycleService(store, max_artifact_bytes=1024).finish(
             turn,
-            _outcome(),
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
             result_snapshot_sink=snapshot,
         )
     )

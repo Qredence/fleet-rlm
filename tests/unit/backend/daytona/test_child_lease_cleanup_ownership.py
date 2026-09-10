@@ -1,19 +1,4 @@
-"""P39 child lease/cleanup ownership contract lanes.
-
-Behavior-only evidence for the contracted single child-runtime owner
-(P36 rows P39-REC-002..006, absorbed behind one owner module):
-
-- VAL-REC-027: strict interpreter/broker shutdown; broker failure fails the
-  close while purge/delete/absence/permit restoration are still attempted.
-- VAL-REC-029: admission restoration follows cleanup settlement on every
-  path, without leaks or over-release.
-- VAL-REC-030: cleanup failure is recorded as fatal and re-observed without
-  rerunning cleanup.
-- VAL-REC-031: close is single-owner, joinable, deadline-bounded, and
-  re-observable under a two-thread barrier race.
-- VAL-REC-032: cleanup survives owner-loop loss and dispatch failure through
-  the bounded fallback executor/disposable loop.
-"""
+"""Behavior contracts for child lease cleanup ownership."""
 
 from __future__ import annotations
 
@@ -21,6 +6,7 @@ import asyncio
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from threading import Event
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -656,5 +642,38 @@ def test_val_rec_032_late_cleanup_dispatch_failure_is_re_observable() -> None:
         owner_module.Thread = original_thread  # type: ignore[misc,assignment]
         owner_module._FALLBACK_CLEANUP_EXECUTOR = original_executor  # type: ignore[misc,assignment]
 
+    with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
+        owner.wait_owned()
+
+
+def test_thread_start_failure_dispatches_cleanup_without_loop_thread_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = Event()
+    release = Event()
+
+    def close(_lease: object) -> None:
+        """
+        Signal that cleanup was invoked and wait for release.
+        """
+        started.set()
+        assert release.wait(2)
+
+    class FailingThread:
+        def __init__(self, **_kwargs: object) -> None:
+            return None
+
+        def start(self) -> None:
+            raise RuntimeError("thread start failed")
+
+    monkeypatch.setattr(recursive_child_runtime, "Thread", FailingThread)
+    owner = recursive_child_runtime.LateCleanupOwner(wait_timeout_s=1.0)
+    acquisition: Future[object] = Future()
+    acquisition.set_result(object())
+
+    owner.adopt_late_acquisition(acquisition, close)
+    assert started.wait(2)
+
+    release.set()
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         owner.wait_owned()

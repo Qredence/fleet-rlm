@@ -1,16 +1,24 @@
-"""Prepared-context RLM runner execution contract."""
+"""Behavior contracts for runtime execution."""
 
 from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
+from contextvars import ContextVar
 from types import SimpleNamespace
+from typing import cast
 from uuid import uuid4
 
 import dspy
 import pytest
+
+from fleet_rlm.rlm.runtime import (
+    RLMExecutionContext,
+    WorkerOwnership,
+    start_rlm_worker,
+)
 
 
 @pytest.mark.asyncio
@@ -577,3 +585,34 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.display_text == "progressive completion"
+
+
+@pytest.mark.asyncio
+async def test_worker_handle_propagates_context_and_hides_thread_details() -> None:
+    execution_marker: ContextVar[str | None] = ContextVar("execution_marker", default=None)
+    execution_marker.set("turn-context")
+    main_thread = threading.get_ident()
+    ownership = WorkerOwnership()
+    context = cast(RLMExecutionContext, SimpleNamespace())
+    observations: list[tuple[object, object, Mapping[str, object]]] = []
+
+    async def execute(rlm: object, received_context: RLMExecutionContext, kwargs: Mapping[str, object]) -> str:
+        observations.append((rlm, received_context, kwargs))
+        assert execution_marker.get() == "turn-context"
+        assert threading.get_ident() != main_thread
+        return f"answer:{kwargs['value']}"
+
+    worker = start_rlm_worker(
+        rlm=object(),
+        context=context,
+        kwargs={"value": "sample"},
+        ownership=ownership,
+        execute=execute,
+    )
+
+    await worker.wait_until_done()
+
+    assert worker.result() == "answer:sample"
+    assert len(observations) == 1
+    assert observations[0][1] is context
+    await ownership.wait_owned()

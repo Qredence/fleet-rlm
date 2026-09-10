@@ -499,7 +499,7 @@ Executable evidence lives in:
 - `tests/unit/backend/daytona/test_native_sdk_contract.py`
 - `tests/unit/backend/daytona/test_sdk_resource_errors.py`
 - `tests/unit/backend/daytona/test_native_interpreter.py`
-- `tests/unit/backend/daytona/test_run_environment_root_lease.py`
+- `tests/unit/backend/daytona/test_daytona_session_lifecycle.py`
 - `tests/unit/backend/test_host_tool_submit_broker.py`
 - `tests/live/backend/test_daytona_containment.py`
 - `scripts/benchmarks/attach_phase3_receipt.py`

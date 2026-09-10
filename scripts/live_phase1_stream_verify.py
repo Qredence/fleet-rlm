@@ -25,6 +25,7 @@ _LIVE_TEST = "tests/live/backend/test_phase1_daytona_stream.py::test_phase1_dayt
 _CANDIDATE_PATHS = (
     "scripts/live_phase1_stream_verify.py",
     "tests/live/backend/test_phase1_daytona_stream.py",
+    "tests/live/backend/_cleanup.py",
 )
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL = "databricks-deepseek-v4-flash-0731"

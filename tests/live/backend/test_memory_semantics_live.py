@@ -56,13 +56,8 @@ from fleet_rlm.workspace.memory import WorkspaceMemory, WorkspaceMemoryToolHost,
 from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.workspace.paths import volume_paths_from_settings
 from fleet_rlm.workspace.storage import AgentStorageSession, DaytonaSandboxVolumeFs, WorkspaceMemoryStorage
-from tests.live.backend.test_fleet_rlm_daytona_mvp import (
-    _assert_sse_stop,
-    _live_settings,
-    _sse_chunks,
-    _strict_cleanup,
-)
-from tests.live.backend.test_memory_candidate_live import _paired_tool_chunks
+from tests.live.backend._mvp_support import _assert_sse_stop, _live_settings, _sse_chunks, _strict_cleanup
+from tests.live.backend._tool_chunks import _paired_tool_chunks
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 

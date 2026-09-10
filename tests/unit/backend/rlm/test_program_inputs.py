@@ -1,65 +1,27 @@
-"""Characterization and validation tests for model-visible RLM inputs."""
+"""Behavior contracts for program inputs."""
 
 from __future__ import annotations
 
 import ast
 import json
 from pathlib import Path
-from uuid import UUID
 
 import dspy
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.attachments.models import PreparedAttachment
-from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
+from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
     AttachmentInput,
+    FleetRLMSignature,
     SessionContextInput,
     SkillCardInput,
     build_rlm_input_kwargs,
 )
 from fleet_rlm.rlm.result import RLMConfigError
-from fleet_rlm.skills.models import SkillCard
-from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY
-
-SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
-SKILL_ID = UUID("00000000-0000-0000-0000-000000000002")
-ATTACHMENT_ID = UUID("00000000-0000-0000-0000-000000000003")
-
-
-def _payload() -> dict[str, object]:
-    return build_rlm_input_kwargs(
-        request="Summarize the report",
-        history=dspy.History(messages=[]),
-        session_context=SessionContextManifest(
-            session_id=SESSION_ID,
-            checkpoint_version=7,
-            message_count=3,
-            recent=(TurnPreview(ordinal=3, role="user", preview="Recent request"),),
-        ),
-        skill_cards=(
-            SkillCard(
-                id=SKILL_ID,
-                name="report-builder",
-                description="Build bounded reports",
-                version="1.0.0",
-                resources_available=True,
-            ),
-        ),
-        attachments=(
-            PreparedAttachment(
-                ATTACHMENT_ID,
-                "report.md",
-                "text/markdown",
-                128,
-                "a" * 64,
-            ),
-        ),
-        workspace=DAYTONA_WORKSPACE_CAPABILITY,
-    )
+from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
 
 
 def test_default_input_payload_contains_only_bounded_metadata() -> None:
@@ -574,3 +536,140 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
                     offenders.append(relative)
                     break
     assert offenders == [], f"DSPy imports leaked into deterministic layers: {offenders}"
+
+
+_SESSION_ID = "00000000-0000-0000-0000-000000000001"
+
+
+def _manifest():
+    from fleet_rlm.chat.session_context import SessionContextManifest
+
+    return SessionContextManifest(
+        session_id=__import__("uuid").UUID(_SESSION_ID),
+        checkpoint_version=0,
+        message_count=0,
+        recent=(),
+    )
+
+
+def test_fleet_signature_declares_history_as_required_input() -> None:
+    """``FleetRLMSignature`` declares ``history: dspy.History`` as a required input."""
+
+    assert "history" in FleetRLMSignature.input_fields
+
+    history_field = FleetRLMSignature.input_fields["history"]
+    assert history_field.annotation is dspy.History
+    assert history_field.is_required()
+
+    extra = getattr(history_field, "json_schema_extra", None)
+    assert isinstance(extra, dict)
+    assert extra.get("__dspy_field_type") == "input"
+
+    # The description mirrors the P44 canonical-conversation wording.
+    desc = extra.get("desc", "")
+    assert isinstance(desc, str)
+    for needle in (
+        "Canonical committed Session conversation",
+        "history.messages",
+        "do not assume previews are complete",
+        "do not treat",
+        "hidden trajectory",
+        "failed Runs as conversation",
+    ):
+        assert needle in desc, f"history description missing canonical phrase: {needle!r}"
+
+
+def test_fleet_signature_still_declares_unchanged_common_fields() -> None:
+    """The P41 common inputs and ``answer`` output are unchanged by P44.3."""
+
+    assert set(FleetRLMSignature.input_fields) == {
+        "request",
+        "history",
+        "session_context",
+        "skill_cards",
+        "attachments",
+    }
+    for required in ("request", "session_context", "skill_cards", "attachments"):
+        assert FleetRLMSignature.input_fields[required].is_required()
+    assert "answer" in FleetRLMSignature.output_fields
+    assert FleetRLMSignature.output_fields["answer"].is_required()
+
+
+def test_build_rlm_input_kwargs_includes_history_when_supplied() -> None:
+    """The optional ``history`` keyword round-trips into the kwargs dict."""
+
+    history = dspy.History(messages=[{"request": "earlier", "answer": "earlier answer"}])
+    kwargs = build_rlm_input_kwargs(
+        request="current",
+        session_context=_manifest(),
+        history=history,
+    )
+
+    assert "history" in kwargs
+    # The exact installed ``dspy.History`` instance is forwarded unchanged
+    # (no transformation, no preview, no replacement).
+    assert kwargs["history"] is history
+    assert type(kwargs["history"]) is dspy.History
+    assert list(kwargs["history"].messages) == [{"request": "earlier", "answer": "earlier answer"}]
+
+
+def test_build_rlm_input_kwargs_omits_history_when_not_supplied() -> None:
+    """Without ``history`` the key is absent so existing call sites keep working."""
+
+    kwargs = build_rlm_input_kwargs(
+        request="current",
+        session_context=_manifest(),
+    )
+
+    assert "history" not in kwargs
+    # Existing default payload shape is preserved.
+    assert set(kwargs) == {"request", "session_context", "skill_cards", "attachments"}
+
+
+@pytest.mark.parametrize(
+    "bad_value",
+    [
+        {"messages": [{"request": "r", "answer": "a"}]},
+        [{"request": "r", "answer": "a"}],
+        "raw-string",
+        42,
+        object(),
+    ],
+)
+def test_build_rlm_input_kwargs_rejects_non_dspy_history_values(bad_value: object) -> None:
+    """``build_rlm_input_kwargs`` fails closed on non-``dspy.History`` values."""
+
+    with pytest.raises(RLMConfigError, match="Turn input metadata is invalid"):
+        build_rlm_input_kwargs(
+            request="current",
+            session_context=_manifest(),
+            history=bad_value,  # type: ignore[arg-type]
+        )
+
+
+def test_build_rlm_input_kwargs_rejects_history_subclass_or_shadow() -> None:
+    """A subclass of ``dspy.History`` is rejected; only the exact class is accepted."""
+
+    class _HistorySubclass(dspy.History):
+        pass
+
+    with pytest.raises(RLMConfigError, match="Turn input metadata is invalid"):
+        build_rlm_input_kwargs(
+            request="current",
+            session_context=_manifest(),
+            history=_HistorySubclass(messages=[]),
+        )
+
+
+def test_dspy_rlm_validates_end_to_end_payload_with_history() -> None:
+    """``dspy.RLM(FleetRLMSignature)._validate_inputs`` accepts the full payload."""
+
+    history = dspy.History(messages=[{"request": "earlier", "answer": "earlier answer"}])
+    kwargs = build_rlm_input_kwargs(
+        request="current",
+        session_context=_manifest(),
+        history=history,
+    )
+    # The contract pinned by this test: the production payload with a real
+    # ``dspy.History`` instance satisfies the native RLM input validator.
+    dspy.RLM(FleetRLMSignature)._validate_inputs(kwargs)
