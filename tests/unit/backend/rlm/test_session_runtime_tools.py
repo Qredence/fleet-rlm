@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import uuid4
-
 import dspy
 import pytest
 
@@ -207,25 +205,3 @@ def test_proxy_preserves_exact_source_metadata_without_retaining_source_tool() -
     assert proxy.args is not source.args
     assert proxy.arg_desc is not source.arg_desc
     assert proxy.func(value="public") == "public"
-
-
-@pytest.mark.asyncio
-async def test_runner_caches_one_tool_registry_per_session_key() -> None:
-    """The runner's inline tenancy cache keys registries by full Session identity."""
-    from fleet_rlm.rlm.runtime import RLMRunner
-    from fleet_rlm.rlm.session_runtime import SessionKey
-
-    runner = RLMRunner()
-    try:
-        cache = runner._session_tool_registries
-        assert cache == {}
-        first = SessionKey(workspace_id=uuid4(), session_id=uuid4())
-        second = SessionKey(workspace_id=first.workspace_id, session_id=uuid4())
-        registry_a, registry_b = SessionToolRegistry(), SessionToolRegistry()
-        cache[first] = registry_a
-        cache[second] = registry_b
-        assert cache[first] is registry_a
-        assert cache[second] is registry_b
-        assert cache[first] is not cache[second]
-    finally:
-        await runner.aclose()

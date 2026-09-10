@@ -155,8 +155,8 @@ async def test_tainted_root_forces_new_sandbox_and_preserves_volume(monkeypatch:
     assert first.mark_tainted is not None
     first.mark_tainted()
     assert key in provider._tainted_root_keys
-    assert first.resident_release is not None
-    await first.resident_release()
+    assert first.resident_release is None
+    await provider.resources.runtime.close_root_session(workspace_id, session_id)
     assert old_owner.closed
     assert provider.resources.runtime.roots == ()
 
@@ -288,8 +288,8 @@ async def test_production_runtime_lookup_failure_quarantines_before_root_publica
     fresh = await registry.acquire(key, "fingerprint")
     assert fresh is not resident
     await fresh_environment.release()
-    assert fresh_environment.resident_release is not None
-    await fresh_environment.resident_release()
+    assert fresh_environment.resident_release is None
+    await resources.runtime.close_root_session(workspace_id, session_id)
     await provider.aclose()
     await registry.shutdown()
 

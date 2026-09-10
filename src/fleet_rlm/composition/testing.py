@@ -38,7 +38,6 @@ from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import RLMFactoryLike
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
@@ -119,7 +118,6 @@ def build_local_inventory(
     artifact_reader: ArtifactReader,
     preparation: RunPreparation,
     rlm_factory: RLMFactoryLike,
-    session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
@@ -146,8 +144,6 @@ def build_local_inventory(
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
     cleanup = RunCleanupSupervisor(max_jobs=8)
-    if session_runtime_registry is None:
-        session_runtime_registry = SessionRLMRegistry()
     lifecycle = RunLifecycleService(
         run_state,
         max_artifact_bytes=settings.max_artifact_bytes,
@@ -155,7 +151,7 @@ def build_local_inventory(
         stale_after_seconds=settings.run_stale_after_seconds,
         cleanup=cleanup,
     )
-    runner = RLMRunner(factory=rlm_factory, runtime_registry=session_runtime_registry)
+    runner = RLMRunner(factory=rlm_factory)
     coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=preparation,
@@ -176,7 +172,6 @@ def build_local_inventory(
         run_cleanup_supervisor=cleanup,
         run_preparation=preparation,
         run_state_store=run_state,
-        session_runtime_registry=session_runtime_registry,
         config_policy=ConfigPolicyService.from_settings(settings),
         database=database,
     )
@@ -388,7 +383,6 @@ class DeterministicTurnPreparation:
         wrap_up_seconds: float = 300.0,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
-        session_runtime_registry: SessionRLMRegistry | None = None,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
@@ -406,7 +400,6 @@ class DeterministicTurnPreparation:
                 max_artifact_bytes=max_artifact_bytes,
                 max_url_bytes=max_url_bytes,
             ),
-            session_runtime_registry=session_runtime_registry,
         )
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
@@ -435,7 +428,6 @@ def install_testing_composition(
         volume_paths=volume_paths_from_settings(settings),
     )
     volume_gateway = OfflineHostVolumeGateway(mirror)
-    session_runtime_registry = SessionRLMRegistry()
     storage = build_local_storage_adapters(
         settings,
         session_factory=database.session_factory,
@@ -456,10 +448,8 @@ def install_testing_composition(
             wrap_up_seconds=settings.rlm_wrap_up_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
             max_url_bytes=settings.max_url_bytes,
-            session_runtime_registry=session_runtime_registry,
         ),
         rlm_factory=TestingRLMFactory(),
-        session_runtime_registry=session_runtime_registry,
     )
     # Overlay only the host volume adapters; keep the shared local inventory
     # members so new RuntimeInventory fields cannot silently drop here.

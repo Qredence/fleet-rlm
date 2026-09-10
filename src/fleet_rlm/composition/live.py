@@ -35,14 +35,12 @@ from fleet_rlm.composition.inventory import (
 )
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
-from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
@@ -564,14 +562,12 @@ async def build_daytona_composition(
         local_scope = LocalScope()
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
-        session_runtime_registry = SessionRLMRegistry(idle_timeout=DEFAULT_IDLE_STOP_SECONDS)
         run_preparation = build_run_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
             skill_catalog=skill_catalog,
             settings=resolved,
             models=model_bundle,
-            session_runtime_registry=session_runtime_registry,
         )
         run_state = SqlAlchemyRunStateStore(
             session_factory,
@@ -685,7 +681,6 @@ async def build_daytona_composition(
 
         runner = RLMRunner(
             factory=RLMFactory(verbose=resolved.rlm_verbose),
-            runtime_registry=session_runtime_registry,
         )
         coordinator = TurnRuntime(
             lifecycle=lifecycle,
@@ -713,7 +708,6 @@ async def build_daytona_composition(
             run_state_store=run_state,
             database=database_lifecycle,
             model_bundle=model_bundle,
-            session_runtime_registry=session_runtime_registry,
             orphan_cleanup_task=orphan_cleanup_task,
             memory_outbox_task=memory_outbox_task,
         )
@@ -882,7 +876,6 @@ def build_run_preparation(
     skill_catalog: SkillCatalog,
     settings: Settings,
     models: RLMModelBundle,
-    session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> DefaultRunPreparer:
     """
     Create a Daytona run preparer configured with models, runtime limits,
@@ -918,8 +911,7 @@ def build_run_preparation(
             finalization_seconds=settings.rlm_wrap_up_seconds,
         ),
         attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
+        environments=_DaytonaEnvironmentProvider(resources, settings),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
-        session_runtime_registry=session_runtime_registry,
         runtime_variant=settings.runtime_variant,
     )

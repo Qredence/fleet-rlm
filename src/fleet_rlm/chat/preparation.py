@@ -42,9 +42,7 @@ from fleet_rlm.rlm.runtime import (
     RLMInterpreter,
     RunIdentity,
     SessionView,
-    program_fingerprint_for_context,
 )
-from fleet_rlm.rlm.session_runtime import ProgramFingerprint, SessionKey, SessionRLMRegistry
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
@@ -133,7 +131,6 @@ class PreparedTurn:
     attachments: tuple[PreparedAttachment, ...] = ()
     capabilities: PreparedCapabilities | None = None
     program: RLMExecutionSpec | None = None
-    program_fingerprint: ProgramFingerprint | None = None
     authorization: RunAuthority | None = None
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
@@ -316,7 +313,6 @@ class DefaultRunPreparer:
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
         recursive_options: RecursiveRLMOptions | None = None,
-        session_runtime_registry: SessionRLMRegistry | None = None,
         wrap_up_seconds: float = 300.0,
         budget_limits: BudgetLimits | None = None,
         runtime_variant: Literal["legacy"] = "legacy",
@@ -329,7 +325,6 @@ class DefaultRunPreparer:
         self._recursive_options = recursive_options or RecursiveRLMOptions()
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._budget_limits = budget_limits or BudgetLimits()
-        self._session_runtime_registry = session_runtime_registry
         if runtime_variant != "legacy":
             raise ValueError("only retained broker execution is supported")
         self._runtime_variant: Literal["legacy"] = runtime_variant
@@ -355,16 +350,6 @@ class DefaultRunPreparer:
                 raise RunPreparationCancelledError("Turn cancelled")
         except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
             raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
-
-        if self._session_runtime_registry is not None:
-            await self._session_runtime_registry.evict_configured_idle(deadline=deadline)
-            await self._session_runtime_registry.close_unhealthy(
-                SessionKey(
-                    workspace_id=str(run.access.workspace_id),
-                    session_id=str(run.session_id),
-                ),
-                deadline=deadline,
-            )
 
         with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
             try:
@@ -569,9 +554,6 @@ class DefaultRunPreparer:
             capabilities=capabilities,
             program=capabilities.spec,
             # The runner calls the same helper again with its observed and
-            # recursive Tool wrappers; this preparation value is the composed
-            # program identity available before execution starts.
-            program_fingerprint=program_fingerprint_for_context(execution),
             authorization=run.authority,
             result_snapshot_sink=environment.result_snapshot_sink,
             post_commit_memory_promotion=environment.post_commit_memory_promotion,
