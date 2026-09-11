@@ -27,6 +27,71 @@ def test_record_phase_failure_preserves_sanitized_last_lm_call_structure() -> No
     assert outputs[-1]["last_lm_call"] == {"call_index": 4, "response_keys": ()}
 
 
+def test_record_phase_failure_merges_adapter_parse_profile_into_last_lm_call() -> None:
+    import dspy
+    from dspy.utils.exceptions import AdapterParseError
+
+    class _Sig(dspy.Signature):
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    error = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response="",
+        message="The LM returned an empty or null response.",
+    )
+
+    record_phase_failure(
+        phase,
+        0.0,
+        None,
+        None,
+        error,
+        last_lm_call={"call_index": 14, "response_keys": ()},
+    )
+
+    last_call = outputs[-1]["last_lm_call"]
+    assert last_call["call_index"] == 14
+    assert last_call["response_keys"] == ()
+    assert last_call["parse_failure_kind"] == "empty"
+    assert last_call["lm_response_chars"] == 0
+    assert last_call["has_reasoning_content"] is False
+
+
+def test_record_phase_failure_preserves_callback_reasoning_flag_on_empty_parse() -> None:
+    import dspy
+    from dspy.utils.exceptions import AdapterParseError
+
+    class _Sig(dspy.Signature):
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    error = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response="",
+        message="The LM returned an empty or null response.",
+    )
+
+    record_phase_failure(
+        phase,
+        0.0,
+        None,
+        None,
+        error,
+        last_lm_call={"call_index": 14, "has_reasoning_content": True},
+    )
+
+    last_call = outputs[-1]["last_lm_call"]
+    assert last_call["parse_failure_kind"] == "empty"
+    assert last_call["has_reasoning_content"] is True
+
+
 def test_phase_trace_records_wrap_up_diagnostics_without_changing_trajectory() -> None:
     outputs: list[dict[str, object]] = []
     phase = SimpleNamespace(set_outputs=outputs.append)

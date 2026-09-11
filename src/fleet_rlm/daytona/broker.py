@@ -266,7 +266,9 @@ _CONTEXT_MOUNT_ROOT = __CONTEXT_MOUNT_ROOT__
 _CONTEXT_MANIFEST_SHA256 = __CONTEXT_MANIFEST_SHA256__
 _execution_lock = threading.Lock()
 _context_accesses = []
-_namespace = {"__name__": "__fleet_rlm_repl__"}
+# `context` is always defined so REPL code never hits NameError when no
+# capsule is bound (single utf-8 entry promotes it to str below).
+_namespace = {"__name__": "__fleet_rlm_repl__", "context": []}
 
 
 def _read_json(handler):
@@ -397,7 +399,7 @@ def _fleet_load_context_manifest(raw_manifest):
     if len(values) == 1 and values[0]["encoding"] == "utf-8":
         _namespace["context"] = values[0]["data"]
     else:
-        _namespace.pop("context", None)
+        _namespace["context"] = []
     return values
 
 

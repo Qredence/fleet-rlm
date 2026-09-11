@@ -93,11 +93,14 @@ keyword-only and are not routed through the native positional call contract.
   program, taint, eviction, or failure creates a replacement. Greetings also use this native path. The default for RLM Turns is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
 - Fleet scopes `FleetJSONAdapter`, a DSPy JSON adapter with bounded corrective
-  re-asks and shared deadline/budget accounting, to each Turn. It preserves the
-  pinned action grammar; exhausted repair is an `adapter_parse_error`. RLM action output contains
+  re-asks and shared deadline/budget accounting, to each Turn. Wrap-up starts
+  on the final native iteration. Empty or reasoning-only completions stay on
+  the bounded parse re-ask path while time and iterations remain. It preserves
+  the pinned action grammar; exhausted repair is an `adapter_parse_error`. RLM
+  action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
   output field. The selected `daytona-recursive` Root and Sub Models
-(through the policy-configured Databricks Chat Completions gateway) cap Root
+  (through the policy-configured Databricks Chat Completions gateway) cap Root
 and Sub at 16,384 output tokens with no
 reasoning-effort override. This is separate from `max_output_chars`, which
 bounds REPL output retained in recursive history.
@@ -106,8 +109,10 @@ bounds REPL output retained in recursive history.
   `recursion_max_prompt_chars`, `recursion_child_max_iters`,
   `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 - MLflow `RLM.*_lm` spans record recursive depth, call order, bounded context-size
-  metadata, response shape, and per-call provider token usage when DSPy exposes it;
-  the aggregate Turn usage remains on `RLM.execute`.
+  metadata, legacy list/dict response shape (`text`, `reasoning_content`), and
+  per-call provider token usage when DSPy or the stored history entry exposes it;
+  the aggregate Turn usage remains on `RLM.execute`. Missing provider usage stays
+  `unavailable`, never a fabricated zero.
 - MLflow `RLM.root_action` spans record each parsed iteration with bounded/redacted
   reasoning and code previews. Host Tools create nested `tool.*` spans with their
   allowlisted input/output projections, while `sandbox.execute` records the step's

@@ -399,3 +399,10 @@ def test_sandbox_backend_requires_co_located_broker_and_ignores_code_interpreter
 
     assert code_interpreter.created == []
     assert code_interpreter.deleted == []
+
+
+def test_context_defaults_to_empty_list_without_capsule() -> None:
+    """tr-1a67398e: `len(context)` must not raise NameError when no capsule is bound."""
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    assert interpreter.execute("_out = str(len(context))") == "0"
+    assert interpreter.execute("_out = str(type(context).__name__)") == "list"

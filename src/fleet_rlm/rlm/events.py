@@ -23,7 +23,7 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback, is_native_rlm
+from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -1183,6 +1183,14 @@ def record_phase_failure(
     }
     if last_lm_call:
         outputs["last_lm_call"] = dict(last_lm_call)
+    parse_profile = _adapter_parse_profile(exc)
+    if parse_profile:
+        merged_last_call = dict(last_lm_call) if last_lm_call else {}
+        had_reasoning = bool(merged_last_call.get("has_reasoning_content"))
+        merged_last_call.update(parse_profile)
+        if had_reasoning or merged_last_call.get("has_reasoning_content"):
+            merged_last_call["has_reasoning_content"] = True
+        outputs["last_lm_call"] = merged_last_call
     if wrap_up:
         outputs.update(dict(wrap_up))
     output_diag = getattr(exc, "output_chars", None)
