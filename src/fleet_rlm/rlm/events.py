@@ -1186,10 +1186,7 @@ def record_phase_failure(
     parse_profile = _adapter_parse_profile(exc)
     if parse_profile:
         merged_last_call = dict(last_lm_call) if last_lm_call else {}
-        had_reasoning = bool(merged_last_call.get("has_reasoning_content"))
         merged_last_call.update(parse_profile)
-        if had_reasoning or merged_last_call.get("has_reasoning_content"):
-            merged_last_call["has_reasoning_content"] = True
         outputs["last_lm_call"] = merged_last_call
     if wrap_up:
         outputs.update(dict(wrap_up))

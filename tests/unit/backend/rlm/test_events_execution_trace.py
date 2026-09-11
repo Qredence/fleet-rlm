@@ -58,7 +58,7 @@ def test_record_phase_failure_merges_adapter_parse_profile_into_last_lm_call() -
     assert last_call["response_keys"] == ()
     assert last_call["parse_failure_kind"] == "empty"
     assert last_call["lm_response_chars"] == 0
-    assert last_call["has_reasoning_content"] is False
+    assert "has_reasoning_content" not in last_call
 
 
 def test_record_phase_failure_preserves_callback_reasoning_flag_on_empty_parse() -> None:

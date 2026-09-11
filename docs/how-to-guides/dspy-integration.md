@@ -89,10 +89,14 @@ work; see the [implementation status](../decisions/006-implementation-status.md)
 - Fleet scopes `FleetJSONAdapter` to each Turn alongside the Root Model. It
   extends DSPy's JSON adapter with deadline/budget accounting and bounded
   corrective re-asks. Wrap-up also starts on the final native iteration
-  (`current == total`). Empty or reasoning-only completions use those bounded
-  parse re-asks while time and iterations remain. It retains the pinned DSPy
-  action grammar; exhausted repairs produce bounded `adapter_parse_error`
-  failures without changing process-global DSPy settings.
+  (`current == total`). When wrap-up is enabled (`rlm.wrap_up_seconds` > 0,
+  the production default), exhaustion on that last iteration is a Turn
+  `timeout`: DSPy extract fallback (`native_extraction_fallback`) only runs if
+  every `generate_action` returns without SUBMIT, so it is unreachable.
+  Empty or reasoning-only completions use those bounded parse re-asks while
+  time and iterations remain. It retains the pinned DSPy action grammar;
+  exhausted repairs produce bounded `adapter_parse_error` failures without
+  changing process-global DSPy settings.
 - The REPL `context` variable is always defined: a single utf-8 attachment
   capsule promotes it to that attachment's text, otherwise it stays `[]`.
   REPL code must treat `[]` as "no prepared context" and trust the
