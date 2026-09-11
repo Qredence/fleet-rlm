@@ -569,21 +569,19 @@ def test_complete_daytona_mvp_through_fastapi(
                             " 1) The FIRST code cell must immediately call, once:"
                             " iteration_token = issue_iteration_token();"
                             ' accumulator = [iteration_token]; print("FIRST_ITERATION_READY").'
-                            ' 2) Reuse it: run single_result = llm_query("Return exactly ROOT") and'
+                            " 2) The SECOND code cell must contain only these statements in this order"
+                            " (no parsing request, no regex, no extra logic):"
+                            ' single_result = llm_query("Return exactly ROOT");'
                             ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA",'
-                            ' "Return exactly GAMMA"]); reject any result starting with [ERROR]; extend the'
-                            " accumulator with [single_result, *batch_results]; call exactly once with keywords,"
-                            " no casts/copies/positional args:"
+                            ' "Return exactly GAMMA"]);'
+                            " accumulator.extend([single_result, *batch_results]);"
                             " verification = verify_semantic_work(iteration_token=iteration_token,"
-                            " single_result=single_result, batch_results=batch_results, accumulator=accumulator)."
-                            ' Append "notes/findings.md" with the results and verification["checksum"]: first set'
-                            ' checksum = verification["checksum"] and content = f"single={single_result}'
-                            ' batch={batch_results} checksum={checksum}", then call workspace_result ='
-                            ' append_workspace_text(path="notes/findings.md", content=content); require'
-                            ' workspace_result["ok"]. Publish the existing Workspace document without'
-                            " resending its body: call artifact_result = publish_workspace_artifact("
-                            'path="notes/findings.md", kind="markdown", title="Findings");'
-                            ' require artifact_result["ok"]; print("SECOND_ITERATION_READY").'
+                            " single_result=single_result, batch_results=batch_results, accumulator=accumulator);"
+                            ' checksum = verification["checksum"];'
+                            ' content = f"single={single_result} batch={batch_results} checksum={checksum}";'
+                            ' workspace_result = append_workspace_text(path="notes/findings.md", content=content);'
+                            ' artifact_result = publish_workspace_artifact(path="notes/findings.md",'
+                            ' kind="markdown", title="Findings"); print("SECOND_ITERATION_READY").'
                             " 3) Set non-empty string-only summary/findings; call exactly"
                             " SUBMIT(answer=summary, findings=findings) with keywords. No fallback."
                         ),

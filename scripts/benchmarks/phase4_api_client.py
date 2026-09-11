@@ -279,7 +279,7 @@ def _usage_metrics(usage: Mapping[str, Any]) -> tuple[int | None, int | None, in
     return input_tokens, output_tokens, root_calls, child_calls, delegated
 
 
-def _read_events(path: Path | None, *, offset: int, token: str, timeout: float = 5.0) -> list[dict[str, Any]]:
+def _read_events(path: Path | None, *, offset: int, token: str, timeout: float = 130.0) -> list[dict[str, Any]]:
     if path is None:
         return []
     deadline = time.monotonic() + timeout
