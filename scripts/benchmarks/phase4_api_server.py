@@ -10,6 +10,7 @@ resource observations to an ephemeral NDJSON file for the parent driver.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import contextvars
 import inspect
 import json
@@ -118,6 +119,8 @@ class LifecycleObserver:
         self._created: dict[str, tuple[int, str | None, float, tuple[int, int, int] | None]] = {}
         self._stats: dict[str, dict[str, Any]] = {}
         self._attached = False
+        self._platform: Any = None
+        self._observed_delete: Any = None
 
     def attach(self) -> None:
         if self._attached:
@@ -217,7 +220,30 @@ class LifecycleObserver:
 
         platform.create = observed_create  # type: ignore[method-assign]
         platform.delete = observed_delete  # type: ignore[method-assign]
+        self._platform = platform
+        self._observed_delete = observed_delete
         self._attached = True
+
+    async def _sweep_outstanding_sandboxes(self, trial: str | None) -> None:
+        """Delete any provider sandboxes still tracked for one campaign trial."""
+        if trial is None or self._observed_delete is None:
+            return
+        get = getattr(self._platform, "get", None) if self._platform is not None else None
+        for sandbox_id, record in list(self._created.items()):
+            if record[1] != trial:
+                continue
+            target: object = sandbox_id
+            if callable(get):
+                try:
+                    resolved = await get(sandbox_id)
+                except BaseException:
+                    resolved = None
+                if resolved is not None:
+                    target = resolved
+            try:
+                await self._observed_delete(target)
+            except BaseException:
+                continue
 
     async def close_turn_root(self, session_id: UUID) -> None:
         """Close the retained root belonging to one streamed campaign Turn."""
@@ -244,6 +270,7 @@ class LifecycleObserver:
                 {"event": "turn_cleanup", "trial": trial, "cleanup": False, "error_category": type(exc).__name__[:64]},
             )
             return
+        await self._sweep_outstanding_sandboxes(trial)
         stats = self._stats.pop(
             trial or "",
             {"created": 0, "deleted": 0, "delete_failures": 0, "sandbox_seconds": 0, "shape": None},
@@ -298,7 +325,9 @@ class CampaignMiddleware:
                 and not message.get("more_body", False)
             ):
                 finished = True
-                await self.observer.close_turn_root(session_id)
+                # Root close runs after the terminal SSE chunk is sent. Client
+                # disconnect must not cancel provider cleanup mid-flight.
+                await asyncio.shield(self.observer.close_turn_root(session_id))
 
         try:
             return await self.app(scope, receive, observed_send)

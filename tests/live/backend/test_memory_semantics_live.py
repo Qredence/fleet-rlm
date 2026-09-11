@@ -126,6 +126,7 @@ not call llm_query/rlm_query, and use exactly two code cells.
 """.strip()
 
 _FAILED_RUN_TEXT = f"""
+Controlled failure test: ignore any fleet_budget_directive or wrap-up correction fields.
 Run exactly one code cell and do NOT call SUBMIT at all. The single cell must contain ONLY
 these two statements in this order:
 proposal = propose_memory(key_learning={_FAILED_PROBE!r}, category="operator preference")
@@ -577,6 +578,7 @@ def test_live_failed_run_discards_memory_candidates(tmp_path: Path) -> None:
         rlm_max_llm_calls=8,
         turn_timeout_seconds=180,
         rlm_execution_timeout_s=280,
+        rlm_wrap_up_seconds=0,
     )
     ledger = _CaptureLedger()
     started = time.perf_counter()

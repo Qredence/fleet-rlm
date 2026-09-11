@@ -361,9 +361,15 @@ def _require_mlflow_server(contract: Any, *, timeout_seconds: float = 5.0) -> st
     uri = contract.mlflow_tracking_uri
     if not isinstance(uri, str) or not uri.startswith(("http://", "https://")):
         raise Phase4CampaignError("campaign MLflow tracking server is not a reachable HTTP(S) URI")
-    probe_url = uri.rstrip("/") + "/api/2.0/mlflow/experiments/list?max_results=1"
+    # MLflow 3.x removed the legacy GET list endpoint; search is the stable probe.
+    probe_url = uri.rstrip("/") + "/api/2.0/mlflow/experiments/search"
     try:
-        request = urllib.request.Request(probe_url, method="GET")
+        request = urllib.request.Request(
+            probe_url,
+            data=json.dumps({"max_results": 1}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             if not 200 <= response.status < 300:
                 raise Phase4CampaignError("MLflow tracking server is unreachable")
