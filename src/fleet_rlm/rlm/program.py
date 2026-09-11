@@ -297,7 +297,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         Returns:
                 `True` if wrap-up is enabled and the action iteration is at or below its
                 time reserve, has exhausted exploration, or is the final native iteration,
-                `False` otherwise.
+                `False` otherwise. When wrap-up is enabled, last-iteration exhaustion is a
+                Turn timeout: DSPy extract fallback never runs because ``generate_action``
+                does not return.
         """
         return bool(
             remaining is not None
@@ -364,31 +366,6 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             value=_wrap_up_correction(reason),
         )
         return extended, extended_inputs
-
-    def _begin_wrap_up_after_parse_failure(
-        self,
-        *,
-        remaining: float,
-        call_lm: BaseLM,
-        request_signature: type[Signature],
-        request_inputs: dict[str, Any],
-        directive_field: str | None,
-    ) -> tuple[type[Signature], dict[str, Any], str]:
-        """Reclassify an unparseable action as wrap-up and attach SUBMIT corrections."""
-        self._enter_wrap_up(remaining, rejection_reason="unparseable_json")
-        self._next_wrap_up_attempt(call_lm)
-        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-            request_signature,
-            request_inputs,
-            remaining,
-            field_name=directive_field,
-        )
-        request_signature, request_inputs = self._with_wrap_up_correction(
-            request_signature,
-            request_inputs,
-            reason="unparseable JSON",
-        )
-        return request_signature, request_inputs, directive_field
 
     def __call__(
         self,
@@ -540,12 +517,18 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     boundary_remaining = self._remaining()
                     if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
                         wrap_up = True
-                        request_signature, request_inputs, directive_field = self._begin_wrap_up_after_parse_failure(
-                            remaining=boundary_remaining,
-                            call_lm=call_lm,
-                            request_signature=request_signature,
-                            request_inputs=request_inputs,
-                            directive_field=directive_field,
+                        self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
+                        self._next_wrap_up_attempt(call_lm)
+                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
+                            request_signature,
+                            request_inputs,
+                            boundary_remaining,
+                            field_name=directive_field,
+                        )
+                        request_signature, request_inputs = self._with_wrap_up_correction(
+                            request_signature,
+                            request_inputs,
+                            reason="unparseable JSON",
                         )
                         continue
                 if not self._budget.can_repair(attempt):

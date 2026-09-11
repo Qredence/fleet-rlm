@@ -94,10 +94,12 @@ keyword-only and are not routed through the native positional call contract.
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
 - Fleet scopes `FleetJSONAdapter`, a DSPy JSON adapter with bounded corrective
   re-asks and shared deadline/budget accounting, to each Turn. Wrap-up starts
-  on the final native iteration. Empty or reasoning-only completions stay on
-  the bounded parse re-ask path while time and iterations remain. It preserves
-  the pinned action grammar; exhausted repair is an `adapter_parse_error`. RLM
-  action output contains
+  on the final native iteration. When wrap-up is enabled, last-iteration
+  exhaustion is a Turn `timeout`; DSPy extract fallback is unreachable because
+  `generate_action` does not return. Empty or reasoning-only completions stay
+  on the bounded parse re-ask path while time and iterations remain. It
+  preserves the pinned action grammar; exhausted repair is an
+  `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
   output field. The selected `daytona-recursive` Root and Sub Models
   (through the policy-configured Databricks Chat Completions gateway) cap Root

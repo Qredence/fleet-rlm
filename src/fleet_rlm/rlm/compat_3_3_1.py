@@ -517,7 +517,11 @@ def _lm_output_profile(
 
 
 def _mapping_from_usage_value(value: object) -> dict[str, Any] | None:
-    """Copy an already-stored usage object into a mapping without inventing zeros."""
+    """Copy an already-stored usage object into a mapping without inventing zeros.
+
+    Allowlisting stays in ``_safe_usage_entry``. This only coerces Mapping,
+    ``model_dump()``, or ``__dict__`` into a dict.
+    """
     if value is None:
         return None
     if isinstance(value, Mapping):
@@ -530,27 +534,8 @@ def _mapping_from_usage_value(value: object) -> dict[str, Any] | None:
             dumped = None
         if isinstance(dumped, Mapping) and dumped:
             return dict(dumped)
-    data: dict[str, Any] = {}
-    for key in (
-        "prompt_tokens",
-        "completion_tokens",
-        "total_tokens",
-        "input_tokens",
-        "output_tokens",
-        "reasoning_tokens",
-        "completion_tokens_details",
-        "prompt_tokens_details",
-        "cache_read_input_tokens",
-        "prompt_cache_hit_tokens",
-        "cache_read_tokens",
-    ):
-        try:
-            item = getattr(value, key)
-        except Exception:
-            continue
-        if item is not None and not callable(item):
-            data[key] = item
-    return data or None
+    raw = getattr(value, "__dict__", None)
+    return dict(raw) if isinstance(raw, dict) and raw else None
 
 
 def _usage_from_history_entry(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
@@ -605,11 +590,13 @@ def _adapter_parse_profile(exc: BaseException) -> dict[str, JsonValue]:
     lm_response = getattr(parse_error, "lm_response", "")
     text = str(lm_response or "")
     kind = "empty" if _is_empty_adapter_parse(parse_error) else "non_object_json"
-    return {
+    profile: dict[str, JsonValue] = {
         "parse_failure_kind": kind,
         "lm_response_chars": len(text),
-        "has_reasoning_content": "reasoning_content" in text,
     }
+    if "reasoning_content" in text:
+        profile["has_reasoning_content"] = True
+    return profile
 
 
 def _latest_lm_telemetry(

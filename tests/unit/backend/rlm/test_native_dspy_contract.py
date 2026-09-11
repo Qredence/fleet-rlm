@@ -1025,7 +1025,7 @@ def test_adapter_parse_profile_classifies_empty_and_non_json() -> None:
     empty_profile = _adapter_parse_profile(empty)
     assert empty_profile["parse_failure_kind"] == "empty"
     assert empty_profile["lm_response_chars"] == 0
-    assert empty_profile["has_reasoning_content"] is False
+    assert "has_reasoning_content" not in empty_profile
 
     reasoning = AdapterParseError(
         adapter_name="JSONAdapter",
