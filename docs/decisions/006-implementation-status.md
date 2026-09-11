@@ -16,6 +16,36 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 3 re-cert and P4.5 live campaign (2026-09-11)
+
+Operator-gated live work on `fix/adr006-runtime-continuation` with MLflow
+`3.16.0` on canonical store `http://127.0.0.1:5001`.
+
+- **Phase 3 lane 2 (MVP complete):** receipt
+  `.scratch/live-receipts/mvp-complete-20260911.json` — `passed: false`.
+  The turn reached `stop`, but the model did not invoke `verify_semantic_work`
+  before workspace publish; semantic-step contract remains open.
+- **Phase 3 lane 3 (failed-run discard):** receipt
+  `.scratch/live-receipts/memory-failed-run-20260911-failed-run.json` —
+  `passed: true` after `rlm_wrap_up_seconds=0` and explicit budget-directive
+  override in the live prompt.
+- **P4.5 partial-live smoke:** receipt
+  `.scratch/benchmark-reports/phase4-partial-live-20260911.json` — ten sealed
+  exploratory rows (A3/B3/C2/D2), all cleanup confirmed, MLflow trace IDs on
+  every row; mechanical `incomplete` as expected.
+- **P4.5 full live ablation:** receipt
+  `.scratch/benchmark-reports/phase4-ablation-20260911.json` — **109/144**
+  admissions before halt (`cleanup_failure` / `unconfirmed_cleanup` on trial
+  B-p4-control-01-r1 with `http_400`). Charged spend **$5.56** (under cap).
+  Mechanical `phase4_decision` → **`incomplete`**.
+- **P4.6 recommendation memo:** `.scratch/benchmark-reports/phase4-p46-memo-20260911.md`
+  — **do not retain** simplified recursive profile as default; re-run remaining
+  admissions after fixing the late admission fault. **No default/profile change**
+  until operator approves a complete receipt.
+
+Harness fixes landed in `2aee1c93`: MLflow 3.x search preflight, shielded
+turn-root close, orphaned-sandbox sweep, extended telemetry wait.
+
 ### Phase 0 stabilization baseline (2026-09-10)
 
 - P0.1: the deterministic unit lane initially failed because the editable
