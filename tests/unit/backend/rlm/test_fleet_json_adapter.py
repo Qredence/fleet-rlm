@@ -466,6 +466,81 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
     }
 
 
+def test_final_iteration_enters_wrap_up_above_time_reserve() -> None:
+    lm = _ScriptedLM(['{"reasoning": "r", "code": "SUBMIT(answer=\'ok\')"}'])
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+    prediction = _run_iteration_action(lm, adapter, iteration="3/3")
+
+    assert prediction.code == "SUBMIT(answer='ok')"
+    assert "Final iteration reached" in _last_user_text(lm.calls[0])
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is True
+
+
+def test_final_iteration_rejects_exploration_then_submits() -> None:
+    lm = _ScriptedLM(
+        [
+            '{"reasoning": "keep exploring", "code": "answer = tool()"}',
+            '{"reasoning": "submit evidence", "code": "SUBMIT(answer=answer)"}',
+        ]
+    )
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+    prediction = _run_iteration_action(lm, adapter, iteration="5/5")
+
+    assert prediction.code == "SUBMIT(answer=answer)"
+    assert len(lm.calls) == 2
+    assert adapter.wrap_up_summary()["wrap_up_rejection_reason"] == "exploration_or_additional_code"
+
+
+def test_empty_parse_above_reserve_uses_parse_repair() -> None:
+    lm = _ScriptedLM(
+        [
+            "",
+            '{"reasoning": "r", "code": "answer = tool()"}',
+        ]
+    )
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+    prediction = _run_iteration_action(lm, adapter, iteration="1/3")
+
+    assert prediction.code == "answer = tool()"
+    assert len(lm.calls) == 2
+    retry_text = _last_user_text(lm.calls[1])
+    assert "[[ ## fleet_retry_correction ## ]]" in retry_text
+    assert "Correction (attempt 1)" in retry_text
+    assert "Wrap-up correction" not in retry_text
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is False
+    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 0
+
+
+def test_empty_parse_above_reserve_preserves_finalization_for_later_wrap_up() -> None:
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+    first = _ScriptedLM(
+        [
+            "",
+            '{"reasoning": "r", "code": "answer = tool()"}',
+        ]
+    )
+    _run_iteration_action(first, adapter, iteration="1/3")
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is False
+    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 0
+
+    later = _ScriptedLM(['{"reasoning": "submit evidence", "code": "SUBMIT(answer=answer)"}'])
+    prediction = _run_iteration_action(later, adapter, iteration="3/3")
+
+    assert prediction.code == "SUBMIT(answer=answer)"
+    assert "Final iteration reached" in _last_user_text(later.calls[0])
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is True
+
+
+def test_non_json_parse_retries_above_time_reserve() -> None:
+    lm = _ScriptedLM(["not json at all", '{"reasoning": "r", "code": "c"}'])
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+    prediction = _run_iteration_action(lm, adapter, iteration="1/3")
+
+    assert prediction.code == "c"
+    assert len(lm.calls) == 2
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is False
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "texts, reserve, expected_error",

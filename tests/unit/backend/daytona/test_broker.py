@@ -203,6 +203,11 @@ def test_broker_server_and_wrapper_sources_are_provider_independent() -> None:
     assert "daytona" not in (BROKER_SERVER_CODE + TOOL_WRAPPER_TEMPLATE).lower()
 
 
+def test_broker_namespace_binds_empty_context_default() -> None:
+    """tr-1a67398e: REPL `context` is always defined, even with no capsule bound."""
+    assert '"context": []' in BROKER_SERVER_CODE
+
+
 def test_tool_wrapper_forwards_every_parameter_as_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     """RC-1: required parameters cross the wire by name; ``args`` stays empty."""
     wrapper = _build_sandbox_wrapper("write_workspace_text", _write_workspace_text_stub)

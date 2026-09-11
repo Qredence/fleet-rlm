@@ -227,7 +227,9 @@ class InProcessInterpreterBackend:
     """Shared-namespace offline backend for host-tool and SUBMIT contracts."""
 
     def __init__(self) -> None:
-        self.namespace: dict[str, object] = {"_out": ""}
+        # `context` is always defined so REPL code never hits NameError when
+        # no capsule is bound (a single utf-8 entry promotes it to str below).
+        self.namespace: dict[str, object] = {"_out": "", "context": []}
         self.closed = False
         self._host_tools: dict[str, Callable[..., Any]] = {}
         self._bound_tool_names: set[str] = set()
@@ -252,7 +254,7 @@ class InProcessInterpreterBackend:
             if len(values) == 1 and values[0]["encoding"] == "utf-8":
                 self.namespace["context"] = values[0]["data"]
             else:
-                self.namespace.pop("context", None)
+                self.namespace["context"] = []
             return values
 
         self.namespace["_fleet_load_context_manifest"] = load_context

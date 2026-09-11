@@ -88,9 +88,16 @@ work; see the [implementation status](../decisions/006-implementation-status.md)
   event.
 - Fleet scopes `FleetJSONAdapter` to each Turn alongside the Root Model. It
   extends DSPy's JSON adapter with deadline/budget accounting and bounded
-  corrective re-asks. It retains the pinned DSPy action grammar; exhausted
-  repairs produce bounded `adapter_parse_error` failures without changing
-  process-global DSPy settings.
+  corrective re-asks. Wrap-up also starts on the final native iteration
+  (`current == total`). Empty or reasoning-only completions use those bounded
+  parse re-asks while time and iterations remain. It retains the pinned DSPy
+  action grammar; exhausted repairs produce bounded `adapter_parse_error`
+  failures without changing process-global DSPy settings.
+- The REPL `context` variable is always defined: a single utf-8 attachment
+  capsule promotes it to that attachment's text, otherwise it stays `[]`.
+  REPL code must treat `[]` as "no prepared context" and trust the
+  `attachments` metadata over claims inside the request text instead of
+  probing for context that was never staged.
 - The committed profiles use the OpenAI-compatible Chat Completion format:
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's

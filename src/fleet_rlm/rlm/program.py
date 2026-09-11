@@ -33,7 +33,9 @@ from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, BudgetDim
 from fleet_rlm.rlm.compat_3_3_1 import (
     BaseLM,
     Signature,
+    _is_empty_adapter_parse,
     _iteration_is_action,
+    _iteration_is_final,
     daytona_provider_contract,
 )
 from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
@@ -52,8 +54,6 @@ RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
 
-_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
-
 
 def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
     """
@@ -69,8 +69,7 @@ def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
     Returns:
         str: Bounded instruction text for the corrected re-ask.
     """
-    message = str(getattr(exc, "message", "") or "")
-    if _EMPTY_RESPONSE_MARKER in message:
+    if _is_empty_adapter_parse(exc):
         return (
             f"Correction (attempt {attempt}): the previous response produced no parseable output. "
             "It was empty or null, typically because generation exhausted the output-token budget "
@@ -138,18 +137,24 @@ def _append_input_field(
     return extended, extended_inputs, field
 
 
-def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
+def _budget_directive(remaining: float, *, attempts_exhausted: bool = False, final_iteration: bool = False) -> str:
     """Create a directive requiring immediate submission when exploration must end.
 
     Parameters:
         remaining (float): Estimated seconds remaining in the time budget.
         attempts_exhausted (bool): Whether the exploration attempt limit has been reached.
+        final_iteration (bool): Whether this is the last native action iteration.
 
     Returns:
         str: A directive containing the budget reason, remaining time, and required SUBMIT action.
     """
     seconds = max(0, int(remaining))
-    reason = "Exploration attempt budget exhausted" if attempts_exhausted else "Time budget nearly exhausted"
+    if attempts_exhausted:
+        reason = "Exploration attempt budget exhausted"
+    elif final_iteration:
+        reason = "Final iteration reached"
+    else:
+        reason = "Time budget nearly exhausted"
     return (
         f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
         "using evidence already gathered. Do not explore, call tools, or execute additional code. "
@@ -291,13 +296,18 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
         Returns:
                 `True` if wrap-up is enabled and the action iteration is at or below its
-                time reserve or has exhausted exploration, `False` otherwise.
+                time reserve, has exhausted exploration, or is the final native iteration,
+                `False` otherwise.
         """
         return bool(
             remaining is not None
             and self._wrap_up_seconds > 0
             and _iteration_is_action(inputs)
-            and (remaining <= self._wrap_up_seconds or self._budget.turn.exploration_exhausted())
+            and (
+                remaining <= self._wrap_up_seconds
+                or self._budget.turn.exploration_exhausted()
+                or _iteration_is_final(inputs)
+            )
         )
 
     def _with_wrap_up_directive(
@@ -321,7 +331,11 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 tuple[type[Signature], dict[str, Any], str]: The updated signature, input
                 values, and field name containing the directive.
         """
-        directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
+        directive = _budget_directive(
+            remaining,
+            attempts_exhausted=self._budget.turn.exploration_exhausted(),
+            final_iteration=_iteration_is_final(inputs),
+        )
         if field_name is not None and field_name in signature.fields:
             updated = dict(inputs)
             updated[field_name] = directive
@@ -350,6 +364,31 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             value=_wrap_up_correction(reason),
         )
         return extended, extended_inputs
+
+    def _begin_wrap_up_after_parse_failure(
+        self,
+        *,
+        remaining: float,
+        call_lm: BaseLM,
+        request_signature: type[Signature],
+        request_inputs: dict[str, Any],
+        directive_field: str | None,
+    ) -> tuple[type[Signature], dict[str, Any], str]:
+        """Reclassify an unparseable action as wrap-up and attach SUBMIT corrections."""
+        self._enter_wrap_up(remaining, rejection_reason="unparseable_json")
+        self._next_wrap_up_attempt(call_lm)
+        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
+            request_signature,
+            request_inputs,
+            remaining,
+            field_name=directive_field,
+        )
+        request_signature, request_inputs = self._with_wrap_up_correction(
+            request_signature,
+            request_inputs,
+            reason="unparseable JSON",
+        )
+        return request_signature, request_inputs, directive_field
 
     def __call__(
         self,
@@ -501,18 +540,12 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     boundary_remaining = self._remaining()
                     if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
                         wrap_up = True
-                        self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
-                        self._next_wrap_up_attempt(call_lm)
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
-                        )
-                        request_signature, request_inputs = self._with_wrap_up_correction(
-                            request_signature,
-                            request_inputs,
-                            reason="unparseable JSON",
+                        request_signature, request_inputs, directive_field = self._begin_wrap_up_after_parse_failure(
+                            remaining=boundary_remaining,
+                            call_lm=call_lm,
+                            request_signature=request_signature,
+                            request_inputs=request_inputs,
+                            directive_field=directive_field,
                         )
                         continue
                 if not self._budget.can_repair(attempt):
