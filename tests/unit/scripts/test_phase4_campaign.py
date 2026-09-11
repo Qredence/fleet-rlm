@@ -52,6 +52,7 @@ def _observation(case, *, completed: bool = True, cleanup: bool = True) -> Trial
         delegated_bytes=0,
         sandbox_count=1,
         resource_shape=(1, 2, 1),
+        trace_id="tr-test-001",
     )
 
 
@@ -143,6 +144,21 @@ def test_partial_campaign_continues_ordinary_failures_but_halts_safety_faults() 
     )
     assert len(rows) == 3
 
+    def cleanup_flag_failure(_trial, _case):
+        # The error category preserves the turn diagnosis; the cleanup
+        # flag alone must still halt the exploratory sample.
+        return replace(_observation(cases[0]), cleanup_confirmed=False, error_category="turn_failed")
+
+    rows = execute_partial_campaign(
+        cases=cases,
+        trials=schedule[:3],
+        envelope=_envelope(),
+        runner=cleanup_flag_failure,
+        started_at=0,
+        clock=lambda: 0,
+    )
+    assert len(rows) == 1
+
 
 def test_partial_campaign_reserves_cleanup_window_before_admission_deadline() -> None:
     cases = load_cases(_CASES)
@@ -168,8 +184,8 @@ def test_four_arm_contract_keeps_c_on_the_frozen_revision_only() -> None:
     candidate = "a" * 40
     specs = arm_specs(baseline_revision=baseline, candidate_revision=candidate)
     assert [(spec.arm, spec.execution, spec.uses_child_sandboxes, spec.source_revision) for spec in specs] == [
-        ("A", "direct_dspy", False, candidate),
-        ("B", "native_rlm", False, candidate),
+        ("A", "api_direct", False, candidate),
+        ("B", "api_native_rlm", False, candidate),
         ("C", "frozen_recursive", True, baseline),
         ("D", "simplified_recursive", True, candidate),
     ]
@@ -259,22 +275,61 @@ def test_scoring_requires_exact_oracle_evidence_uncertainty_and_no_forbidden_cla
     assert not forbidden.verified_success
 
 
-def test_campaign_halts_on_unknown_cost_or_missing_cleanup() -> None:
+def test_campaign_charges_unknown_cost_and_continues_with_confirmed_cleanup() -> None:
     cases = load_cases(_CASES)
     policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0)
 
     def runner(trial, case):
         observation = _observation(case)
         if trial.arm == "B":
-            return replace(observation, input_tokens=None)
+            return replace(observation, completed=False, input_tokens=None, output_tokens=None)
         return observation
 
-    rows = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
-    assert len(rows) == 2
-    assert rows[-1].observed_cost_usd is None
+    outcome = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
+    assert len(outcome.rows) == 144
+    unknown = [row for row in outcome.rows if row.observed_cost_usd is None]
+    assert len(unknown) == 36
+    assert all(row.observation.cleanup_confirmed for row in unknown)
+    assert all(row.reserved_cost_usd == _envelope().upper_bound_usd(PublicRateCard()) for row in unknown)
+    assert outcome.budget["halted"] is False
+    assert outcome.budget["halt_reason"] is None
 
 
-def test_campaign_halts_when_non_cost_observation_is_unknown() -> None:
+def test_campaign_halts_on_unconfirmed_cleanup() -> None:
+    cases = load_cases(_CASES)
+    policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0)
+
+    def runner(trial, case):
+        observation = _observation(case)
+        if trial.arm == "B":
+            return replace(observation, cleanup_confirmed=False)
+        return observation
+
+    outcome = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
+    assert len(outcome.rows) == 2
+    assert outcome.rows[-1].observation.cleanup_confirmed is False
+    assert outcome.budget["halted"] is True
+    assert outcome.budget["halt_reason"] == "unconfirmed_cleanup"
+
+
+def test_campaign_halts_when_telemetry_exceeds_the_envelope() -> None:
+    cases = load_cases(_CASES)
+    policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0)
+
+    def runner(trial, case):
+        observation = _observation(case)
+        if trial.arm == "B":
+            return replace(observation, sandbox_seconds=3_600)
+        return observation
+
+    outcome = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
+    assert len(outcome.rows) == 2
+    assert outcome.rows[-1].observed_cost_usd is None
+    assert outcome.budget["halted"] is True
+    assert outcome.budget["halt_reason"] == "cost_bound_breach"
+
+
+def test_campaign_ignores_non_cost_telemetry_gaps_in_settlement() -> None:
     cases = load_cases(_CASES)
     policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0)
 
@@ -284,15 +339,16 @@ def test_campaign_halts_when_non_cost_observation_is_unknown() -> None:
             return replace(observation, delegated_bytes=None)
         return observation
 
-    rows = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
-    assert len(rows) == 2
-    assert rows[-1].observation.delegated_bytes is None
+    outcome = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
+    assert len(outcome.rows) == 144
+    assert all(row.observed_cost_usd is not None for row in outcome.rows)
+    assert outcome.budget["halted"] is False
 
 
 def test_campaign_budget_includes_prior_observed_spend() -> None:
     cases = load_cases(_CASES)
     policy = CampaignPreflight("p4", "daytona", 14_400, 144, 5, 0.003)
-    rows = execute_campaign(
+    outcome = execute_campaign(
         cases=cases,
         preflight=policy,
         envelope=_envelope(),
@@ -300,10 +356,83 @@ def test_campaign_budget_includes_prior_observed_spend() -> None:
         started_at=0,
         initial_spent_usd=0.001,
     )
+    rows = outcome.rows
 
     assert rows
     assert rows[0].observed_cost_usd is not None
     assert 0 < len(rows) < 144
+
+
+def test_decision_requires_trace_linkage_for_completed_rows() -> None:
+    cases = load_cases(_CASES)
+    rows = []
+    for trial in balanced_schedule(cases):
+        case = next(item for item in cases if item.identifier == trial.case_id)
+        rows.append(score_trial(case, trial, _observation(case), PublicRateCard(), _envelope()))
+    bootstrap = paired_bootstrap(rows, samples=200)
+    assert phase4_decision(rows, bootstrap=bootstrap) == "disable"
+    stripped = [
+        replace(row, observation=replace(row.observation, trace_id=None)) if index == 0 else row
+        for index, row in enumerate(rows)
+    ]
+    assert phase4_decision(stripped, bootstrap=bootstrap) == "incomplete"
+
+
+def test_observation_parser_accepts_bounded_trace_linkage() -> None:
+    valid = {
+        "answer": "ok",
+        "cited_evidence": [],
+        "uncertainty": "",
+        "completed": True,
+        "authorization_confirmed": True,
+        "cleanup_confirmed": True,
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "cache_read_tokens": 0,
+        "sandbox_seconds": 60,
+        "latency_ms": 1.0,
+        "root_lm_calls": 1,
+        "child_lm_calls": 0,
+        "delegated_bytes": 0,
+        "trace_id": "tr-abc-123",
+    }
+    assert observation_from_mapping(valid).trace_id == "tr-abc-123"
+    assert observation_from_mapping({k: v for k, v in valid.items() if k != "trace_id"}).trace_id is None
+    for trace_id in ("", "  ", "x" * 257, 123):
+        with pytest.raises(ValueError):
+            observation_from_mapping({**valid, "trace_id": trace_id})
+
+
+def test_mlflow_preflight_requires_reachable_tracking_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from urllib.error import URLError
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    contract = SimpleNamespace(mlflow_tracing_enabled=True, mlflow_tracking_uri="http://127.0.0.1:5001")
+    monkeypatch.setattr("urllib.request.urlopen", lambda *_args, **_kwargs: _Response())
+    assert run_phase4_campaign._require_mlflow_server(contract) == "http://127.0.0.1:5001"
+
+    def _unreachable(*_args, **_kwargs):
+        raise URLError("refused")
+
+    monkeypatch.setattr("urllib.request.urlopen", _unreachable)
+    with pytest.raises(run_phase4_campaign.Phase4CampaignError):
+        run_phase4_campaign._require_mlflow_server(contract)
+    disabled = SimpleNamespace(mlflow_tracing_enabled=False, mlflow_tracking_uri="http://127.0.0.1:5001")
+    with pytest.raises(run_phase4_campaign.Phase4CampaignError):
+        run_phase4_campaign._require_mlflow_server(disabled)
+    for uri in ("databricks", None, "file:///tmp/mlflow"):
+        remote = SimpleNamespace(mlflow_tracing_enabled=True, mlflow_tracking_uri=uri)
+        with pytest.raises(run_phase4_campaign.Phase4CampaignError):
+            run_phase4_campaign._require_mlflow_server(remote)
 
 
 def test_bootstrap_and_decision_require_complete_nonregressing_evidence() -> None:
@@ -338,8 +467,103 @@ def test_bootstrap_and_decision_require_complete_nonregressing_evidence() -> Non
     assert oracle["forbidden_claims_sha256"]
 
 
+def _retain_fixture_rows(cases) -> list:
+    """Mirror the retain fixture: D sweeps suitable, B takes half, A none."""
+    rows = []
+    for trial in balanced_schedule(cases):
+        case = next(item for item in cases if item.identifier == trial.case_id)
+        succeeded = (
+            trial.arm == "D"
+            or case.classification != "suitable"
+            or (trial.arm == "B" and case.identifier in {"p4-suitable-01", "p4-suitable-02", "p4-suitable-03"})
+        )
+        rows.append(score_trial(case, trial, _observation(case, completed=succeeded), PublicRateCard(), _envelope()))
+    return rows
+
+
+def test_decision_imputes_reservation_cost_for_unknown_rows_conservatively() -> None:
+    cases = load_cases(_CASES)
+    rows = _retain_fixture_rows(cases)
+    bootstrap = paired_bootstrap(rows, samples=200)
+    assert phase4_decision(rows, bootstrap=bootstrap) == "retain_simplified_profile"
+    # Unknown spend on D's winning rows must count against retention at the
+    # full reservation, flipping the cost gate to disable.
+    imputed = [
+        replace(
+            row,
+            observation=replace(row.observation, input_tokens=None, output_tokens=None),
+            observed_cost_usd=None,
+        )
+        if row.trial.arm == "D" and row.trial.classification == "suitable"
+        else row
+        for row in rows
+    ]
+    assert phase4_decision(imputed, bootstrap=bootstrap) == "disable"
+
+
+def test_decision_requires_call_metrics_only_for_completed_rows() -> None:
+    cases = load_cases(_CASES)
+    rows = _retain_fixture_rows(cases)
+    bootstrap = paired_bootstrap(rows, samples=200)
+    stripped_failures = [
+        replace(
+            row,
+            observation=replace(row.observation, root_lm_calls=None, child_lm_calls=None, delegated_bytes=None),
+        )
+        if not row.observation.completed
+        else row
+        for row in rows
+    ]
+    assert any(not row.observation.completed for row in stripped_failures)
+    assert phase4_decision(stripped_failures, bootstrap=bootstrap) == "retain_simplified_profile"
+    completed_index = next(index for index, row in enumerate(rows) if row.observation.completed)
+    stripped_completed = [
+        replace(row, observation=replace(row.observation, delegated_bytes=None)) if index == completed_index else row
+        for index, row in enumerate(rows)
+    ]
+    assert phase4_decision(stripped_completed, bootstrap=bootstrap) == "incomplete"
+
+
+def test_receipt_accounts_unknown_spend_as_charged_reservations() -> None:
+    cases = load_cases(_CASES)
+    case = cases[0]
+    schedule = balanced_schedule((case,) * 12)
+    known = score_trial(case, schedule[0], _observation(case), PublicRateCard(), _envelope())
+    unknown = score_trial(
+        case,
+        schedule[1],
+        replace(_observation(case), completed=False, input_tokens=None, output_tokens=None),
+        PublicRateCard(),
+        _envelope(),
+    )
+    assert known.observed_cost_usd is not None
+    assert unknown.observed_cost_usd is None
+    payload = receipt(
+        (known, unknown),
+        corpus_digest="c" * 64,
+        policy_digest="b" * 64,
+        baseline_revision="9b526f50f0aeec37ca399bc8ef19ec8a95d3bead",
+        candidate_revision="a" * 40,
+        bootstrap={"point_estimate": None, "ci_lower": None, "ci_upper": None},
+        cases=cases,
+    )
+    assert payload["observed_spend_usd"] is None
+    assert payload["unknown_cost_rows"] == 1
+    assert Decimal(payload["charged_spend_usd"]) == known.observed_cost_usd + unknown.reserved_cost_usd
+    assert payload["rows"][0]["cost_unknown"] is False
+    assert payload["rows"][1]["cost_unknown"] is True
+    assert payload["rows"][1]["reserved_cost_usd"] == str(unknown.reserved_cost_usd)
+    assert payload["summary"]["A:suitable"]["unknown_cost_rows"] == 0
+    assert payload["summary"]["B:suitable"]["unknown_cost_rows"] == 1
+    assert (
+        Decimal(payload["summary"]["B:suitable"]["charged_spend_usd"])
+        == unknown.reserved_cost_usd
+        == _envelope().upper_bound_usd(PublicRateCard())
+    )
+
+
 def test_worker_evidence_drops_unknown_citations_for_scorer() -> None:
-    from scripts.benchmarks.phase4_arm_worker import _parse_result
+    from scripts.benchmarks.phase4_api_client import _parse_result
 
     source_ids = {"G1", "G2"}
     answer, cited, _ = _parse_result(
@@ -460,6 +684,25 @@ def test_prior_receipt_top_level_spend_takes_precedence_over_rows(tmp_path: Path
     )
 
     assert run_phase4_campaign._prior_receipt_spend(receipt_path) == (0.125, "observed")
+
+
+def test_prior_receipt_charged_spend_takes_precedence_over_observed(tmp_path: Path) -> None:
+    receipt_path = _write_prior_receipt(
+        tmp_path / "prior.json",
+        {
+            "charged_spend_usd": "0.5",
+            "observed_spend_usd": "0.125",
+            "rows": [{"observed_cost_usd": "0.125"}],
+        },
+    )
+
+    assert run_phase4_campaign._prior_receipt_spend(receipt_path) == (0.5, "charged")
+    invalid_path = _write_prior_receipt(
+        tmp_path / "invalid.json",
+        {"charged_spend_usd": "oops", "rows": [{"observed_cost_usd": "0.125"}]},
+    )
+
+    assert run_phase4_campaign._prior_receipt_spend(invalid_path) == (None, "invalid")
 
 
 def test_campaign_metadata_discloses_bounded_prior_status() -> None:

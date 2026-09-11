@@ -540,10 +540,10 @@ class WorkerOwnership:
             with contextlib.suppress(BaseException):
                 await self._effect.settle()
 
-        # Recursive batch workers run in a separate ThreadPoolExecutor. A
-        # Root task can finish after a batch has failed while those workers
-        # still own child leases, so wait for each ownership callback off the
-        # event loop before Run resources are released.
+        # Recursive child workers run on owned blocking threads joined through
+        # the Turn scheduler. A Root task can finish after a batch has failed
+        # while those workers still own child leases, so wait for each
+        # ownership callback off the event loop before Run resources are released.
         waiter_errors: list[BaseException] = []
         for waiter in tuple(self._blocking_waiters):
             owned = OwnedEffect.start(asyncio.to_thread(waiter))

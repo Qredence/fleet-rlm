@@ -45,7 +45,9 @@ def _usage() -> dict[str, object]:
     }
 
 
-def _stream(case, *, finish: bool = True, header: bool = True, error: bool = False) -> tuple[dict[str, str], bytes]:
+def _stream(
+    case, *, finish: bool = True, header: bool = True, error: bool = False, trace_id: str | None = "tr-001"
+) -> tuple[dict[str, str], bytes]:
     usage = _usage()
     chunks: list[dict[str, object]] = [
         {"type": "tool-input-available", "toolName": "rlm_query", "input": {"prompt_count": 1}},
@@ -62,7 +64,10 @@ def _stream(case, *, finish: bool = True, header: bool = True, error: bool = Fal
         },
     ]
     if finish:
-        chunks.append({"type": "finish", "finishReason": "stop"})
+        # Mirror the backend: error finishes project no metadata, so failed
+        # trials carry an explicit null linkage instead of a trace identifier.
+        metadata = {} if error or trace_id is None else {"messageMetadata": {"traceId": trace_id}}
+        chunks.append({"type": "finish", "finishReason": "stop", **metadata})
     if error:
         chunks.insert(0, {"type": "error", "errorText": "discarded"})
     body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks)
@@ -128,6 +133,61 @@ def test_api_runner_uses_public_sse_and_sanitized_lifecycle_telemetry(tmp_path: 
     assert result.delegated_bytes == 64
     assert result.cleanup_confirmed is True
     assert result.resource_shape == (4, 8, 8)
+    assert result.trace_id == "tr-001"
+
+
+def test_api_runner_leaves_failed_trials_explicitly_untraced(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=_transport(case, telemetry, error=True),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is False
+    assert result.trace_id is None
+
+
+def test_api_runner_drops_unbounded_trace_linkage(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/turns"):
+            token = request.headers["x-fleet-phase4-trial"]
+            telemetry.write_text(
+                json.dumps(
+                    {
+                        "event": "turn_cleanup",
+                        "trial": token,
+                        "cleanup": True,
+                        "created": 1,
+                        "deleted": 1,
+                        "sandbox_count": 1,
+                        "sandbox_seconds": 1,
+                        "shape": [4, 8, 8],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            headers, body = _stream(case, trace_id="x" * 300)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is True
+    assert result.trace_id is None
 
 
 def test_api_runner_accepts_single_field_text_answer(tmp_path: Path) -> None:
@@ -212,6 +272,28 @@ def test_api_runner_rejects_partial_stream_and_keeps_cleanup_observable(tmp_path
     assert result.error_category == "stream_incomplete"
     assert result.cleanup_confirmed is True
     assert result.resource_shape == (4, 8, 8)
+    # Settlement telemetry proves the backend admitted and ran the trial,
+    # so authorization held even though the client-side parse failed.
+    assert result.authorization_confirmed is True
+
+
+def test_error_observation_keeps_authorization_fail_closed_without_telemetry(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is False
+    assert result.authorization_confirmed is False
+    assert result.cleanup_confirmed is False
+    assert result.error_category == "http_404"
 
 
 def test_api_runner_rejects_missing_stream_header(tmp_path: Path) -> None:
@@ -253,7 +335,7 @@ def test_api_runner_records_missing_optional_telemetry_as_unknown() -> None:
     assert result.error_category == "telemetry_unavailable"
 
 
-def test_telemetry_normalizes_provider_cleanup_errors_to_the_safety_category() -> None:
+def test_telemetry_suppresses_provider_cleanup_errors_and_keeps_the_flag() -> None:
     cleanup, sandbox_seconds, sandbox_count, shape, category = _telemetry(
         [
             {
@@ -268,7 +350,16 @@ def test_telemetry_normalizes_provider_cleanup_errors_to_the_safety_category() -
     assert sandbox_seconds is None
     assert sandbox_count is None
     assert shape is None
-    assert category == "cleanup_failed"
+    # Provider exception names never become receipt semantics; the cleanup
+    # flag carries the verdict while the turn diagnosis flows separately.
+    assert category is None
+
+
+def test_telemetry_keeps_the_harness_defined_unavailable_token() -> None:
+    cleanup, _, _, _, category = _telemetry([])
+
+    assert cleanup is False
+    assert category == "cleanup_unavailable"
 
 
 def test_api_runner_never_verifies_a_stream_that_contains_an_error_frame(tmp_path: Path) -> None:
@@ -281,8 +372,80 @@ def test_api_runner_never_verifies_a_stream_that_contains_an_error_frame(tmp_pat
     )(_trial(case.identifier), case)
 
     assert result.completed is False
-    assert result.authorization_confirmed is False
+    # The request was admitted and streamed to a terminal finish, so
+    # authorization held; the turn failure is ordinary outcome evidence.
+    assert result.authorization_confirmed is True
+    assert result.cleanup_confirmed is True
     assert result.error_category == "turn_failed"
+
+
+def test_api_runner_preserves_turn_diagnosis_when_cleanup_fails(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            token = request.headers["x-fleet-phase4-trial"]
+            telemetry.write_text(
+                json.dumps(
+                    {
+                        "event": "turn_cleanup",
+                        "trial": token,
+                        "cleanup": False,
+                        "error_category": "TimeoutError",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            headers, body = _stream(case, error=True)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is False
+    assert result.cleanup_confirmed is False
+    assert result.authorization_confirmed is True
+    assert result.error_category == "turn_failed"
+
+
+def test_api_runner_rejects_cleanup_success_without_resource_telemetry(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            token = request.headers["x-fleet-phase4-trial"]
+            telemetry.write_text(
+                json.dumps({"event": "turn_cleanup", "trial": token, "cleanup": True}) + "\n",
+                encoding="utf-8",
+            )
+            headers, body = _stream(case)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.completed is True
+    assert result.cleanup_confirmed is False
+    assert result.error_category == "resource_observation_unavailable"
 
 
 def test_sse_parser_discards_tool_frames_but_requires_one_terminal_finish() -> None:
@@ -317,7 +480,9 @@ def test_sse_parser_rejects_frames_after_finish_or_duplicate_done() -> None:
         )
 
 
-def test_api_runner_rejects_citations_outside_the_delivered_source_set(tmp_path: Path) -> None:
+def test_api_runner_drops_undeclared_citations_for_scorer(tmp_path: Path) -> None:
+    from scripts.benchmarks.phase4_campaign import TrialEnvelope, score_trial
+
     case = load_cases(_CASES)[0]
     telemetry = tmp_path / "telemetry.ndjson"
 
@@ -362,9 +527,21 @@ def test_api_runner_rejects_citations_outside_the_delivered_source_set(tmp_path:
         transport=httpx.MockTransport(handler),
     )(_trial(case.identifier), case)
 
-    assert result.completed is False
-    assert result.error_category == "turn_failed"
+    # Undeclared citations are model-content facts, not transport failures:
+    # the trial completes and the scorer penalizes the missing evidence.
+    assert result.completed is True
+    assert result.error_category is None
     assert result.cleanup_confirmed is True
+    assert "undeclared-source" not in result.cited_evidence
+    scored = score_trial(
+        case,
+        _trial(case.identifier),
+        result,
+        PublicRateCard(),
+        TrialEnvelope(2_000_000, 500_000, 0, 1, 3_600, 5, 4, 8, 8, maximum_lifetime_seconds=3_600),
+    )
+    assert scored.evidence_valid is False
+    assert scored.verified_success is False
 
 
 def test_prior_incomplete_receipt_is_not_treated_as_zero_spend(tmp_path: Path) -> None:

@@ -6,7 +6,6 @@ import pytest
 
 from scripts.benchmarks import run_phase4_campaign
 from scripts.benchmarks.phase4_api_server import LifecycleObserver, _bounded_trial, _campaign_settings, _shape
-from scripts.benchmarks.run_phase4_campaign import Phase4CampaignError, _validate_candidate_url
 
 
 def test_campaign_trial_correlation_is_bounded_and_content_free() -> None:
@@ -14,20 +13,6 @@ def test_campaign_trial_correlation_is_bounded_and_content_free() -> None:
     assert _bounded_trial("") is None
     assert _bounded_trial("bad value with spaces") is None
     assert _bounded_trial("x" * 129) is None
-
-
-def test_candidate_api_url_is_restricted_to_a_loopback_origin() -> None:
-    assert _validate_candidate_url("http://127.0.0.1:8000/") == "http://127.0.0.1:8000"
-    assert _validate_candidate_url("http://localhost:8123") == "http://localhost:8123"
-    for value in (
-        "https://127.0.0.1:8000",
-        "http://example.test:8000",
-        "http://127.0.0.1",
-        "http://127.0.0.1:8000/api",
-        "http://127.0.0.1:8000?x=1",
-    ):
-        with pytest.raises(Phase4CampaignError):
-            _validate_candidate_url(value)
 
 
 def test_shape_reads_the_selected_platform_resource_contract() -> None:
@@ -99,9 +84,48 @@ def test_baseline_policy_overlay_selects_campaign_profile_without_mutating_candi
 
 def test_close_deadline_defaults_and_rejects_bad_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("FLEET_P4_CLOSE_DEADLINE_S", raising=False)
-    assert LifecycleObserver.close_deadline_seconds() == 30.0
-    monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", "120")
     assert LifecycleObserver.close_deadline_seconds() == 120.0
+    monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", "60")
+    assert LifecycleObserver.close_deadline_seconds() == 60.0
     for value in ("bogus", "", "0", "-5", "9999"):
         monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", value)
-        assert LifecycleObserver.close_deadline_seconds() == 30.0
+        assert LifecycleObserver.close_deadline_seconds() == 120.0
+
+
+def test_campaign_server_reads_arm_budgets_from_selected_profile(tmp_path) -> None:
+    recursive = _campaign_settings(
+        profile="phase4-campaign",
+        recursive=True,
+        data_root=tmp_path / "data",
+        database_url="sqlite+aiosqlite:///tmp/fleet-p4.db",
+        volume_name="fleet-p4-volume",
+    )
+
+    assert (recursive.rlm_max_iters, recursive.rlm_max_llm_calls) == (6, 8)
+    assert recursive.rlm_recursion_enabled is True
+    assert recursive.root_llm_max_tokens == 1_024
+    assert recursive.sub_llm_max_tokens == 512
+    assert recursive.max_active_daytona_leases == 1
+    assert recursive.turn_timeout_seconds == 90
+
+    direct = _campaign_settings(
+        profile="phase4-campaign-a",
+        recursive=False,
+        data_root=tmp_path / "data",
+        database_url="sqlite+aiosqlite:///tmp/fleet-p4.db",
+        volume_name="fleet-p4-volume",
+    )
+
+    assert (direct.rlm_max_iters, direct.rlm_max_llm_calls) == (2, 2)
+    assert direct.rlm_recursion_enabled is False
+
+    native = _campaign_settings(
+        profile="phase4-campaign-b",
+        recursive=False,
+        data_root=tmp_path / "data",
+        database_url="sqlite+aiosqlite:///tmp/fleet-p4.db",
+        volume_name="fleet-p4-volume",
+    )
+
+    assert (native.rlm_max_iters, native.rlm_max_llm_calls) == (6, 8)
+    assert native.rlm_recursion_enabled is False

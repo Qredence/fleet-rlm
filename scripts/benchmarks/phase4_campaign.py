@@ -40,7 +40,7 @@ class ArmSpec:
     """Immutable arm contract; provider invocation stays behind ArmRunner."""
 
     arm: Arm
-    execution: Literal["direct_dspy", "native_rlm", "frozen_recursive", "simplified_recursive"]
+    execution: Literal["api_direct", "api_native_rlm", "frozen_recursive", "simplified_recursive"]
     uses_child_sandboxes: bool
     source_revision: str | None = None
 
@@ -50,8 +50,8 @@ def arm_specs(*, baseline_revision: str, candidate_revision: str) -> tuple[ArmSp
     if not _REVISION_RE.fullmatch(baseline_revision) or not _REVISION_RE.fullmatch(candidate_revision):
         raise ValueError("Phase 4 arm revisions must be full commit identifiers")
     return (
-        ArmSpec("A", "direct_dspy", False, candidate_revision),
-        ArmSpec("B", "native_rlm", False, candidate_revision),
+        ArmSpec("A", "api_direct", False, candidate_revision),
+        ArmSpec("B", "api_native_rlm", False, candidate_revision),
         ArmSpec("C", "frozen_recursive", True, baseline_revision),
         ArmSpec("D", "simplified_recursive", True, candidate_revision),
     )
@@ -211,8 +211,13 @@ class TrialObservation:
     sandbox_count: int | None = None
     resource_shape: tuple[int, int, int] | None = None
     error_category: str | None = None
+    # MLflow root trace identifier exposed over SSE metadata. Every completed
+    # trial must link back to its engineering trace; failed trials carry an
+    # explicit null because error finishes project no metadata.
+    trace_id: str | None = None
 
-    def observed_cost(self, rates: PublicRateCard, envelope: TrialEnvelope) -> Decimal | None:
+    def cost_inputs_valid(self) -> bool:
+        """Check cost-input shape without comparing against envelope bounds."""
         input_tokens = self.input_tokens
         output_tokens = self.output_tokens
         cache_read_tokens = self.cache_read_tokens
@@ -222,29 +227,64 @@ class TrialObservation:
             type(value) is not int or value < 0
             for value in (input_tokens, output_tokens, cache_read_tokens, sandbox_seconds)
         ):
-            return None
+            return False
+        if type(sandbox_count) is not int or sandbox_count < 0:
+            return False
+        if sandbox_seconds == 0:
+            return sandbox_count == 0 and self.resource_shape is None
+        if sandbox_count < 1:
+            return False
+        return (
+            isinstance(self.resource_shape, tuple)
+            and len(self.resource_shape) == 3
+            and all(type(value) is int and value > 0 for value in self.resource_shape)
+        )
+
+    def within_cost_bounds(self, envelope: TrialEnvelope) -> bool:
+        """Check cost inputs against the envelope's asserted bounds."""
+        if not self.cost_inputs_valid():
+            return False
+        input_tokens = self.input_tokens
+        output_tokens = self.output_tokens
+        cache_read_tokens = self.cache_read_tokens
+        sandbox_seconds = self.sandbox_seconds
+        sandbox_count = self.sandbox_count
         if (
-            input_tokens > envelope.input_tokens
-            or output_tokens > envelope.output_tokens
-            or cache_read_tokens > envelope.cache_read_tokens
+            type(input_tokens) is not int
+            or type(output_tokens) is not int
+            or type(cache_read_tokens) is not int
+            or type(sandbox_seconds) is not int
+            or type(sandbox_count) is not int
+        ):
+            return False
+        return (
+            input_tokens <= envelope.input_tokens
+            and output_tokens <= envelope.output_tokens
+            and cache_read_tokens <= envelope.cache_read_tokens
+            and sandbox_count <= envelope.sandbox_count
+            and sandbox_seconds <= envelope.sandbox_seconds * sandbox_count
+        )
+
+    def raw_cost(self, rates: PublicRateCard) -> Decimal | None:
+        """Price valid cost inputs without enforcing envelope bounds."""
+        input_tokens = self.input_tokens
+        output_tokens = self.output_tokens
+        cache_read_tokens = self.cache_read_tokens
+        sandbox_seconds = self.sandbox_seconds
+        sandbox_count = self.sandbox_count
+        if (
+            type(input_tokens) is not int
+            or input_tokens < 0
+            or type(output_tokens) is not int
+            or output_tokens < 0
+            or type(cache_read_tokens) is not int
+            or cache_read_tokens < 0
+            or type(sandbox_seconds) is not int
+            or sandbox_seconds < 0
+            or type(sandbox_count) is not int
+            or sandbox_count < 0
         ):
             return None
-        if type(sandbox_count) is not int or sandbox_count < 0:
-            return None
-        if sandbox_seconds == 0:
-            if sandbox_count != 0 or self.resource_shape is not None:
-                return None
-        else:
-            if sandbox_count < 1 or sandbox_count > envelope.sandbox_count:
-                return None
-            if sandbox_seconds > envelope.sandbox_seconds * sandbox_count:
-                return None
-            if (
-                not isinstance(self.resource_shape, tuple)
-                or len(self.resource_shape) != 3
-                or any(type(value) is not int or value <= 0 for value in self.resource_shape)
-            ):
-                return None
         model = (
             Decimal(input_tokens) * rates.input_usd_per_million / _TOKEN_DIVISOR
             + Decimal(output_tokens) * rates.output_usd_per_million / _TOKEN_DIVISOR
@@ -261,6 +301,11 @@ class TrialObservation:
             )
         return model + sandbox
 
+    def observed_cost(self, rates: PublicRateCard, envelope: TrialEnvelope) -> Decimal | None:
+        if not self.cost_inputs_valid() or not self.within_cost_bounds(envelope):
+            return None
+        return self.raw_cost(rates)
+
 
 @dataclass(frozen=True, slots=True)
 class ScoredTrial:
@@ -269,8 +314,13 @@ class ScoredTrial:
     evidence_valid: bool
     observation: TrialObservation
     observed_cost_usd: Decimal | None
+    # Sealed-envelope reservation for this trial. Unknown-cost rows impute
+    # this bound in spend accounting and retention comparisons; it is never
+    # treated as an observed measurement.
+    reserved_cost_usd: Decimal
 
     def receipt(self) -> dict[str, object]:
+        cost_unknown = self.observed_cost_usd is None
         return {
             "case_id": self.trial.case_id,
             "classification": self.trial.classification,
@@ -295,7 +345,10 @@ class ScoredTrial:
             if self.observation.resource_shape is not None
             else None,
             "error_category": self.observation.error_category,
+            "trace_id": self.observation.trace_id,
             "observed_cost_usd": str(self.observed_cost_usd) if self.observed_cost_usd is not None else None,
+            "reserved_cost_usd": str(self.reserved_cost_usd),
+            "cost_unknown": cost_unknown,
         }
 
 
@@ -318,10 +371,14 @@ def corpus_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def policy_sha256(path: Path, *, profile: str = "phase4-campaign") -> str:
-    """Hash the exact non-secret policy file and selected campaign profile."""
+def policy_sha256(
+    path: Path,
+    *,
+    profiles: tuple[str, ...] = ("phase4-campaign-a", "phase4-campaign-b", "phase4-campaign"),
+) -> str:
+    """Hash the exact non-secret policy file and selected campaign profiles."""
     raw = path.read_bytes()
-    marker = f"\nphase4-profile:{profile}\n".encode()
+    marker = "".join(f"\nphase4-profile:{profile}\n" for profile in profiles).encode()
     return hashlib.sha256(raw + marker).hexdigest()
 
 
@@ -395,6 +452,9 @@ def observation_from_mapping(value: Mapping[str, Any]) -> TrialObservation:
     category = value.get("error_category")
     if category is not None and (not isinstance(category, str) or len(category) > 64):
         raise ValueError("worker error category is invalid")
+    trace_id = value.get("trace_id")
+    if trace_id is not None and (not isinstance(trace_id, str) or not trace_id.strip() or len(trace_id) > 256):
+        raise ValueError("worker trace identifier is invalid")
     return TrialObservation(
         answer=answer,
         cited_evidence=tuple(evidence),
@@ -413,6 +473,7 @@ def observation_from_mapping(value: Mapping[str, Any]) -> TrialObservation:
         sandbox_count=sandbox_count,
         resource_shape=resource_shape,
         error_category=category,
+        trace_id=trace_id,
     )
 
 
@@ -470,7 +531,14 @@ def score_trial(
         and case.expected_answer.casefold() in answer
         and not forbidden
     )
-    return ScoredTrial(trial, verified, evidence_valid, observation, observation.observed_cost(rates, envelope))
+    return ScoredTrial(
+        trial,
+        verified,
+        evidence_valid,
+        observation,
+        observation.observed_cost(rates, envelope),
+        envelope.upper_bound_usd(rates),
+    )
 
 
 def paired_bootstrap(rows: Sequence[ScoredTrial], *, seed: int = 7, samples: int = 10_000) -> dict[str, float | None]:
@@ -518,8 +586,18 @@ def paired_bootstrap(rows: Sequence[ScoredTrial], *, seed: int = 7, samples: int
     }
 
 
+def charged_cost(row: ScoredTrial) -> Decimal:
+    """Return the observed cost, or the worst-case reservation when unknown.
+
+    Retention comparisons must stay conservative when ordinary trial
+    failures leave spend unobserved: unknown rows count at their full
+    reservation, exactly as the budget charged them.
+    """
+    return row.observed_cost_usd if row.observed_cost_usd is not None else row.reserved_cost_usd
+
+
 def phase4_decision(rows: Sequence[ScoredTrial], *, bootstrap: Mapping[str, float | None]) -> str:
-    if len(rows) != 144 or any(row.observed_cost_usd is None for row in rows):
+    if len(rows) != 144:
         return "incomplete"
     if {row.trial.arm for row in rows} != set(ARMS) or {row.trial.classification for row in rows} != _CLASSIFICATIONS:
         return "incomplete"
@@ -534,13 +612,22 @@ def phase4_decision(rows: Sequence[ScoredTrial], *, bootstrap: Mapping[str, floa
         return "incomplete"
     if any(not row.observation.authorization_confirmed or not row.observation.cleanup_confirmed for row in rows):
         return "safety_failure"
+    if any(row.observation.latency_ms is None for row in rows):
+        return "incomplete"
+    # Failed turns project no usage telemetry by design, so call-shape
+    # metrics are required only for completed rows. Unknown spend on failed
+    # rows is handled conservatively by reservation imputation below.
     if any(
-        row.observation.latency_ms is None
-        or row.observation.root_lm_calls is None
-        or row.observation.child_lm_calls is None
-        or row.observation.delegated_bytes is None
+        row.observation.completed
+        and (
+            row.observation.root_lm_calls is None
+            or row.observation.child_lm_calls is None
+            or row.observation.delegated_bytes is None
+        )
         for row in rows
     ):
+        return "incomplete"
+    if any(row.observation.completed and row.observation.trace_id is None for row in rows):
         return "incomplete"
     if any(
         row.observation.error_category in {"authorization", "unauthorized", "cleanup", "cleanup_failed", "deadline"}
@@ -571,7 +658,7 @@ def phase4_decision(rows: Sequence[ScoredTrial], *, bootstrap: Mapping[str, floa
 
     def cost_per_success(values: Sequence[ScoredTrial]) -> Decimal | None:
         successes = sum(row.verified_success for row in values)
-        return sum((row.observed_cost_usd for row in values), Decimal(0)) / successes if successes else None
+        return sum((charged_cost(row) for row in values), Decimal(0)) / successes if successes else None
 
     def percentile95(values: Sequence[ScoredTrial]) -> float:
         ordered = sorted(float(row.observation.latency_ms) for row in values)
@@ -644,6 +731,8 @@ def campaign_summary(rows: Sequence[ScoredTrial]) -> dict[str, object]:
                 if all(row.observation.child_lm_calls is not None for row in selected)
                 else None,
                 "observed_spend_usd": str(sum(costs, Decimal(0))) if len(costs) == len(selected) else None,
+                "unknown_cost_rows": sum(row.observed_cost_usd is None for row in selected),
+                "charged_spend_usd": str(sum((charged_cost(row) for row in selected), Decimal(0))),
                 "cost_per_verified_success_usd": str(sum(costs, Decimal(0)) / successes)
                 if len(costs) == len(selected) and successes
                 else None,
@@ -685,6 +774,11 @@ def receipt(
         "observed_spend_usd": str(sum((cost for cost in costs if cost is not None), Decimal(0)))
         if all_costs_observed
         else None,
+        # Unknown-never-zero accounting: unknown rows charge their full
+        # reservation, exactly as the budget settled them. Cumulative cap
+        # checks must use this bound, never the observed-only sum.
+        "charged_spend_usd": str(sum((charged_cost(row) for row in rows), Decimal(0))),
+        "unknown_cost_rows": sum(row.observed_cost_usd is None for row in rows),
         "safety": {
             "all_authorization_confirmed": all(row.observation.authorization_confirmed for row in rows),
             "all_cleanup_confirmed": all(row.observation.cleanup_confirmed for row in rows),
@@ -715,6 +809,14 @@ def receipt(
     }
 
 
+@dataclass(frozen=True, slots=True)
+class CampaignOutcome:
+    """Sealed rows plus the budget ledger that admitted them."""
+
+    rows: tuple[ScoredTrial, ...]
+    budget: dict[str, object]
+
+
 def execute_campaign(
     *,
     cases: Sequence[Phase4Case],
@@ -725,7 +827,7 @@ def execute_campaign(
     started_at: float | None = None,
     clock: Callable[[], float] | None = None,
     initial_spent_usd: float = 0.0,
-) -> tuple[ScoredTrial, ...]:
+) -> CampaignOutcome:
     """Run a serial campaign through one pre-admission/settlement owner."""
     simulated = started_at is not None
     started = time.monotonic() if started_at is None else started_at
@@ -749,9 +851,10 @@ def execute_campaign(
         try:
             observation = runner(trial, by_id[trial.case_id])
         except Exception:
-            # A worker/process failure is still one attempted trial. Missing
-            # telemetry keeps the reservation owned and therefore halts the
-            # campaign in ``settle``; it is never retried or replaced.
+            # A worker/process failure is still one attempted trial. Its
+            # fallback observation carries no telemetry and unconfirmed
+            # cleanup, so ``settle_unknown`` halts the campaign below; the
+            # trial is never retried or replaced.
             observation = TrialObservation(
                 answer="",
                 cited_evidence=(),
@@ -772,38 +875,28 @@ def execute_campaign(
                 error_category="runner_failed",
             )
         scored = score_trial(by_id[trial.case_id], trial, observation, rates, envelope)
-        metrics_complete = all(
-            value is not None
-            for value in (
-                observation.input_tokens,
-                observation.output_tokens,
-                observation.cache_read_tokens,
-                observation.sandbox_seconds,
-                observation.sandbox_count,
-                observation.latency_ms,
-                observation.root_lm_calls,
-                observation.child_lm_calls,
-                observation.delegated_bytes,
-            )
-        )
-        resource_shape_complete = (
-            observation.sandbox_seconds == 0 and observation.sandbox_count == 0 and observation.resource_shape is None
-        ) or (
-            isinstance(observation.sandbox_seconds, int)
-            and observation.sandbox_seconds > 0
-            and isinstance(observation.sandbox_count, int)
-            and observation.sandbox_count > 0
-            and observation.resource_shape is not None
-        )
         try:
-            budget.settle(
-                actual_usd=(
-                    float(scored.observed_cost_usd)
-                    if scored.observed_cost_usd is not None and metrics_complete and resource_shape_complete
-                    else None
-                ),
-                cleanup_confirmed=observation.cleanup_confirmed and metrics_complete and resource_shape_complete,
-            )
+            if not observation.cost_inputs_valid():
+                # Ordinary failures carry no usage telemetry by design. The
+                # campaign charges the worst-case reservation and continues
+                # so success-rate evidence can accumulate; unconfirmed
+                # cleanup still halts inside ``settle_unknown``.
+                budget.settle_unknown(cleanup_confirmed=observation.cleanup_confirmed)
+            elif not observation.within_cost_bounds(envelope):
+                # Telemetry is present but outside the asserted envelope.
+                # Route through the existing bound-breach halt; the
+                # reservation math cannot vouch for this trial.
+                raw = observation.raw_cost(rates)
+                budget.settle(
+                    actual_usd=float(raw) if raw is not None else None,
+                    cleanup_confirmed=observation.cleanup_confirmed,
+                )
+            else:
+                observed = scored.observed_cost_usd
+                budget.settle(
+                    actual_usd=float(observed) if observed is not None else None,
+                    cleanup_confirmed=observation.cleanup_confirmed,
+                )
         except CampaignAdmissionError:
             output.append(scored)
             break
@@ -814,7 +907,7 @@ def execute_campaign(
             if simulated
             else clock()
         )
-    return tuple(output)
+    return CampaignOutcome(rows=tuple(output), budget=budget.receipt())
 
 
 def execute_partial_campaign(
@@ -867,15 +960,18 @@ def execute_partial_campaign(
         }
     )
 
-    def is_safety_failure(trial: Trial, observation: TrialObservation) -> bool:
+    def is_safety_failure(observation: TrialObservation) -> bool:
         category = observation.error_category
         if category in safety_categories:
             return True
-        # C has a campaign-owned lifecycle observer. Missing cleanup or
-        # resource telemetry there is a safety failure, while D may reuse the
-        # ordinary candidate service whose observer is intentionally absent in
-        # this exploratory mode.
-        return trial.arm == "C" and category in {
+        # The cleanup flag carries the provider-cleanup verdict; the error
+        # category preserves the turn diagnosis. Either signal halts.
+        if not observation.cleanup_confirmed:
+            return True
+        # Every arm runs behind a campaign-owned lifecycle observer on its
+        # supervised service. Missing cleanup or resource telemetry on any
+        # arm is a safety failure in this exploratory mode.
+        return category in {
             "cleanup_unavailable",
             "resource_observation_unavailable",
             "telemetry_unavailable",
@@ -909,7 +1005,7 @@ def execute_partial_campaign(
             )
         scored = score_trial(by_id[trial.case_id], trial, observation, rates, envelope)
         output.append(scored)
-        if is_safety_failure(trial, observation):
+        if is_safety_failure(observation):
             break
         if clock() >= deadline:
             break
@@ -919,6 +1015,7 @@ def execute_partial_campaign(
 __all__ = [
     "ARMS",
     "ArmSpec",
+    "CampaignOutcome",
     "Phase4Case",
     "PublicRateCard",
     "ScoredTrial",
@@ -928,6 +1025,7 @@ __all__ = [
     "arm_specs",
     "balanced_schedule",
     "campaign_summary",
+    "charged_cost",
     "corpus_sha256",
     "execute_campaign",
     "execute_partial_campaign",

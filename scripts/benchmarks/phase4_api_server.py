@@ -90,12 +90,15 @@ def _shape(resources: Any, profile: object) -> tuple[int, int, int] | None:
 class LifecycleObserver:
     """Patch the selected Daytona platform with a bounded local observer."""
 
-    # Default root-close deadline. Provider deletes take seconds each, so a
-    # tight deadline converts slow-but-complete cleanup into a safety fault.
-    # Operators may raise it via the environment for diagnosis; slowness then
-    # surfaces in the latency gates instead of masking as a cleanup failure.
-    # Leaks (created != deleted) still fail regardless of the deadline.
-    CLOSE_DEADLINE_DEFAULT_SECONDS: Final = 30.0
+    # Default root-close deadline. Shutdown runs interpreter settlement,
+    # broker stop, sandbox delete, and binding persistence in sequence, and
+    # provider deletes alone have been observed near seven seconds each, so
+    # a tight deadline converts slow-but-complete cleanup into a safety
+    # fault. Operators may raise it via the environment for diagnosis;
+    # slowness then surfaces in the latency gates instead of masking as a
+    # cleanup failure. Leaks (created != deleted) still fail regardless of
+    # the deadline, and a genuinely hung close still fails closed here.
+    CLOSE_DEADLINE_DEFAULT_SECONDS: Final = 120.0
 
     @staticmethod
     def close_deadline_seconds() -> float:
@@ -321,44 +324,17 @@ def _campaign_settings(
     # The frozen baseline predates explicit profile selection. Its disposable
     # policy overlay sets the campaign profile as default.
     settings = load_settings(profile=profile) if profile is not None and accepts_profile else load_settings()
+    # Only process-local overlays live here: the selected profile owns model,
+    # decoding, budget, and lease policy. The recursion flag selects the
+    # arm behavior (A/B run non-recursive, C/D recursive). MLflow tracing
+    # stays exactly as the profile configures it: campaign trials require
+    # live engineering traces on the profile's tracking server.
     update: dict[str, object] = {
-        # These values are process-local overlays for the disposable API
-        # service.  The ordinary profile's provider/model and runtime limits
-        # remain intact when no explicit campaign profile is supplied.
         "rlm_recursion_enabled": recursive,
         "data_root": str(data_root),
         "database_url": database_url,
         "volume_name": volume_name,
     }
-    if profile is not None:
-        update.update(
-            {
-                "root_llm_max_tokens": 1_024,
-                "sub_llm_max_tokens": 512,
-                "root_llm_timeout_seconds": 90,
-                "sub_llm_timeout_seconds": 90,
-                "root_llm_temperature": 0.0,
-                "sub_llm_temperature": 0.0,
-                "root_llm_num_retries": 0,
-                "sub_llm_num_retries": 0,
-                "root_llm_cache": False,
-                "sub_llm_cache": False,
-                "rlm_max_iters": 6,
-                "rlm_max_llm_calls": 8,
-                "rlm_max_provider_attempts": 8,
-                "rlm_execution_timeout_s": 90,
-                "rlm_wrap_up_seconds": 30,
-                "rlm_recursion_enabled": recursive,
-                "rlm_recursion_max_calls": 4,
-                "rlm_recursion_child_max_iters": 4,
-                "rlm_recursion_child_max_llm_calls": 4,
-                "rlm_recursion_child_max_output_chars": 2_000,
-                "rlm_recursion_max_parallel_children": 4,
-                "max_active_daytona_leases": 1,
-                "turn_timeout_seconds": 90,
-                "mlflow_tracing_enabled": False,
-            }
-        )
     return settings.model_copy(update=update)
 
 

@@ -62,7 +62,13 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert set(document["profiles"]) == {"daytona-recursive", "daytona-managed", "phase4-campaign"}
+    assert set(document["profiles"]) == {
+        "daytona-recursive",
+        "daytona-managed",
+        "phase4-campaign",
+        "phase4-campaign-a",
+        "phase4-campaign-b",
+    }
     assert document["defaults"]["daytona"]["snapshot_env"] == "FLEET_DAYTONA_SNAPSHOT"
     assert document["defaults"]["daytona"]["child_snapshot_env"] == "FLEET_DAYTONA_CHILD_SNAPSHOT"
     assert document["defaults"]["daytona"]["org_id_env"] == "FLEET_DAYTONA_ORG_ID"

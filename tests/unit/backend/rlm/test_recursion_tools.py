@@ -563,7 +563,6 @@ def test_native_child_depth_is_a_fixed_invariant_not_an_options_surface() -> Non
     depths = [event.output["recursive_depth"] for event in completed]
     assert depths == [1]
     assert executor.summary().call_count == 1
-    assert executor.summary().depth_fallback_count == 0
 
 
 def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> None:
@@ -627,8 +626,6 @@ def test_capsule_child_uses_native_semantic_calls_without_new_interpreter() -> N
     assert "fallback-answer" in outcome["answer"]
     assert len(created) == 1
     assert executor.summary().call_count == 1
-    assert executor.summary().depth_fallback_count == 0
-    assert "depth_fallback" not in executor.summary().termination_modes
 
 
 @pytest.mark.parametrize(

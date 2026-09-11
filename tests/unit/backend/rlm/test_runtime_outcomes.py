@@ -365,7 +365,6 @@ def test_delegation_usage_prefers_executor_reserved_count() -> None:
         delegated_prompt_chars=0,
         maximum_prompt_chars=0,
         child_iterations=0,
-        depth_fallback_count=0,
         termination_modes=(),
         delegation_metrics=metrics.snapshot(),
     )

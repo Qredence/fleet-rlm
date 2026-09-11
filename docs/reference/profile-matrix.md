@@ -9,6 +9,8 @@ Provider environment names are the only values required by the credentialed live
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `daytona-recursive` | yes | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 16384 / 16384 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | — |
 | `phase4-campaign` | no | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 1024 / 512 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | — |
+| `phase4-campaign-a` | no | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 1024 / 512 | disabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | — |
+| `phase4-campaign-b` | no | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 1024 / 512 | disabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | — |
 | `daytona-managed` | no | OpenAI Chat Completion | `databricks-deepseek-v4-flash-0731` / `databricks-deepseek-v4-flash-0731` | 16384 / 16384 | enabled | http://127.0.0.1:5001 | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` | `FLEET_DATABASE_URL` |
 
 The verifier uses the selected row's provider environment names and never checks a hard-coded provider credential. `FLEET_DATABASE_URL` is replaced by a temporary SQLite URL in the live proof.

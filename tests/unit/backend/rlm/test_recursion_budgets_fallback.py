@@ -178,7 +178,6 @@ def test_native_semantic_calls_do_not_consume_recursive_child_slots() -> None:
     assert recorder.call_indexes == [1]
     summary = executor.summary()
     assert summary.call_count == 1
-    assert summary.depth_fallback_count == 0
     assert summary.delegation_metrics.lm_call_counts == (("root", 1, 2), ("sub", 1, 1))
     with pytest.raises(RuntimeError, match="budget exhausted"):
         executor.batched_tool(capsules=[{"task": "no child slot remains"}])

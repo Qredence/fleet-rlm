@@ -375,7 +375,14 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
 
             usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
             assert 2 <= int(usage["iterations"]) <= 3
-            assert 2 <= len(code_chunks) <= 3
+            # Raw SSE code-chunk count is not the iteration bound: an iteration that yields no
+            # live execution (malformed model code) shifts live/trajectory step alignment, and
+            # trajectory reconciliation legitimately re-emits the corrected step plus the
+            # canonical backfill under the same stable step IDs (TUI cards upsert). The stable
+            # contract is distinct code steps, bounded by max_iters.
+            code_steps = {chunk["data"].get("step") for chunk in code_chunks if isinstance(chunk.get("data"), dict)}
+            code_steps.discard(None)
+            assert 2 <= len(code_steps) <= 3
 
             tool_names = [
                 str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
@@ -569,12 +576,14 @@ def test_complete_daytona_mvp_through_fastapi(
                             " no casts/copies/positional args:"
                             " verification = verify_semantic_work(iteration_token=iteration_token,"
                             " single_result=single_result, batch_results=batch_results, accumulator=accumulator)."
-                            ' Append "notes/findings.md" with the results and verification["checksum"] via'
-                            ' append_workspace_text(path="notes/findings.md", content=content);'
-                            ' require workspace_result["ok"]. Publish the existing Workspace document without'
-                            ' resending its body via publish_workspace_artifact(path="notes/findings.md",'
-                            ' kind="markdown", title="Findings"); require artifact_result["ok"];'
-                            ' print("SECOND_ITERATION_READY").'
+                            ' Append "notes/findings.md" with the results and verification["checksum"]: first set'
+                            ' checksum = verification["checksum"] and content = f"single={single_result}'
+                            ' batch={batch_results} checksum={checksum}", then call workspace_result ='
+                            ' append_workspace_text(path="notes/findings.md", content=content); require'
+                            ' workspace_result["ok"]. Publish the existing Workspace document without'
+                            " resending its body: call artifact_result = publish_workspace_artifact("
+                            'path="notes/findings.md", kind="markdown", title="Findings");'
+                            ' require artifact_result["ok"]; print("SECOND_ITERATION_READY").'
                             " 3) Set non-empty string-only summary/findings; call exactly"
                             " SUBMIT(answer=summary, findings=findings) with keywords. No fallback."
                         ),

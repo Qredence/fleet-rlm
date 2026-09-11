@@ -137,27 +137,35 @@ uv run python scripts/benchmarks/run_phase4_campaign.py --dry-run \
   --output .scratch/benchmark-reports/phase4-api-dry-run.json
 ```
 
-The campaign driver supervises isolated candidate and frozen-baseline API
-services and sends arms C/D through `POST /api/attachments`,
+The campaign driver supervises one isolated API service per arm (A/B/D from
+the candidate checkout, C from the frozen baseline) and sends every trial
+through `POST /api/attachments`,
 `POST /api/sessions`, and `POST /api/sessions/{id}/turns` over the public SSE
-contract. Arms A/B are direct DSPy ablations by design. The profile is opt-in;
+contract. Arm behavior differs by sealed profile only. The profiles are opt-in;
 ordinary launchers retain their existing defaults. The prior receipt at
 `.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
 incomplete, and superseded, so it is not value proof.
 
-To exercise the same API/SSE path against the ordinary committed profile, keep
-the candidate backend running on loopback and run the fixed exploratory sample:
+Every live campaign mode requires the MLflow tracking server from the
+campaign profile to be reachable before it admits a trial (local server at
+`http://127.0.0.1:5001` by default). Each completed trial links its sealed
+receipt row to the trial's MLflow root trace identifier; completed rows
+without linkage keep the campaign `incomplete`.
+
+To exercise the same API/SSE path against the ordinary committed profile, run
+the fixed exploratory sample (the driver supervises all four arm services; no
+separately running backend is needed):
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
-  --partial-live --candidate-url http://127.0.0.1:8000 \
+  --partial-live \
   --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
 ```
 
-This admits ten sealed rows with A/B direct DSPy ablations and C/D FastAPI
-services. It is deliberately partial and non-certifying; it records unknown
-cost or unavailable candidate lifecycle telemetry instead of treating either
-as zero, and it leaves the ordinary launcher profile unchanged.
+This admits ten sealed rows with every arm on supervised FastAPI services.
+It is deliberately partial and non-certifying; it records unknown
+cost instead of treating it as zero, and it leaves the ordinary launcher
+profile unchanged.
 
 The 2026-09-10 sample is retained at
 `.scratch/benchmark-reports/phase4-api-partial-20260910.json`; it attempted ten

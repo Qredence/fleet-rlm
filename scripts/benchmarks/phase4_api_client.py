@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import replace
@@ -21,10 +22,16 @@ class Phase4ApiClientError(RuntimeError):
 
 _PUBLIC_CHUNK_TYPES = frozenset({"data-structured-result", "data-usage", "text-delta", "error", "finish"})
 
+# MLflow root trace identifiers ride on finish-chunk message metadata when
+# the backend exposes them. The bound matches the API's trace-id contract.
+_MAX_TRACE_ID_CHARS = 256
+
 # Bound for joining text-delta frames into one answer candidate. Single-field
 # programs commit a text answer, so the client must accept the same bound the
 # structured parser enforces without retaining unbounded stream text.
 _MAX_TEXT_BYTES = 51_200
+
+_SOURCE_ID = re.compile(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])")
 
 
 def _error_observation(
@@ -37,11 +44,14 @@ def _error_observation(
 ) -> TrialObservation:
     """Return one bounded failure while still collecting cleanup telemetry."""
     events = _read_events(telemetry_path, offset=offset, token=token, timeout=2.0)
-    cleanup, sandbox_seconds, sandbox_count, shape, cleanup_category = _telemetry(events)
-    if telemetry_path is None:
-        cleanup_category = "telemetry_unavailable"
+    cleanup, sandbox_seconds, sandbox_count, shape, _ = _telemetry(events)
+    # The transport/stream diagnosis is always more specific than the
+    # generic lifecycle fallback, so it wins the category slot; the
+    # authorization and cleanup flags carry the safety verdict separately.
+    executed = any(event.get("event") == "turn_cleanup" for event in events)
     return replace(
-        _blank(cleanup_category or category),
+        _blank(category),
+        authorization_confirmed=executed,
         cleanup_confirmed=cleanup,
         sandbox_seconds=sandbox_seconds,
         sandbox_count=sandbox_count,
@@ -106,6 +116,20 @@ def _parse_sse(lines: Any) -> tuple[list[dict[str, Any]], str]:
 def trial_token(trial: Trial) -> str:
     """Return the bounded correlation token sent in the campaign-only header."""
     return f"{trial.arm}-{trial.case_id}-{trial.repeat}"
+
+
+def _trace_id(chunks: list[dict[str, Any]]) -> str | None:
+    """Return the bounded trace identifier from finish metadata, if exposed."""
+    for chunk in chunks:
+        if chunk.get("type") != "finish":
+            continue
+        metadata = chunk.get("messageMetadata")
+        if not isinstance(metadata, Mapping):
+            continue
+        candidate = metadata.get("traceId")
+        if isinstance(candidate, str) and candidate.strip() and len(candidate) <= _MAX_TRACE_ID_CHARS:
+            return candidate
+    return None
 
 
 def _record_label(trial: Trial, case: Phase4Case) -> str:
@@ -183,10 +207,17 @@ def _parse_result(value: object, source_ids: set[str]) -> tuple[str, tuple[str, 
     cited: list[str] = []
     for candidate in candidates:
         candidate = candidate.strip("[]")
+        # Unknown citations are model-content facts for the scorer
+        # (evidence_valid=false), not transport failures: drop them here
+        # and let score_trial penalize the missing required evidence.
         if candidate not in source_ids:
-            raise ValueError("citation_unavailable")
+            continue
         if candidate not in cited:
             cited.append(candidate)
+    if not cited:
+        for candidate in _SOURCE_ID.findall(answer):
+            if candidate in source_ids and candidate not in cited:
+                cited.append(candidate)
     return answer, tuple(cited), uncertainty
 
 
@@ -293,16 +324,18 @@ def _telemetry(
     category = cleanup.get("error_category") if isinstance(cleanup.get("error_category"), str) else None
     if sandbox_count and sandbox_seconds == 0:
         sandbox_seconds = 1
-    # Do not propagate arbitrary SDK exception names as lifecycle semantics.
-    # Any observed failed cleanup is the same safety category; the receipt
-    # must not depend on provider-specific exception text.
-    if not cleanup_confirmed:
-        category = "cleanup_failed"
+    # Only the harness-defined token survives this boundary: provider
+    # exception names must never become receipt semantics, and a failed
+    # cleanup must not mask the turn diagnosis. The cleanup flag carries
+    # the provider-cleanup verdict; the error category preserves what the
+    # turn itself did.
+    if category != "cleanup_unavailable":
+        category = None
     return cleanup_confirmed, sandbox_seconds, sandbox_count, resource_shape, category
 
 
 class Phase4ApiTrialRunner:
-    """Execute C/D through a running FastAPI service and parse public telemetry."""
+    """Execute trials through a running FastAPI service and parse public telemetry."""
 
     def __init__(
         self,
@@ -459,9 +492,12 @@ class Phase4ApiTrialRunner:
         )
         if self.telemetry_path is None:
             cleanup_category = "telemetry_unavailable"
-        if trial.arm in {"C", "D"} and (
-            sandbox_count is None or sandbox_count < 1 or sandbox_seconds is None or shape is None
-        ):
+        # Every API trial provisions a root Sandbox through the supervised
+        # service. A claimed success without resource telemetry is a
+        # cleanup-observation fault for every arm, not only the recursive
+        # ones. Already-failed cleanups keep their verdict so the turn
+        # diagnosis is not masked by a second observation label.
+        if cleanup and (sandbox_count is None or sandbox_count < 1 or sandbox_seconds is None or shape is None):
             cleanup = False
             cleanup_category = cleanup_category or "resource_observation_unavailable"
         return TrialObservation(
@@ -469,7 +505,10 @@ class Phase4ApiTrialRunner:
             cited_evidence=cited,
             uncertainty=uncertainty,
             completed=finish_reason == "stop" and bool(answer),
-            authorization_confirmed=finish_reason == "stop",
+            # The request was admitted and streamed to a terminal finish, so
+            # authorization held for this trial. Turn failure is an ordinary
+            # outcome, not an authorization fault.
+            authorization_confirmed=True,
             cleanup_confirmed=cleanup,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
@@ -482,6 +521,7 @@ class Phase4ApiTrialRunner:
             sandbox_count=sandbox_count,
             resource_shape=shape,
             error_category=cleanup_category or (None if finish_reason == "stop" else "turn_failed"),
+            trace_id=_trace_id(chunks),
         )
 
 

@@ -1053,7 +1053,6 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
     assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
     outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
     assert any(payload["termination_mode"] == "typed_submit" for payload in outputs)
-    assert executor.summary().depth_fallback_count == 0
 
 
 def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: pytest.MonkeyPatch) -> None:

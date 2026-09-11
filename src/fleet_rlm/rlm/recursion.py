@@ -110,7 +110,6 @@ class DelegationMetricsSnapshot:
     recursive_batch_calls: int = 0
     recursive_children_started: int = 0
     recursive_children_completed: int = 0
-    depth_fallback_calls: int = 0
     peak_child_concurrency: int = 0
     # UTF-8 bytes delivered to child invocations, including the serialized
     # capsule and any selected Artifact/Project/Session reads.  This is kept
@@ -144,7 +143,6 @@ class DelegationMetricsSnapshot:
             "recursive_batch_calls": self.recursive_batch_calls,
             "recursive_children_started": self.recursive_children_started,
             "recursive_children_completed": self.recursive_children_completed,
-            "depth_fallback_calls": self.depth_fallback_calls,
             "peak_child_concurrency": self.peak_child_concurrency,
             "delegated_input_bytes": self.delegated_input_bytes,
             "lm_call_counts": [
@@ -186,7 +184,6 @@ class DelegationMetrics:
         self._recursive_batch_calls = 0
         self._recursive_children_started = 0
         self._recursive_children_completed = 0
-        self._depth_fallback_calls = 0
         self._active_children = 0
         self._peak_child_concurrency = 0
         self._delegated_input_bytes = 0
@@ -242,10 +239,6 @@ class DelegationMetrics:
         with self._lock:
             self._recursive_batch_calls += 1
 
-    def record_depth_fallback(self) -> None:
-        with self._lock:
-            self._depth_fallback_calls += 1
-
     def record_delegated_input_bytes(self, value: int) -> None:
         """Record bytes actually delivered to a child invocation."""
         if type(value) is not int or value < 0:
@@ -298,7 +291,6 @@ class DelegationMetrics:
                 recursive_batch_calls=self._recursive_batch_calls,
                 recursive_children_started=self._recursive_children_started,
                 recursive_children_completed=self._recursive_children_completed,
-                depth_fallback_calls=self._depth_fallback_calls,
                 peak_child_concurrency=self._peak_child_concurrency,
                 delegated_input_bytes=self._delegated_input_bytes,
                 lm_call_counts=calls,
@@ -995,7 +987,6 @@ class RecursiveCallSummary:
     delegated_prompt_chars: int
     maximum_prompt_chars: int
     child_iterations: int
-    depth_fallback_count: int
     termination_modes: tuple[str, ...]
     recursive_batch_calls: int = 0
     recursive_children_started: int = 0
@@ -1012,7 +1003,6 @@ class RecursiveCallSummary:
         delegated_prompt_chars: int = 0,
         maximum_prompt_chars: int = 0,
         child_iterations: int = 0,
-        depth_fallback_count: int = 0,
         termination_modes: tuple[str, ...] = (),
     ) -> RecursiveCallSummary:
         """Assemble one bounded summary from a shared delegation snapshot."""
@@ -1021,7 +1011,6 @@ class RecursiveCallSummary:
             delegated_prompt_chars,
             maximum_prompt_chars,
             child_iterations,
-            depth_fallback_count,
             termination_modes,
             recursive_batch_calls=snapshot.recursive_batch_calls,
             recursive_children_started=snapshot.recursive_children_started,
@@ -1038,7 +1027,6 @@ class _RecursiveState:
     delegated_prompt_chars: int = 0
     maximum_prompt_chars: int = 0
     child_iterations: int = 0
-    depth_fallback_count: int = 0
     termination_modes: list[str] = field(default_factory=list)
     fatal_cleanup_error: BaseException | None = None
     pending_batch_futures: list[Future[Any]] = field(default_factory=list, repr=False)
@@ -1257,7 +1245,6 @@ class RecursiveRLMExecutor:
                 delegated_prompt_chars=self._state.delegated_prompt_chars,
                 maximum_prompt_chars=self._state.maximum_prompt_chars,
                 child_iterations=self._state.child_iterations,
-                depth_fallback_count=self._state.depth_fallback_count,
                 termination_modes=tuple(self._state.termination_modes),
             )
 
