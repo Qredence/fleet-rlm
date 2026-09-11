@@ -421,9 +421,9 @@ cost rather than inspecting private model reasoning. The curated classes are:
    iterative Python exploration.
 5. `recursive_batch` for independent subproblems where each needs iterative
    Python exploration in its own child Sandbox.
-6. `recursive_depth_fallback` for a child attempting one more delegation beyond
-   `RLM_NATIVE_CHILD_DEPTH`; the bounded plain Sub LM answers it and no second
-   child Sandbox is allocated.
+
+Children receive no Fleet recursion tools; further semantic work inside a
+child uses native `llm_query` calls under the child budget.
 
 The deterministic lane uses dummy models and in-process interpreters; public
 Tool observations, recursive summaries, answer text, child-runtime creation

@@ -1145,8 +1145,8 @@ def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None
         return executor.summary()
     if metrics is not None and callable(getattr(metrics, "snapshot", None)):
         snapshot = metrics.snapshot()
-        return RecursiveCallSummary.from_snapshot(snapshot, depth_fallback_count=snapshot.depth_fallback_calls)
-    return RecursiveCallSummary(0, 0, 0, 0, 0, ())
+        return RecursiveCallSummary.from_snapshot(snapshot)
+    return RecursiveCallSummary(0, 0, 0, 0, ())
 
 
 def record_phase_failure(
@@ -1178,7 +1178,6 @@ def record_phase_failure(
         "failure_category": trace_failure_category(exc),
         "recursive_call_count": summary.call_count,
         "recursive_prompt_chars": summary.delegated_prompt_chars,
-        "recursive_depth_fallback_count": summary.depth_fallback_count,
         "delegation_metrics": summary.delegation_metrics.as_dict(),
         "token_usage_status": summary.delegation_metrics.token_usage_status,
     }
@@ -1241,7 +1240,6 @@ def record_phase_success(
         "request_status": "completed",
         "recursive_call_count": summary.call_count,
         "recursive_prompt_chars": summary.delegated_prompt_chars,
-        "recursive_depth_fallback_count": summary.depth_fallback_count,
         "delegation_metrics": summary.delegation_metrics.as_dict(),
         "token_usage_status": token_usage_status,
     }

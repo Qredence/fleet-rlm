@@ -80,6 +80,52 @@ def test_campaign_unknown_cost_unconfirmed_cleanup_and_bound_breach_halt_admissi
         budget.reserve(upper_bound_usd=0.1, now=30, max_trial_seconds=30)
 
 
+def test_campaign_unknown_spend_charges_reservation_and_continues_with_confirmed_cleanup() -> None:
+    budget = CampaignBudget(_campaign(total_spend_cap=1.0, max_admissions=3), started_at=0)
+    budget.reserve(upper_bound_usd=0.5, now=0, max_trial_seconds=30)
+    budget.settle_unknown(cleanup_confirmed=True)
+    assert budget.receipt()["halted"] is False
+    assert budget.receipt()["observed_spend_usd"] == "0.5"
+    assert budget.receipt()["reserved_spend_usd"] is None
+    assert budget.reserve(upper_bound_usd=0.5, now=30, max_trial_seconds=30) == 2
+    budget.settle(actual_usd=0.1, cleanup_confirmed=True)
+    assert budget.receipt()["observed_spend_usd"] == "0.6"
+
+
+def test_campaign_unknown_spend_with_unconfirmed_cleanup_still_halts() -> None:
+    budget = CampaignBudget(_campaign(), started_at=0)
+    budget.reserve(upper_bound_usd=0.5, now=0, max_trial_seconds=30)
+    with pytest.raises(CampaignAdmissionError, match="unavailable"):
+        budget.settle_unknown(cleanup_confirmed=False)
+    assert budget.receipt()["halted"] is True
+    assert budget.receipt()["halt_reason"] == "unconfirmed_cleanup"
+    with pytest.raises(CampaignAdmissionError, match="halted"):
+        budget.reserve(upper_bound_usd=0.1, now=30, max_trial_seconds=30)
+
+
+def test_campaign_halt_reason_distinguishes_unknown_spend_from_bound_breach() -> None:
+    budget = CampaignBudget(_campaign(), started_at=0)
+    budget.reserve(upper_bound_usd=0.5, now=0, max_trial_seconds=30)
+    with pytest.raises(CampaignAdmissionError):
+        budget.settle(actual_usd=None, cleanup_confirmed=True)
+    assert budget.receipt()["halt_reason"] == "unknown_spend"
+
+    budget = CampaignBudget(_campaign(), started_at=0)
+    budget.reserve(upper_bound_usd=0.5, now=0, max_trial_seconds=30)
+    with pytest.raises(CampaignAdmissionError, match="asserted cost bound"):
+        budget.settle(actual_usd=0.6, cleanup_confirmed=True)
+    assert budget.receipt()["halt_reason"] == "cost_bound_breach"
+
+
+def test_campaign_charged_reservations_count_toward_the_spend_cap() -> None:
+    budget = CampaignBudget(_campaign(total_spend_cap=1.0, max_admissions=5), started_at=0)
+    budget.reserve(upper_bound_usd=0.6, now=0, max_trial_seconds=30)
+    budget.settle_unknown(cleanup_confirmed=True)
+    with pytest.raises(CampaignAdmissionError, match="spend reservation"):
+        budget.reserve(upper_bound_usd=0.6, now=30, max_trial_seconds=30)
+    assert budget.receipt()["halted"] is False
+
+
 def test_campaign_cost_and_time_caps_reject_before_admission() -> None:
     budget = CampaignBudget(_campaign(total_spend_cap=1.0), started_at=0)
     with pytest.raises(CampaignAdmissionError, match="spend reservation"):

@@ -115,7 +115,9 @@ def build_app(*, corpus: Path, telemetry: Path, recursive: bool) -> FastAPI:
         # Keep the request body consumed by FastAPI and intentionally ignore
         # its text/attachment content; the fake is a transport/lifecycle test.
         del body
-        _write_cleanup(telemetry, x_fleet_phase4_trial, sandbox=recursive)
+        # Mirror the real backend: every API Turn provisions a root Sandbox,
+        # recursive or not. The recursive flag only shapes the usage payload.
+        _write_cleanup(telemetry, x_fleet_phase4_trial, sandbox=True)
         usage = {
             "iterations": 1,
             "recursive_call_count": 1 if recursive else 0,
@@ -138,13 +140,19 @@ def build_app(*, corpus: Path, telemetry: Path, recursive: bool) -> FastAPI:
         value = {"answer": expected_answer, "evidence": required_evidence, "uncertainty": uncertainty}
         # Mirror the real backend: single-field programs commit a text answer,
         # so the stream carries text frames (not a structured-result chunk).
+        # The finish chunk carries a deterministic fake trace identifier so
+        # dry runs exercise the same linkage plumbing as live trials.
         body_text = json.dumps(value, ensure_ascii=True)
         chunks = (
             {"type": "text-start", "id": "text-fake"},
             {"type": "text-delta", "id": "text-fake", "delta": body_text},
             {"type": "text-end", "id": "text-fake"},
             {"type": "data-usage", "data": {"usage": usage}},
-            {"type": "finish", "finishReason": "stop"},
+            {
+                "type": "finish",
+                "finishReason": "stop",
+                "messageMetadata": {"traceId": f"fake-trace-{x_fleet_phase4_trial or session_id}"},
+            },
         )
 
         async def stream():

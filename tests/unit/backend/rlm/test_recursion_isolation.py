@@ -288,7 +288,6 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     assert counts.get(("sub", 0), 0) == 0
     assert snapshot.root_lm_calls_depth_0 == 2
     assert snapshot.child_root_lm_calls_depth_1 == 2
-    assert snapshot.depth_fallback_calls == 0
 
     # Invocation attribution: the fallback prompt reached only the Sub LM;
     # no Root action prompt reached the Sub LM, and the Sub LM's answer

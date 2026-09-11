@@ -64,20 +64,22 @@ retains `config.default_profile`. Explicit profile loading occurs before
 provider, database, Daytona, or client initialization, and explicit profiles
 are incompatible with Uvicorn `--reload`.
 
-The Phase 4 campaign preserves this transport boundary. Its candidate (D) and
-frozen-baseline (C) arms are isolated FastAPI processes reached through the
-public attachment, Session, Turn, and SSE endpoints. The A and B arms are
-direct DSPy ablations by design; they compare model behavior without claiming
-to certify the API transport. There is no public arm selector or alternate
-in-process campaign execution path.
+The Phase 4 campaign preserves this transport boundary. All four arms run as
+isolated FastAPI processes reached through the public attachment, Session,
+Turn, and SSE endpoints: A/B/D from the candidate checkout with their sealed
+arm profiles, C from the frozen-baseline checkout. Arm behavior differs by
+profile only; there is no public arm selector or alternate in-process campaign
+execution path. Live campaign modes require the profile's MLflow tracking
+server before admitting a trial, and every completed trial row links to its
+MLflow root trace identifier.
 
-For a bounded operator smoke of the live transport, the campaign driver can
-reuse an ordinary loopback candidate (`http://127.0.0.1:8000`) and start an
-isolated frozen-baseline service from the pinned revision. Its `--partial-live`
-mode sends exactly ten sealed exploratory trials through the public API/SSE
-contract, keeps one Session per trial, and records a partial receipt. This is
-transport evidence only: unknown provider spend and telemetry remain explicit,
-and the receipt cannot certify recursive value or change the default profile.
+For a bounded operator smoke of the live transport, the campaign driver
+supervises one disposable API service per arm from the pinned revisions. Its
+`--partial-live` mode sends exactly ten sealed exploratory trials through the
+public API/SSE contract, keeps one Session per trial, and records a partial
+receipt. This is transport evidence only: unknown provider spend remains
+explicit, and the receipt cannot certify recursive value or change the default
+profile.
 The 2026-09-10 execution is retained at
 `.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
 `incomplete`.

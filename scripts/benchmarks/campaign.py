@@ -65,8 +65,10 @@ class CampaignBudget:
     """Serial trial reservations made before provider or sandbox admission.
 
     A reservation includes worst-case retries, tokens, sandbox lifetime, and
-    cleanup. Unknown actual spend retains the entire reservation and stops
-    further admissions; it never releases budget based on an assumed zero.
+    cleanup. Unknown actual spend on a trial with confirmed cleanup charges
+    the entire reservation and continues; it never releases budget based on
+    an assumed zero. Unconfirmed cleanup still halts admission, because a
+    leaked provider resource can bill outside the cap's visibility.
     """
 
     def __init__(
@@ -91,6 +93,7 @@ class CampaignBudget:
         self._reserved: Decimal | None = None
         self._admissions = 0
         self._halted = False
+        self._halt_reason: str | None = None
 
     @staticmethod
     def _amount(value: float) -> Decimal:
@@ -119,14 +122,35 @@ class CampaignBudget:
             raise CampaignAdmissionError("no trial reservation exists")
         if actual_usd is None or not cleanup_confirmed:
             self._halted = True
+            self._halt_reason = "unconfirmed_cleanup" if not cleanup_confirmed else "unknown_spend"
             raise CampaignAdmissionError("trial spend or cleanup evidence is unavailable")
         actual = self._amount(actual_usd)
         if actual > self._reserved:
             self._spent += actual
             self._reserved = None
             self._halted = True
+            self._halt_reason = "cost_bound_breach"
             raise CampaignAdmissionError("trial exceeded its asserted cost bound")
         self._spent += actual
+        self._reserved = None
+
+    def settle_unknown(self, *, cleanup_confirmed: bool) -> None:
+        """Charge one full reservation for unknown actual spend and continue.
+
+        Ordinary trial failures (model errors, parse failures) carry no
+        usage telemetry by design; the campaign accounts them at the
+        worst-case reservation instead of halting, so success-rate evidence
+        can accumulate. The cap guarantee is preserved because every
+        reservation was admitted against it. Unconfirmed cleanup still
+        halts: leaked provider resources bill outside this ledger.
+        """
+        if self._reserved is None:
+            raise CampaignAdmissionError("no trial reservation exists")
+        if not cleanup_confirmed:
+            self._halted = True
+            self._halt_reason = "unconfirmed_cleanup"
+            raise CampaignAdmissionError("trial spend or cleanup evidence is unavailable")
+        self._spent += self._reserved
         self._reserved = None
 
     def receipt(self) -> dict[str, object]:
@@ -135,6 +159,7 @@ class CampaignBudget:
             "observed_spend_usd": str(self._spent),
             "reserved_spend_usd": str(self._reserved) if self._reserved is not None else None,
             "halted": self._halted,
+            "halt_reason": self._halt_reason,
         }
 
 
