@@ -146,3 +146,25 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
 
     release.set()
     await asyncio.wait_for(stream.wait_owned(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_runner_close_drains_active_owners_and_rejects_new_streams() -> None:
+    from fleet_rlm.rlm.runtime import RLMRunner, RunTerminalError
+
+    runner = RLMRunner()
+    runner.stream(object())
+    owner = next(iter(runner._active_ownerships))
+    release = asyncio.Event()
+
+    async def wait_owned() -> None:
+        await release.wait()
+
+    owner.wait_owned = wait_owned  # type: ignore[method-assign]
+    with pytest.raises(TimeoutError, match="did not settle"):
+        await runner.aclose(drain_seconds=0.01)
+    with pytest.raises(RunTerminalError, match="closed"):
+        runner.stream(object())
+    release.set()
+    await runner.aclose(drain_seconds=1)
+    assert not runner._active_ownerships

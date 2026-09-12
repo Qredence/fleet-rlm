@@ -11,11 +11,17 @@ import math
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Protocol
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import provider_status_code
-from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile, DaytonaSandboxSpec, environment_manifest
+from fleet_rlm.daytona.provisioning import (
+    SEMANTIC_CHILD_RESOURCES,
+    DaytonaEnvironmentProfile,
+    DaytonaSandboxSpec,
+    environment_manifest,
+)
 
 
 class WarmPoolError(ValueError):
@@ -60,13 +66,17 @@ def validate_semantic_child_warm_pool_request(request: Mapping[str, Any] | Any) 
 
 
 class WarmPoolClient(Protocol):
-    async def list(self) -> Sequence[Any]: ...
+    async def list(self) -> Sequence[Any]:
+        pass
 
-    async def create(self, snapshot: str, pool: int, target: str | None = None) -> Any: ...
+    async def create(self, snapshot: str, pool: int, target: str | None = None) -> Any:
+        pass
 
-    async def update(self, warm_pool_id: str, pool: int) -> Any: ...
+    async def update(self, warm_pool_id: str, pool: int) -> Any:
+        pass
 
-    async def delete(self, warm_pool_id: str) -> Any: ...
+    async def delete(self, warm_pool_id: str) -> Any:
+        pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,9 +98,11 @@ class WarmPoolOwnership:
 
 
 class WarmPoolOwnershipStore(Protocol):
-    async def find(self, *, pool_id: str) -> WarmPoolOwnership | None: ...
+    async def find(self, *, pool_id: str) -> WarmPoolOwnership | None:
+        pass
 
-    async def save(self, ownership: WarmPoolOwnership) -> WarmPoolOwnership: ...
+    async def save(self, ownership: WarmPoolOwnership) -> WarmPoolOwnership:
+        pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,6 +219,21 @@ def _matching_pools(pools: Sequence[Any], plan: WarmPoolPlan) -> list[Any]:
     ]
 
 
+def _validate_campaign_capacity(plan: WarmPoolPlan, campaign: WarmPoolCampaign) -> None:
+    """Prove the requested pool fits its operator-owned spend envelope."""
+    if plan.desired_size > campaign.admission_limit:
+        raise WarmPoolError("warm-pool capacity exceeds the campaign admission limit")
+    if plan.desired_size > campaign.sandbox_concurrency:
+        raise WarmPoolError("warm-pool capacity exceeds the campaign concurrency limit")
+    cpu, memory, disk = SEMANTIC_CHILD_RESOURCES
+    hourly = (
+        Decimal(cpu) * Decimal("0.0504") + Decimal(memory) * Decimal("0.0162") + Decimal(disk) * Decimal("0.000108")
+    )
+    estimated = Decimal(plan.desired_size) * Decimal(campaign.elapsed_seconds) * hourly / Decimal(3600)
+    if estimated > Decimal(str(campaign.spend_cap)):
+        raise WarmPoolError("warm-pool campaign spend estimate exceeds the declared cap")
+
+
 async def _cleanup_created_pool(client: WarmPoolClient, pool_id: str) -> bool:
     """Delete and re-list one pool, confirming provider absence before failure."""
     try:
@@ -242,6 +269,7 @@ async def reconcile_warm_pool(
         if campaign is None:
             raise WarmPoolError("a campaign preflight is required for reconciliation")
         campaign.validate()
+        _validate_campaign_capacity(plan, campaign)
     pools = _matching_pools(await client.list(), plan)
     if len(pools) > 1:
         raise WarmPoolError("multiple matching Daytona warm pools require manual reconciliation")

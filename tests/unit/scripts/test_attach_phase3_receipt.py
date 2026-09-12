@@ -135,10 +135,17 @@ def test_attach_logs_artifact_tags_and_timing_metrics(monkeypatch: pytest.Monkey
     calls = SimpleNamespace(tags=[], metrics=[], artifacts=[])
 
     class _Client:
+        def __init__(self) -> None:
+            self._tags: dict[str, str] = {}
+
         def get_run(self, run_id: str) -> Any:
-            return SimpleNamespace(info=SimpleNamespace(run_id=run_id, status="FINISHED"))
+            return SimpleNamespace(
+                info=SimpleNamespace(run_id=run_id, status="FINISHED"),
+                data=SimpleNamespace(tags=dict(self._tags)),
+            )
 
         def set_tag(self, run_id: str, key: str, value: str) -> None:
+            self._tags[key] = value
             calls.tags.append((run_id, key, value))
 
         def log_metric(self, run_id: str, key: str, value: float, **kwargs: Any) -> None:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import sys
 from contextlib import redirect_stdout, suppress
 from io import StringIO
 from pathlib import Path
@@ -129,7 +130,7 @@ async def test_mounted_gateway_creates_and_deletes_exactly_one_ephemeral_sandbox
 async def test_mounted_gateway_cancels_delete_that_exceeds_grace_period(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.composition.daytona_workspace_gateway as workspace_gateway
+    workspace_gateway = sys.modules[DaytonaWorkspaceGateway.__module__]
 
     platform = _Platform()
     delete_started = asyncio.Event()

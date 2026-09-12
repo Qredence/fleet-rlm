@@ -132,6 +132,30 @@ async def test_enabled_zero_capacity_is_a_drained_noop_without_provider_create()
     assert client.calls == [("list",)]
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("campaign", "message"),
+    [
+        (WarmPoolCampaign("test-campaign", 10, 1800, 1, 2), "admission limit"),
+        (WarmPoolCampaign("test-campaign", 10, 1800, 2, 1), "concurrency limit"),
+        (WarmPoolCampaign("test-campaign", 0.01, 1800, 2, 2), "spend estimate"),
+    ],
+)
+async def test_reconcile_checks_campaign_limits_before_provider_mutation(campaign, message) -> None:
+    settings = _settings(daytona_warm_pool_enabled=True, daytona_warm_pool_size=2)
+    client = Client()
+    with pytest.raises(WarmPoolError, match=message):
+        await reconcile_warm_pool(
+            client,
+            WarmPoolPlan.from_settings(settings),
+            apply=True,
+            campaign=campaign,
+            ownership_store=OwnershipStore(),
+            candidate_sha="a" * 64,
+        )
+    assert all(call[0] != "create" and call[0] != "update" for call in client.calls)
+
+
 @pytest.mark.parametrize("field", ("volumes", "env_vars", "user", "resources"))
 def test_semantic_child_request_rejects_disqualifying_drift(field):
     request = {"snapshot": "child", "pool": 1, "target": "us", field: {"drift": True}}

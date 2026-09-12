@@ -334,19 +334,7 @@ def attach(args: argparse.Namespace) -> dict[str, Any]:
         raise Phase3AttachmentError("cannot attach a receipt to a deleted MLflow run")
     existing_tags = getattr(getattr(run, "data", None), "tags", {}) or {}
     existing_digest = existing_tags.get("fleet.phase3.receipt_sha256")
-    if existing_digest == digest:
-        return {
-            "schema": RECEIPT_SCHEMA,
-            "run_id": run_id,
-            "artifact": f"{artifact_path}/daytona-native-feasibility.json",
-            "receipt_sha256": digest,
-            "tags_written": 0,
-            "metrics_written": 0,
-            "already_attached": True,
-            "native_production": receipt["go_no_go"]["native_production"],
-            "retained_broker_compatibility": receipt["go_no_go"]["retained_broker_compatibility"],
-        }
-    if existing_digest:
+    if existing_digest and existing_digest != digest:
         raise Phase3AttachmentError("MLflow run already has a different sealed Phase 3 receipt")
     timestamp_ms = int(digest[:12], 16) % 1_000_000_000_000
     tags = {
@@ -381,8 +369,18 @@ def attach(args: argparse.Namespace) -> dict[str, Any]:
     for name, value in receipt["timings_ms"].items():
         client.log_metric(run_id, f"fleet.phase3.{name}", float(value), timestamp=timestamp_ms, step=0)
         metrics += 1
+    # Write all metadata except the digest first.  The digest is the commit
+    # marker and is sealed last so a retry cannot leave a convincing digest
+    # pointing at missing or incomplete metadata.
     for key, value in tags.items():
+        if key == "fleet.phase3.receipt_sha256":
+            continue
         client.set_tag(run_id, key, value)
+    client.set_tag(run_id, "fleet.phase3.receipt_sha256", digest)
+    verified = client.get_run(run_id)
+    verified_tags = getattr(getattr(verified, "data", None), "tags", {}) or {}
+    if any(verified_tags.get(key) != value for key, value in tags.items()):
+        raise Phase3AttachmentError("MLflow receipt metadata could not be verified after sealing")
 
     return {
         "schema": RECEIPT_SCHEMA,
@@ -391,6 +389,7 @@ def attach(args: argparse.Namespace) -> dict[str, Any]:
         "receipt_sha256": digest,
         "tags_written": len(tags),
         "metrics_written": metrics,
+        "already_attached": existing_digest == digest,
         "native_production": receipt["go_no_go"]["native_production"],
         "retained_broker_compatibility": receipt["go_no_go"]["retained_broker_compatibility"],
     }

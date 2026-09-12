@@ -337,6 +337,7 @@ _WORKSPACE_TOOL_NAMESPACES = {
     "read_workspace_text": "session_workspace",
     "delete_workspace_path": "session_workspace",
     "edit_workspace_text": "session_workspace",
+    "publish_workspace_artifact": "session_workspace",
     "write_project_text": "project_workspace",
     "read_project_text": "project_workspace",
     "delete_project_path": "project_workspace",
@@ -402,6 +403,16 @@ class RunIntegrityLedger:
     required_targets: frozenset[str] | None = None
     _expected_content: dict[str, str] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.required_targets is not None:
+            self._unresolved.update(self.required_targets)
+
+    def set_required_targets(self, targets: frozenset[str] | None) -> None:
+        """Seed named request obligations before the worker can submit."""
+        self.required_targets = targets
+        if targets is not None:
+            self._unresolved.update(targets)
+
     def _target(self, tool_name: str, arguments: Mapping[str, Any]) -> str | None:
         target = _workspace_target(tool_name, arguments)
         if target is None:
@@ -415,6 +426,8 @@ class RunIntegrityLedger:
             self._unresolved.add(target)
 
     def completed(self, tool_name: str, arguments: Mapping[str, Any], result: object) -> None:
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            return
         target = self._target(tool_name, arguments)
         if target is None:
             return
@@ -424,6 +437,10 @@ class RunIntegrityLedger:
                 self._expected_content[target] = sha256(content.encode("utf-8")).hexdigest()
             return
         if tool_name == "append_workspace_text":
+            self._unresolved.discard(target)
+            self._expected_content.pop(target, None)
+            return
+        if tool_name == "publish_workspace_artifact":
             self._unresolved.discard(target)
             self._expected_content.pop(target, None)
             return
@@ -486,7 +503,7 @@ class RunToolGuards:
 
     def __post_init__(self) -> None:
         if self.required_targets is not None:
-            self.integrity.required_targets = self.required_targets
+            self.integrity.set_required_targets(self.required_targets)
 
     def completed(self, tool_name: str, arguments: Mapping[str, Any], result: object) -> str | None:
         self.integrity.completed(tool_name, arguments, result)
@@ -1008,6 +1025,7 @@ class RunEventStream:
         outcome_factory: Callable[[], RLMOutcome],
         ownership: WorkerOwnership,
         runtime_lease: list[Any] | None = None,
+        on_finish: Callable[[], None] | None = None,
     ) -> None:
         """Initialize an event stream with its event iterator and owned Session lane."""
         self._agen = agen.__aiter__()
@@ -1018,6 +1036,7 @@ class RunEventStream:
         self._runtime_lease_holder = runtime_lease if runtime_lease is not None else []
         self._defer_runtime_release = False
         self._runtime_released = False
+        self._on_finish = on_finish
 
     @property
     def outcome(self) -> RLMOutcome | None:
@@ -1079,6 +1098,9 @@ class RunEventStream:
         if not self._finished:
             self._finished = True
             self._outcome = self._outcome_factory()
+            if self._on_finish is not None:
+                self._on_finish()
+                self._on_finish = None
 
 
 def _terminal_status(exc: BaseException) -> TerminalStatus:
@@ -1153,11 +1175,13 @@ class RLMRunner:
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
+        self._active_ownerships: set[WorkerOwnership] = set()
+        self._unregister_tasks: set[asyncio.Task[None]] = set()
 
     async def aclose(self, *, drain_seconds: float = 30.0) -> None:
         """Detach observers and boundedly release runner-owned state exactly once."""
         async with self._close_lock:
-            if self._closed:
+            if self._closed and not self._active_ownerships:
                 return
             task = self._close_task
             if task is None:
@@ -1179,9 +1203,27 @@ class RLMRunner:
             raise
 
     async def _aclose_impl(self, *, drain_seconds: float) -> None:
-        """Mark this run-scoped runner closed."""
-        del drain_seconds
+        """Stop new work and boundedly drain every already-created worker."""
         self._closed = True
+        deadline = asyncio.get_running_loop().time() + max(0.0, drain_seconds)
+        while self._active_ownerships:
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                raise TimeoutError("RLM runner workers did not settle before shutdown")
+            owners = tuple(self._active_ownerships)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*(owner.wait_owned() for owner in owners)),
+                    timeout=remaining,
+                )
+            except TimeoutError as exc:
+                raise TimeoutError("RLM runner workers did not settle before shutdown") from exc
+            except BaseException:
+                # The worker has still settled even when a blocking waiter
+                # reports its own failure; do not retain a dead owner forever.
+                self._active_ownerships.difference_update(owners)
+                raise
+            self._active_ownerships.difference_update(owners)
 
     def stream(self, context: RLMExecutionContext) -> RunEventStream:
         """
@@ -1193,8 +1235,17 @@ class RLMRunner:
         Returns:
                 RunEventStream: Stream of execution events with access to the final outcome.
         """
+        if self._closed:
+            raise RunTerminalError("RLM runner is closed")
         outcome: list[RLMOutcome] = []
         ownership = WorkerOwnership()
+        self._active_ownerships.add(ownership)
+
+        def unregister() -> None:
+            task = asyncio.create_task(self._unregister_after_drain(ownership), name="fleet-rlm-owner-drain")
+            self._unregister_tasks.add(task)
+            task.add_done_callback(self._unregister_tasks.discard)
+
         runtime_lease: list[Any] = []
         events = self._generate(context, outcome, ownership, runtime_lease)
         return RunEventStream(
@@ -1214,7 +1265,14 @@ class RLMRunner:
             ),
             ownership,
             runtime_lease,
+            unregister,
         )
+
+    async def _unregister_after_drain(self, ownership: WorkerOwnership) -> None:
+        """Drop a stream owner only after its worker and blocking waiters settle."""
+        with suppress(BaseException):
+            await ownership.wait_owned()
+        self._active_ownerships.discard(ownership)
 
     async def _generate(
         self,
@@ -1237,6 +1295,8 @@ class RLMRunner:
         started = time.perf_counter()
         prediction: list[Any] = []
         try:
+            if self._closed:
+                raise RunTerminalError("RLM runner is closed")
             async for event in self._run_success(context, outcome, ownership, prediction, started, runtime_lease):
                 yield event
         except (GeneratorExit, asyncio.CancelledError):
@@ -1304,6 +1364,8 @@ class RLMRunner:
         observations = ObservationSession(context.identity.run_id, context.identity.session_id)
         async for event in self._initial_events(context, observations):
             yield event
+        if self._closed:
+            raise RunTerminalError("RLM runner is closed")
         spec, guards, worker, _recursive_executor, lease = await self._start_worker(context, ownership, observations)
         runtime_lease.append(lease)
         async for event in self._worker_events(context, observations, worker):
@@ -1388,6 +1450,8 @@ class RLMRunner:
             RLMConfigError: If recursive execution is enabled without a child runtime or
             the session tool registry is unavailable.
         """
+        if self._closed:
+            raise RunTerminalError("RLM runner is closed")
         spec = context.capabilities.spec
         guards = RunToolGuards(
             required_targets=workspace_obligations(context.session.request),

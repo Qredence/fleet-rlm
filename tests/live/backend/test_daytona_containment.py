@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import importlib.metadata
+import inspect
 import json
 import os
 import sys
@@ -72,7 +73,7 @@ async def _close_client(client: Any) -> None:
     if callable(close):
         with contextlib.suppress(BaseException):
             result = close()
-            if hasattr(result, "__await__"):
+            if inspect.isawaitable(result):
                 await result
 
 

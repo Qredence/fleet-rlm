@@ -122,7 +122,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         result = asyncio.run(_run(args))
-    except (WarmPoolError, ValueError):
+    except Exception:
         print("Daytona warm-pool operation could not be completed safely.")
         return 2
     print(json.dumps(result, sort_keys=True))
