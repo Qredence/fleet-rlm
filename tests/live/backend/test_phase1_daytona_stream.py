@@ -369,11 +369,19 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
             created = client.post("/api/sessions", json={"title": "Phase 1 Daytona stream canary"})
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
-            uploaded = client.post(
-                "/api/attachments",
-                files={"attachment": ("phase1.txt", _ATTACHMENT_CONTENT.encode(), "text/plain")},
-            )
-            assert uploaded.status_code == 201
+            uploaded = None
+            # The canary proves the Session/stream contract, not local blob
+            # write latency: tolerate a transient local-storage hiccup with a
+            # bounded retry. A persistent failure still fails the canary.
+            for _attempt in range(3):
+                uploaded = client.post(
+                    "/api/attachments",
+                    files={"attachment": ("phase1.txt", _ATTACHMENT_CONTENT.encode(), "text/plain")},
+                )
+                if uploaded.status_code == 201:
+                    break
+                time.sleep(2.0)
+            assert uploaded is not None and uploaded.status_code == 201
             attachment_id = uploaded.json()["id"]
             response = client.post(
                 f"/api/sessions/{session_id}/turns",

@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, UploadFile
 from fleet_rlm.api.dependencies import AttachmentLifecycleDep, LocalScopeDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import AttachmentResponse
-from fleet_rlm.attachments.errors import AttachmentError, AttachmentNotFoundError
+from fleet_rlm.attachments.errors import AttachmentError, AttachmentNotFoundError, AttachmentStorageError
 from fleet_rlm.attachments.models import AttachmentAccess, AttachmentUpload
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
@@ -36,6 +36,8 @@ async def upload_attachment(
                 source=attachment,
             ),
         )
+    except AttachmentStorageError as exc:
+        raise http_error(503, "attachment_unavailable", "Attachment storage is unavailable") from exc
     except AttachmentError as exc:
         raise http_error(400, "attachment_invalid", str(exc)) from exc
     except Exception as exc:
