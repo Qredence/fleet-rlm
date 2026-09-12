@@ -16,6 +16,49 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 5 closeout execution (2026-09-12, candidate `02af9a300`)
+
+Full authorization was granted (paid provider/model, database, deployment).
+Candidate `02af9a300c5819699fe342f1ed4869808ead0184` on
+`chore/phase5-operational-certification`; worktree clean for every sealed receipt.
+`.env` snapshot references (ignored, deployment-local) were promoted
+`fleet-rlm-python313-v7/v2` -> `fleet-rlm-python313-v10/v5` after the aggregate
+passed; `fleet doctor daytona` passes on the promoted references.
+
+- P5.1 aggregate P2.7: `.fleet-evidence/receipts/adr006/p27-clean-02af9a300.json`
+  passes all five assertions (Session/child probes, host-tool/RLM stream,
+  SemanticChild recursive RLM, disposable cleanup). Required two reconciliations:
+  an explicit recursion opt-in overlay for the Phase 2 canary (production stays
+  disabled), and volume-less SemanticChild isolation scope replacing the
+  scoped-sibling assertion for that profile.
+- P5.2 Neon exclusive branch: 6/6 contention scenarios plus 5/5 query plans
+  (4 synthetic samples, explicit) pass
+  (`.fleet-evidence/receipts/adr006/phase5-neon-postgres-final-s4.json`); managed
+  Lakebase preflight passes read-only. Default 64-sample plans time out on Neon;
+  small-sample topology evidence is recorded explicitly, not as a load proof.
+  Migration rehearsal: the tool fails safe on legacy dev SQLite (July schema,
+  lineage verification); no receipt. No production cutover import is required:
+  managed Lakebase is the live store. Deterministic import-logic coverage stays
+  in `tests/unit/scripts/test_migrate_sqlite_to_postgres.py`.
+- P5.3: warm pools remain disabled; cold-path Turns and cleanups proven.
+- P5.4: configured loopback MLflow passes exercised scenarios; token aggregation
+  unknown and fault/sampling lanes unexercised (receipt ineligible by design).
+  Managed Databricks MLflow export is not certified. Live Turn traces resolve OK
+  with valid parent linkage (14-17 spans).
+- P5.5: MLflow/campaign write-once persistence consolidated with deterministic
+  failure-safety coverage.
+- Incidental production fix: blob-write storage failures returned 400
+  `attachment_invalid`; they now return 503 `attachment_unavailable`, with
+  contract coverage. The Phase 1 canary retries upload 3x for transient local
+  hiccups; persistent failure still fails.
+- Flakiness observed and retried honestly: one smoke Turn failed then passed on
+  retry; aggregate lanes failed fast twice (upload 400 before the retry landed)
+  then passed twice. Every paid attempt confirmed disposable cleanup; actual
+  model/Daytona spend is cents against the US$50 cap (reservations, not spend,
+  accounted US$48+ per campaign envelope).
+- Unchanged: complete-MVP quality failures, production latency/error/cost
+  tolerances, release/rollback rehearsal (Phase 6).
+
 ### Phase 5 bounded API/MLflow execution (2026-09-12)
 
 Operator approved a certification branch/commit and paid provider/model work

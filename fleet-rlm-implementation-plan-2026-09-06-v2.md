@@ -805,7 +805,16 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 # Phase 5 - Operational certification without feature growth
 
-**Status: in progress; bounded live evidence collected (2026-09-12).**
+**Status: substantially complete (2026-09-12, candidate `02af9a300`).**
+Aggregate snapshot certification, exclusive-database contention/query plans,
+configured-loopback MLflow (partial), bounded FastAPI smoke with trace linkage,
+snapshot promotion with doctor pass, and cold-path evidence are sealed.
+Migration rehearsal fails safe on legacy dev rows with no production cutover
+required; managed MLflow export and production tolerances remain open and
+belong to release/Phase 6 gates. The [ADR006 closeout entry](docs/decisions/006-implementation-status.md#phase-5-closeout-execution-2026-09-12-candidate-02af9a300)
+records exact scope. Previous wording retained below for continuity.
+
+**Status (earlier): in progress; bounded live evidence collected (2026-09-12).**
 The operator-authorized clean candidate `962f4a62f` passed v10/v5 image/runtime
 probes and one bounded non-recursive FastAPI control with MLflow linkage.
 Configured-loopback MLflow export passed its exercised scenarios, but token
