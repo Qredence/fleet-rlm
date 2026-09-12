@@ -417,13 +417,25 @@ class RunIntegrityLedger:
         target = _workspace_target(tool_name, arguments)
         if target is None:
             return None
-        if self.required_targets is not None and target not in self.required_targets:
+        if self.required_targets is not None:
+            if target in self.required_targets:
+                return target
+            # Request prose historically treats ``workspace/`` as an explicit
+            # session-workspace namespace marker, while host tools receive the
+            # literal path. Accept that unambiguous alias without allowing a
+            # project target or unrelated path to satisfy the obligation.
+            workspace_alias = "session_workspace:workspace/"
+            if target.startswith(workspace_alias):
+                stripped = "session_workspace:" + target.removeprefix(workspace_alias)
+                if stripped in self.required_targets:
+                    return stripped
             return None
         return target
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
         if target := self._target(tool_name, arguments):
             self._unresolved.add(target)
+            self._expected_content.pop(target, None)
 
     def completed(self, tool_name: str, arguments: Mapping[str, Any], result: object) -> None:
         if not isinstance(result, Mapping) or result.get("ok") is not True:

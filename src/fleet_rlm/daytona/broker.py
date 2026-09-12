@@ -1400,7 +1400,7 @@ class DaytonaHttpToolBroker:
                 run_started_ns = time.perf_counter_ns()
                 try:
                     bucket.append(run_code())
-                except (Exception, asyncio.CancelledError) as exc:
+                except BaseException as exc:
                     # Transfer cancellation and other control-flow exceptions
                     # to the owning caller rather than losing them in a thread.
                     bucket.append(exc)
