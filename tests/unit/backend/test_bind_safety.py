@@ -6,6 +6,7 @@ import pytest
 
 from fleet_rlm.cli.bind_safety import UnsafeBindError, is_loopback_bind_host, require_safe_bind_host
 from fleet_rlm.cli.main import fleet_main, fleet_rlm_main
+from fleet_rlm.cli.server import main as serve_api_main
 
 
 @pytest.mark.parametrize(
@@ -34,6 +35,7 @@ def test_non_loopback_hosts_require_explicit_opt_in(host: str) -> None:
         (fleet_main, ["web", "--host", "0.0.0.0"]),
         (fleet_rlm_main, ["serve-api", "--host", "0.0.0.0"]),
         (fleet_main, ["cli", "--host", "0.0.0.0"]),
+        (serve_api_main, ["--host", "0.0.0.0"]),
     ],
 )
 def test_launchers_reject_non_loopback_without_opt_in(
