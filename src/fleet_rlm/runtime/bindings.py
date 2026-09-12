@@ -37,7 +37,8 @@ class SandboxBindingStore(Protocol):
 
     async def upsert(self, binding: SandboxBinding) -> SandboxBinding: ...
 
-    async def replace_with_next_generation(self, binding: SandboxBinding) -> SandboxBinding: ...
+    async def replace_with_next_generation(self, binding: SandboxBinding) -> SandboxBinding:
+        raise NotImplementedError
 
 
 class BindingGenerationAuthority:

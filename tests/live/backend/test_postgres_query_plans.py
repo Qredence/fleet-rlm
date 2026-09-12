@@ -25,7 +25,6 @@ from scripts.benchmarks.certify_postgres import project_query_plan
 from tests.live.backend.test_postgres_contention import postgres_claim_store
 
 __all__ = ["postgres_claim_store"]
-pytestmark = [pytest.mark.db, pytest.mark.asyncio, pytest.mark.timeout(180)]
 
 
 @pytest.mark.parametrize("operation", ["sessions", "history", "replay", "recovery", "outbox"])

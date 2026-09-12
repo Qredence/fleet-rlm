@@ -1547,10 +1547,7 @@ def _score_value(value: object) -> bool | str | None:
         return bool(value)
     if value is None:
         return None
-    try:
-        if value != value:  # NaN-like values
-            return None
-    except Exception:
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isnan(value):
         return None
     return str(value)[:128]
 

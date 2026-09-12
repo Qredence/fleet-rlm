@@ -91,7 +91,7 @@ class OwnershipStore:
 
 
 class FailingOwnershipStore(OwnershipStore):
-    async def save(self, **_kwargs):
+    async def save(self, _ownership):
         raise RuntimeError("storage unavailable")
 
 

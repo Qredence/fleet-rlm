@@ -947,7 +947,6 @@ def _trace_attributes(values: Mapping[str, object]) -> dict[str, object]:
 # and standard DSPy autolog spans (module/LM/tool calls).
 
 _LOCAL_BYOK_USER = "fleet-local"
-_LOCAL_SUPERVISED_TRACKING_URI = "http://127.0.0.1:5001"
 _SPAN_NAME = "fleet_turn"
 # Closed phase set so one Fleet Run (preparation + execution fleet_turn roots)
 # remains searchable by exactly these values, never by ad-hoc strings.

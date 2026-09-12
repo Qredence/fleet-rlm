@@ -335,12 +335,12 @@ async def test_async_tool_uses_the_composition_bridge_inside_dspy_event_loop() -
             nonlocal bridge_calls
             bridge_calls += 1
             result: list[Any] = []
-            failure: list[BaseException] = []
+            failure: list[Exception] = []
 
             def resolve() -> None:
                 try:
                     result.append(asyncio.run(awaitable))
-                except BaseException as exc:  # pragma: no cover - assertion below reports it
+                except Exception as exc:  # pragma: no cover - assertion below reports it
                     failure.append(exc)
 
             worker = Thread(target=resolve)

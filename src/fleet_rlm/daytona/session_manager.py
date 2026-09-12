@@ -1434,7 +1434,7 @@ class DaytonaSessionManager:
                 request.workspace_id,
                 deadline=deadline,
             )
-        except BaseException:
+        except Exception:
             durable_read_failed = True
         if not durable_read_failed:
             if durable_binding is None or durable_binding.sandbox_id != sandbox_id:

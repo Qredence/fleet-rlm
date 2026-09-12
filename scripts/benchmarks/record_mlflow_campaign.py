@@ -259,12 +259,17 @@ def _write_once(path: Path, payload: Mapping[str, object]) -> None:
     except FileExistsError as exc:
         raise CampaignRecordError("campaign result receipt already exists") from exc
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle = os.fdopen(descriptor, "w", encoding="utf-8")
+        descriptor = None
+        with handle:
             json.dump(payload, handle, indent=2, sort_keys=True)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
     except BaseException:
+        if descriptor is not None:
+            with suppress(OSError):
+                os.close(descriptor)
         path.unlink(missing_ok=True)
         raise
 
