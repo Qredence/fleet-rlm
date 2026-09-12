@@ -86,6 +86,7 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
+from fleet_rlm.rlm.specified_prompt_rewrite import apply_specified_sub_lm_prompts
 from fleet_rlm.runtime.errors import FilesystemToolError
 
 if TYPE_CHECKING:
@@ -550,6 +551,7 @@ class DaytonaCodeInterpreter:
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
+        self._turn_request: str | None = None
         self._output_budget_exhausted = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
@@ -745,6 +747,19 @@ class DaytonaCodeInterpreter:
         self._turn_budget = budget
         self._output_budget_exhausted = False
 
+    def bind_turn_request(self, request: str | None) -> None:
+        """
+        Bind or clear the current Turn request used to restore specified Sub-LM prompts.
+
+        Parameters:
+                request (str | None): Turn request text, or ``None`` to clear the binding.
+        """
+        self._ensure_binding_mutation_allowed()
+        if isinstance(request, str) and request:
+            self._turn_request = request
+        else:
+            self._turn_request = None
+
     def bind_context_capsule(self, capsule: Any) -> None:
         """
         Bind and validate the host-created context capsule used for execution.
@@ -905,6 +920,7 @@ class DaytonaCodeInterpreter:
         if self._backend is None:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
+        code = apply_specified_sub_lm_prompts(self._turn_request, code)
         self._observation_step += 1
         step = self._observation_step
         output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
@@ -1174,6 +1190,7 @@ class DaytonaCodeInterpreter:
                     self._backend = None
             if first_error is not None:
                 raise first_error
+            self._turn_request = None
             self._shutdown = broker_settled
 
     @with_callbacks
