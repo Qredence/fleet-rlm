@@ -472,3 +472,74 @@ def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution(
         RLMOutput("FINAL submitted", 2),
         StepFinished(2),
     ]
+
+
+def test_trajectory_reconciliation_treats_equivalent_action_formatting_as_the_same_payload() -> None:
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    live_second = (
+        'single_result = llm_query("Return exactly ROOT")\n'
+        'batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA", "Return exactly GAMMA"])\n'
+        'print("SECOND_ITERATION_READY")'
+    )
+    trajectory_second = (
+        "single_result = llm_query('Return exactly ROOT')\n"
+        "batch_results = llm_query_batched(['Return exactly ALPHA', 'Return exactly BETA', 'Return exactly GAMMA'])\n"
+        "print('SECOND_ITERATION_READY')"
+    )
+    submit = 'summary = "ok"\nSUBMIT(answer=summary, findings=findings)'
+    details = [
+        StepStarted(1),
+        RLMCode(live_second, 1),
+        RLMOutput("SECOND_ITERATION_READY", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMCode(submit, 2),
+        RLMOutput("FINAL submitted", 2),
+        StepFinished(2),
+    ]
+
+    emissions = reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(1, "", trajectory_second, "SECOND_ITERATION_READY"),
+            TrajectoryStep(2, "", submit, "FINAL: ok"),
+        ),
+        max_chars=1000,
+    )
+
+    assert [item.code for item in emissions if isinstance(item, RLMCode)] == []
+
+
+def test_trajectory_reconciliation_does_not_reemit_earlier_code_after_later_submit() -> None:
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    details = [
+        StepStarted(1),
+        RLMCode('single_result = llm_query("Return exactly ROOT")', 1),
+        RLMOutput("SECOND_ITERATION_READY", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMCode('SUBMIT(answer="ok")', 2),
+        RLMOutput("FINAL submitted", 2),
+        StepFinished(2),
+    ]
+
+    emissions = reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(
+                1, "", 'single_result = llm_query("Reply with exactly: COMPLETE")', "SECOND_ITERATION_READY"
+            ),
+            TrajectoryStep(2, "", 'SUBMIT(answer="ok")', "FINAL: ok"),
+        ),
+        max_chars=100,
+    )
+
+    assert [item.code for item in emissions if isinstance(item, RLMCode)] == []
+    assert [item.code for item in details if isinstance(item, RLMCode)] == [
+        'single_result = llm_query("Reply with exactly: COMPLETE")',
+        'SUBMIT(answer="ok")',
+    ]

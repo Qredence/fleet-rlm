@@ -37,6 +37,10 @@ from fleet_rlm.rlm.result import (
     truncate_public_text,
     validate_rlm_usage,
 )
+from fleet_rlm.rlm.specified_prompt_rewrite import (
+    apply_specified_sub_lm_prompts,
+    normalize_action_code,
+)
 from fleet_rlm.tool_events import (
     ToolAfterResult,
     ToolEventView,
@@ -822,18 +826,24 @@ def observe_tool(
 _StreamDetail = RLMReasoning | RLMCode | RLMOutput
 
 
-def trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
+def trajectory_details(
+    steps: Sequence[TrajectoryStep],
+    *,
+    max_chars: int,
+    request: str | None = None,
+) -> list[ObservationDetail]:
     """Project strictly normalized DSPy trajectory steps into public details."""
     details: list[ObservationDetail] = []
     for step in steps:
         output = step.output
         if output.startswith("FINAL:"):
             output = "FINAL submitted"
+        code = apply_specified_sub_lm_prompts(request, step.code)
         details.extend(
             (
                 StepStarted(step.index),
                 RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
-                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
+                RLMCode(truncate_public_text(code, max_len=max_chars), step.index),
                 RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
                 StepFinished(step.index),
             )
@@ -944,7 +954,19 @@ def _same_stream_payload(
             return False
         value = _stream_text(detail)
         text = text + value if _is_delta(detail) else value
-    return stream_id == _stream_id(target) and text == _stream_text(target)
+    live_text = text
+    target_text = _stream_text(target)
+    if isinstance(target, RLMCode):
+        live_text = normalize_action_code(live_text)
+        target_text = normalize_action_code(target_text)
+    return stream_id == _stream_id(target) and live_text == target_text
+
+
+def _has_later_live_code(details: Sequence[ExecutionDetail], step: int) -> bool:
+    """True when a later live RLMCode was already observed after ``step``."""
+    return any(
+        isinstance(detail, RLMCode) and isinstance(detail.step, int) and detail.step > step for detail in details
+    )
 
 
 def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
@@ -994,6 +1016,7 @@ def reconcile_trajectory(
     trajectory: Sequence[TrajectoryStep],
     *,
     max_chars: int,
+    request: str | None = None,
 ) -> list[ObservationDetail]:
     """Reconcile completed DSPy trajectory details with live observations.
 
@@ -1035,7 +1058,7 @@ def reconcile_trajectory(
     aligned_positions: set[int] = set()
     for trajectory_step in trajectory:
         step = trajectory_step.index
-        step_details = trajectory_details((trajectory_step,), max_chars=max_chars)
+        step_details = trajectory_details((trajectory_step,), max_chars=max_chars, request=request)
         start = step_starts.get(step)
         finish = step_finishes.get(step)
         if start is None or finish is None or start >= finish:
@@ -1072,7 +1095,9 @@ def reconcile_trajectory(
                 # re-emitting already-delivered content; a true correction is
                 # still re-emitted so the TUI upserts the same stream.
                 if not _same_stream_payload(details, existing_positions, target):
-                    emissions.append(target)
+                    later_live_code = isinstance(target, RLMCode) and _has_later_live_code(details, step)
+                    if not later_live_code:
+                        emissions.append(target)
                 details[first] = target
                 removed = existing_positions[1:]
                 for duplicate in reversed(removed):

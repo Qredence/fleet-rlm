@@ -4,99 +4,116 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-The entries below retain the sequence of unreleased work, including superseded
-provider experiments. For effective runtime policy, use `config/fleet.toml` and
-the [configuration reference](docs/reference/configuration.md); for migration
-progress and scoped evidence, use the [ADR 006 ledger](docs/decisions/006-implementation-status.md).
+## [0.7.7] - 2026-09-12
+
+This release carries the `fix/adr006-runtime-continuation` work: ADR 006 runtime
+simplification, Phase 4 ablation harnessing, live certification receipts, and
+follow-up RLM/Turn fixes. For effective runtime policy, use
+`config/fleet.toml` and the [configuration reference](docs/reference/configuration.md).
+For migration progress, scoped evidence, and certification status, use the
+[ADR 006 ledger](docs/decisions/006-implementation-status.md). Phase 3
+complete-MVP remains **uncertified** on the committed Root model.
+
+### Added
+
+- **Change:** Added the Phase 4 four-arm ablation campaign routed through the
+  public FastAPI transport (`scripts/benchmarks/phase4_campaign.py`,
+  `run_phase4_campaign.py`, `phase4_api_server.py`, `phase4_api_client.py`)
+  with explicit `phase4-campaign` / `-a` / `-b` profiles, partial-live slice
+  support, and deterministic admission gates.
+  **Outcome:** Arms A/B/C/D run as isolated API processes with profile-only
+  behavior differences; live trials link MLflow root trace identifiers and
+  retain cleanup receipts.
+- **Change:** Added operator certification and evidence lanes for MLflow,
+  PostgreSQL contention, Daytona SDK contract, Phase 3 receipt attachment,
+  MLflow campaign recording, P2.7 reduced-snapshot verification, warm-pool
+  management, Lakebase preflight, database head inventory, and SQLite→Postgres
+  migration.
+  **Outcome:** Local and disposable certification targets produce sealed,
+  content-addressed receipts without mutating deployed infrastructure.
+- **Change:** Added Session-bound MLflow trace feedback
+  (`POST /api/sessions/{session_id}/traces/feedback`) with TUI client support.
+  **Outcome:** Operators can record human assessments on traces owned by a
+  Session without exposing provider secrets through the public API.
+- **Change:** Added warm-pool ownership persistence, binding-generation lineage,
+  database preflight checks, stale-binding recovery, and shared
+  `tests/support/*` certification fixtures.
+  **Outcome:** Daytona capacity campaigns, binding rotation, and live suites
+  share one contention-safe persistence model and reusable test doubles.
+- **Change:** Added delegation telemetry on SSE usage plus bounded prior-turn
+  spend accounting, and backfilled Turn token usage from LM histories when
+  provider callbacks omit totals.
+  **Outcome:** Stream usage and receipts reflect native `llm_query` /
+  recursive-child work more accurately during ablation and live runs.
 
 ### Changed
 
-- Refreshed repository guidance, architecture, setup, API, migration, and
-  runtime Skill documentation against current implementation. Corrected
-  resident Session reuse, child concurrency, cancellation framing, feedback,
-  retired certification commands, and historical-versus-current evidence.
+- **Change:** Replaced the resident Session runtime registry with fresh
+  per-Run DSPy program construction; unified recursive scheduler ownership;
+  localized Daytona cleanup; scoped active lease claims to the session manager;
+  and made the retained broker path the sole production code-execution owner.
+  **Outcome:** Cross-Turn correctness depends on committed history, PostgreSQL,
+  and the Workspace Volume rather than a resident Python/DSPy object graph.
+- **Change:** Applied P4.6 policy after the 144-trial ablation:
+  `[defaults.rlm] recursion_enabled = false`. Native `llm_query` remains the
+  semantic delegation path; Fleet child RLMs (`rlm_query`,
+  `rlm_query_batched`) stay available when an explicit profile re-enables
+  recursion.
+  **Outcome:** The committed default no longer offers recursive children; Phase
+  4 arms still exercise them through campaign profiles only.
+- **Change:** Refreshed `ARCHITECTURE.md`, ADR 006 docs/ledger, implementation
+  plan, setup guides, and repository agent instructions for the broker-only
+  production path, fresh-per-Run programs, Phase 4 transport boundary, and
+  dated live receipts.
+  **Outcome:** Documentation distinguishes implementation from certification
+  and records Phase 3/P4.5/P4.6 evidence without claiming closed gates.
+- **Change:** Root instructions now require named workspace writes before
+  `SUBMIT`, copy request-specified Sub-LM prompts verbatim (`long-context`
+  2.0.1), wrap up on the last iteration without burning mid-turn empty
+  attempts, and keep parse traces from inventing false reasoning flags.
+  **Outcome:** Complete-MVP steering no longer treats verification helpers as
+  license to skip `append_workspace_text` / `publish_workspace_artifact`; live
+  recerts on the current Root still did not pass (see ledger).
+- **Change:** Keep native Sub-LM HTTP timeouts at `llm.sub.timeout_seconds`
+  as a hard ceiling after `bind_turn_deadline`; remaining Turn time may only
+  shrink it, and provider retries share that ceiling so packed `llm_query`
+  then concurrent `llm_query_batched` cells can finish under
+  `rlm.execution_timeout_s` without stacking a full role timeout per retry.
+  **Outcome:** Native `llm_query` no longer inherits Root-scale HTTP waits
+  after Turn copy. This does not certify Phase 3 complete-MVP.
+- **Change:** Hardened runtime cancellation fencing, Turn execution evidence
+  validation, Daytona diagnostics, host-tool broker submit paths, and benchmark
+  evaluation coverage.
+  **Outcome:** Detached work cannot continue mutating Fleet state after Turn
+  settlement; campaign and live lanes emit auditable cleanup and usage evidence.
 
-- **Change:** Collapsed `config/fleet.toml` from five committed profiles to a
-  single `daytona-recursive` default — the whole policy now lives in
-  `[defaults]` (recursive child RLMs at the fixed native depth, DSPy verbose
-  host logging, and local MLflow tracing on). Removed the near-duplicate
-  `daytona`, `daytona-managed`, `daytona-bench`, and `daytona-bench-40`
-  profiles.
-  **Outcome:** The committed policy now centers on the Root/Sub model pair
-  instead of profile variants; Databricks-hosted MLflow tracing remains
-  available by declaring `mlflow.*_env` references in a local profile.
-- **Change:** Set Root and Sub `max_tokens` to 131,072 for the Modal-hosted
-  `openai/zai-org/GLM-5.3-Flash` endpoint, replacing the arbitrary
-  32,768/4,000 role split. Z.AI's chat completion API reference documents a
-  128K maximum output length for GLM-5.3-Flash (with a 1024-token floor),
-  which sits well inside the served endpoint's 1,048,576-token context for any
-  Fleet prompt; the old 4,000-token Sub cap risked truncating interleaved
-  reasoning in delegated queries.
-  **Outcome:** Both roles share the model's documented completion ceiling; the
-  generated profile matrix, configuration guidance, `.env.example`, and the
-  Oolong guide were updated, and the stale Databricks AI Gateway provider
-  claims in those documents were corrected to the committed Modal routing.
+### Fixed
+
+- **Change:** `scripts/live_daytona_verify.py` now reads B5 durability evidence
+  from `.fleet-evidence/receipts/p35d/` instead of the stale clean-backend
+  asset path.
+  **Outcome:** Lane 1 durability can pass without blocking Lane 2 MVP proof on
+  a missing receipt file.
+- **Change:** Phase 4 campaign admission skips empty control-case uploads,
+  confirms vacuous cleanup for pre-turn HTTP 400 responses, and supports
+  `--continue-from` for halted rows; evidence parsing now matches real backend
+  SSE streams.
+  **Outcome:** The 144-row continuation completed with cleanup confirmed; the
+  original 109-row halt on `http_400` empty attachments is resolved.
+- **Change:** Isolated P2.7 live snapshot evidence into dedicated verification
+  lanes and gated workspace SDK substitution parity.
+  **Outcome:** Reduced-snapshot probes and SDK doubles cannot masquerade as
+  live Daytona certification.
 
 ### Removed
 
-- **Removed:** The dead Prime Oolong benchmark lane: the
-  `benchmark-oolong` Makefile target, `scripts/benchmarks/run_prime_oolong.py`
-  and `prime_oolong_sidecar.py`, their unit tests, and the Oolong guide
-  (the pinned PrimeIntellect package index is no longer reachable). The
-  `daytona-bench` profile lost its only consumer and was removed with it.
-  **Outcome:** Benchmark surface is now the Daytona lifecycle and
-  native-long-context measurements; the manual-dispatch live workflow runs the
-  canonical MVP + durability canaries with workflow-provided Modal secrets
-  instead of every live test serially.
-- **Removed:** The one-shot P-phase certification receipt lane: the
-  `p53-live-certification`, `certification-gate`, and `certification-verify`
-  Makefile targets; `scripts/certification_gate.py`, `live_p53_certification.py`,
-  `live_p35d_certification.py`, and `p53_certification.py` with their unit
-  tests; and the fifteen historical live receipt tests
-  (`test_p35d_live_matrix`, `test_callback_shadow_root_child`,
-  `test_p38_root_child_trace`, `test_p39a_*`, `test_p39c_*` (five),
-  `test_p41b_*` (two), `test_p43_2_*`, `test_p45_*`,
-  `test_p53_daytona_session_certification_live`) plus the `_p39c_evidence`
-  helper and its unit test.
-  **Outcome:** `tests/live/backend` now contains only current-behavior
-  canaries (MVP, durability, Phase 1/2, recursive batch, cancel/timeout/
-  deletion, Memory lanes, URL-cache, Lakebase resilience, and the GEPA
-  Daytona policy canary); the `_p35d_evidence` receipt helper stays because
-  the kept lanes write receipts through it.
-- **Removed:** Eleven redundant Makefile alias targets with no callers
-  (`test-fast`, `quality-gate`, `release-check`, `sync`, `sync-dev`,
-  `sync-all`, `metadata-check`, `docs-check`, `security-check`,
-  `dependency-check`, `release-artifacts`, `cli-help`), and added an explicit
-  `benchmark-daytona-lifecycle` target for the lifecycle benchmark previously
-  invoked only through its long-form command.
-  **Outcome:** The Makefile is a flat list of the targets that are actually
-  used; local test parallelism now defaults to four xdist workers
-  (previously two) with the same `loadfile` scheduling.
-
-- **Removed:** The documentation-prose freeze lanes: the P41 documentation
-  freeze test (12-doc governance plus the byte-digest
-  `tests/fixtures/p35e-golden-baseline.json` manifest), the P42 session-state
-  documentation pinning test, and the P41 behavior-over-structure suite guard
-  (tests about tests). None exercised product code; they froze historical
-  English prose and made routine doc edits fail the gate.
-  **Outcome:** `tests/freeze/` keeps only the four real-code contracts
-  (public stream gate, failure-taxonomy golden, CLI doctor retention,
-  reasoning-trajectory equality); `test_docs_quality.py` moved to
-  `tests/unit/scripts/` next to the other script tests it actually tests.
-
-- **Removed:** Every remaining P-phase-numbered test file: the contract
-  lanes (`test_p33_guardrails`, `test_p37_coordinator_ownership`,
-  `test_p38_durable_handoff`, `test_p38_native_contraction`,
-  `test_p38_single_span_trace`, `test_p40_explicit_hosts`,
-  `test_p43_dspy_state_contract`, `test_p43_skill_history_contract`,
-  `test_p45_session_runtime_contract`, `test_p46_dspy_kernel_contract`),
-  the `test_p41_cli_doctor_retention` freeze lane, and the
-  `test_p52_security_restart` chat lane. Their live behavior is covered by
-  the surviving phase-neutral unit/contract/freeze suites named in
-  `docs/reference/behavior-freeze.md`.
-  **Outcome:** No test file carries a historical phase number; the shared
-  live-evidence helper was renamed `_p35d_evidence.py` -> `_evidence.py`
-  and the four kept live canaries import it under the new name.
+- **Removed:** The in-tree native interpreter production path
+  (`src/fleet_rlm/daytona/native_interpreter.py`), native composition context,
+  duplicate `runtime/daytona` package, resident `session_runtime.py` registry,
+  and `scripts/benchmarks/run_native_long_context.py`.
+  **Outcome:** Broker-backed execution is the sole maintained code-execution
+  implementation; native process containment remains a provider no-go recorded
+  in ADR 006.
 
 ## [0.7.6] - 2026-09-04
 

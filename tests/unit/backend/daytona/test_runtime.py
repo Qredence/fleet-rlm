@@ -78,6 +78,50 @@ async def test_taint_marker_survives_root_close_until_fresh_acquisition() -> Non
 
 
 @pytest.mark.asyncio
+async def test_discard_stale_root_does_not_force_new_successor() -> None:
+    roots: list[FakeRoot] = []
+    force_new_calls: list[bool] = []
+
+    async def factory(*, spec: RootSessionSpec, force_new: bool = False):
+        del spec
+        force_new_calls.append(force_new)
+        root = FakeRoot(str(len(roots)))
+        roots.append(root)
+        return root
+
+    runtime = DaytonaRuntime(root_acquirer=factory)
+    first = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    await runtime.discard_stale_root_session("w", "s")
+    second = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    assert second is not first
+    assert first.state is LeaseState.CLOSED
+    assert roots[0].released == 1
+    assert force_new_calls == [False, False]
+    assert await runtime.aclose() is True
+
+
+@pytest.mark.asyncio
+async def test_discard_stale_root_survives_failed_close() -> None:
+    force_new_calls: list[bool] = []
+    issued = 0
+
+    async def factory(*, spec: RootSessionSpec, force_new: bool = False):
+        nonlocal issued
+        del spec
+        force_new_calls.append(force_new)
+        issued += 1
+        return FakeRoot("stale", fail=True) if issued == 1 else FakeRoot("next")
+
+    runtime = DaytonaRuntime(root_acquirer=factory)
+    await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    await runtime.discard_stale_root_session("w", "s")
+    successor = await runtime.acquire_root_session(RootSessionSpec("w", "s", context_fingerprint="a"))
+    assert successor.lease.name == "next"
+    assert force_new_calls == [False, False]
+    await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_child():
     closed = []
 

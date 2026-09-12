@@ -469,6 +469,34 @@ class DaytonaRuntime:
         finally:
             self._root_transition_lock.release()
 
+    async def discard_stale_root_session(
+        self,
+        workspace_id: UUID | str,
+        session_id: UUID | str,
+        *,
+        deadline: float | None = None,
+    ) -> None:
+        """Drop a resident root after an external binding replacement.
+
+        The next acquisition reuses the durable successor. Unlike
+        ``mark_root_tainted``, this does not force a new Sandbox.
+        """
+        key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
+        await _acquire_lock(self._root_transition_lock, deadline, "root Session transition timed out")
+        try:
+            async with self._root_lock:
+                owner = self._roots.pop(key, None)
+            if owner is None:
+                return
+            try:
+                await owner.close(notify=False, deadline=deadline)
+            except BaseException:
+                # The provider identity was already replaced. A failed close
+                # must not taint the successor or block reuse.
+                self._retain_late_root_lease(owner)
+        finally:
+            self._root_transition_lock.release()
+
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
