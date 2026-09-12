@@ -47,7 +47,7 @@ _FAILURE_PHASES = frozenset({"policy", "candidate", "scenario", "receipt", "rece
 _REQUIRED_ASSERTIONS = frozenset(
     {
         "dedicated_child_sandbox",
-        "same_volume_sibling_scope",
+        "child_isolation_scope",
         "root_marker_absent_in_child",
         "root_continuity",
         "child_typed_submit",
