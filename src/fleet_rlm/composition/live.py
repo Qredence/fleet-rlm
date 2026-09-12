@@ -560,10 +560,7 @@ async def build_daytona_composition(
             models=model_bundle,
             artifact_reader=artifact_reader,
         )
-        run_state = SqlAlchemyRunStateStore(
-            session_factory,
-            stale_after_seconds=resolved.run_stale_after_seconds,
-        )
+        run_state = SqlAlchemyRunStateStore(session_factory)
         session_catalog = SqlAlchemySessionCatalog(session_factory)
         memory_outbox = SqlAlchemyMemoryPromotionOutbox(session_factory)
         lifecycle = RunLifecycleService(

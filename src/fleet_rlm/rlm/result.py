@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
+from typing import Any, Literal, TypeAlias, cast
 
 import dspy
 from pydantic import TypeAdapter
@@ -24,10 +24,6 @@ from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.workspace.memory import MemoryCandidate
-
-if TYPE_CHECKING:
-    pass
-
 
 # ---------------------------------------------------------------------------
 # Error Taxonomy
@@ -598,30 +594,6 @@ def prediction_result(
     return result
 
 
-@dataclass(frozen=True, slots=True)
-class ResultContract:
-    """Output validation contract declared for one execution."""
-
-    signature: type[dspy.Signature]
-    schema_id: str = "fleet.default"
-    schema_version: str = "1"
-    max_output_chars: int = 10_000
-
-
-def validate_prediction(
-    prediction: Any,
-    contract: ResultContract,
-) -> PredictionResult:
-    """Validate a native DSPy Prediction against a declared ResultContract."""
-    return prediction_result(
-        prediction,
-        contract.signature,
-        schema_id=contract.schema_id,
-        schema_version=contract.schema_version,
-        max_output_chars=contract.max_output_chars,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Usage Metadata
 # ---------------------------------------------------------------------------
@@ -996,7 +968,6 @@ __all__ = [
     "RLMModelBundleError",
     "RLMOutcome",
     "RLMUsage",
-    "ResultContract",
     "RunCancelledError",
     "RunIntegrityFailureError",
     "RunNoProgressError",
@@ -1016,6 +987,5 @@ __all__ = [
     "truncate_head_tail",
     "truncate_public_text",
     "validate_declared_public_value",
-    "validate_prediction",
     "validate_rlm_usage",
 ]
