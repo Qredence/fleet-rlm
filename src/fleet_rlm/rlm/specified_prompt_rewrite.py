@@ -302,9 +302,10 @@ class _SpecifiedPromptRewriter(ast.NodeTransformer):
         self.changed = False
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
-        node = self.generic_visit(node)
-        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
-            return node
+        visited = self.generic_visit(node)
+        if not isinstance(visited, ast.Call) or not isinstance(visited.func, ast.Name):
+            return visited
+        node = visited
         name = node.func.id
         if name not in {_SINGLE, _BATCHED}:
             return node
