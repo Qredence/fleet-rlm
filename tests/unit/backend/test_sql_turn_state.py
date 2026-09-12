@@ -299,7 +299,7 @@ async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         first_id, replacement_id = uuid4(), uuid4()
         request = RunClaim(access, session_id, TurnInput("hello"), "key", first_id)
         assert isinstance(await store.begin(request), ClaimedRun)
@@ -350,7 +350,7 @@ async def test_reconcile_recovers_stale_running_after_provider_fence() -> None:
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
         assert isinstance(started, ClaimedRun)
         async with factory() as db, db.begin():
@@ -401,7 +401,7 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         assert isinstance(
             await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id)), ClaimedRun
         )
@@ -452,7 +452,7 @@ async def test_reconcile_deadline_bounds_provider_fence_and_leaves_claim_retryab
                 for index, session_id in enumerate(session_ids)
             )
 
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         owners: dict[object, str] = {}
         for index, (session_id, run_id) in enumerate(zip(session_ids, run_ids, strict=True)):
             started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), f"key-{index}", run_id))
@@ -533,7 +533,7 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
         assert isinstance(started, ClaimedRun)
         failure = RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
@@ -726,7 +726,7 @@ async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
         assert isinstance(started, ClaimedRun)
         async with factory() as db, db.begin():
@@ -878,7 +878,7 @@ async def test_sql_racing_begins_fence_one_claimant() -> None:
                 )
             )
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-        store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
+        store = SqlAlchemyRunStateStore(factory)
 
         async def begin(run_id, key: str):
             """

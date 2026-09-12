@@ -1248,10 +1248,6 @@ class RecursiveRLMExecutor:
                 termination_modes=tuple(self._state.termination_modes),
             )
 
-    def execute_capsule(self, capsule: SubproblemCapsule) -> ChildOutcome:
-        """Run selected input, propagating execution failures to the caller."""
-        return self._execute_capsule(capsule, classify_failures=False)
-
     def _execute_capsule(self, capsule: SubproblemCapsule, *, classify_failures: bool) -> ChildOutcome:
         """Keep execution, measurements, and selected access in one owned scope."""
         if not isinstance(capsule, SubproblemCapsule):

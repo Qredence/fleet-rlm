@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
 
 
@@ -18,23 +17,6 @@ class RunAuthority:
     @property
     def revoked(self) -> bool:
         return self._revoked
-
-    def is_live(self) -> bool:
-        """Return whether this Run may still perform host-mediated effects."""
-        return not self._revoked
-
-    def add_revoke_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
-        """Register a callback that fences suspended operations on revocation."""
-        if self._revoked:
-            listener()
-            return lambda: None
-        self._listeners.append(listener)
-
-        def remove() -> None:
-            with contextlib.suppress(ValueError):
-                self._listeners.remove(listener)
-
-        return remove
 
     def revoke(self) -> None:
         if self._revoked:
