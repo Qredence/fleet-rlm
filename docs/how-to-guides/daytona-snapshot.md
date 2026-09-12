@@ -26,11 +26,13 @@ Volume-scoped and uses the Session image contract.
 
 The P2.7 source definition now omits remote DSPy: orchestration stays on the
 host, Session/WorkspaceChild retain the four analysis packages, and
-SemanticChild uses the standard library. The v9/v4 candidates therefore also
-predate this definition. New unused immutable names must be created and
-verified before promotion; this source change has not rebuilt or selected any
-provider image. The commands below illustrate proposed v10/v5 names, whose
-availability must be checked by the operator.
+SemanticChild uses the standard library. Immutable Session
+`fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5` were
+created and certified on 2026-09-10 (receipt
+`.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`).
+Configured `.env` references and code fallbacks remain `fleet-rlm-python313-v7`
+/ `fleet-rlm-python313-child-v2` until an operator promotes the pair atomically
+in Phase 5.
 
 Snapshot provisioning is an explicit operator action. Application startup does
 not create, overwrite, or delete snapshots, and an existing immutable name is
@@ -119,9 +121,8 @@ The profile contract is deliberately explicit:
 | `workspace-child` | Scoped `workspaces/<workspace_id>` mount | Child work that truly needs durable Workspace files |
 
 These are environment-manifest roles, not selectable `runtime.variant` values.
-The legacy prompt-based recursive lane still uses its private sibling Volume
-scope. Volume-less capsule children belong to the gated ADR 006 migration;
-snapshot creation alone does not certify their containment, mounts, or warm pools.
+Capsule children are volume-less SemanticChild sandboxes. Snapshot creation
+alone does not certify containment, mounts, or warm pools.
 
 Create and verify a new immutable name before changing `.env`. A Session
 replacement retains the authorized Workspace Volume identity and subpath; it

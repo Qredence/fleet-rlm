@@ -141,8 +141,9 @@ admissions, including retries and adapter repairs; `max_tool_calls` and
 recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
 
-The `[rlm]` recursion settings include `recursion_enabled` and bound the native
-`rlm_query(prompt=prompt)` child harness: `recursion_max_calls`,
+The `[rlm]` recursion settings include `recursion_enabled` (default `false`
+after the 2026-09-12 P4.6 decision) and bound the opt-in native
+`rlm_query(capsule=...)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
@@ -152,12 +153,14 @@ The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CH
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. The committed Daytona profiles inherit recursive execution from
-`[defaults.rlm]`; `daytona-recursive` is the selected default profile. The
+override them. The committed Daytona profiles inherit disabled recursive
+execution from `[defaults.rlm]`; `daytona-recursive` remains the selected
+default profile name. Re-enable Fleet child RLMs only with an explicit
+`rlm.recursion_enabled = true` profile override. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
-Each child receives a fresh,
+When recursion is enabled, each child receives a fresh,
 dedicated Daytona Sandbox, ordinary Daytona network egress, and the same Volume
 ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
 sibling scope cannot reach the Root `workspaces/<workspace-id>` mount. The

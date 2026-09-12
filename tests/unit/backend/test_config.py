@@ -280,11 +280,11 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_committed_policy_enables_recursive_child_execution() -> None:
+def test_committed_policy_disables_recursive_child_execution() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert document["defaults"]["rlm"]["recursion_enabled"] is True
+    assert document["defaults"]["rlm"]["recursion_enabled"] is False
     # The committed default profile is the [defaults] policy itself: the table
     # stays empty because the schema requires at least one profile.
     assert document["profiles"]["daytona-recursive"] == {}

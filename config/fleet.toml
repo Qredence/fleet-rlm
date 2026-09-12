@@ -37,11 +37,10 @@ temperature = 0
 num_retries = 1
 cache = false
 
-# Recursive harness limits: one native child level (depth is a fixed
-# execution invariant, not a policy knob), a bounded root budget, four
-# reserved child calls per Turn, a 50,000-character delegated prompt bound,
-# and at most five child workers concurrently. The root budget leaves room
-# for deliberate verification without allowing an unproductive long tail.
+# Recursive child RLMs are opt-in. P4.6 (2026-09-12) disabled them by default
+# after the 144-trial ablation failed the retain gates. Native llm_query
+# remains the semantic delegation path. Depth is a fixed execution invariant
+# (not a policy knob) when an explicit profile re-enables recursion.
 [defaults.rlm]
 max_iters = 12
 max_llm_calls = 32
@@ -53,7 +52,7 @@ max_execution_output_bytes = 2000000
 execution_timeout_s = 300
 wrap_up_seconds = 300
 finalization_attempts = 2
-recursion_enabled = true
+recursion_enabled = false
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
@@ -106,10 +105,11 @@ enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
-# The local/disposable profile inherits the complete default policy: recursive
-# child RLMs (one native depth), DSPy verbose host logging, local MLflow tracing,
-# and the Root/Sub model pair above. The managed profile below overrides only
-# the production database contract.
+# The local/disposable profile inherits the complete default policy: native
+# DSPy RLM with llm_query only, DSPy verbose host logging, local MLflow tracing,
+# and the Root/Sub model pair above. Fleet child RLMs stay available when an
+# explicit profile sets rlm.recursion_enabled. The managed profile below
+# overrides only the production database contract.
 [profiles.daytona-recursive]
 
 # Explicit, non-default policy for the retained Phase 4 four-arm certification.

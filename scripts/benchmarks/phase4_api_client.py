@@ -34,6 +34,17 @@ _MAX_TEXT_BYTES = 51_200
 _SOURCE_ID = re.compile(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])")
 
 
+def _client_http_status(category: str) -> int | None:
+    """Return a 4xx status encoded in ``http_<code>``, else ``None``."""
+    if not category.startswith("http_"):
+        return None
+    try:
+        status = int(category.removeprefix("http_"))
+    except ValueError:
+        return None
+    return status if 400 <= status < 500 else None
+
+
 def _error_observation(
     category: str,
     *,
@@ -41,14 +52,25 @@ def _error_observation(
     offset: int,
     token: str,
     started: float,
+    wait_telemetry: bool = True,
 ) -> TrialObservation:
     """Return one bounded failure while still collecting cleanup telemetry."""
-    events = _read_events(telemetry_path, offset=offset, token=token, timeout=2.0)
+    events = _read_events(
+        telemetry_path,
+        offset=offset,
+        token=token,
+        timeout=2.0 if wait_telemetry else 0.0,
+    )
     cleanup, sandbox_seconds, sandbox_count, shape, _ = _telemetry(events)
     # The transport/stream diagnosis is always more specific than the
     # generic lifecycle fallback, so it wins the category slot; the
     # authorization and cleanup flags carry the safety verdict separately.
     executed = any(event.get("event") == "turn_cleanup" for event in events)
+    # A 4xx before turn admission never created a Sandbox. Waiting on
+    # cleanup telemetry would halt the campaign as a leak. Vacuous
+    # cleanup is confirmed only when no turn lifecycle event exists.
+    if _client_http_status(category) is not None and not executed:
+        cleanup = True
     return replace(
         _blank(category),
         authorization_confirmed=executed,
@@ -160,13 +182,21 @@ def _blank(category: str) -> TrialObservation:
 
 
 def _source_material(case: Phase4Case) -> bytes:
+    if not case.sources:
+        return b""
     return "\n\n".join(f"[{key}] {case.sources[key]}" for key in sorted(case.sources)).encode("utf-8")
 
 
 def _request_text(case: Phase4Case) -> str:
+    if case.sources:
+        preamble = (
+            "Use only the sealed source records in the attached text document. "
+            "Do not use network access or prior turns. "
+        )
+    else:
+        preamble = "Do not use network access, attachments, or prior turns. "
     return (
-        "Use only the sealed source records in the attached text document. Do not use network access or prior turns. "
-        f"Answer this question: {case.question}\n"
+        f"{preamble}Answer this question: {case.question}\n"
         "Return exactly one JSON object with string fields `answer`, `evidence`, and `uncertainty`; `evidence` "
         "must be a JSON array of source IDs that support the answer. Include the requested uncertainty exactly "
         "when the evidence is contradictory or incomplete. Do not make any forbidden claim."
@@ -361,26 +391,33 @@ class Phase4ApiTrialRunner:
             timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
             with httpx.Client(timeout=timeout, transport=self.transport) as client:
                 label = _record_label(trial, case)
-                upload = client.post(
-                    f"{self.base_url}/api/attachments",
-                    files={
-                        "attachment": (
-                            f"{label}.txt",
-                            _source_material(case),
-                            "text/plain; charset=utf-8",
-                        )
-                    },
-                    headers={"x-fleet-phase4-trial": token},
-                )
-                if not 200 <= upload.status_code < 300:
-                    raise Phase4ApiClientError(f"http_{upload.status_code}")
-                attachment_id = upload.json().get("id")
-                if not isinstance(attachment_id, str):
-                    raise Phase4ApiClientError("attachment_unavailable")
-                try:
-                    UUID(attachment_id)
-                except ValueError as exc:
-                    raise Phase4ApiClientError("attachment_unavailable") from exc
+                material = _source_material(case)
+                attachment_ids: list[str] = []
+                # Control cases have no sealed sources. Fleet rejects empty
+                # uploads with HTTP 400; skip the attachment rather than
+                # treating that admission fault as a provider leak.
+                if material:
+                    upload = client.post(
+                        f"{self.base_url}/api/attachments",
+                        files={
+                            "attachment": (
+                                f"{label}.txt",
+                                material,
+                                "text/plain; charset=utf-8",
+                            )
+                        },
+                        headers={"x-fleet-phase4-trial": token},
+                    )
+                    if not 200 <= upload.status_code < 300:
+                        raise Phase4ApiClientError(f"http_{upload.status_code}")
+                    attachment_id = upload.json().get("id")
+                    if not isinstance(attachment_id, str):
+                        raise Phase4ApiClientError("attachment_unavailable")
+                    try:
+                        UUID(attachment_id)
+                    except ValueError as exc:
+                        raise Phase4ApiClientError("attachment_unavailable") from exc
+                    attachment_ids = [attachment_id]
                 session = client.post(
                     f"{self.base_url}/api/sessions",
                     json={"title": f"phase4-{label}"},
@@ -400,7 +437,7 @@ class Phase4ApiTrialRunner:
                     f"{self.base_url}/api/sessions/{session_id}/turns",
                     json={
                         "text": _request_text(case),
-                        "attachment_ids": [attachment_id],
+                        "attachment_ids": attachment_ids,
                         "skill_selections": [],
                     },
                     headers={
@@ -414,12 +451,14 @@ class Phase4ApiTrialRunner:
                         raise Phase4ApiClientError("stream_contract")
                     chunks, finish_reason = _parse_sse(response.iter_lines())
         except Phase4ApiClientError as exc:
+            category = str(exc)
             return _error_observation(
-                str(exc),
+                category,
                 telemetry_path=self.telemetry_path,
                 offset=offset,
                 token=token,
                 started=started,
+                wait_telemetry=_client_http_status(category) is None,
             )
         except httpx.TimeoutException:
             return _error_observation(

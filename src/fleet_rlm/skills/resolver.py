@@ -42,7 +42,7 @@ def resolve_selected_skills(
     )
 
 
-def resolved_signature(resolved: ResolvedSkills, *, recursion_enabled: bool = True) -> type[dspy.Signature]:
+def resolved_signature(resolved: ResolvedSkills, *, recursion_enabled: bool = False) -> type[dspy.Signature]:
     """Return the active output Signature with Fleet operating instructions."""
     base = resolved.signature or FleetRLMSignature
     return root_signature_for_recursion(

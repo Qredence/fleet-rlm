@@ -817,6 +817,124 @@ class CampaignOutcome:
     budget: dict[str, object]
 
 
+def is_pre_turn_http_fault(observation: TrialObservation) -> bool:
+    """Whether the trial died on a 4xx before any Sandbox was admitted."""
+    category = observation.error_category
+    if not isinstance(category, str) or not category.startswith("http_"):
+        return False
+    try:
+        status = int(category.removeprefix("http_"))
+    except ValueError:
+        return False
+    return 400 <= status < 500 and not observation.authorization_confirmed and observation.sandbox_count is None
+
+
+def scored_trial_from_receipt_row(value: Mapping[str, object]) -> ScoredTrial:
+    """Rebuild a scored trial from a sealed receipt row.
+
+    Receipts do not retain answer text. Continuation scoring uses the already
+    sealed ``verified_success`` / ``evidence_valid`` flags.
+    """
+    if not isinstance(value, Mapping):
+        raise ValueError("continuation row is invalid")
+    arm = value.get("arm")
+    classification = value.get("classification")
+    arm_order = value.get("arm_order")
+    if (
+        not isinstance(value.get("case_id"), str)
+        or classification not in _CLASSIFICATIONS
+        or arm not in ARMS
+        or type(value.get("repeat")) is not int
+        or not isinstance(arm_order, list)
+        or not arm_order
+        or any(item not in ARMS for item in arm_order)
+        or type(value.get("verified_success")) is not bool
+        or type(value.get("evidence_valid")) is not bool
+        or type(value.get("completed")) is not bool
+        or type(value.get("authorization_confirmed")) is not bool
+        or type(value.get("cleanup_confirmed")) is not bool
+    ):
+        raise ValueError("continuation row is invalid")
+    reserved = value.get("reserved_cost_usd")
+    observed = value.get("observed_cost_usd")
+    try:
+        reserved_cost = Decimal(reserved) if isinstance(reserved, str) else None
+        observed_cost = Decimal(observed) if isinstance(observed, str) else None
+    except ArithmeticError as exc:
+        raise ValueError("continuation row cost is invalid") from exc
+    if reserved_cost is None or not reserved_cost.is_finite() or reserved_cost < 0:
+        raise ValueError("continuation row cost is invalid")
+    if observed_cost is not None and (not observed_cost.is_finite() or observed_cost < 0):
+        raise ValueError("continuation row cost is invalid")
+    observation = observation_from_mapping(
+        {
+            "answer": "",
+            "cited_evidence": [],
+            "uncertainty": "",
+            "completed": value["completed"],
+            "authorization_confirmed": value["authorization_confirmed"],
+            "cleanup_confirmed": value["cleanup_confirmed"],
+            "input_tokens": value.get("input_tokens"),
+            "output_tokens": value.get("output_tokens"),
+            "cache_read_tokens": value.get("cache_read_tokens"),
+            "sandbox_seconds": value.get("sandbox_seconds"),
+            "latency_ms": value.get("latency_ms"),
+            "root_lm_calls": value.get("root_lm_calls"),
+            "child_lm_calls": value.get("child_lm_calls"),
+            "delegated_bytes": value.get("delegated_bytes"),
+            "sandbox_count": value.get("sandbox_count"),
+            "resource_shape": value.get("resource_shape"),
+            "error_category": value.get("error_category"),
+            "trace_id": value.get("trace_id"),
+        }
+    )
+    return ScoredTrial(
+        trial=Trial(
+            value["case_id"],
+            classification,
+            int(value["repeat"]),
+            arm,
+            tuple(arm_order),
+        ),
+        verified_success=value["verified_success"],
+        evidence_valid=value["evidence_valid"],
+        observation=observation,
+        observed_cost_usd=observed_cost,
+        reserved_cost_usd=reserved_cost,
+    )
+
+
+def load_continuation_rows(path: Path) -> tuple[tuple[ScoredTrial, ...], tuple[ScoredTrial, ...]]:
+    """Split a halted receipt into retained executions and pre-turn HTTP faults."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("continuation receipt is unreadable") from exc
+    if not isinstance(payload, Mapping) or payload.get("schema") != PHASE4_SCHEMA:
+        raise ValueError("continuation receipt schema is invalid")
+    raw_rows = payload.get("rows")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise ValueError("continuation receipt has no rows")
+    retained: list[ScoredTrial] = []
+    faults: list[ScoredTrial] = []
+    seen: set[tuple[str, str, int]] = set()
+    for item in raw_rows:
+        if not isinstance(item, Mapping):
+            raise ValueError("continuation row is invalid")
+        scored = scored_trial_from_receipt_row(item)
+        key = (scored.trial.arm, scored.trial.case_id, scored.trial.repeat)
+        if key in seen:
+            raise ValueError("continuation receipt has duplicate trial keys")
+        seen.add(key)
+        if is_pre_turn_http_fault(scored.observation):
+            faults.append(scored)
+            continue
+        if scored.observation.authorization_confirmed and not scored.observation.cleanup_confirmed:
+            raise ValueError("continuation receipt has an unconfirmed provider cleanup")
+        retained.append(scored)
+    return tuple(retained), tuple(faults)
+
+
 def execute_campaign(
     *,
     cases: Sequence[Phase4Case],
@@ -827,6 +945,7 @@ def execute_campaign(
     started_at: float | None = None,
     clock: Callable[[], float] | None = None,
     initial_spent_usd: float = 0.0,
+    retained_rows: Sequence[ScoredTrial] = (),
 ) -> CampaignOutcome:
     """Run a serial campaign through one pre-admission/settlement owner."""
     simulated = started_at is not None
@@ -840,10 +959,17 @@ def execute_campaign(
         initial_spent_usd=initial_spent_usd,
     )
     by_id = {case.identifier: case for case in cases}
+    retained_by_key = {(row.trial.arm, row.trial.case_id, row.trial.repeat): row for row in retained_rows}
+    if len(retained_by_key) != len(retained_rows):
+        raise ValueError("retained campaign rows must have unique trial keys")
     output: list[ScoredTrial] = []
     upper = float(envelope.upper_bound_usd(rates))
     now = started
     for trial in balanced_schedule(cases):
+        retained = retained_by_key.get((trial.arm, trial.case_id, trial.repeat))
+        if retained is not None:
+            output.append(retained)
+            continue
         try:
             budget.reserve(upper_bound_usd=upper, now=now, max_trial_seconds=envelope.maximum_lifetime_seconds)
         except CampaignAdmissionError:
@@ -1029,7 +1155,9 @@ __all__ = [
     "corpus_sha256",
     "execute_campaign",
     "execute_partial_campaign",
+    "is_pre_turn_http_fault",
     "load_cases",
+    "load_continuation_rows",
     "observation_from_mapping",
     "paired_bootstrap",
     "partial_schedule",
@@ -1037,4 +1165,5 @@ __all__ = [
     "policy_sha256",
     "receipt",
     "score_trial",
+    "scored_trial_from_receipt_row",
 ]

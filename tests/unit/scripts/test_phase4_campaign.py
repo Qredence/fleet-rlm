@@ -19,6 +19,7 @@ from scripts.benchmarks.phase4_campaign import (
     execute_campaign,
     execute_partial_campaign,
     load_cases,
+    load_continuation_rows,
     observation_from_mapping,
     paired_bootstrap,
     partial_schedule,
@@ -720,3 +721,68 @@ def test_campaign_metadata_discloses_bounded_prior_status() -> None:
 
     assert metadata["prior_receipt_status"] == "bounded_upper"
     assert metadata["prior_observed_spend_usd"] == "0.06093188"
+
+
+def test_execute_campaign_retains_prior_rows_and_runs_only_the_remainder() -> None:
+    cases = load_cases(_CASES)
+    schedule = balanced_schedule(cases)
+    rates = PublicRateCard()
+    envelope = _envelope()
+    by_id = {case.identifier: case for case in cases}
+    retained = tuple(
+        score_trial(by_id[trial.case_id], trial, _observation(by_id[trial.case_id]), rates, envelope)
+        for trial in schedule[:-1]
+    )
+    ran: list[tuple[str, str, int]] = []
+
+    def runner(trial, case):
+        ran.append((trial.arm, trial.case_id, trial.repeat))
+        return _observation(case)
+
+    outcome = execute_campaign(
+        cases=cases,
+        preflight=CampaignPreflight("p4", "daytona", 14_400, 144, 5, 50.0),
+        envelope=envelope,
+        runner=runner,
+        started_at=0,
+        retained_rows=retained,
+    )
+    last = schedule[-1]
+    assert ran == [(last.arm, last.case_id, last.repeat)]
+    assert len(outcome.rows) == 144
+    assert outcome.rows[-1].trial == last
+    assert outcome.budget["halted"] is False
+
+
+def test_load_continuation_rows_retries_pre_turn_http_faults(tmp_path: Path) -> None:
+    cases = load_cases(_CASES)
+    case = cases[0]
+    trial = balanced_schedule(cases)[0]
+    kept = score_trial(case, trial, _observation(case), PublicRateCard(), _envelope())
+    fault_observation = replace(
+        _observation(case),
+        completed=False,
+        authorization_confirmed=False,
+        cleanup_confirmed=False,
+        input_tokens=None,
+        output_tokens=None,
+        sandbox_seconds=None,
+        sandbox_count=None,
+        resource_shape=None,
+        error_category="http_400",
+        trace_id=None,
+    )
+    fault = score_trial(case, replace(trial, arm="B"), fault_observation, PublicRateCard(), _envelope())
+    payload = {
+        "schema": "fleet.phase4-ablation/v1",
+        "rows": [kept.receipt(), fault.receipt()],
+    }
+    path = tmp_path / "halted.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    retained, faults = load_continuation_rows(path)
+
+    assert len(retained) == 1
+    assert retained[0].trial == trial
+    assert len(faults) == 1
+    assert faults[0].observation.error_category == "http_400"

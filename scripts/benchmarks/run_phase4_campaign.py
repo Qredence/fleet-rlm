@@ -55,6 +55,7 @@ from scripts.benchmarks.phase4_campaign import (
     execute_campaign,
     execute_partial_campaign,
     load_cases,
+    load_continuation_rows,
     paired_bootstrap,
     partial_schedule,
     policy_sha256,
@@ -109,7 +110,30 @@ def _parser() -> argparse.ArgumentParser:
         help="run the fixed ten-trial exploratory sample against local fake APIs",
     )
     parser.add_argument("--dry-run", action="store_true", help="run the local deterministic adapter smoke path")
+    parser.add_argument(
+        "--continue-from",
+        type=Path,
+        help="halted Phase 4 receipt whose executed rows are retained; pre-turn HTTP 4xx rows are retried",
+    )
     return parser
+
+
+def _continuation_spent(path: Path) -> tuple[float | None, str]:
+    """Prefer the continuation receipt's cumulative charged spend for the cap."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "unreadable"
+    if not isinstance(payload, Mapping):
+        return None, "invalid"
+    for key, status in (
+        ("cumulative_charged_spend_usd", "cumulative_charged"),
+        ("charged_spend_usd", "charged"),
+    ):
+        numeric = _spend_amount(payload.get(key))
+        if numeric is not None:
+            return numeric, status
+    return None, "invalid"
 
 
 def _git(*args: str, cwd: Path = REPO_ROOT) -> str:
@@ -873,13 +897,32 @@ def run(args: argparse.Namespace) -> int:
     if not corpus.is_file():
         raise Phase4CampaignError("sealed Phase 4 corpus is unavailable")
     load_dotenv(REPO_ROOT / ".env", override=False)
-    candidate_revision = _candidate_revision(require_clean=live)
-    candidate_dirty, candidate_dirty_sha256 = _candidate_dirty_fingerprint() if partial_live else (False, None)
+    continue_from = getattr(args, "continue_from", None)
+    continue_path: Path | None = None
+    retained_rows: tuple[Any, ...] = ()
+    dropped_admission_faults = 0
+    if continue_from is not None:
+        if not live:
+            raise Phase4CampaignError("continuation requires --live")
+        continue_path = continue_from.expanduser().resolve()
+        if not _path_is_below_scratch(continue_path) or not continue_path.is_file():
+            raise Phase4CampaignError("continuation receipt must be an existing JSON path below .scratch")
+        try:
+            retained_rows, faults = load_continuation_rows(continue_path)
+        except ValueError as exc:
+            raise Phase4CampaignError(str(exc)) from exc
+        dropped_admission_faults = len(faults)
+        prior_spend, prior_status = _continuation_spent(continue_path)
+    else:
+        prior_spend, prior_status = _prior_receipt_spend()
+    candidate_revision = _candidate_revision(require_clean=live and continue_from is None)
+    candidate_dirty, candidate_dirty_sha256 = (
+        _candidate_dirty_fingerprint() if partial_live or continue_from is not None else (False, None)
+    )
     if live:
         _require_live_preflight(profile=CAMPAIGN_PROFILE)
     elif partial_live:
         _require_live_preflight(profile=None)
-    prior_spend, prior_status = _prior_receipt_spend()
     if live and prior_spend is None:
         raise Phase4CampaignError("prior Phase 4 receipt has no defensible observed spend")
     if live and prior_spend is not None and prior_spend > TOTAL_SPEND_CAP:
@@ -932,6 +975,7 @@ def run(args: argparse.Namespace) -> int:
                 envelope=envelope,
                 runner=runner,
                 initial_spent_usd=prior_spend if prior_spend is not None else 0.0,
+                retained_rows=retained_rows,
             )
             rows = outcome.rows
             budget_ledger = outcome.budget
@@ -1142,6 +1186,16 @@ def run(args: argparse.Namespace) -> int:
                 else None
             ),
         }
+        if continue_path is not None:
+            campaign_metadata.update(
+                {
+                    "continue_from": str(continue_path.relative_to(REPO_ROOT)),
+                    "retained_rows": len(retained_rows),
+                    "retried_admission_faults": dropped_admission_faults,
+                    "candidate_dirty": candidate_dirty,
+                    "candidate_dirty_sha256": candidate_dirty_sha256,
+                }
+            )
     payload = receipt(
         rows,
         corpus_digest=corpus_sha256(corpus),

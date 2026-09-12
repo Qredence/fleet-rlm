@@ -13,6 +13,7 @@ from scripts.benchmarks.phase4_api_client import (
     Phase4ApiTrialRunner,
     _parse_sse,
     _record_label,
+    _request_text,
     _telemetry,
 )
 from scripts.benchmarks.phase4_campaign import PublicRateCard, Trial, load_cases
@@ -292,7 +293,7 @@ def test_error_observation_keeps_authorization_fail_closed_without_telemetry(tmp
 
     assert result.completed is False
     assert result.authorization_confirmed is False
-    assert result.cleanup_confirmed is False
+    assert result.cleanup_confirmed is True
     assert result.error_category == "http_404"
 
 
@@ -587,3 +588,72 @@ def test_prior_receipt_with_rows_bounds_unknown_spend(tmp_path: Path) -> None:
     assert status == "bounded_upper"
     assert spend is not None
     assert spend == pytest.approx(float(driver._envelope().upper_bound_usd(PublicRateCard()) + Decimal("0.00008512")))
+
+
+def test_control_case_skips_empty_attachment_upload(tmp_path: Path) -> None:
+    case = next(item for item in load_cases(_CASES) if item.identifier == "p4-control-01")
+    telemetry = tmp_path / "telemetry.ndjson"
+    uploaded = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal uploaded
+        if request.url.path == "/api/attachments":
+            uploaded = True
+            return httpx.Response(400, json={"error": "empty file"}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            payload = json.loads(request.content)
+            assert payload["attachment_ids"] == []
+            token = request.headers["x-fleet-phase4-trial"]
+            telemetry.write_text(
+                json.dumps(
+                    {
+                        "event": "turn_cleanup",
+                        "trial": token,
+                        "cleanup": True,
+                        "created": 1,
+                        "deleted": 1,
+                        "sandbox_count": 1,
+                        "sandbox_seconds": 1,
+                        "shape": [4, 8, 8],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            headers, body = _stream(case)
+            return httpx.Response(200, headers=headers, content=body, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier, arm="B"), case)
+
+    assert uploaded is False
+    assert result.completed is True
+    assert "attached text document" not in _request_text(case)
+    assert result.cleanup_confirmed is True
+
+
+def test_pre_turn_http_400_confirms_vacuous_cleanup(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(400, json={"error": "empty file"}, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.error_category == "http_400"
+    assert result.authorization_confirmed is False
+    assert result.cleanup_confirmed is True
+    assert result.sandbox_count is None
