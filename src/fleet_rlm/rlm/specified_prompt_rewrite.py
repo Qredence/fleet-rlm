@@ -132,15 +132,34 @@ def _request_specifies_accumulator_extend(request: object) -> bool:
     return isinstance(request, str) and _SPECIFIED_ACCUMULATOR_EXTEND in _compact_python(request)
 
 
-def _has_accumulator_extend(tree: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and isinstance(node.func.value, ast.Name)
-        and node.func.value.id == "accumulator"
-        and node.func.attr == "extend"
-        for node in ast.walk(tree)
+def _is_exact_accumulator_extend(node: ast.AST) -> bool:
+    if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+        return False
+    call = node.value
+    if (
+        not isinstance(call.func, ast.Attribute)
+        or not isinstance(call.func.value, ast.Name)
+        or call.func.value.id != "accumulator"
+        or call.func.attr != "extend"
+        or len(call.args) != 1
+        or call.keywords
+    ):
+        return False
+    argument = call.args[0]
+    return (
+        isinstance(argument, ast.List)
+        and len(argument.elts) == 2
+        and isinstance(argument.elts[0], ast.Name)
+        and argument.elts[0].id == "single_result"
+        and isinstance(argument.elts[1], ast.Starred)
+        and isinstance(argument.elts[1].value, ast.Name)
+        and argument.elts[1].value.id == "batch_results"
     )
+
+
+def _has_accumulator_extend(statements: Sequence[ast.stmt], verify_index: int) -> bool:
+    """Return whether the exact extension precedes verify in its statement list."""
+    return any(_is_exact_accumulator_extend(statement) for statement in statements[:verify_index])
 
 
 def _contains_direct_verify_semantic_work(statement: ast.stmt) -> bool:
@@ -180,13 +199,13 @@ def _restore_specified_accumulator_extend(request: object, tree: ast.AST) -> boo
     """Insert the request-specified accumulator extend before verify when omitted."""
     if not _request_specifies_accumulator_extend(request) or not isinstance(tree, ast.Module):
         return False
-    if _has_accumulator_extend(tree):
-        return False
     location = _verify_semantic_work_location(tree)
     if location is None:
         return False
-    body, index = location
-    body.insert(index, ast.parse("accumulator.extend([single_result, *batch_results])", mode="exec").body[0])
+    body, verify_index = location
+    if _has_accumulator_extend(body, verify_index):
+        return False
+    body.insert(verify_index, ast.parse("accumulator.extend([single_result, *batch_results])", mode="exec").body[0])
     return True
 
 

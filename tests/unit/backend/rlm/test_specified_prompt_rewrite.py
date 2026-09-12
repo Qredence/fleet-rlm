@@ -191,6 +191,30 @@ def test_exact_prompts_without_extend_still_restore_specified_extend() -> None:
     assert any(_is_accumulator_extend(statement) for statement in tree.body)
 
 
+def test_unrelated_accumulator_extend_does_not_suppress_exact_restore() -> None:
+    generated = (
+        "accumulator.extend(other_results)\n"
+        "verification = verify_semantic_work(single_result, batch_results, accumulator)\n"
+    )
+    rewritten = apply_specified_sub_lm_prompts(_MVP_REQUEST, generated)
+    tree = ast.parse(rewritten)
+    exact = [statement for statement in tree.body if _is_accumulator_extend(statement)]
+    assert len(exact) == 2
+    assert ast.unparse(exact[-1]) == "accumulator.extend([single_result, *batch_results])"
+
+
+def test_nested_accumulator_extend_does_not_suppress_exact_restore() -> None:
+    generated = (
+        "if False:\n"
+        "    accumulator.extend([single_result, *batch_results])\n"
+        "verification = verify_semantic_work(single_result, batch_results, accumulator)\n"
+    )
+    rewritten = apply_specified_sub_lm_prompts(_MVP_REQUEST, generated)
+    tree = ast.parse(rewritten)
+    assert ast.unparse(tree.body[0]) == "if False:\n    accumulator.extend([single_result, *batch_results])"
+    assert ast.unparse(tree.body[1]) == "accumulator.extend([single_result, *batch_results])"
+
+
 def test_request_name_prompts_restore_specified_literals() -> None:
     generated = (
         "single_result = llm_query(request)\n"

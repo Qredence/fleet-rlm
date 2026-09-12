@@ -920,8 +920,14 @@ def _align_trajectory_detail(
     text = _stream_text(target)
     if not text:
         return target
+    target_text = normalize_action_code(text) if isinstance(target, RLMCode) else text
     for index, detail in enumerate(details):
-        if index in used_positions or type(detail) is not type(target) or _stream_text(detail) != text:
+        if index in used_positions or type(detail) is not type(target):
+            continue
+        detail_text = _stream_text(detail)
+        if isinstance(target, RLMCode):
+            detail_text = normalize_action_code(detail_text)
+        if detail_text != target_text:
             continue
         observed_step = _stream_step(detail)
         target_step = _stream_step(target)

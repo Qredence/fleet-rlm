@@ -153,10 +153,12 @@ The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CH
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. The committed Daytona profiles inherit disabled recursive
-execution from `[defaults.rlm]`; `daytona-recursive` remains the selected
-default profile name. Re-enable Fleet child RLMs only with an explicit
-`rlm.recursion_enabled = true` profile override. The
+override them. Profiles without an explicit recursion override inherit disabled
+recursive execution from `[defaults.rlm]`; `daytona-recursive` remains the
+selected default profile name. The committed `phase4-campaign` profile is an
+explicit opt-in recursive profile with `rlm.recursion_enabled = true`. Re-enable
+Fleet child RLMs only with an explicit `rlm.recursion_enabled = true` profile
+override. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.

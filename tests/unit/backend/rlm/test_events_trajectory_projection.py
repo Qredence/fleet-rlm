@@ -512,6 +512,35 @@ def test_trajectory_reconciliation_treats_equivalent_action_formatting_as_the_sa
     assert [item.code for item in emissions if isinstance(item, RLMCode)] == []
 
 
+def test_trajectory_reconciliation_aligns_normalized_code_after_setup_offset() -> None:
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    live_action = """```python
+single_result = llm_query(\"Return exactly ROOT\")
+```"""
+    canonical_action = "single_result = llm_query('Return exactly ROOT')"
+    details = [
+        StepStarted(1),
+        RLMCode("load prepared context", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("native reasoning", 2),
+        RLMCode(live_action, 2),
+        RLMOutput("READY", 2),
+        StepFinished(2),
+    ]
+
+    emissions = reconcile_trajectory(
+        details,
+        (TrajectoryStep(1, "native reasoning", canonical_action, "READY"),),
+        max_chars=100,
+    )
+
+    assert emissions == []
+    assert details[5] == RLMCode(canonical_action, 2)
+
+
 def test_trajectory_reconciliation_reemits_earlier_code_correction_after_later_submit() -> None:
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep
