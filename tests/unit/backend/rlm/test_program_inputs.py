@@ -130,7 +130,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "name": "long-context",
             "description": "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
             "scope": "system",
-            "version": "2.0.0",
+            "version": "2.0.1",
             "trust": "system",
             "affordances": ["fetch_url", "llm_query_batched", "workspace.files"],
             "resources_available": True,

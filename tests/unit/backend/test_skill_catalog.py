@@ -17,7 +17,7 @@ def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
     assert [(card.name, card.version) for card in catalog.cards()] == [
         ("data-analysis", "1.0.0"),
         ("dspy-rlm", "1.0.0"),
-        ("long-context", "2.0.0"),
+        ("long-context", "2.0.1"),
         ("report-builder", "1.1.0"),
         ("workspace-files", "1.2.0"),
     ]
@@ -39,6 +39,8 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
     assert "dspy.Retrieve" in resource.content
     assert "Turn output is too large" in resource.content
     assert "named host-tool work remains" in resource.content
+    assert "pass them unchanged and in the given order" in resource.content
+    assert "do not omit listed accumulator updates" in resource.content
     assert "`FleetRLMSignature`" in resource.content
     assert "every required output field" in resource.content
     assert "`max_iters`" in resource.content
@@ -47,6 +49,14 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
     assert '["skill_markdown"]' in skill.instructions
     assert '["content"]' in skill.instructions
     assert "not" in resource.content.lower()
+
+
+def test_long_context_skill_does_not_rewrite_request_specified_prompts() -> None:
+    catalog = build_bundled_skill_catalog()
+    skill = catalog.require(stable_skill_id("long-context"))
+    assert skill.card.version == "2.0.1"
+    assert "pass those strings unchanged" in skill.instructions
+    assert "do not add offsets, paraphrase, or substitute different wording" in skill.instructions
 
 
 def test_workspace_skills_distinguish_exact_readback_from_large_file_metadata_confirmation() -> None:
@@ -160,7 +170,7 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "015a133e-7b90-50c7-bb61-4b2772f57c1c",
             "long-context",
-            "2.0.0",
+            "2.0.1",
             "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
             True,
             ("fetch_url", "llm_query_batched", "workspace.files"),
