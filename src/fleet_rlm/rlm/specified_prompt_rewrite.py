@@ -303,10 +303,13 @@ class _SpecifiedPromptRewriter(ast.NodeTransformer):
 
     def visit_Call(self, node: ast.Call) -> ast.AST:
         visited = self.generic_visit(node)
-        if not isinstance(visited, ast.Call) or not isinstance(visited.func, ast.Name):
+        if not isinstance(visited, ast.Call):
+            return visited
+        func = visited.func
+        if not isinstance(func, ast.Name):
             return visited
         node = visited
-        name = node.func.id
+        name = func.id
         if name not in {_SINGLE, _BATCHED}:
             return node
         queue = self._queues[name]
