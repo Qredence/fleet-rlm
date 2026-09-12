@@ -66,14 +66,32 @@ unchanged until the 144-row continuation above authorized P4.6.
   P4.6 disable): `.scratch/live-receipts/mvp-complete-20260912-r3.json` —
   `passed: false`, `receipt_invalid` / `durability_receipt`. Lane 1 pytest
   returned 0 (~105s), so B5 likely ran, but
-  `scripts/live_daytona_verify.py` reads
+  `scripts/live_daytona_verify.py` then read
   `.scratch/clean-backend-refoundation/assets/live-b5-attachment-artifact-durability-evidence.json`
   while the durability test writes
   `.fleet-evidence/receipts/p35d/live-b5-attachment-artifact-durability-evidence.json`.
   Lane 2 (`test_complete_daytona_mvp_through_fastapi`) did not start.
-  Assertions were not weakened. Phase 5 is not started. A further official
-  recert needs the evidence path aligned, then a new `live_daytona_verify.py`
-  run.
+  Assertions were not weakened. Path aligned on `47df9cbb7`.
+- **Phase 3 complete-MVP recert** on `47df9cbb7` (B5 evidence path aligned):
+  `.scratch/live-receipts/mvp-complete-20260912-r4.json` — `passed: false`,
+  `proof_failed` / `fastapi_dspy_daytona_mvp`. Lane 1 durability passed; the
+  verifier now reads the p35d receipt path. Lane 2 failed at `first_turn`.
+  Diagnostic pytest (same SHA, logs the verifier discards):
+  `.scratch/live-receipts/mvp-complete-20260912-r4-pytest.json` /
+  `mvp-complete-20260912-r4-pytest.log`. SSE `tool-input-available` names were
+  `issue_iteration_token`, `llm_query`, `llm_query_batched`,
+  `verify_semantic_work` — still no `append_workspace_text`. Root **did**
+  emit `append_workspace_text` / `publish_workspace_artifact` in the second
+  cell after the instruction fix, and wrap-up 60s did **not** steal cell 3.
+  Execution never reached the write: Root paraphrased the mandated Sub-LM
+  prompts (`Return exactly ROOT` / `ALPHA` / `BETA` / `GAMMA`) and omitted
+  `accumulator.extend`, so `verify_semantic_work` raised "batched semantic
+  results are out of order" and the cell aborted before the append. Root then
+  SUBMIT-ed without retry, matching the prompt's "do not retry" clause.
+  Assertions were not weakened. Recursion stays disabled. Phase 5 is not
+  started. A further official recert needs a product change that keeps the
+  scripted second cell executable through the named write, then a new
+  `live_daytona_verify.py` run.
 - **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
   empty files with HTTP 400; `_error_observation` treated that as unconfirmed
   cleanup and halted at 109/144. The runner now skips empty uploads, confirms
