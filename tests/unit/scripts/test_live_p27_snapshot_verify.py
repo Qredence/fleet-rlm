@@ -5,7 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import live_p27_snapshot_verify as verifier
+
+
+def test_success_receipt_is_validated_by_the_phase_specific_contract(tmp_path: Path) -> None:
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"passed": True}), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="receipt failed"):
+        verifier._assert_success_receipt(receipt)
 
 
 def test_rejects_existing_or_outside_receipts_without_live_setup(tmp_path: Path) -> None:

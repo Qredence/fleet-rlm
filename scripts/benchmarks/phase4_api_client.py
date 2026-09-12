@@ -34,6 +34,17 @@ _MAX_TEXT_BYTES = 51_200
 _SOURCE_ID = re.compile(r"(?<![A-Za-z0-9_-])([A-Za-z][A-Za-z0-9_-]{0,63})(?![A-Za-z0-9_-])")
 
 
+def _client_http_status(category: str) -> int | None:
+    """Return a 4xx status encoded in ``http_<code>``, else ``None``."""
+    if not category.startswith("http_"):
+        return None
+    try:
+        status = int(category.removeprefix("http_"))
+    except ValueError:
+        return None
+    return status if 400 <= status < 500 else None
+
+
 def _error_observation(
     category: str,
     *,
@@ -41,14 +52,26 @@ def _error_observation(
     offset: int,
     token: str,
     started: float,
+    wait_telemetry: bool = True,
+    allow_vacuous_cleanup: bool = True,
 ) -> TrialObservation:
     """Return one bounded failure while still collecting cleanup telemetry."""
-    events = _read_events(telemetry_path, offset=offset, token=token, timeout=2.0)
-    cleanup, sandbox_seconds, sandbox_count, shape, _ = _telemetry(events)
+    events = _read_events(
+        telemetry_path,
+        offset=offset,
+        token=token,
+        timeout=2.0 if wait_telemetry else 0.0,
+    )
+    cleanup, sandbox_seconds, sandbox_count, shape, shape_seconds, _ = _telemetry(events)
     # The transport/stream diagnosis is always more specific than the
     # generic lifecycle fallback, so it wins the category slot; the
     # authorization and cleanup flags carry the safety verdict separately.
     executed = any(event.get("event") == "turn_cleanup" for event in events)
+    # A 4xx before turn admission never created a Sandbox. Waiting on
+    # cleanup telemetry would halt the campaign as a leak. Vacuous
+    # cleanup is confirmed only when no turn lifecycle event exists.
+    if _client_http_status(category) is not None and not executed and allow_vacuous_cleanup:
+        cleanup = True
     return replace(
         _blank(category),
         authorization_confirmed=executed,
@@ -56,6 +79,7 @@ def _error_observation(
         sandbox_seconds=sandbox_seconds,
         sandbox_count=sandbox_count,
         resource_shape=shape,
+        resource_seconds_by_shape=shape_seconds,
         latency_ms=max(0.0, (time.perf_counter() - started) * 1000),
     )
 
@@ -231,7 +255,28 @@ def _usage_pair(value: object) -> tuple[int | None, int | None]:
     return input_value, output_value
 
 
-def _usage_metrics(usage: Mapping[str, Any]) -> tuple[int | None, int | None, int | None, int | None, int | None]:
+_CACHE_READ_KEYS = ("cache_read_tokens", "cache_read_input_tokens", "prompt_cache_hit_tokens")
+
+
+def _cache_read_value(value: object) -> int | None:
+    """Read one provider cache-hit counter, including nested usage details."""
+    if not isinstance(value, Mapping):
+        return None
+    for key in _CACHE_READ_KEYS:
+        if key in value:
+            candidate = value[key]
+            return candidate if type(candidate) is int and candidate >= 0 else None
+    for nested in value.values():
+        if isinstance(nested, Mapping):
+            candidate = _cache_read_value(nested)
+            if candidate is not None:
+                return candidate
+    return None
+
+
+def _usage_metrics(
+    usage: Mapping[str, Any],
+) -> tuple[int | None, int | None, int | None, int | None, int | None, int | None]:
     metrics = usage.get("delegation_metrics")
     counts = metrics.get("lm_call_counts") if isinstance(metrics, Mapping) else None
     root_calls: int | None = None
@@ -268,6 +313,32 @@ def _usage_metrics(usage: Mapping[str, Any]) -> tuple[int | None, int | None, in
                 pairs.append((input_value, output_value))
     input_tokens = sum(item[0] for item in pairs) if pairs else None
     output_tokens = sum(item[1] for item in pairs) if pairs else None
+    cache_read_tokens: int | None = None
+    if pairs:
+        # Every usage row must expose an explicit cache counter.  A missing
+        # field is not equivalent to zero: pricing otherwise understates a
+        # provider bill that reports cache hits through a nested alias.
+        usage_rows: list[object] = []
+        if isinstance(token_rows, list) and token_rows and len(token_rows) == len(pairs):
+            usage_rows = list(token_rows)
+        else:
+            observed = usage.get("observed_lm_usage")
+            if isinstance(observed, Mapping) and len(observed) == len(pairs):
+                usage_rows = list(observed.values())
+        cache_values = [_cache_read_value(item) for item in usage_rows]
+        if usage_rows and all(item is not None for item in cache_values):
+            cache_read_tokens = sum(item for item in cache_values if item is not None)
+        else:
+            # Some providers put one aggregate counter at the top level rather
+            # than repeating it per model role.
+            cache_read_tokens = next(
+                (
+                    candidate
+                    for key in _CACHE_READ_KEYS
+                    if (candidate := usage.get(key)) is not None and type(candidate) is int and candidate >= 0
+                ),
+                None,
+            )
     delegated: int | None = None
     if isinstance(metrics, Mapping) and type(metrics.get("delegated_input_bytes")) is int:
         delegated = int(metrics["delegated_input_bytes"])
@@ -276,7 +347,7 @@ def _usage_metrics(usage: Mapping[str, Any]) -> tuple[int | None, int | None, in
         delegated = 0
     if root_calls is None and type(usage.get("iterations")) is int and recursive_count == 0:
         root_calls = int(usage["iterations"])
-    return input_tokens, output_tokens, root_calls, child_calls, delegated
+    return input_tokens, output_tokens, root_calls, child_calls, delegated, cache_read_tokens
 
 
 def _read_events(path: Path | None, *, offset: int, token: str, timeout: float = 130.0) -> list[dict[str, Any]]:
@@ -306,10 +377,17 @@ def _read_events(path: Path | None, *, offset: int, token: str, timeout: float =
 
 def _telemetry(
     events: list[dict[str, Any]],
-) -> tuple[bool, int | None, int | None, tuple[int, int, int] | None, str | None]:
+) -> tuple[
+    bool,
+    int | None,
+    int | None,
+    tuple[int, int, int] | None,
+    tuple[tuple[tuple[int, int, int], int], ...] | None,
+    str | None,
+]:
     cleanup = next((event for event in reversed(events) if event.get("event") == "turn_cleanup"), None)
     if cleanup is None:
-        return False, None, None, None, "cleanup_unavailable"
+        return False, None, None, None, None, "cleanup_unavailable"
     cleanup_confirmed = cleanup.get("cleanup") is True
     sandbox_count = cleanup.get("sandbox_count")
     sandbox_seconds = cleanup.get("sandbox_seconds")
@@ -321,6 +399,24 @@ def _telemetry(
     resource_shape: tuple[int, int, int] | None = None
     if isinstance(shape, list) and len(shape) == 3 and all(type(item) is int and item > 0 for item in shape):
         resource_shape = (shape[0], shape[1], shape[2])
+    resource_seconds_by_shape: tuple[tuple[tuple[int, int, int], int], ...] | None = None
+    raw_shape_seconds = cleanup.get("shape_seconds")
+    if isinstance(raw_shape_seconds, Mapping) and raw_shape_seconds:
+        parsed: list[tuple[tuple[int, int, int], int]] = []
+        for key, value in raw_shape_seconds.items():
+            if (
+                not isinstance(key, str)
+                or len(key.split(",")) != 3
+                or any(not part.isdigit() or int(part) <= 0 for part in key.split(","))
+                or type(value) is not int
+                or value <= 0
+            ):
+                parsed = []
+                break
+            parts = tuple(int(part) for part in key.split(","))
+            parsed.append((parts, value))  # type: ignore[arg-type]
+        if parsed and (sandbox_seconds is None or sum(seconds for _shape, seconds in parsed) == sandbox_seconds):
+            resource_seconds_by_shape = tuple(sorted(parsed))
     category = cleanup.get("error_category") if isinstance(cleanup.get("error_category"), str) else None
     if sandbox_count and sandbox_seconds == 0:
         sandbox_seconds = 1
@@ -331,7 +427,7 @@ def _telemetry(
     # turn itself did.
     if category != "cleanup_unavailable":
         category = None
-    return cleanup_confirmed, sandbox_seconds, sandbox_count, resource_shape, category
+    return cleanup_confirmed, sandbox_seconds, sandbox_count, resource_shape, resource_seconds_by_shape, category
 
 
 class Phase4ApiTrialRunner:
@@ -357,6 +453,7 @@ class Phase4ApiTrialRunner:
         except OSError:
             offset = 0
         started = time.perf_counter()
+        session_created = False
         try:
             timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
             with httpx.Client(timeout=timeout, transport=self.transport) as client:
@@ -395,6 +492,7 @@ class Phase4ApiTrialRunner:
                     UUID(session_id)
                 except ValueError as exc:
                     raise Phase4ApiClientError("session_unavailable") from exc
+                session_created = True
                 with client.stream(
                     "POST",
                     f"{self.base_url}/api/sessions/{session_id}/turns",
@@ -414,12 +512,15 @@ class Phase4ApiTrialRunner:
                         raise Phase4ApiClientError("stream_contract")
                     chunks, finish_reason = _parse_sse(response.iter_lines())
         except Phase4ApiClientError as exc:
+            category = str(exc)
             return _error_observation(
-                str(exc),
+                category,
                 telemetry_path=self.telemetry_path,
                 offset=offset,
                 token=token,
                 started=started,
+                wait_telemetry=_client_http_status(category) is None or session_created,
+                allow_vacuous_cleanup=not session_created,
             )
         except httpx.TimeoutException:
             return _error_observation(
@@ -486,8 +587,8 @@ class Phase4ApiTrialRunner:
         except ValueError:
             answer, cited, uncertainty = "", (), ""
             finish_reason = "error"
-        input_tokens, output_tokens, root_calls, child_calls, delegated = _usage_metrics(usage)
-        cleanup, sandbox_seconds, sandbox_count, shape, cleanup_category = _telemetry(
+        input_tokens, output_tokens, root_calls, child_calls, delegated, cache_read_tokens = _usage_metrics(usage)
+        cleanup, sandbox_seconds, sandbox_count, shape, shape_seconds, cleanup_category = _telemetry(
             _read_events(self.telemetry_path, offset=offset, token=token)
         )
         if self.telemetry_path is None:
@@ -512,7 +613,7 @@ class Phase4ApiTrialRunner:
             cleanup_confirmed=cleanup,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            cache_read_tokens=0 if input_tokens is not None and output_tokens is not None else None,
+            cache_read_tokens=cache_read_tokens,
             sandbox_seconds=sandbox_seconds,
             latency_ms=max(0.0, (time.perf_counter() - started) * 1000) if finish_reason else None,
             root_lm_calls=root_calls,
@@ -520,6 +621,7 @@ class Phase4ApiTrialRunner:
             delegated_bytes=delegated,
             sandbox_count=sandbox_count,
             resource_shape=shape,
+            resource_seconds_by_shape=shape_seconds,
             error_category=cleanup_category or (None if finish_reason == "stop" else "turn_failed"),
             trace_id=_trace_id(chunks),
         )

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
 from scripts.benchmarks import run_phase4_campaign
-from scripts.benchmarks.phase4_api_server import LifecycleObserver, _bounded_trial, _campaign_settings, _shape
+from scripts.benchmarks.phase4_api_server import (
+    CampaignMiddleware,
+    LifecycleObserver,
+    _bounded_trial,
+    _campaign_settings,
+    _shape,
+)
 
 
 def test_campaign_trial_correlation_is_bounded_and_content_free() -> None:
@@ -90,6 +98,34 @@ def test_close_deadline_defaults_and_rejects_bad_overrides(monkeypatch: pytest.M
     for value in ("bogus", "", "0", "-5", "9999"):
         monkeypatch.setenv("FLEET_P4_CLOSE_DEADLINE_S", value)
         assert LifecycleObserver.close_deadline_seconds() == 120.0
+
+
+@pytest.mark.asyncio
+async def test_campaign_middleware_closes_admitted_turn_when_terminal_body_is_missing() -> None:
+    session_id = uuid4()
+    closed: list[object] = []
+
+    class Observer:
+        async def close_turn_root(self, value):
+            closed.append(value)
+
+    async def app(_scope, _receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        raise RuntimeError("client disconnected")
+
+    middleware = CampaignMiddleware(app, Observer())
+    with pytest.raises(RuntimeError, match="disconnected"):
+        await middleware(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": f"/api/sessions/{session_id}/turns",
+                "headers": [],
+            },
+            lambda: asyncio.sleep(0),
+            lambda _message: asyncio.sleep(0),
+        )
+    assert closed == [session_id]
 
 
 def test_campaign_server_reads_arm_budgets_from_selected_profile(tmp_path) -> None:

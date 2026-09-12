@@ -158,7 +158,7 @@ class TrialEnvelope:
     # Maximum wall-clock lifetime reserved for one worker, independent of the
     # shorter Daytona billing lifetime.  Admission uses this bound so a slow
     # provider attempt cannot push the campaign beyond its four-hour window.
-    maximum_lifetime_seconds: int = 150
+    maximum_lifetime_seconds: int = 210
 
     def upper_bound_usd(self, rates: PublicRateCard) -> Decimal:
         values = asdict(self)
@@ -210,6 +210,11 @@ class TrialObservation:
     delegated_bytes: int | None
     sandbox_count: int | None = None
     resource_shape: tuple[int, int, int] | None = None
+    # Exact aggregate lifetime by provider resource shape.  The legacy
+    # ``resource_shape`` field remains for one-shape receipts; mixed recursive
+    # runs must use this map so pricing cannot silently apply one shape to all
+    # sandboxes.
+    resource_seconds_by_shape: tuple[tuple[tuple[int, int, int], int], ...] | None = None
     error_category: str | None = None
     # MLflow root trace identifier exposed over SSE metadata. Every completed
     # trial must link back to its engineering trace; failed trials carry an
@@ -231,9 +236,23 @@ class TrialObservation:
         if type(sandbox_count) is not int or sandbox_count < 0:
             return False
         if sandbox_seconds == 0:
-            return sandbox_count == 0 and self.resource_shape is None
+            return sandbox_count == 0 and self.resource_shape is None and not self.resource_seconds_by_shape
         if sandbox_count < 1:
             return False
+        by_shape = self.resource_seconds_by_shape
+        if by_shape is not None:
+            if not by_shape or sum(seconds for _shape, seconds in by_shape) != sandbox_seconds:
+                return False
+            if any(
+                not isinstance(shape, tuple)
+                or len(shape) != 3
+                or any(type(value) is not int or value <= 0 for value in shape)
+                or type(seconds) is not int
+                or seconds <= 0
+                for shape, seconds in by_shape
+            ):
+                return False
+            return len({shape for shape, _seconds in by_shape}) == len(by_shape)
         return (
             isinstance(self.resource_shape, tuple)
             and len(self.resource_shape) == 3
@@ -295,7 +314,18 @@ class TrialObservation:
         sandbox_hours = Decimal(sandbox_seconds) / Decimal(3600)
         shape = self.resource_shape
         sandbox = Decimal(0)
-        if shape is not None:
+        if self.resource_seconds_by_shape is not None:
+            for shape, seconds in self.resource_seconds_by_shape:
+                sandbox += (
+                    Decimal(seconds)
+                    / Decimal(3600)
+                    * (
+                        Decimal(shape[0]) * rates.vcpu_usd_per_hour
+                        + Decimal(shape[1]) * rates.gib_ram_usd_per_hour
+                        + Decimal(shape[2]) * rates.gib_storage_usd_per_hour
+                    )
+                )
+        elif shape is not None:
             sandbox = sandbox_hours * (
                 Decimal(shape[0]) * rates.vcpu_usd_per_hour
                 + Decimal(shape[1]) * rates.gib_ram_usd_per_hour
@@ -345,6 +375,12 @@ class ScoredTrial:
             "sandbox_count": self.observation.sandbox_count,
             "resource_shape": list(self.observation.resource_shape)
             if self.observation.resource_shape is not None
+            else None,
+            "resource_seconds_by_shape": [
+                {"shape": list(shape), "seconds": seconds}
+                for shape, seconds in self.observation.resource_seconds_by_shape
+            ]
+            if self.observation.resource_seconds_by_shape is not None
             else None,
             "error_category": self.observation.error_category,
             "trace_id": self.observation.trace_id,
@@ -448,6 +484,29 @@ def observation_from_mapping(value: Mapping[str, Any]) -> TrialObservation:
         if not isinstance(shape, list) or len(shape) != 3 or any(type(item) is not int or item <= 0 for item in shape):
             raise ValueError("worker resource shape is invalid")
         resource_shape = (shape[0], shape[1], shape[2])
+    raw_shape_seconds = value.get("resource_seconds_by_shape")
+    resource_seconds_by_shape: tuple[tuple[tuple[int, int, int], int], ...] | None = None
+    if raw_shape_seconds is not None:
+        if not isinstance(raw_shape_seconds, list) or not raw_shape_seconds:
+            raise ValueError("worker resource shape seconds are invalid")
+        parsed_shape_seconds: list[tuple[tuple[int, int, int], int]] = []
+        for item in raw_shape_seconds:
+            if not isinstance(item, Mapping):
+                raise ValueError("worker resource shape seconds are invalid")
+            item_shape = item.get("shape")
+            seconds = item.get("seconds")
+            if (
+                not isinstance(item_shape, list)
+                or len(item_shape) != 3
+                or any(type(part) is not int or part <= 0 for part in item_shape)
+                or type(seconds) is not int
+                or seconds <= 0
+            ):
+                raise ValueError("worker resource shape seconds are invalid")
+            parsed_shape_seconds.append(((item_shape[0], item_shape[1], item_shape[2]), seconds))
+        if len({shape for shape, _seconds in parsed_shape_seconds}) != len(parsed_shape_seconds):
+            raise ValueError("worker resource shape seconds are invalid")
+        resource_seconds_by_shape = tuple(parsed_shape_seconds)
     sandbox_count = bounded_optional_int("sandbox_count")
     if sandbox_count is not None and sandbox_count > 5:
         raise ValueError("worker sandbox count exceeds campaign bound")
@@ -474,6 +533,7 @@ def observation_from_mapping(value: Mapping[str, Any]) -> TrialObservation:
         delegated_bytes=bounded_optional_int("delegated_bytes"),
         sandbox_count=sandbox_count,
         resource_shape=resource_shape,
+        resource_seconds_by_shape=resource_seconds_by_shape,
         error_category=category,
         trace_id=trace_id,
     )
@@ -595,6 +655,12 @@ def charged_cost(row: ScoredTrial) -> Decimal:
     failures leave spend unobserved: unknown rows count at their full
     reservation, exactly as the budget charged them.
     """
+    # Cleanup failure means provider spend may continue after the receipt was
+    # written.  Never treat an observed partial value as settled in that case;
+    # the admission reservation is the conservative amount already charged by
+    # CampaignBudget before it halted.
+    if not row.observation.cleanup_confirmed:
+        return row.reserved_cost_usd
     return row.observed_cost_usd if row.observed_cost_usd is not None else row.reserved_cost_usd
 
 
@@ -818,6 +884,167 @@ class CampaignOutcome:
     rows: tuple[ScoredTrial, ...]
     budget: dict[str, object]
 
+def is_pre_turn_http_fault(observation: TrialObservation) -> bool:
+    """Whether the trial died on a 4xx before any Sandbox was admitted."""
+    category = observation.error_category
+    if not isinstance(category, str) or not category.startswith("http_"):
+        return False
+    try:
+        status = int(category.removeprefix("http_"))
+    except ValueError:
+        return False
+    return (
+        400 <= status < 500
+        and not observation.authorization_confirmed
+        and observation.sandbox_count is None
+        and observation.cleanup_confirmed
+    )
+
+
+def scored_trial_from_receipt_row(value: Mapping[str, object]) -> ScoredTrial:
+    """Rebuild a scored trial from a sealed receipt row.
+
+    Receipts do not retain answer text. Continuation scoring uses the already
+    sealed ``verified_success`` / ``evidence_valid`` flags.
+    """
+    if not isinstance(value, Mapping):
+        raise ValueError("continuation row is invalid")
+    arm = value.get("arm")
+    classification = value.get("classification")
+    arm_order = value.get("arm_order")
+    if (
+        not isinstance(value.get("case_id"), str)
+        or classification not in _CLASSIFICATIONS
+        or arm not in ARMS
+        or type(value.get("repeat")) is not int
+        or not isinstance(arm_order, list)
+        or not arm_order
+        or any(item not in ARMS for item in arm_order)
+        or type(value.get("verified_success")) is not bool
+        or type(value.get("evidence_valid")) is not bool
+        or type(value.get("completed")) is not bool
+        or type(value.get("authorization_confirmed")) is not bool
+        or type(value.get("cleanup_confirmed")) is not bool
+    ):
+        raise ValueError("continuation row is invalid")
+    reserved = value.get("reserved_cost_usd")
+    observed = value.get("observed_cost_usd")
+    try:
+        reserved_cost = Decimal(reserved) if isinstance(reserved, str) else None
+        observed_cost = Decimal(observed) if isinstance(observed, str) else None
+    except ArithmeticError as exc:
+        raise ValueError("continuation row cost is invalid") from exc
+    if reserved_cost is None or not reserved_cost.is_finite() or reserved_cost < 0:
+        raise ValueError("continuation row cost is invalid")
+    if observed_cost is not None and (not observed_cost.is_finite() or observed_cost < 0):
+        raise ValueError("continuation row cost is invalid")
+    observation = observation_from_mapping(
+        {
+            "answer": "",
+            "cited_evidence": [],
+            "uncertainty": "",
+            "completed": value["completed"],
+            "authorization_confirmed": value["authorization_confirmed"],
+            "cleanup_confirmed": value["cleanup_confirmed"],
+            "input_tokens": value.get("input_tokens"),
+            "output_tokens": value.get("output_tokens"),
+            "cache_read_tokens": value.get("cache_read_tokens"),
+            "sandbox_seconds": value.get("sandbox_seconds"),
+            "latency_ms": value.get("latency_ms"),
+            "root_lm_calls": value.get("root_lm_calls"),
+            "child_lm_calls": value.get("child_lm_calls"),
+            "delegated_bytes": value.get("delegated_bytes"),
+            "sandbox_count": value.get("sandbox_count"),
+            "resource_shape": value.get("resource_shape"),
+            "resource_seconds_by_shape": value.get("resource_seconds_by_shape"),
+            "error_category": value.get("error_category"),
+            "trace_id": value.get("trace_id"),
+        }
+    )
+    return ScoredTrial(
+        trial=Trial(
+            value["case_id"],
+            classification,
+            int(value["repeat"]),
+            arm,
+            tuple(arm_order),
+        ),
+        verified_success=value["verified_success"],
+        evidence_valid=value["evidence_valid"],
+        observation=observation,
+        observed_cost_usd=observed_cost,
+        reserved_cost_usd=reserved_cost,
+    )
+
+
+def load_continuation_rows(
+    path: Path,
+    *,
+    expected_corpus_sha256: str | None = None,
+    expected_policy_sha256: str | None = None,
+    expected_baseline_revision: str | None = None,
+    expected_candidate_revision: str | None = None,
+    expected_campaign: str | None = None,
+    expected_target: str | None = None,
+    expected_schedule: Sequence[Trial] | None = None,
+) -> tuple[tuple[ScoredTrial, ...], tuple[ScoredTrial, ...]]:
+    """Split a halted receipt into retained executions and pre-turn HTTP faults."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("continuation receipt is unreadable") from exc
+    if not isinstance(payload, Mapping) or payload.get("schema") != PHASE4_SCHEMA:
+        raise ValueError("continuation receipt schema is invalid")
+    expected_lineage = {
+        "corpus_sha256": expected_corpus_sha256,
+        "policy_sha256": expected_policy_sha256,
+        "baseline_revision": expected_baseline_revision,
+        "candidate_revision": expected_candidate_revision,
+    }
+    if any(expected is not None and payload.get(key) != expected for key, expected in expected_lineage.items()):
+        raise ValueError("continuation receipt lineage does not match the current candidate")
+    if expected_campaign is not None or expected_target is not None:
+        campaign = payload.get("campaign")
+        if (
+            not isinstance(campaign, Mapping)
+            or (expected_campaign is not None and campaign.get("name") != expected_campaign)
+            or (expected_target is not None and campaign.get("target") != expected_target)
+        ):
+            raise ValueError("continuation receipt campaign does not match the current run")
+    raw_rows = payload.get("rows")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise ValueError("continuation receipt has no rows")
+    retained: list[ScoredTrial] = []
+    faults: list[ScoredTrial] = []
+    seen: set[tuple[str, str, int]] = set()
+    schedule_by_key = (
+        {(trial.arm, trial.case_id, trial.repeat): trial for trial in expected_schedule}
+        if expected_schedule is not None
+        else None
+    )
+    if schedule_by_key is not None and len(schedule_by_key) != len(expected_schedule):
+        raise ValueError("expected continuation schedule has duplicate trial keys")
+    for item in raw_rows:
+        if not isinstance(item, Mapping):
+            raise ValueError("continuation row is invalid")
+        scored = scored_trial_from_receipt_row(item)
+        key = (scored.trial.arm, scored.trial.case_id, scored.trial.repeat)
+        if key in seen:
+            raise ValueError("continuation receipt has duplicate trial keys")
+        seen.add(key)
+        if schedule_by_key is not None:
+            expected = schedule_by_key.get(key)
+            if expected is None or (
+                scored.trial.classification != expected.classification or scored.trial.arm_order != expected.arm_order
+            ):
+                raise ValueError("continuation receipt trial schedule does not match the current corpus")
+        if is_pre_turn_http_fault(scored.observation):
+            faults.append(scored)
+            continue
+        if not scored.observation.cleanup_confirmed:
+            raise ValueError("continuation receipt has an unconfirmed provider cleanup")
+        retained.append(scored)
+    return tuple(retained), tuple(faults)
 
 def execute_campaign(
     *,

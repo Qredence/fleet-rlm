@@ -120,12 +120,19 @@ class CampaignBudget:
     def settle(self, *, actual_usd: float | None, cleanup_confirmed: bool) -> None:
         if self._reserved is None:
             raise CampaignAdmissionError("no trial reservation exists")
+        reserved = self._reserved
         if actual_usd is None or not cleanup_confirmed:
+            # The reservation is the only defensible spend value when the
+            # provider result or lifecycle proof is incomplete.  Charge it
+            # before halting so the receipt and retention accounting cannot
+            # accidentally release an owned bound.
+            self._spent += reserved
+            self._reserved = None
             self._halted = True
             self._halt_reason = "unconfirmed_cleanup" if not cleanup_confirmed else "unknown_spend"
             raise CampaignAdmissionError("trial spend or cleanup evidence is unavailable")
         actual = self._amount(actual_usd)
-        if actual > self._reserved:
+        if actual > reserved:
             self._spent += actual
             self._reserved = None
             self._halted = True
@@ -146,11 +153,14 @@ class CampaignBudget:
         """
         if self._reserved is None:
             raise CampaignAdmissionError("no trial reservation exists")
+        reserved = self._reserved
         if not cleanup_confirmed:
+            self._spent += reserved
+            self._reserved = None
             self._halted = True
             self._halt_reason = "unconfirmed_cleanup"
             raise CampaignAdmissionError("trial spend or cleanup evidence is unavailable")
-        self._spent += self._reserved
+        self._spent += reserved
         self._reserved = None
 
     def receipt(self) -> dict[str, object]:

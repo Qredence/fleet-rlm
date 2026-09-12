@@ -14,6 +14,7 @@ from scripts.benchmarks.phase4_api_client import (
     _parse_sse,
     _record_label,
     _telemetry,
+    _usage_metrics,
 )
 from scripts.benchmarks.phase4_campaign import PublicRateCard, Trial, load_cases
 from scripts.benchmarks.run_phase4_campaign import _prior_receipt_spend
@@ -38,8 +39,8 @@ def _usage() -> dict[str, object]:
                 {"role": "child", "recursive_depth": 1, "count": 1},
             ],
             "lm_token_totals": [
-                {"input_tokens": 32, "output_tokens": 16},
-                {"input_tokens": 16, "output_tokens": 8},
+                {"input_tokens": 32, "output_tokens": 16, "cache_read_tokens": 0},
+                {"input_tokens": 16, "output_tokens": 8, "cache_read_tokens": 0},
             ],
         },
     }
@@ -134,6 +135,21 @@ def test_api_runner_uses_public_sse_and_sanitized_lifecycle_telemetry(tmp_path: 
     assert result.cleanup_confirmed is True
     assert result.resource_shape == (4, 8, 8)
     assert result.trace_id == "tr-001"
+
+
+@pytest.mark.parametrize("key", ("cache_read_tokens", "cache_read_input_tokens", "prompt_cache_hit_tokens"))
+def test_usage_metrics_reads_cache_aliases_and_nested_details(key: str) -> None:
+    usage = {
+        "observed_lm_usage": {
+            "root": {"input_tokens": 10, "output_tokens": 2, "prompt_tokens_details": {key: 3}},
+        }
+    }
+    assert _usage_metrics(usage)[-1] == 3
+
+
+def test_usage_metrics_fails_closed_when_cache_usage_is_not_observable() -> None:
+    usage = {"observed_lm_usage": {"root": {"input_tokens": 10, "output_tokens": 2}}}
+    assert _usage_metrics(usage)[-1] is None
 
 
 def test_api_runner_leaves_failed_trials_explicitly_untraced(tmp_path: Path) -> None:
@@ -296,6 +312,30 @@ def test_error_observation_keeps_authorization_fail_closed_without_telemetry(tmp
     assert result.error_category == "http_404"
 
 
+def test_turn_http_failure_after_session_creation_does_not_confirm_vacuous_cleanup(tmp_path: Path) -> None:
+    case = load_cases(_CASES)[0]
+    telemetry = tmp_path / "telemetry.ndjson"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/attachments":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path == "/api/sessions":
+            return httpx.Response(201, json={"id": str(uuid4())}, request=request)
+        if request.url.path.endswith("/turns"):
+            return httpx.Response(400, json={"error": "turn rejected"}, request=request)
+        return httpx.Response(404, request=request)
+
+    result = Phase4ApiTrialRunner(
+        base_url="http://fake",
+        telemetry_path=telemetry,
+        transport=httpx.MockTransport(handler),
+    )(_trial(case.identifier), case)
+
+    assert result.error_category == "http_400"
+    assert result.authorization_confirmed is False
+    assert result.cleanup_confirmed is False
+
+
 def test_api_runner_rejects_missing_stream_header(tmp_path: Path) -> None:
     case = load_cases(_CASES)[0]
     telemetry = tmp_path / "telemetry.ndjson"
@@ -336,7 +376,7 @@ def test_api_runner_records_missing_optional_telemetry_as_unknown() -> None:
 
 
 def test_telemetry_suppresses_provider_cleanup_errors_and_keeps_the_flag() -> None:
-    cleanup, sandbox_seconds, sandbox_count, shape, category = _telemetry(
+    cleanup, sandbox_seconds, sandbox_count, shape, shape_seconds, category = _telemetry(
         [
             {
                 "event": "turn_cleanup",
@@ -350,13 +390,14 @@ def test_telemetry_suppresses_provider_cleanup_errors_and_keeps_the_flag() -> No
     assert sandbox_seconds is None
     assert sandbox_count is None
     assert shape is None
+    assert shape_seconds is None
     # Provider exception names never become receipt semantics; the cleanup
     # flag carries the verdict while the turn diagnosis flows separately.
     assert category is None
 
 
 def test_telemetry_keeps_the_harness_defined_unavailable_token() -> None:
-    cleanup, _, _, _, category = _telemetry([])
+    cleanup, _, _, _, _, category = _telemetry([])
 
     assert cleanup is False
     assert category == "cleanup_unavailable"

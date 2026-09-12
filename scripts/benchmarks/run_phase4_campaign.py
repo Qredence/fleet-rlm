@@ -50,6 +50,7 @@ from scripts.benchmarks.phase4_campaign import (
     TrialEnvelope,
     TrialObservation,
     arm_specs,
+    balanced_schedule,
     charged_cost,
     corpus_sha256,
     execute_campaign,
@@ -62,7 +63,6 @@ from scripts.benchmarks.phase4_campaign import (
 )
 
 CORPUS_PATH = REPO_ROOT / "scripts" / "benchmarks" / "phase4_cases.json"
-API_SERVER_PATH = REPO_ROOT / "scripts" / "benchmarks" / "phase4_api_server.py"
 API_FAKE_SERVER_PATH = REPO_ROOT / "scripts" / "benchmarks" / "phase4_api_fake_server.py"
 BASELINE_REVISION = "9b526f50f0aeec37ca399bc8ef19ec8a95d3bead"
 CAMPAIGN_NAME = "phase4-ablation-20260910"
@@ -110,6 +110,39 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--dry-run", action="store_true", help="run the local deterministic adapter smoke path")
     return parser
+
+
+def _continuation_spent(
+    path: Path,
+    *,
+    retained_rows: tuple[Any, ...] = (),
+) -> tuple[float | None, str]:
+    """Return spend predating retained rows from a continuation receipt."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, "unreadable"
+    if not isinstance(payload, Mapping):
+        return None, "invalid"
+    retained_spend = sum((charged_cost(row) for row in retained_rows), Decimal(0))
+    campaign = payload.get("campaign")
+    if isinstance(campaign, Mapping) and "cumulative_charged_spend_usd" in campaign:
+        numeric = _spend_amount(campaign.get("cumulative_charged_spend_usd"))
+        status = "cumulative_charged"
+        if numeric is None:
+            return None, "invalid"
+    else:
+        numeric = _spend_amount(payload.get("cumulative_charged_spend_usd"))
+        status = "cumulative_charged"
+        if numeric is None:
+            numeric = _spend_amount(payload.get("charged_spend_usd"))
+            status = "charged"
+    if numeric is not None:
+        remaining = Decimal(str(numeric)) - retained_spend
+        if remaining < 0 or not remaining.is_finite():
+            return None, "invalid"
+        return float(remaining), status
+    return None, "invalid"
 
 
 def _git(*args: str, cwd: Path = REPO_ROOT) -> str:
@@ -383,6 +416,9 @@ def _campaign_env(*, candidate: str) -> dict[str, str]:
     env["FLEET_LIVE"] = "1"
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(item for item in (candidate, existing) if item)
+    # The approved turn (90s) plus root-close (120s) envelope is part of the
+    # campaign contract; ambient overrides must not invalidate admission.
+    env["FLEET_P4_CLOSE_DEADLINE_S"] = "120"
     return env
 
 
@@ -511,7 +547,7 @@ class Phase4ApiService:
                 raise Phase4CampaignError(f"{self.label} API database initialization failed")
             command = [
                 sys.executable,
-                str(API_SERVER_PATH),
+                str(self.checkout_root / "scripts" / "benchmarks" / "phase4_api_server.py"),
                 "--host",
                 "127.0.0.1",
                 "--port",
@@ -876,19 +912,50 @@ def run(args: argparse.Namespace) -> int:
     corpus = args.corpus.expanduser().resolve()
     if not corpus.is_file():
         raise Phase4CampaignError("sealed Phase 4 corpus is unavailable")
+    cases = load_cases(corpus)
     load_dotenv(REPO_ROOT / ".env", override=False)
+    continue_from = getattr(args, "continue_from", None)
     candidate_revision = _candidate_revision(require_clean=live)
-    candidate_dirty, candidate_dirty_sha256 = _candidate_dirty_fingerprint() if partial_live else (False, None)
+    candidate_dirty, candidate_dirty_sha256 = (
+        _candidate_dirty_fingerprint() if partial_live or continue_from is not None else (False, None)
+    )
+    continue_path: Path | None = None
+    retained_rows: tuple[Any, ...] = ()
+    dropped_admission_faults = 0
+    if continue_from is not None:
+        if not live:
+            raise Phase4CampaignError("continuation requires --live")
+        continue_path = continue_from.expanduser().resolve()
+        if not _path_is_below_scratch(continue_path) or not continue_path.is_file():
+            raise Phase4CampaignError("continuation receipt must be an existing JSON path below .scratch")
+        try:
+            retained_rows, faults = load_continuation_rows(
+                continue_path,
+                expected_corpus_sha256=corpus_sha256(corpus),
+                expected_policy_sha256=policy_sha256(
+                    REPO_ROOT / "config" / "fleet.toml",
+                    profiles=CAMPAIGN_PROFILES,
+                ),
+                expected_baseline_revision=BASELINE_REVISION,
+                expected_candidate_revision=candidate_revision,
+                expected_campaign=args.campaign,
+                expected_target=args.target,
+                expected_schedule=partial_schedule(cases) if partial_live else balanced_schedule(cases),
+            )
+        except ValueError as exc:
+            raise Phase4CampaignError(str(exc)) from exc
+        dropped_admission_faults = len(faults)
+        prior_spend, prior_status = _continuation_spent(continue_path, retained_rows=retained_rows)
+    else:
+        prior_spend, prior_status = _prior_receipt_spend()
     if live:
         _require_live_preflight(profile=CAMPAIGN_PROFILE)
     elif partial_live:
         _require_live_preflight(profile=None)
-    prior_spend, prior_status = _prior_receipt_spend()
     if live and prior_spend is None:
         raise Phase4CampaignError("prior Phase 4 receipt has no defensible observed spend")
     if live and prior_spend is not None and prior_spend > TOTAL_SPEND_CAP:
         raise Phase4CampaignError("prior Phase 4 receipt already exceeds the cumulative spend cap")
-    cases = load_cases(corpus)
     specs = arm_specs(baseline_revision=BASELINE_REVISION, candidate_revision=candidate_revision)
     envelope = _partial_envelope() if partial_live else _envelope()
     policy = CampaignPreflight(

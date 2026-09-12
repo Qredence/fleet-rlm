@@ -126,9 +126,23 @@ def _run(command: list[str], timeout_seconds: int, env: dict[str, str]) -> None:
 
 
 def _assert_success_receipt(path: Path) -> None:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("passed") is not True or payload.get("failure") is not None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("live scenario receipt failed") from exc
+    if not isinstance(payload, dict):
         raise RuntimeError("live scenario receipt failed")
+    schema = payload.get("schema")
+    if schema == "fleet.phase1-daytona-stream/v1":
+        from scripts import live_phase1_stream_verify as validator
+    elif schema == "fleet.phase2-daytona-recursive/v1":
+        from scripts import live_phase2_recursive_verify as validator
+    else:
+        raise RuntimeError("live scenario receipt failed")
+    try:
+        validator.validate_test_receipt(payload)
+    except (ValueError, RuntimeError) as exc:
+        raise RuntimeError("live scenario receipt failed") from exc
 
 
 def main(argv: list[str] | None = None) -> int:

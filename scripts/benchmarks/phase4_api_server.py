@@ -19,6 +19,7 @@ import re
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, Final
 from uuid import UUID
@@ -63,6 +64,7 @@ def _write_event(path: Path, event: Mapping[str, object]) -> None:
             "cleanup",
             "sandbox_count",
             "sandbox_seconds",
+            "shape_seconds",
             "error_category",
         }
     }
@@ -122,6 +124,40 @@ class LifecycleObserver:
         self._platform: Any = None
         self._observed_delete: Any = None
 
+    @staticmethod
+    def _stats_record() -> dict[str, Any]:
+        return {
+            "created": 0,
+            "deleted": 0,
+            "delete_failures": 0,
+            "sandbox_seconds": 0.0,
+            "shape": None,
+            "shape_seconds": {},
+        }
+
+    @staticmethod
+    def _shape_key(value: tuple[int, int, int]) -> str:
+        return ",".join(str(item) for item in value)
+
+    @classmethod
+    def _rounded_shape_seconds(cls, values: Mapping[str, object], total: int) -> dict[str, int]:
+        """Round shape lifetimes while preserving the aggregate exactly."""
+        numeric = {
+            key: float(value)
+            for key, value in values.items()
+            if isinstance(key, str) and isinstance(value, (int, float)) and value >= 0
+        }
+        if not numeric or total <= 0:
+            return {}
+        rounded = {key: int(value) for key, value in numeric.items()}
+        remaining = max(0, total - sum(rounded.values()))
+        for key, _fraction in sorted(numeric.items(), key=lambda item: item[1] - int(item[1]), reverse=True):
+            if remaining == 0:
+                break
+            rounded[key] += 1
+            remaining -= 1
+        return {key: value for key, value in rounded.items() if value > 0}
+
     def attach(self) -> None:
         if self._attached:
             return
@@ -146,13 +182,14 @@ class LifecycleObserver:
                 trial = _TRIAL_CONTEXT.get()
                 self._created[raw_identifier] = (self._ordinal, trial, time.perf_counter(), resource_shape)
                 if trial is not None:
-                    stats = self._stats.setdefault(
-                        trial,
-                        {"created": 0, "deleted": 0, "delete_failures": 0, "sandbox_seconds": 0, "shape": None},
-                    )
+                    stats = self._stats.setdefault(trial, self._stats_record())
                     stats["created"] += 1
                     if resource_shape is not None:
-                        stats["shape"] = list(resource_shape)
+                        shape = stats.get("shape")
+                        if shape is None and stats["created"] == 1:
+                            stats["shape"] = list(resource_shape)
+                        elif shape is not None and tuple(shape) != resource_shape:
+                            stats["shape"] = None
                 _write_event(
                     self.path,
                     {
@@ -175,10 +212,7 @@ class LifecycleObserver:
             except BaseException as exc:
                 trial = record[1] if record is not None else _TRIAL_CONTEXT.get()
                 if trial is not None:
-                    stats = self._stats.setdefault(
-                        trial,
-                        {"created": 0, "deleted": 0, "delete_failures": 0, "sandbox_seconds": 0, "shape": None},
-                    )
+                    stats = self._stats.setdefault(trial, self._stats_record())
                     stats["delete_failures"] += 1
                 _write_event(
                     self.path,
@@ -199,12 +233,13 @@ class LifecycleObserver:
                     trial = record[1] if record is not None else _TRIAL_CONTEXT.get()
                     duration_ms = max(0, int((time.perf_counter() - record[2]) * 1000))
                     if trial is not None:
-                        stats = self._stats.setdefault(
-                            trial,
-                            {"created": 0, "deleted": 0, "delete_failures": 0, "sandbox_seconds": 0, "shape": None},
-                        )
+                        stats = self._stats.setdefault(trial, self._stats_record())
                         stats["deleted"] += 1
                         stats["sandbox_seconds"] += duration_ms / 1000
+                        if record[3] is not None:
+                            shape_key = self._shape_key(record[3])
+                            shape_seconds = stats.setdefault("shape_seconds", {})
+                            shape_seconds[shape_key] = shape_seconds.get(shape_key, 0.0) + duration_ms / 1000
                     _write_event(
                         self.path,
                         {
@@ -273,9 +308,11 @@ class LifecycleObserver:
         await self._sweep_outstanding_sandboxes(trial)
         stats = self._stats.pop(
             trial or "",
-            {"created": 0, "deleted": 0, "delete_failures": 0, "sandbox_seconds": 0, "shape": None},
+            self._stats_record(),
         )
         cleanup = stats["delete_failures"] == 0 and stats["created"] == stats["deleted"]
+        sandbox_seconds = int(stats["sandbox_seconds"] + 0.999)
+        shape_seconds = self._rounded_shape_seconds(stats.get("shape_seconds", {}), sandbox_seconds)
         _write_event(
             self.path,
             {
@@ -285,8 +322,9 @@ class LifecycleObserver:
                 "deleted": stats["deleted"],
                 "cleanup": cleanup,
                 "sandbox_count": stats["created"],
-                "sandbox_seconds": int(stats["sandbox_seconds"] + 0.999),
+                "sandbox_seconds": sandbox_seconds,
                 "shape": stats["shape"],
+                "shape_seconds": shape_seconds or None,
             },
         )
 
@@ -313,14 +351,19 @@ class CampaignMiddleware:
             session_id = None
         token = _TRIAL_CONTEXT.set(trial)
         finished = False
+        admitted = False
 
         async def observed_send(message: Mapping[str, object]) -> None:
-            nonlocal finished
+            nonlocal admitted, finished
+            if message.get("type") == "http.response.start":
+                status = message.get("status")
+                admitted = type(status) is int and 200 <= status < 300
             await send(message)
             if (
                 not finished
                 and method == "POST"
                 and session_id is not None
+                and admitted
                 and message.get("type") == "http.response.body"
                 and not message.get("more_body", False)
             ):
@@ -332,6 +375,14 @@ class CampaignMiddleware:
         try:
             return await self.app(scope, receive, observed_send)
         finally:
+            if method == "POST" and session_id is not None and admitted and not finished:
+                # A client disconnect can prevent Starlette from emitting a
+                # terminal body, so the normal send hook never gets a chance
+                # to retire the retained root.  Keep cleanup independent of
+                # request cancellation and avoid masking the transport error.
+                finished = True
+                with suppress(BaseException):
+                    await asyncio.shield(self.observer.close_turn_root(session_id))
             _TRIAL_CONTEXT.reset(token)
 
 
