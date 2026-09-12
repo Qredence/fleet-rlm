@@ -1670,6 +1670,9 @@ class RLMRunner:
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
             if callable(bind_budget):
                 bind_budget(getattr(state_context.execution.models, "budget", None))
+            bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
+            if callable(bind_request):
+                bind_request(state_context.session.request)
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,
@@ -1745,7 +1748,10 @@ class RLMRunner:
         """
         trajectory = normalize_prediction_trajectory(prediction)
         for item in reconcile_trajectory(
-            observations.details, trajectory, max_chars=context.execution.options.max_output_chars
+            observations.details,
+            trajectory,
+            max_chars=context.execution.options.max_output_chars,
+            request=context.session.request,
         ):
             # ``reconcile_trajectory`` appends the canonical details to the
             # observation list; emit them without recording them a second time.

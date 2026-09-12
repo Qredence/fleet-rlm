@@ -13,10 +13,10 @@ Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubuserconten
 ## How it works
 
 1. The Root LM inspects bound inputs and REPL history, then emits reasoning plus Python code.
-2. Code runs in a sandboxed interpreter. Variables may persist across sequential
-   clean Turns while the compatible Session runtime remains resident.
+2. Code runs in a sandboxed interpreter. Broker Root Sandbox Python state may
+   persist across sequential clean Turns while that Sandbox remains healthy.
 3. Built-ins include `llm_query(prompt)`, `llm_query_batched(prompts)`, and `SUBMIT(...)`.
-4. Fleet adds `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=[...])` for bounded iterative child-RLM subproblems when recursion is enabled. Each capsule is a mapping with at least a `task` string plus optional selected-input references.
+4. Fleet adds `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=[...])` for bounded iterative child-RLM subproblems only when the selected profile sets `rlm.recursion_enabled = true`. Each capsule is a mapping with at least a `task` string plus optional selected-input references. The committed default disables those Fleet child tools; use native `llm_query` / `llm_query_batched` instead.
 5. Host Tools (Fleet) are additional callables registered for the Turn.
 6. `SUBMIT(...)` ends the RLM loop with typed Signature outputs.
 7. If the loop ends without SUBMIT, DSPy may extract outputs from the trajectory.
@@ -24,13 +24,17 @@ Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubuserconten
 For deterministic computation, parsing, search, or aggregation, use Python
 directly. Reserve `llm_query(prompt)` for one bounded semantic judgment and
 `llm_query_batched(prompts)` for multiple independent semantic judgments with
-self-contained prompts. Load Fleet Host Capability bodies only when their
+self-contained prompts. When the request already specifies those prompt
+strings, pass them unchanged and in the given order; do not paraphrase,
+expand, or replace them. Load Fleet Host Capability bodies only when their
 discovery metadata establishes relevance to the current request.
 Keep each intermediate code action concise: prefer a few thousand characters,
 keep large values in REPL variables or Session Workspace, and never paste a
-long report or repeat the complete request in generated code. The Daytona
-interpreter rejects an action above its 12,000-character safety bound with
-bounded repair feedback so the next action can be smaller.
+long report or the complete request as unused text. When the request specifies
+exact Python statements or Sub-LM prompt strings, emit those statements in
+that order with those strings unchanged; do not omit listed accumulator updates.
+The Daytona interpreter rejects an action above its 12,000-character
+safety bound with bounded repair feedback so the next action can be smaller.
 Use `rlm_query(capsule={'task': task})` when the selected subproblem benefits from its own
 bounded REPL loop. Keep large input-specific values in parent REPL variables,
 pass only the smallest sufficient slice, and retain the child answer in a
@@ -48,7 +52,10 @@ For nontrivial deterministic work, keep the initial computation and later
 independent verification in the same action when practical. Use a later
 iteration only when the verification genuinely cannot be completed alongside
 the computation; never spend a later iteration merely restating an already
-verified result.
+verified result. Completing a verification helper does not finish the Turn
+while named host-tool work remains: call requested Session Workspace writes
+and artifact publishes before `SUBMIT`. Sandbox-local `open()` is not
+Session Workspace.
 
 ## Constructor knobs (DSPy defaults)
 
@@ -89,15 +96,20 @@ keyword-only and are not routed through the native positional call contract.
 
 ## Fleet mapping
 
-- Normal primary Turns use one compatible native `dspy.RLM` per resident Session runtime; a changed
+- Normal primary Turns use one compatible native `dspy.RLM` per Run; a changed
   program, taint, eviction, or failure creates a replacement. Greetings also use this native path. The default for RLM Turns is
   `FleetRLMSignature` (`answer: str`), but a selected Skill may supply additional required output fields.
 - Fleet scopes `FleetJSONAdapter`, a DSPy JSON adapter with bounded corrective
-  re-asks and shared deadline/budget accounting, to each Turn. It preserves the
-  pinned action grammar; exhausted repair is an `adapter_parse_error`. RLM action output contains
+  re-asks and shared deadline/budget accounting, to each Turn. Wrap-up starts
+  on the final native iteration. When wrap-up is enabled, last-iteration
+  exhaustion is a Turn `timeout`; DSPy extract fallback is unreachable because
+  `generate_action` does not return. Empty or reasoning-only completions stay
+  on the bounded parse re-ask path while time and iterations remain. It
+  preserves the pinned action grammar; exhausted repair is an
+  `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
   output field. The selected `daytona-recursive` Root and Sub Models
-(through the policy-configured Databricks Chat Completions gateway) cap Root
+  (through the policy-configured Databricks Chat Completions gateway) cap Root
 and Sub at 16,384 output tokens with no
 reasoning-effort override. This is separate from `max_output_chars`, which
 bounds REPL output retained in recursive history.
@@ -106,8 +118,10 @@ bounds REPL output retained in recursive history.
   `recursion_max_prompt_chars`, `recursion_child_max_iters`,
   `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 - MLflow `RLM.*_lm` spans record recursive depth, call order, bounded context-size
-  metadata, response shape, and per-call provider token usage when DSPy exposes it;
-  the aggregate Turn usage remains on `RLM.execute`.
+  metadata, legacy list/dict response shape (`text`, `reasoning_content`), and
+  per-call provider token usage when DSPy or the stored history entry exposes it;
+  the aggregate Turn usage remains on `RLM.execute`. Missing provider usage stays
+  `unavailable`, never a fabricated zero.
 - MLflow `RLM.root_action` spans record each parsed iteration with bounded/redacted
   reasoning and code previews. Host Tools create nested `tool.*` spans with their
   allowlisted input/output projections, while `sandbox.execute` records the step's

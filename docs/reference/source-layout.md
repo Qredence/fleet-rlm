@@ -30,11 +30,11 @@ See the root [architecture](../../ARCHITECTURE.md) for dependency boundaries.
 
 Start lifecycle investigations in `chat/turn_runtime.py` and
 `chat/run_lifecycle.py`; native invocation and observation live in `rlm/runtime.py`
-and `rlm/events.py`. `rlm/session_runtime.py` owns resident reuse, while
-`rlm/program.py` and `rlm/compat_3_3_1.py` own program construction and pinned
-DSPy adaptation. SDK calls remain inside `daytona/`; Turn preparation and
-composition wiring consume provider-owned interfaces without duplicating a
-`runtime/daytona/` package.
+and `rlm/events.py`. `rlm/program.py` and `rlm/compat_3_3_1.py` own program
+construction and pinned DSPy adaptation. Each Run gets a fresh DSPy program;
+the broker Root Sandbox may persist across sequential clean Turns. SDK calls
+remain inside `daytona/`; Turn preparation and composition wiring consume
+provider-owned interfaces without a duplicate `runtime/daytona/` package.
 
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.

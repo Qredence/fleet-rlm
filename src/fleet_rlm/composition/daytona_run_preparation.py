@@ -973,6 +973,58 @@ class _DaytonaEnvironmentProvider:
             return
         self._retain_late_lookup(cleanup)
 
+    async def _align_root_to_durable_binding(
+        self,
+        run: ClaimedRun,
+        owner: RootSessionLease,
+        created_root: bool,
+        *,
+        deadline: float,
+    ) -> tuple[RootSessionLease, bool]:
+        """Reattach a reused root when the durable binding already points elsewhere."""
+        bindings = getattr(self.resources, "bindings", None)
+        getter = getattr(bindings, "get", None)
+        if not callable(getter):
+            return owner, created_root
+        binding = await getter(run.session_id)
+        lease_sandbox = str(getattr(owner.lease, "sandbox_id", "") or "")
+        bound_sandbox = str(getattr(binding, "sandbox_id", "") or "") if binding is not None else ""
+        if not lease_sandbox or not bound_sandbox or lease_sandbox == bound_sandbox:
+            return owner, created_root
+        await self._discard_stale_provider_root(
+            (run.access.workspace_id, run.session_id),
+            deadline=deadline,
+        )
+        return await self._acquire_root_lease(run, deadline=deadline)
+
+    async def _discard_stale_provider_root(
+        self,
+        key: tuple[UUID, UUID],
+        *,
+        deadline: float,
+    ) -> None:
+        """Drop a retired resident root without forcing a new Sandbox."""
+        runtime = getattr(self.resources, "runtime", None)
+        if isinstance(runtime, DaytonaRuntime):
+            await runtime.discard_stale_root_session(*key, deadline=deadline)
+            return
+        async with self._resident_root_transition_lock:
+            async with self._resident_root_lock:
+                owner = self._resident_root_leases.get(key)
+            if owner is None:
+                return
+            try:
+                await owner.close(notify=False, deadline=deadline)
+            except BaseException:
+                # Keep the exact owner and context binding reachable for the
+                # environment shutdown/retry lane when close does not settle.
+                raise
+            async with self._resident_root_lock:
+                if self._resident_root_leases.get(key) is owner:
+                    self._resident_root_leases.pop(key, None)
+                    self._resident_context_keys.pop(key, None)
+                    self._prune_preparation_gate(key)
+
     async def _acquire_root_lease(
         self,
         run: ClaimedRun,
@@ -1205,6 +1257,9 @@ class _DaytonaEnvironmentProvider:
             gate_held = True
             try:
                 owner, created_root = await self._acquire_root_lease(run, deadline=deadline)
+                owner, created_root = await self._align_root_to_durable_binding(
+                    run, owner, created_root, deadline=deadline
+                )
             except DaytonaAdmissionTimeoutError as exc:
                 raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
             except DaytonaLeaseAcquisitionTimeoutError as exc:

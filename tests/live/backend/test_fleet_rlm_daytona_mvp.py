@@ -435,7 +435,14 @@ def test_complete_daytona_mvp_through_fastapi(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    settings = _live_settings(tmp_path)
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            # Keep wrap-up from rewriting the required third cell (append + publish
+            # + SUBMIT) into SUBMIT-only after long Sub-LM work. Default policy
+            # reserves 300s of the 840s proof Turn.
+            "rlm_wrap_up_seconds": 60,
+        }
+    )
     caplog.set_level(logging.DEBUG)
     started_at = datetime.now(UTC)
     started_at_text = started_at.isoformat()

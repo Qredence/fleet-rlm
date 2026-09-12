@@ -43,6 +43,9 @@ _APPROVED_SUB_MODELS = frozenset(
     for name in (base, f"openai/{base}")
 )
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
+DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
+    "live-b5-attachment-artifact-durability-evidence.json"
+)
 _SUCCESS_FIELDS = frozenset(
     {
         "schema",
@@ -513,7 +516,7 @@ def _validate_lane_evidence(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_durability_evidence(worktree: Path) -> dict[str, Any]:
-    path = worktree / ".scratch/clean-backend-refoundation/assets/live-b5-attachment-artifact-durability-evidence.json"
+    path = worktree / DURABILITY_EVIDENCE_RELATIVE
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:

@@ -23,7 +23,7 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback, is_native_rlm
+from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -36,6 +36,11 @@ from fleet_rlm.rlm.result import (
     rlm_termination_mode,
     truncate_public_text,
     validate_rlm_usage,
+)
+from fleet_rlm.rlm.specified_prompt_rewrite import (
+    SpecifiedPromptRewriteState,
+    apply_specified_sub_lm_prompts,
+    normalize_action_code,
 )
 from fleet_rlm.tool_events import (
     ToolAfterResult,
@@ -822,18 +827,28 @@ def observe_tool(
 _StreamDetail = RLMReasoning | RLMCode | RLMOutput
 
 
-def trajectory_details(steps: Sequence[TrajectoryStep], *, max_chars: int) -> list[ObservationDetail]:
+def trajectory_details(
+    steps: Sequence[TrajectoryStep],
+    *,
+    max_chars: int,
+    request: str | None = None,
+    rewrite_state: SpecifiedPromptRewriteState | None = None,
+) -> list[ObservationDetail]:
     """Project strictly normalized DSPy trajectory steps into public details."""
+    state = rewrite_state or SpecifiedPromptRewriteState()
+    if rewrite_state is None:
+        state.bind(request)
     details: list[ObservationDetail] = []
     for step in steps:
         output = step.output
         if output.startswith("FINAL:"):
             output = "FINAL submitted"
+        code = apply_specified_sub_lm_prompts(request, step.code, state=state)
         details.extend(
             (
                 StepStarted(step.index),
                 RLMReasoning(truncate_public_text(step.reasoning, max_len=max_chars), step.index),
-                RLMCode(truncate_public_text(step.code, max_len=max_chars), step.index),
+                RLMCode(truncate_public_text(code, max_len=max_chars), step.index),
                 RLMOutput(truncate_public_text(output, max_len=max_chars), step.index),
                 StepFinished(step.index),
             )
@@ -905,8 +920,14 @@ def _align_trajectory_detail(
     text = _stream_text(target)
     if not text:
         return target
+    target_text = normalize_action_code(text) if isinstance(target, RLMCode) else text
     for index, detail in enumerate(details):
-        if index in used_positions or type(detail) is not type(target) or _stream_text(detail) != text:
+        if index in used_positions or type(detail) is not type(target):
+            continue
+        detail_text = _stream_text(detail)
+        if isinstance(target, RLMCode):
+            detail_text = normalize_action_code(detail_text)
+        if detail_text != target_text:
             continue
         observed_step = _stream_step(detail)
         target_step = _stream_step(target)
@@ -944,7 +965,12 @@ def _same_stream_payload(
             return False
         value = _stream_text(detail)
         text = text + value if _is_delta(detail) else value
-    return stream_id == _stream_id(target) and text == _stream_text(target)
+    live_text = text
+    target_text = _stream_text(target)
+    if isinstance(target, RLMCode):
+        live_text = normalize_action_code(live_text)
+        target_text = normalize_action_code(target_text)
+    return stream_id == _stream_id(target) and live_text == target_text
 
 
 def _detail_position(details: Sequence[ExecutionDetail], detail_type: type[object], step: int) -> int | None:
@@ -994,6 +1020,7 @@ def reconcile_trajectory(
     trajectory: Sequence[TrajectoryStep],
     *,
     max_chars: int,
+    request: str | None = None,
 ) -> list[ObservationDetail]:
     """Reconcile completed DSPy trajectory details with live observations.
 
@@ -1033,9 +1060,16 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
+    rewrite_state = SpecifiedPromptRewriteState()
+    rewrite_state.bind(request)
     for trajectory_step in trajectory:
         step = trajectory_step.index
-        step_details = trajectory_details((trajectory_step,), max_chars=max_chars)
+        step_details = trajectory_details(
+            (trajectory_step,),
+            max_chars=max_chars,
+            request=request,
+            rewrite_state=rewrite_state,
+        )
         start = step_starts.get(step)
         finish = step_finishes.get(step)
         if start is None or finish is None or start >= finish:
@@ -1183,6 +1217,11 @@ def record_phase_failure(
     }
     if last_lm_call:
         outputs["last_lm_call"] = dict(last_lm_call)
+    parse_profile = _adapter_parse_profile(exc)
+    if parse_profile:
+        merged_last_call = dict(last_lm_call) if last_lm_call else {}
+        merged_last_call.update(parse_profile)
+        outputs["last_lm_call"] = merged_last_call
     if wrap_up:
         outputs.update(dict(wrap_up))
     output_diag = getattr(exc, "output_chars", None)

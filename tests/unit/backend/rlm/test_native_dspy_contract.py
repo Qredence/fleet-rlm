@@ -700,6 +700,68 @@ def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
     assert "sensitive prompt" not in str(summary)
 
 
+def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.observability import tracing as turn_tracing
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+
+    captured = SimpleNamespace(outputs=[])
+
+    class Span:
+        def set_inputs(self, _payload):
+            return None
+
+        def set_outputs(self, payload):
+            captured.outputs.append(payload)
+
+        def set_attributes(self, _payload):
+            return None
+
+        def set_status(self, _status):
+            return None
+
+    class SpanContext:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    fake_mlflow = SimpleNamespace(
+        get_current_active_span=lambda: Span(),
+        start_span=lambda **_kwargs: SpanContext(),
+    )
+    fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", fake_entities)
+
+    outputs = [{"text": "", "reasoning_content": "hidden think"}]
+    root = SimpleNamespace(model="root-model", history=[])
+    callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
+    token = turn_tracing._fleet_trace_active.set(True)
+    try:
+        callback.on_lm_start("call-1", root, {"prompt": "p"})
+        root.history.append(
+            {
+                "outputs": outputs,
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 20,
+                    "completion_tokens_details": {"reasoning_tokens": 18},
+                },
+            }
+        )
+        callback.on_lm_end("call-1", outputs)
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+    assert captured.outputs[-1]["has_reasoning_content"] is True
+    assert captured.outputs[-1]["reasoning_tokens"] == 18
+    assert callback.last_call_summary()["reasoning_tokens"] == 18
+    assert callback.last_call_summary()["has_reasoning_content"] is True
+
+
 def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing
     from fleet_rlm.rlm.compat_3_3_1 import (
@@ -938,6 +1000,66 @@ def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
     assert "response_preview" in profile
 
 
+def test_lm_output_profile_reads_legacy_list_payloads() -> None:
+    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
+
+    text_only = _lm_output_profile(['{"reasoning": "r", "code": "c"}'])
+    assert text_only["response_keys"] == ("content",)
+    assert text_only["response_chars"] == len('{"reasoning": "r", "code": "c"}')
+    assert "response_preview" in text_only
+
+    reasoning_only = _lm_output_profile([{"text": "", "reasoning_content": "long think"}])
+    assert reasoning_only["response_keys"] == ("reasoning_content", "text")
+    assert reasoning_only["response_chars"] == len("long think")
+    assert reasoning_only["has_reasoning_content"] is True
+
+    assert _lm_output_profile([]) == {"response_keys": ()}
+
+
+def test_adapter_parse_profile_classifies_empty_and_non_json() -> None:
+    import dspy
+    from dspy.utils.exceptions import AdapterParseError
+
+    from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile
+
+    class _Sig(dspy.Signature):
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    empty = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response="",
+        message="The LM returned an empty or null response.",
+    )
+    empty_profile = _adapter_parse_profile(empty)
+    assert empty_profile["parse_failure_kind"] == "empty"
+    assert empty_profile["lm_response_chars"] == 0
+    assert "has_reasoning_content" not in empty_profile
+
+    reasoning = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response=str({"text": None, "reasoning_content": "think"}),
+        message="The LM returned an empty or null response.",
+    )
+    reasoning_profile = _adapter_parse_profile(reasoning)
+    assert reasoning_profile["parse_failure_kind"] == "empty"
+    assert reasoning_profile["has_reasoning_content"] is True
+    assert int(reasoning_profile["lm_response_chars"]) > 0
+
+    junk = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response="not json at all",
+        message="LM response cannot be serialized to a JSON object.",
+    )
+    junk_profile = _adapter_parse_profile(junk)
+    assert junk_profile["parse_failure_kind"] == "non_object_json"
+    assert junk_profile["lm_response_chars"] == len("not json at all")
+    assert _adapter_parse_profile(ValueError("unrelated")) == {}
+
+
 def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None:
     from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
 
@@ -984,6 +1106,52 @@ def test_latest_lm_telemetry_reads_only_the_certified_legacy_history_entry() -> 
     # Missing history or unknown payloads degrade to unavailable, not zero.
     assert _latest_lm_telemetry(SimpleNamespace(history=[]), 0, None) == {}
     assert _latest_lm_telemetry(SimpleNamespace(), 0, outputs) == {}
+
+
+def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
+    """Empty ``history['usage']`` can still carry counts on the stored response.
+
+    Databricks AI Gateway / DeepSeek sometimes omit the top-level usage mapping
+    while the same history entry's ``response.usage`` has token counts. That is
+    a history-local fallback, not live provider probing. When both are empty,
+    usage stays unavailable rather than a fabricated zero.
+    """
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry
+
+    outputs = ["ok"]
+    recovered = _latest_lm_telemetry(
+        SimpleNamespace(
+            history=[
+                {
+                    "outputs": outputs,
+                    "usage": {},
+                    "response": SimpleNamespace(
+                        usage=SimpleNamespace(
+                            prompt_tokens=4,
+                            completion_tokens=9,
+                            completion_tokens_details={"reasoning_tokens": 7},
+                        )
+                    ),
+                }
+            ]
+        ),
+        0,
+        outputs,
+    )
+    assert recovered["prompt_tokens"] == 4
+    assert recovered["completion_tokens"] == 9
+    assert recovered["completion_tokens_details"] == {"reasoning_tokens": 7}
+
+    assert (
+        _latest_lm_telemetry(
+            SimpleNamespace(history=[{"outputs": outputs, "usage": {}, "response": object()}]),
+            0,
+            outputs,
+        )
+        == {}
+    )
 
 
 def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeypatch: pytest.MonkeyPatch) -> None:

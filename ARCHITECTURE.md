@@ -13,17 +13,21 @@ Canonical Run Environment set: `daytona`.
 ## Current runtime and migration target
 
 `runtime.variant = "legacy"` is the only selectable architecture. It uses native
-DSPy RLM with Fleet's broker-backed interpreter and a compatible resident
-Session runtime. Sequential successful Turns may reuse the Root RLM,
-interpreter, and Sandbox; invocation history, authority, budgets, and bindings
-remain Turn-local. Failures and taint force rotation before reuse.
+DSPy RLM with Fleet's broker-backed interpreter. Production execution builds a
+fresh DSPy program, direct Tool bindings, callbacks, and worker executor for
+each Run. Sequential successful Turns may reuse the broker Root Sandbox;
+invocation history, authority, budgets, and bindings remain Turn-local.
+Failures and taint force rotation before reuse. Cross-Turn correctness depends
+on committed history, PostgreSQL, and the Workspace Volume rather than a
+resident Python/DSPy object graph.
 
-The native Daytona interpreter adapter, fresh per-Run contexts, and selected-input
-capsules in ADR 006 are separate feasibility mechanics. Their presence in source
-does not enable native production. Turn preparation and the RLM runner accept
-only retained broker execution; the native worker/lease branch has been removed.
-Context deletion has not established remote
-detached-process containment. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
+Native Daytona interpreter cutover is not on the production path: context
+deletion does not contain detached process-session children, and the native
+worker/lease branch has been removed. Turn preparation and the RLM runner
+accept only retained broker execution. Fleet child RLM tools (`rlm_query` /
+`rlm_query_batched`) are opt-in: `[defaults.rlm] recursion_enabled = false`
+after the 2026-09-12 P4.6 ablation. Native `llm_query` remains the semantic
+delegation path. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
 owns dated evidence and remaining gates; this page describes current ownership.
 
 ## System model
@@ -106,9 +110,9 @@ resource cleanup.
 ### RLM runtime
 
 `src/fleet_rlm/rlm/` owns Fleet's DSPy Signature inputs, process-scoped model
-templates, Session runtime reuse, per-Turn bindings, native options, Runtime
-Events, trajectory reconciliation, semantic query tools, and recursive child
-execution.
+templates, fresh per-Run program construction, per-Turn bindings, native
+options, Runtime Events, trajectory reconciliation, semantic query tools, and
+the opt-in recursive child executor.
 
 The execution levels are distinct:
 

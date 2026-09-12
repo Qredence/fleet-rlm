@@ -33,7 +33,9 @@ from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, BudgetDim
 from fleet_rlm.rlm.compat_3_3_1 import (
     BaseLM,
     Signature,
+    _is_empty_adapter_parse,
     _iteration_is_action,
+    _iteration_is_final,
     daytona_provider_contract,
 )
 from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
@@ -52,8 +54,6 @@ RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
 
-_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
-
 
 def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
     """
@@ -69,8 +69,7 @@ def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
     Returns:
         str: Bounded instruction text for the corrected re-ask.
     """
-    message = str(getattr(exc, "message", "") or "")
-    if _EMPTY_RESPONSE_MARKER in message:
+    if _is_empty_adapter_parse(exc):
         return (
             f"Correction (attempt {attempt}): the previous response produced no parseable output. "
             "It was empty or null, typically because generation exhausted the output-token budget "
@@ -138,18 +137,24 @@ def _append_input_field(
     return extended, extended_inputs, field
 
 
-def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
+def _budget_directive(remaining: float, *, attempts_exhausted: bool = False, final_iteration: bool = False) -> str:
     """Create a directive requiring immediate submission when exploration must end.
 
     Parameters:
         remaining (float): Estimated seconds remaining in the time budget.
         attempts_exhausted (bool): Whether the exploration attempt limit has been reached.
+        final_iteration (bool): Whether this is the last native action iteration.
 
     Returns:
         str: A directive containing the budget reason, remaining time, and required SUBMIT action.
     """
     seconds = max(0, int(remaining))
-    reason = "Exploration attempt budget exhausted" if attempts_exhausted else "Time budget nearly exhausted"
+    if attempts_exhausted:
+        reason = "Exploration attempt budget exhausted"
+    elif final_iteration:
+        reason = "Final iteration reached"
+    else:
+        reason = "Time budget nearly exhausted"
     return (
         f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
         "using evidence already gathered. Do not explore, call tools, or execute additional code. "
@@ -291,13 +296,20 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
         Returns:
                 `True` if wrap-up is enabled and the action iteration is at or below its
-                time reserve or has exhausted exploration, `False` otherwise.
+                time reserve, has exhausted exploration, or is the final native iteration,
+                `False` otherwise. When wrap-up is enabled, last-iteration exhaustion is a
+                Turn timeout: DSPy extract fallback never runs because ``generate_action``
+                does not return.
         """
         return bool(
             remaining is not None
             and self._wrap_up_seconds > 0
             and _iteration_is_action(inputs)
-            and (remaining <= self._wrap_up_seconds or self._budget.turn.exploration_exhausted())
+            and (
+                remaining <= self._wrap_up_seconds
+                or self._budget.turn.exploration_exhausted()
+                or _iteration_is_final(inputs)
+            )
         )
 
     def _with_wrap_up_directive(
@@ -321,7 +333,11 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 tuple[type[Signature], dict[str, Any], str]: The updated signature, input
                 values, and field name containing the directive.
         """
-        directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
+        directive = _budget_directive(
+            remaining,
+            attempts_exhausted=self._budget.turn.exploration_exhausted(),
+            final_iteration=_iteration_is_final(inputs),
+        )
         if field_name is not None and field_name in signature.fields:
             updated = dict(inputs)
             updated[field_name] = directive
@@ -679,8 +695,10 @@ Neither model substitutes for deterministic computation in the REPL."""
 REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is answered with sufficient evidence:"""
 
 TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
-   intermediate code action concise (prefer a few thousand characters; never paste a long report or repeat the
-   full request in code). Never repeat an identical interpreter action: use its output, choose a different action, or
+   intermediate code action concise (prefer a few thousand characters; never paste a long report or the complete
+   request as unused text). When the request specifies exact Python statements or Sub-LM prompt strings, emit those
+   statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
+   prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
    relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
    print the complete value. Validate the result is a mapping with ``.get('content')``; ``content`` may be raw
@@ -692,13 +710,28 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
    its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
    a URL whose cached result is already available.
-3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
-4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
-   self-contained. Prefer the cheapest sufficient mechanism."""
+3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine. If the request
+   already specifies the prompt string, pass that string unchanged.
+4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
+   self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
+   Prefer the cheapest sufficient mechanism."""
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
 relevant paths, keep each page bounded, and never crawl an entire Workspace."""
+
+WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
+    {
+        "append_workspace_text",
+        "write_workspace_text",
+        "publish_workspace_artifact",
+    }
+)
+
+WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspace writes or artifact publishes, call the matching host tools
+(``write_workspace_text``, ``append_workspace_text``, ``publish_workspace_artifact``) and require a successful ``ok``
+result before ``SUBMIT``. Sandbox-local ``open()`` is not Session Workspace. A successful verification helper does not
+complete the request if a named write or publish remains."""
 
 RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative
    Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
@@ -745,12 +778,12 @@ class RLMInstructionFragments:
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
     """Build instruction fragments for the selected recursion policy."""
     step = 6 if recursion_enabled else 5
-    verification = f"""{step}. Verify within the same action when possible, then issue exactly one typed ``SUBMIT`` with every active
+    verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
    that action when practical. Use a later iteration only when verification cannot be completed in the same
-   action. Once sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
-   action. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
+   action. Once the request is fully satisfied and sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
+   action. Completing a verification helper does not finish the Turn while named host-tool work remains. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
    code block. Never pass positional arguments.
    A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
    or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
@@ -819,7 +852,12 @@ class FleetRLMSignature(dspy.Signature):
     )
 
 
-FleetRLMSignature.instructions = compose_rlm_instructions(recursion_enabled=True)
+FleetRLMSignature.instructions = compose_rlm_instructions(recursion_enabled=False)
+
+
+def _tool_names_need_instruction_overlay(tool_names: frozenset[str]) -> bool:
+    """Whether registered tools add instruction fragments beyond the base recipe."""
+    return "read_workspace_text_batch" in tool_names or bool(tool_names & WORKSPACE_MUTATION_TOOL_NAMES)
 
 
 def root_signature_for_recursion(
@@ -833,6 +871,8 @@ def root_signature_for_recursion(
     instructions = compose_rlm_instructions(recursion_enabled=recursion_enabled)
     if "read_workspace_text_batch" in tool_names:
         instructions += "\n\n" + WORKSPACE_BATCH_RLM_INSTRUCTIONS
+    if tool_names & WORKSPACE_MUTATION_TOOL_NAMES:
+        instructions += "\n\n" + WORKSPACE_MUTATION_RLM_INSTRUCTIONS
     if skill_instructions:
         instructions += "\n\n" + "\n\n".join(skill_instructions)
     return signature.with_instructions(instructions)
@@ -1303,6 +1343,34 @@ def _supports_turn_lm_copy(lm: Any) -> bool:
     )
 
 
+def _positive_timeout(value: object) -> float | None:
+    """Return a finite positive timeout, or ``None`` when the value is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    timeout = float(value)
+    if not math.isfinite(timeout) or timeout <= 0:
+        return None
+    return timeout
+
+
+def _configured_lm_timeout(lm: Any) -> float | None:
+    """Read the role HTTP timeout from a template or an already-bound proxy."""
+    stored = _positive_timeout(getattr(lm, "_fleet_role_timeout", None))
+    if stored is not None:
+        return stored
+    wrapped = lm.wrapped if isinstance(lm, DeadlineLMProxy) else lm
+    return _positive_timeout(getattr(wrapped, "kwargs", {}).get("timeout"))
+
+
+def _apply_role_timeout(lm: Any, role_timeout: float | None) -> None:
+    """Keep the role timeout on a copied runtime even when ``copy()`` dropped kwargs."""
+    if role_timeout is None:
+        return
+    kwargs = getattr(lm, "kwargs", None)
+    if isinstance(kwargs, dict):
+        kwargs["timeout"] = role_timeout
+
+
 class DeadlineLMProxy(dspy.BaseLM):
     """Turn-owned DSPy LM proxy with one retry owner and no instance method edits."""
 
@@ -1319,6 +1387,7 @@ class DeadlineLMProxy(dspy.BaseLM):
         budget: TurnBudget | None = None,
         admission: ProviderAdmission | None = None,
         can_finalize: bool = True,
+        role_timeout: float | None = None,
     ) -> None:
         """
         Initialize a deadline-enforcing language-model proxy.
@@ -1332,6 +1401,7 @@ class DeadlineLMProxy(dspy.BaseLM):
                 budget (TurnBudget | None): Optional turn budget shared by provider calls.
                 admission (ProviderAdmission | None): Optional provider admission controller.
                 can_finalize (bool): Whether the proxy may reserve time for finalization.
+                role_timeout (float | None): Immutable role HTTP timeout ceiling from the template.
         """
         super().__init__(
             model=getattr(wrapped, "model", "test/deadline"),
@@ -1341,6 +1411,8 @@ class DeadlineLMProxy(dspy.BaseLM):
             num_retries=0,
         )
         self.wrapped = wrapped
+        resolved_role_timeout = _positive_timeout(role_timeout) or _configured_lm_timeout(wrapped)
+        _apply_role_timeout(wrapped, resolved_role_timeout)
         self.kwargs = dict(getattr(wrapped, "kwargs", {}))
         self.history = getattr(wrapped, "history", [])
         self._fleet_deadline = deadline
@@ -1350,6 +1422,7 @@ class DeadlineLMProxy(dspy.BaseLM):
         self.budget = budget
         self.admission = admission
         self.can_finalize = can_finalize
+        self._fleet_role_timeout = resolved_role_timeout
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute lookup to the wrapped language model."""
@@ -1411,6 +1484,7 @@ class DeadlineLMProxy(dspy.BaseLM):
             budget=self.budget,
             admission=self.admission,
             can_finalize=self.can_finalize,
+            role_timeout=self._fleet_role_timeout,
         )
         if "_fleet_trace_identity" in vars(self):
             copied._fleet_trace_identity = self._fleet_trace_identity
@@ -1446,6 +1520,7 @@ class DeadlineLMProxy(dspy.BaseLM):
             budget=budget.turn,
             admission=ProviderAdmission(budget, action, wrap_up, can_finalize),
             can_finalize=can_finalize,
+            role_timeout=_configured_lm_timeout(lm),
         )
         view._fleet_trace_identity = getattr(lm, "_fleet_trace_identity", lm)
         return view
@@ -1454,31 +1529,52 @@ class DeadlineLMProxy(dspy.BaseLM):
         """Persist the provider template, never a transient Turn deadline."""
         return self.wrapped.dump_state()
 
-    def _attempt_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _attempt_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        call_deadline: float | None = None,
+    ) -> tuple[dict[str, Any], float]:
         """
         Add a bounded timeout to language-model call parameters based on the remaining turn budget.
 
         Parameters:
             kwargs (dict[str, Any]): Call parameters to copy and constrain.
+            call_deadline (float | None): Wall-clock end of the current provider call including retries.
 
         Returns:
-            dict[str, Any]: A copy of the call parameters with a calculated timeout when finite.
+            tuple[dict[str, Any], float]: Bounded call parameters and the monotonic clock used
+                for this attempt. Retries reuse that timestamp so remaining time is not
+                double-counted against the role ceiling.
         """
         bounded = dict(kwargs)
+        now = time.monotonic()
         available = _remaining_lm_timeout(
             self._fleet_deadline,
             self,
             bounded,
             reserve_seconds=self._fleet_reserve_seconds,
             error_message=self._deadline_error_message,
+            now=now,
         )
+        if call_deadline is not None:
+            available = min(available, call_deadline - now)
+        if available <= 0:
+            raise TimeoutError(self._deadline_error_message)
         if self.admission is not None:
             available = min(available, self.admission.reserve())
         elif self.budget is not None:
             available = min(available, self.budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS))
         if math.isfinite(available):
             bounded["timeout"] = available
-        return bounded
+        return bounded, now
+
+    def _retry_call_deadline(self, now: float, timeout: object) -> float | None:
+        """Bound retries to the first attempt's remaining role timeout."""
+        bounded = _positive_timeout(timeout)
+        if bounded is None:
+            return None
+        return now + bounded
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -1490,8 +1586,11 @@ class DeadlineLMProxy(dspy.BaseLM):
         Raises:
             Exception: The final retryable provider error when all retry attempts fail.
         """
+        call_deadline: float | None = None
         for attempt in range(self._fleet_retry_budget + 1):
-            bounded = self._attempt_kwargs(kwargs)
+            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
+            if call_deadline is None:
+                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
                 return self.wrapped.forward(*args, **bounded)
             except _RETRYABLE_LM_ERRORS:
@@ -1508,8 +1607,11 @@ class DeadlineLMProxy(dspy.BaseLM):
         Returns:
                 Any: The wrapped model's response.
         """
+        call_deadline: float | None = None
         for attempt in range(self._fleet_retry_budget + 1):
-            bounded = self._attempt_kwargs(kwargs)
+            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
+            if call_deadline is None:
+                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
                 return await self.wrapped.aforward(*args, **bounded)
             except _RETRYABLE_LM_ERRORS:
@@ -1550,6 +1652,7 @@ def _copy_lm_for_deadline(
     retry_budget = getattr(lm, "_fleet_retry_budget", getattr(lm, "num_retries", 0))
     if not isinstance(retry_budget, int) or isinstance(retry_budget, bool) or retry_budget < 0:
         retry_budget = 0
+    role_timeout = _configured_lm_timeout(lm)
     copied = lm.wrapped.copy(num_retries=0) if isinstance(lm, DeadlineLMProxy) else copy_lm(num_retries=0)
     if copied is lm:
         raise RLMModelBundleError("deadline-bound LM copy() must return an isolated runtime")
@@ -1562,6 +1665,7 @@ def _copy_lm_for_deadline(
         error_message=error_message,
         budget=budget if budget is not None else getattr(lm, "budget", None),
         can_finalize=can_finalize,
+        role_timeout=role_timeout,
     )
 
 
@@ -1581,6 +1685,7 @@ def _remaining_lm_timeout(
     *,
     reserve_seconds: float = 0.0,
     error_message: str = "Turn LM deadline exceeded",
+    now: float | None = None,
 ) -> float:
     """
     Calculate the timeout available for an LM call.
@@ -1591,6 +1696,8 @@ def _remaining_lm_timeout(
         call_kwargs (dict[str, Any]): Call arguments that may contain a timeout.
         reserve_seconds (float): Time to preserve after the call.
         error_message (str): Message for the timeout error.
+        now (float | None): Monotonic clock for this attempt. Callers that also bound
+            retries must pass the same timestamp so one attempt cannot consume two ticks.
 
     Returns:
         float: The smaller of the configured timeout and remaining available time.
@@ -1612,15 +1719,19 @@ def _remaining_lm_timeout(
         or reserve_seconds < 0
     ):
         raise ValueError("reserve_seconds must be finite and nonnegative")
-    remaining = math.inf if deadline is None else deadline - time.monotonic()
+    clock = time.monotonic() if now is None else now
+    remaining = math.inf if deadline is None else deadline - clock
     available = remaining - float(reserve_seconds)
     if available <= 0:
         raise TimeoutError(error_message)
-    configured = call_kwargs.get("timeout")
+    configured = _positive_timeout(call_kwargs.get("timeout"))
     if configured is None:
-        configured = getattr(lm, "kwargs", {}).get("timeout")
-    if isinstance(configured, (int, float)) and not isinstance(configured, bool) and configured > 0:
-        return min(float(configured), available)
+        configured = _configured_lm_timeout(lm)
+    role_timeout = _configured_lm_timeout(lm)
+    if role_timeout is not None:
+        configured = role_timeout if configured is None else min(configured, role_timeout)
+    if configured is not None:
+        return min(configured, available)
     return available
 
 
@@ -1863,20 +1974,17 @@ def build_program(spec: RLMProgramSpec) -> Any:
         Any: The configured native DSPy RLM instance.
     """
     sig = spec.signature
+    tool_names = frozenset(str(tool.name) for tool in spec.tools or ())
     if (
         isinstance(sig, type)
         and issubclass(sig, dspy.Signature)
-        and (
-            spec.recursion_enabled
-            or spec.skill_instructions
-            or any(str(tool.name) == "read_workspace_text_batch" for tool in spec.tools or ())
-        )
+        and (spec.recursion_enabled or spec.skill_instructions or _tool_names_need_instruction_overlay(tool_names))
     ):
         sig = root_signature_for_recursion(
             sig,
             recursion_enabled=spec.recursion_enabled,
             skill_instructions=spec.skill_instructions,
-            tool_names=frozenset(str(tool.name) for tool in spec.tools or ()),
+            tool_names=tool_names,
         )
     return build_native_rlm(
         signature=sig,

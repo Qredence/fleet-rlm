@@ -23,8 +23,10 @@ from dspy import CodeExecutionError, CodeInterpreter, CodeInterpreterError, Fina
 from dspy.clients.base_lm import BaseLM as BaseLM
 from dspy.signatures.signature import Signature as Signature
 from dspy.utils.callback import BaseCallback
+from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.observability.diagnostics import walk_cause_chain
 from fleet_rlm.rlm.result import _safe_usage_entry, truncate_public_text
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,8 @@ ReasoningObserver: TypeAlias = Callable[[Any], None]
 CERTIFIED_DSPY_VERSION = "3.3.1"
 
 PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
+
+_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
 
 # Keep this text in one place.  DSPy copies callable metadata into its native
 # action Signature exactly once at RLM construction time.
@@ -91,16 +95,29 @@ def needs_binding_refresh(
     return desired_generation != installed_generation or not broker_ready
 
 
-def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
-    """Whether DSPy supplied its native ``generate_action`` iteration marker."""
+def _iteration_parts(inputs: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Parse DSPy's native ``generate_action`` iteration marker ``current/total``."""
     value = inputs.get("iteration")
     if not isinstance(value, str):
-        return False
+        return None
     try:
         current, total = (int(part.strip()) for part in value.split("/", 1))
     except (ValueError, TypeError):
-        return False
-    return current >= 1 and total >= current
+        return None
+    if current < 1 or total < current:
+        return None
+    return current, total
+
+
+def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
+    """Whether DSPy supplied its native ``generate_action`` iteration marker."""
+    return _iteration_parts(inputs) is not None
+
+
+def _iteration_is_final(inputs: Mapping[str, Any]) -> bool:
+    """Whether this native action is the last allowed iteration (``current == total``)."""
+    parts = _iteration_parts(inputs)
+    return parts is not None and parts[0] == parts[1]
 
 
 class _RLMReasoningCallback(BaseCallback):
@@ -164,6 +181,7 @@ class _RLMReasoningCallback(BaseCallback):
                         outputs={
                             "action_status": "failed",
                             "failure_category": _trace_failure_category(exception),
+                            **_adapter_parse_profile(exception),
                         },
                     )
                 return
@@ -304,6 +322,9 @@ class _RLMTraceCallback(BaseCallback):
             response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
         except Exception:
             response_details = {}
+        reasoning_tokens = _reasoning_token_count(usage)
+        if reasoning_tokens is not None:
+            response_details["reasoning_tokens"] = reasoning_tokens
         response_details.update(
             {
                 "call_index": call_index,
@@ -320,6 +341,8 @@ class _RLMTraceCallback(BaseCallback):
             "response_keys",
             "response_chars",
             "wall_time_ms",
+            "has_reasoning_content",
+            "reasoning_tokens",
         ):
             value = response_details.get(key)
             if value is not None:
@@ -436,12 +459,24 @@ def _to_output_mapping(outputs: Any) -> Mapping[str, Any] | None:
     Under the certified DSPy 3.3.1 legacy contract, ``on_lm_end`` delivers the
     post-processed outputs (a ``list[str | dict]``), never the raw LiteLLM
     ``ModelResponse``. Raw response-shape probing was removed in the P38
-    contraction (P38-RLM-006/011).
+    contraction (P38-RLM-006/011). List payloads are the certified callback
+    shape and are flattened here so traces retain ``text`` /
+    ``reasoning_content`` instead of collapsing to empty keys.
     """
     if isinstance(outputs, Mapping):
         return outputs
     if isinstance(outputs, str):
         return {"content": outputs}
+    if isinstance(outputs, Sequence) and not isinstance(outputs, (str, bytes, bytearray)):
+        merged: dict[str, Any] = {}
+        for item in outputs:
+            if isinstance(item, str):
+                existing = merged.get("content")
+                merged["content"] = item if not isinstance(existing, str) else existing + item
+            elif isinstance(item, Mapping):
+                for key, value in item.items():
+                    merged[str(key)] = value
+        return merged or None
 
     model_dump = getattr(outputs, "model_dump", None)
     if callable(model_dump):
@@ -461,9 +496,10 @@ def _lm_output_profile(
 ) -> dict[str, JsonValue]:
     """Describe an LM response for tracing.
 
-    Accepts the post-processed callback outputs or a bare string; both are
-    normalized via ``_to_output_mapping`` so the profile reflects the real
-    payload instead of collapsing to empty keys."""
+    Accepts the post-processed callback outputs, a legacy ``list[str | dict]``,
+    or a bare string; all are normalized via ``_to_output_mapping`` so the
+    profile reflects the real payload instead of collapsing to empty keys.
+    """
 
     mapping = _to_output_mapping(outputs)
     if mapping is None:
@@ -472,8 +508,94 @@ def _lm_output_profile(
     response_chars = sum(len(str(value)) for value in mapping.values() if isinstance(value, str))
     if response_chars:
         profile["response_chars"] = response_chars
+    reasoning = mapping.get("reasoning_content")
+    if isinstance(reasoning, str) and reasoning:
+        profile["has_reasoning_content"] = True
     if mapping and include_previews:
         profile["response_preview"] = _trace_preview(_trace_payload_text(mapping))
+    return profile
+
+
+def _mapping_from_usage_value(value: object) -> dict[str, Any] | None:
+    """Copy an already-stored usage object into a mapping without inventing zeros.
+
+    Allowlisting stays in ``_safe_usage_entry``. This only coerces Mapping,
+    ``model_dump()``, or ``__dict__`` into a dict.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return dict(value) if value else None
+    dump = getattr(value, "model_dump", None)
+    if callable(dump):
+        try:
+            dumped = dump()
+        except Exception:
+            dumped = None
+        if isinstance(dumped, Mapping) and dumped:
+            return dict(dumped)
+    raw = getattr(value, "__dict__", None)
+    return dict(raw) if isinstance(raw, dict) and raw else None
+
+
+def _usage_from_history_entry(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    """Read usage from one DSPy history entry, including a stored response object.
+
+    ``history["usage"]`` is the certified per-call field. Some OpenAI-compatible
+    gateways (including Databricks AI Gateway for reasoning models) leave that
+    mapping empty while the same entry's ``response.usage`` still carries counts.
+    That fallback stays history-local: it does not probe a live LiteLLM client.
+    When both are empty, usage is unavailable — some endpoints omit it entirely.
+    """
+    usage = _mapping_from_usage_value(entry.get("usage"))
+    if usage:
+        return usage
+    response = entry.get("response")
+    if response is None:
+        return None
+    nested = getattr(response, "usage", None)
+    if nested is None and isinstance(response, Mapping):
+        nested = response.get("usage")
+    return _mapping_from_usage_value(nested)
+
+
+def _reasoning_token_count(usage: Mapping[str, Any]) -> int | None:
+    """Return observed reasoning-token count when the provider reported one."""
+    value = usage.get("reasoning_tokens")
+    if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        return value
+    details = usage.get("completion_tokens_details")
+    if isinstance(details, Mapping):
+        nested = details.get("reasoning_tokens")
+        if isinstance(nested, int) and not isinstance(nested, bool) and nested >= 0:
+            return nested
+    return None
+
+
+def _is_empty_adapter_parse(exc: BaseException) -> bool:
+    """Whether DSPy classified this failure as an empty or null LM response."""
+    message = str(getattr(exc, "message", "") or exc)
+    return _EMPTY_RESPONSE_MARKER in message
+
+
+def _adapter_parse_profile(exc: BaseException) -> dict[str, JsonValue]:
+    """Bounded AdapterParseError facts for action spans and ``last_lm_call``.
+
+    Records empty vs non-object JSON, response size, and whether
+    ``reasoning_content`` was present. Never stores the raw completion.
+    """
+    parse_error = next((item for item in walk_cause_chain(exc) if isinstance(item, AdapterParseError)), None)
+    if parse_error is None:
+        return {}
+    lm_response = getattr(parse_error, "lm_response", "")
+    text = str(lm_response or "")
+    kind = "empty" if _is_empty_adapter_parse(parse_error) else "non_object_json"
+    profile: dict[str, JsonValue] = {
+        "parse_failure_kind": kind,
+        "lm_response_chars": len(text),
+    }
+    if "reasoning_content" in text:
+        profile["has_reasoning_content"] = True
     return profile
 
 
@@ -514,16 +636,13 @@ def _latest_lm_telemetry(
     else:
         selected = []
     for entry in reversed(selected):
-        usage = entry.get("usage")
-        if not isinstance(usage, Mapping):
-            dump = getattr(usage, "model_dump", None)
-            usage = dump() if callable(dump) else None
-        if isinstance(usage, Mapping):
-            with contextlib.suppress(ValueError):
-                return cast(
-                    dict[str, JsonValue],
-                    _safe_usage_entry(usage, path="lm_usage", filter_unknown=True),
-                )
+        usage = _usage_from_history_entry(entry)
+        if not isinstance(usage, Mapping) or not usage:
+            continue
+        with contextlib.suppress(ValueError):
+            sanitized = _safe_usage_entry(usage, path="lm_usage", filter_unknown=True)
+            if sanitized:
+                return cast(dict[str, JsonValue], sanitized)
     return {}
 
 

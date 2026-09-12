@@ -8,6 +8,7 @@ from fleet_rlm.rlm.program import (
     RECURSION_RLM_INSTRUCTIONS,
     REPL_RLM_INSTRUCTIONS,
     TOOL_RLM_INSTRUCTIONS,
+    WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
     FleetRLMSignature,
     compose_rlm_instructions,
     fleet_rlm_instruction_fragments,
@@ -16,20 +17,20 @@ from fleet_rlm.rlm.program import (
 from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
 
 
-def test_default_fleet_signature_uses_composed_recursive_fragments() -> None:
-    fragments = fleet_rlm_instruction_fragments(recursion_enabled=True)
+def test_default_fleet_signature_omits_recursive_fragments() -> None:
+    fragments = fleet_rlm_instruction_fragments(recursion_enabled=False)
 
     assert fragments.base == BASE_RLM_INSTRUCTIONS
     assert fragments.repl == REPL_RLM_INSTRUCTIONS
     assert fragments.tools == TOOL_RLM_INSTRUCTIONS
-    assert fragments.recursion == RECURSION_RLM_INSTRUCTIONS
+    assert fragments.recursion is None
     assert FleetRLMSignature.instructions == fragments.compose()
-    assert "rlm_query(capsule=capsule)" in FleetRLMSignature.instructions
-    assert "6. Verify within the same action" in FleetRLMSignature.instructions
+    assert "rlm_query(capsule=capsule)" not in FleetRLMSignature.instructions
+    assert "5. Verify within the same action" in FleetRLMSignature.instructions
 
 
 def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment() -> None:
-    recursive = FleetRLMSignature.instructions
+    recursive = compose_rlm_instructions(recursion_enabled=True)
     nonrecursive = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
 
     assert "rlm_query(capsule=capsule)" not in nonrecursive
@@ -79,11 +80,35 @@ def test_batch_read_instruction_requires_the_registered_tool() -> None:
     assert "read_workspace_text_batch" in present
 
 
+def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> None:
+    absent = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
+    present = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        tool_names=frozenset({"append_workspace_text"}),
+    ).instructions
+    publish_only = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        tool_names=frozenset({"publish_workspace_artifact"}),
+    ).instructions
+
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS not in absent
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in present
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in publish_only
+    assert "named write or publish remains" in present
+    assert "Sandbox-local ``open()`` is not Session Workspace" in present
+
+
 def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> None:
     assert ".get('content')" in TOOL_RLM_INSTRUCTIONS
     assert "guarded ``json.loads`` fallback" in TOOL_RLM_INSTRUCTIONS
     assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
     assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
+    assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS
+    assert "pass them unchanged and in the given order" in TOOL_RLM_INSTRUCTIONS
+    assert "do not omit listed accumulator updates" in TOOL_RLM_INSTRUCTIONS
+    assert "request as unused text" in TOOL_RLM_INSTRUCTIONS
 
 
 def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
@@ -116,7 +141,12 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "json.dumps(answer, ensure_ascii=False)" in instructions
     assert "Use ``indent=2`` only when" in normalized_instructions
     assert "Python ``repr`` text" in instructions
-    assert "Once sufficient verification exists, the next action must contain ``SUBMIT``" in normalized_instructions
+    assert (
+        "Once the request is fully satisfied and sufficient verification exists, "
+        "the next action must contain ``SUBMIT``"
+    ) in normalized_instructions
+    assert "after completing any named host-tool work" in normalized_instructions
+    assert "verification helper does not finish the Turn while named host-tool work remains" in normalized_instructions
     assert "Never spend an iteration only restating a verified result or emitting empty code" in normalized_instructions
     assert "Never repeat an identical interpreter action" in normalized_instructions
 

@@ -1693,6 +1693,9 @@ class RecursiveRLMExecutor:
         bind_budget = getattr(lease.interpreter, "bind_turn_budget", None)
         if callable(bind_budget):
             bind_budget(child_models.budget)
+        bind_request = getattr(lease.interpreter, "bind_turn_request", None)
+        if callable(bind_request):
+            bind_request(None)
         selected_access = _selected_access.get()
         child_tools = [selected_access.tool()] if selected_access is not None else []
         child = build_native_rlm(

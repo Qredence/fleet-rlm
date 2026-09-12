@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 import pytest
 from dotenv import load_dotenv
@@ -29,6 +28,13 @@ _SECRET_NAMES = tuple(
 
 
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
+_EPHEMERAL_PROOF_VOLUME_PREFIXES = (
+    "fleet-rlm-live-mvp-",
+    "fleet-rlm-live-cancel-",
+    "fleet-rlm-live-deadline-",
+    "fleet-rlm-qre140-",
+    "fleet-rlm-qre142-",
+)
 
 
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
@@ -62,8 +68,8 @@ def _live_settings(tmp_path: Path) -> Settings:
         tmp_path (Path): Temporary directory used for the proof database.
 
     Returns:
-        Settings: Runtime settings with a temporary database, unique volume, bounded
-            proof limits, and MLflow tracing disabled.
+        Settings: Runtime settings with a temporary database, the configured
+            Workspace Volume, bounded proof limits, and MLflow tracing disabled.
     """
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
@@ -79,7 +85,6 @@ def _live_settings(tmp_path: Path) -> Settings:
     upgrade_to_head(database_url)
     overrides: dict[str, object] = {
         "database_url": database_url,
-        "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
         "rlm_max_iters": 8,
         "rlm_max_llm_calls": 12,
         "turn_timeout_seconds": 840,
@@ -254,6 +259,11 @@ async def _retry_cleanup(operation: Any) -> bool:
     return False
 
 
+def _owns_ephemeral_proof_volume(volume_name: str) -> bool:
+    """Return whether live-proof cleanup should delete this Daytona volume."""
+    return volume_name.startswith(_EPHEMERAL_PROOF_VOLUME_PREFIXES)
+
+
 async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
     failures: list[str] = []
     tracked_ids = sandbox_ids | set(resources._sandbox_ids)
@@ -274,6 +284,9 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
         resources._sandbox_ids.clear()
     except Exception:
         failures.append("tracking")
+
+    if not _owns_ephemeral_proof_volume(volume_name):
+        return tuple(failures)
 
     async def delete_volume() -> None:
         volume = await resources.client.volume.get(volume_name, create=False)
