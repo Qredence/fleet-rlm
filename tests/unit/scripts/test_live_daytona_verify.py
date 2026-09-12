@@ -68,8 +68,13 @@ def _success_receipt(sha: str) -> dict[str, object]:
             "duration_ms": 1000,
         },
         "models": {
-            "root": verifier._LIVE_ROOT_MODEL,
-            "sub": verifier._LIVE_SUB_MODEL,
+            "root": "candidate-root",
+            "sub": "candidate-sub",
+        },
+        "qualification": {
+            "profile": "daytona-recursive",
+            "snapshots": {"session": "fleet-session-v1", "child": "fleet-child-v1"},
+            "limits": {"lane_timeout_seconds": 900, "subprocess_grace_seconds": 60, "lane_count": 2},
         },
         "resources": {
             "session_id": "00000000-0000-0000-0000-000000000001",
@@ -249,15 +254,18 @@ def test_main_rejects_tracked_output_path(
     assert not output.exists()
 
 
-def test_configured_models_ignore_stale_environment_model_variables(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("FLEET_ROOT_MODEL", "provider/private-model")
-    monkeypatch.setenv("FLEET_SUB_MODEL", "provider/private-model")
+def test_candidate_models_require_the_explicit_live_pair(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(verifier._LIVE_ROOT_MODEL_ENV, raising=False)
+    monkeypatch.delenv(verifier._LIVE_SUB_MODEL_ENV, raising=False)
+    with pytest.raises(ValueError, match="FLEET_LIVE_ROOT_MODEL"):
+        verifier._candidate_models_from_environment()
 
-    configured = verifier._configured_models()
-    assert configured["root"] in verifier._APPROVED_ROOT_MODELS
-    assert configured["sub"] in verifier._APPROVED_SUB_MODELS
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
+    assert verifier._candidate_models_from_environment() == {
+        "root": "candidate-root",
+        "sub": "candidate-sub",
+    }
 
 
 @pytest.mark.parametrize(
@@ -267,24 +275,38 @@ def test_configured_models_ignore_stale_environment_model_variables(
             "root": "openai/obsolete-model",
             "sub": "openai/other-model",
         },
-        {
-            "root": verifier._LIVE_ROOT_MODEL,
-            "sub": "openai/other-model",
-        },
+        {"root": "candidate-root", "sub": "candidate-sub"},
     ),
-    ids=("obsolete-root", "invalid-sub"),
+    ids=("arbitrary-root", "arbitrary-pair"),
 )
-def test_model_precondition_rejects_obsolete_or_swapped_roles(models: dict[str, str]) -> None:
-    assert verifier._models_are_approved(models) is False
+def test_model_validation_accepts_bounded_candidate_pairs(models: dict[str, str]) -> None:
+    assert verifier._models_are_valid(models) is True
 
 
-def test_model_precondition_accepts_role_specific_normalized_variants() -> None:
-    assert verifier._models_are_approved(
-        {
-            "root": verifier._LIVE_ROOT_MODEL,
-            "sub": f"openai/{verifier._LIVE_SUB_MODEL}",
-        }
+def test_model_validation_rejects_unbounded_or_controlled_ids() -> None:
+    assert verifier._models_are_valid({"root": "", "sub": "candidate-sub"}) is False
+    assert verifier._models_are_valid({"root": "candidate\nroot", "sub": "candidate-sub"}) is False
+    assert verifier._models_are_valid({"root": " candidate-root", "sub": "candidate-sub"}) is False
+
+
+def test_qualified_failure_receipt_records_bounded_candidate_context() -> None:
+    payload = verifier._failure_receipt(
+        category="proof_failed",
+        phase="fastapi_dspy_daytona_mvp",
+        started_at="2026-09-12T00:00:00+00:00",
+        sha="a" * 40,
+        branch="dev-0.7",
+        models={"root": "candidate-root", "sub": "candidate-sub"},
+        qualification={
+            "profile": "daytona-recursive",
+            "snapshots": {"session": "session-v1", "child": "child-v1"},
+            "limits": {"lane_timeout_seconds": 900, "subprocess_grace_seconds": 60, "lane_count": 2},
+        },
     )
+
+    assert verifier._bounded_failure_is_valid(payload, sha="a" * 40) is True
+    payload["models"] = {"root": "candidate root", "sub": "candidate-sub"}
+    assert verifier._bounded_failure_is_valid(payload, sha="a" * 40) is False
 
 
 def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
@@ -298,8 +320,8 @@ def test_first_lane_failure_skips_second_and_preserves_untracked_sentinel(
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
     _set_provider_environment(monkeypatch)
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: ("b" * 40, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -329,8 +351,8 @@ def test_lane_timeout_cleans_owned_worktree(
     worktree.mkdir()
     monkeypatch.setenv("FLEET_LIVE", "1")
     _set_provider_environment(monkeypatch)
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: ("c" * 40, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -363,8 +385,8 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     calls: list[tuple[list[str], Path, dict[str, str], int]] = []
     monkeypatch.setenv("FLEET_LIVE", "1")
     _set_provider_environment(monkeypatch)
-    monkeypatch.setenv("FLEET_ROOT_MODEL", verifier._LIVE_ROOT_MODEL)
-    monkeypatch.setenv("FLEET_SUB_MODEL", verifier._LIVE_SUB_MODEL)
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -429,10 +451,18 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     assert child_env[verifier.EVIDENCE_ENV] == str(worktree / ".fleet-live-proof-receipt.json")
     assert "FLEET_ROOT_MODEL" not in child_env
     assert "FLEET_SUB_MODEL" not in child_env
+    assert child_env[verifier._LIVE_ROOT_MODEL_ENV] == "candidate-root"
+    assert child_env[verifier._LIVE_SUB_MODEL_ENV] == "candidate-sub"
     assert timeout == 900
     assert removed == [worktree]
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["candidate"]["sha"] == sha
+    assert receipt["models"] == {"root": "candidate-root", "sub": "candidate-sub"}
+    assert receipt["qualification"]["limits"] == {
+        "lane_count": 2,
+        "lane_timeout_seconds": 840,
+        "subprocess_grace_seconds": 60,
+    }
     assert receipt["lanes"]["attachment_artifact_durability"]["order"] == 1
     assert receipt["lanes"]["fastapi_dspy_daytona_mvp"]["order"] == 2
     assert receipt["external_promotion"] == {
@@ -480,6 +510,8 @@ def test_main_records_pytest_failure_without_subprocess_output(
     sha = "4" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
     _set_provider_environment(monkeypatch)
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))
@@ -497,6 +529,13 @@ def test_main_records_pytest_failure_without_subprocess_output(
     failure = json.loads(output.read_text(encoding="utf-8"))
     assert failure["failure"] == {"category": "proof_failed", "phase": "attachment_artifact_durability"}
     assert failure["passed"] is False
+    assert failure["models"] == {"root": "candidate-root", "sub": "candidate-sub"}
+    assert failure["qualification"]["profile"] == "daytona-recursive"
+    assert failure["qualification"]["limits"] == {
+        "lane_count": 2,
+        "lane_timeout_seconds": 900,
+        "subprocess_grace_seconds": 60,
+    }
 
 
 def test_main_rejects_success_without_receipt(
@@ -507,6 +546,8 @@ def test_main_rejects_success_without_receipt(
     sha = "5" * 40
     monkeypatch.setenv("FLEET_LIVE", "1")
     _set_provider_environment(monkeypatch)
+    monkeypatch.setenv(verifier._LIVE_ROOT_MODEL_ENV, "candidate-root")
+    monkeypatch.setenv(verifier._LIVE_SUB_MODEL_ENV, "candidate-sub")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_candidate", lambda: (sha, "dev-0.7"))
     monkeypatch.setattr(verifier, "_git", lambda *_args, **_kwargs: str(tmp_path))

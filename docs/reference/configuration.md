@@ -181,7 +181,7 @@ behavior.
 All committed profiles use the OpenAI-compatible Chat Completion format.
 `dspy.LM` sends the request to the provider's `/chat/completions` endpoint with
 `model_type="chat"`; no provider-specific routing header is required. The
-committed Root and Sub roles use `databricks-deepseek-v4-flash-0731` with the
+committed Root and Sub roles use `databricks-deepseek-v4-1-flash` with the
 `DATABRICKS_TOKEN` and `FLEET_LLM_BASE_URL` references, no reasoning-effort
 override, and LM caching disabled. `FLEET_LLM_BASE_URL` must be the
 `/ai-gateway/mlflow/v1` base; the client appends `/chat/completions`. Their

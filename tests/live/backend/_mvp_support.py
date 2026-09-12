@@ -37,22 +37,9 @@ _EPHEMERAL_PROOF_VOLUME_PREFIXES = (
 )
 
 
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-
-
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
-
-
-_APPROVED_MODELS = frozenset(
-    name
-    for base in {
-        _LIVE_ROOT_MODEL,
-        _LIVE_ROOT_MODEL.removesuffix("-0731"),
-        _LIVE_SUB_MODEL,
-        _LIVE_SUB_MODEL.removesuffix("-0731"),
-    }
-    for name in (base, f"openai/{base}")
-)
+_LIVE_ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
+_LIVE_SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
+_MAX_MODEL_ID_CHARS = 256
 
 
 def _load_repo_env() -> None:
@@ -78,9 +65,18 @@ def _live_settings(tmp_path: Path) -> Settings:
     missing = [name for name in required_environment if not os.environ.get(name)]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))
-    policy = load_runtime_settings()
-    if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
-        pytest.fail("Live Daytona MVP proof requires the committed Root and Sub policy")
+    candidate_models = {
+        "root_model": os.environ.get(_LIVE_ROOT_MODEL_ENV, ""),
+        "sub_model": os.environ.get(_LIVE_SUB_MODEL_ENV, ""),
+    }
+    if any(
+        not isinstance(value, str)
+        or not 0 < len(value) <= _MAX_MODEL_ID_CHARS
+        or any(character.isspace() or ord(character) < 32 for character in value)
+        for value in candidate_models.values()
+    ):
+        pytest.skip("Set FLEET_LIVE_ROOT_MODEL and FLEET_LIVE_SUB_MODEL for candidate qualification")
+    policy = load_runtime_settings().model_copy(update=candidate_models)
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-mvp.db').resolve()}"
     upgrade_to_head(database_url)
     overrides: dict[str, object] = {

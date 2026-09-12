@@ -19,7 +19,7 @@ stale_after_seconds = 60
 # endpoint. Keep the deliberately bounded 16,384-token role limit; Fleet's
 # character-level output caps independently bound retained output.
 [defaults.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-1-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
@@ -28,7 +28,7 @@ num_retries = 1
 cache = false
 
 [defaults.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-1-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384

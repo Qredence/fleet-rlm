@@ -31,6 +31,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.benchmarks.campaign import write_receipt_once
+
 RECEIPT_SCHEMA = "fleet.benchmark-mlflow-campaign/v1"
 RUNTIME_SCHEMA = "fleet.runtime-benchmark/v2"
 ADAPTER_SCHEMA = "fleet.runtime-adapter-comparison/v2"
@@ -251,27 +253,10 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
 
 def _write_once(path: Path, payload: Mapping[str, object]) -> None:
     """Write one operator result receipt without replacing a sealed result."""
-    import os
-
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        write_receipt_once(path, payload)
     except FileExistsError as exc:
         raise CampaignRecordError("campaign result receipt already exists") from exc
-    wrapped = False
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            wrapped = True
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
-        if not wrapped:
-            with suppress(OSError):
-                os.close(descriptor)
-        path.unlink(missing_ok=True)
-        raise
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -75,7 +75,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
-            "model": "databricks-deepseek-v4-flash-0731",
+            "model": "databricks-deepseek-v4-1-flash",
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
@@ -84,7 +84,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "cache": False,
         },
         "sub": {
-            "model": "databricks-deepseek-v4-flash-0731",
+            "model": "databricks-deepseek-v4-1-flash",
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
@@ -111,7 +111,7 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_single_provider_retry
 
 
 # Every committed profile routes Root and Sub through the Databricks endpoint.
-_DATABRICKS_MODEL = "databricks-deepseek-v4-flash-0731"
+_DATABRICKS_MODEL = "databricks-deepseek-v4-1-flash"
 _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
@@ -181,8 +181,8 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "databricks-deepseek-v4-flash-0731"
-    assert settings.sub_model == "databricks-deepseek-v4-flash-0731"
+    assert settings.root_model == "databricks-deepseek-v4-1-flash"
+    assert settings.sub_model == "databricks-deepseek-v4-1-flash"
     # The endpoint has no reasoning-effort policy override; it
     # stays unset instead of being forwarded with a default.
     assert settings.root_llm_reasoning_effort is None

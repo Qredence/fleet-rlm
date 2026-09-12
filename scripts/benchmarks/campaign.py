@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import os
 import re
+from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import asdict, dataclass
 from decimal import Decimal
+from pathlib import Path
 
 
 class CampaignPreflightError(ValueError):
@@ -173,4 +179,38 @@ class CampaignBudget:
         }
 
 
-__all__ = ["CampaignAdmissionError", "CampaignBudget", "CampaignPreflight", "CampaignPreflightError"]
+def write_receipt_once(path: Path, payload: Mapping[str, object], *, max_bytes: int | None = None) -> str:
+    """Persist pre-sanitized JSON without replacing prior evidence.
+
+    Serialization and optional byte bounds are checked before creating a file.
+    Callers retain responsibility for schema validation and content projection.
+    A failed write removes only the file exclusively created by this attempt.
+    """
+    encoded = (json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + "\n").encode("utf-8")
+    if max_bytes is not None and len(encoded) > max_bytes:
+        raise ValueError("receipt exceeds its size bound")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    wrapped = False
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            wrapped = True
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        if not wrapped:
+            with suppress(OSError):
+                os.close(descriptor)
+        path.unlink(missing_ok=True)
+        raise
+    return hashlib.sha256(encoded).hexdigest()
+
+
+__all__ = [
+    "CampaignAdmissionError",
+    "CampaignBudget",
+    "CampaignPreflight",
+    "CampaignPreflightError",
+    "write_receipt_once",
+]

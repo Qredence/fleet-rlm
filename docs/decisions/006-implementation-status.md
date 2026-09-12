@@ -16,6 +16,36 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 5 local preparation (2026-09-12)
+
+Operator requested implementation of the Phase 4/5 continuation and authorized
+paid provider/model runs. No paid run has been admitted in this slice: campaign
+limits and candidate identity remain to be agreed. Commit, database mutation,
+deployment, and promotion authorization remain separate.
+
+On checkout `deec5ca68` with pre-existing uncommitted changes preserved:
+- Reconciled the forward Phase 4 summary with the separate original/overlay
+  evidence; removed superseded pre-campaign notes, not retained receipts.
+- Parameterized the existing Root tool-surface contract for recursion disabled
+  and enabled. Disabled recursion supplies no Fleet child tools.
+- Consolidated MLflow certification/campaign write-once JSON persistence in
+  `scripts/benchmarks/campaign.py`. Canonical bytes, private file permissions,
+  no overwrite, byte limits, invalid numeric values, interrupted writes and
+  descriptor cleanup have deterministic regression coverage. PostgreSQL's
+  pre-execution output reservation remains separate; no authorization or
+  provider lifecycle was moved into shared helpers.
+- Focused script/recursive policy lane passed 45 cases; the broader recursion,
+  MLflow privacy/export/lifecycle, cold-capacity and PostgreSQL receipt suites
+  passed 273 cases (overlapping lanes, not additive coverage).
+- `make check` passed on this dirty local tree: 79.22% backend coverage,
+  543 TUI tests, generated contracts, type/lint/format and boundary/doc checks.
+
+This is local preparation, not P5.1–P5.5 certification or a clean candidate
+receipt. Configured MLflow export/fault gaps, resolved snapshot deployment
+identities, deployed database evidence, and a retained campaign through the
+simplified entry point remain open. Warm capacity and default recursion remain
+disabled. Existing complete-MVP quality failures are unchanged.
+
 ### Documentation and local runtime follow-up (2026-09-12)
 
 The current branch documents the completed simplification state: retained
@@ -26,6 +56,68 @@ and discard a stale resident Root before reattaching to a replaced durable
 binding. They have focused deterministic coverage only. They do not alter the
 failed complete-MVP result, certify the configured Root model, or start Phase 5
 or Phase 6.
+
+### Phase 3 bounded candidate qualification closeout (2026-09-12)
+
+The deterministic Phase 3 contract checks and full local gate passed. The final
+operator-authorized clean candidate used Root/Sub
+`databricks-deepseek-v4-pro-0813` at
+`e27d67100e6cd899442b45ac35cb7f523c163087` under the
+`daytona-recursive` profile (`fleet-rlm-python313-v7` session snapshot and
+`fleet-rlm-python313-child-v2` child snapshot). Receipt:
+`.scratch/live-receipts/mvp-complete-deepseek-v4-pro-0813.json`.
+
+The durability lane passed, but the complete FastAPI/DSPy/Daytona MVP lane
+returned `proof_failed`; the receipt records the exact pair, candidate SHA,
+profile, snapshots, 900-second lane limit, 60-second subprocess grace, and
+two-lane scope. Earlier v4.1 and v4 flash candidate failures remain preserved
+separately. Phase 3 remains **uncertified**. Local MLflow 3.16.0 and the
+loopback FastAPI service were started and health-checked for the operator run,
+but service availability does not override the failed MVP assertions. The
+later, explicitly authorized policy promotion set both default roles in
+`config/fleet.toml` to `databricks-deepseek-v4-1-flash` through Chat
+Completions; it is not certification evidence. Phase 5 remains not started.
+
+An explicitly authorized diagnostic run on clean candidate
+`706c53f906cd70ba78fc081ce75dc74f3eb5667c` isolated the complete-MVP failure
+to Root workflow compliance, not provider transport: it replaced the required
+`ROOT`/`ALPHA`/`BETA`/`GAMMA` semantic prompts with arithmetic prompts. The
+semantic verifier rejected the altered results before the required workspace
+append could execute. The bounded receipt is
+`.scratch/live-receipts/deepseek-v4-1-chat-diagnostic-20260912.json`; Phase 3
+remains uncertified.
+
+The subsequently selected GLM alternative was ready and returned an exact
+Chat-Completions preflight response, but the one clean-candidate qualification
+also failed its complete MVP lane. Candidate
+`7015b80aeecde87ee135150559c59b7018f9f422`, Root/Sub
+`databricks-glm-5-3-flash`, receipt
+`.scratch/live-receipts/mvp-complete-glm-5-3-flash-chat-profile-218237876678801.json`.
+The durability lane passed; no retry or default-policy change followed. Phase 3
+remains uncertified.
+
+### Phase 3 gate retirement (2026-09-12)
+
+The exact-code complete-MVP lane is retired as a Phase 3 gate. It measured
+model obedience to a synthetic, literal three-cell program rather than Fleet
+runtime correctness, and repeated provider attempts showed it to be an
+unsuitable release blocker. Its failed receipts remain historical diagnostics;
+they are not relabelled as passes. Phase 3 is **complete** on the retained
+deterministic FastAPI/DSPy/Daytona contracts plus live attachment/artifact
+durability, binding, replacement, and cleanup evidence. Future semantic model
+evaluation is a separately scoped product-quality activity.
+
+The single authorized profile-exception rerun used Databricks profile
+`218237876678801` with Root/Sub `databricks-deepseek-v4-1-flash` on clean
+candidate `b12574fee3d5e7409f3725d3a3ab5f9fbbb332c0`. Receipt:
+`.scratch/live-receipts/mvp-complete-deepseek-v4-1-flash-profile-218237876678801.json`.
+The endpoint and local MLflow/FastAPI health checks passed; the durability
+lane passed, but the complete MVP lane returned `proof_failed`. The receipt
+records the v2 schema, exact pair, `daytona-recursive` profile, both snapshots,
+900-second lane timeout, 60-second subprocess grace, and two-lane scope. This
+was the final authorized attempt: no retry, assertion relaxation, prompt
+overlay, or default promotion occurred. Phase 3 remains **uncertified** and
+Phase 5 remains not started.
 
 ### Phase 4 exit (2026-09-12)
 

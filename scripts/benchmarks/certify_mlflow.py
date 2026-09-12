@@ -22,6 +22,7 @@ import importlib.metadata
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -48,6 +49,11 @@ from fleet_rlm.observability.tracing import (
 from fleet_rlm.rlm.program import DeadlineLMProxy
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from scripts.benchmarks.campaign import write_receipt_once
+
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _SCHEMA = "fleet.mlflow-certification/v1"
 _MAX_RECEIPT_BYTES = 256 * 1024
@@ -139,24 +145,12 @@ def _backend_version(uri: str) -> str | None:
 
 def _write_once(path: Path, payload: dict[str, object]) -> str:
     """Write one canonical receipt and refuse to replace an existing one."""
-    canonical = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    encoded = canonical.encode("utf-8")
-    if len(encoded) > _MAX_RECEIPT_BYTES:
-        raise CertificationError("MLflow certification receipt exceeds its size bound")
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        return write_receipt_once(path, payload, max_bytes=_MAX_RECEIPT_BYTES)
     except FileExistsError as exc:
         raise CertificationError("MLflow certification receipt already exists") from exc
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
-    return hashlib.sha256(encoded).hexdigest()
+    except ValueError as exc:
+        raise CertificationError("MLflow certification receipt is invalid or exceeds its size bound") from exc
 
 
 def _settings_for_backend(args: argparse.Namespace) -> Any:

@@ -19,29 +19,19 @@ from dotenv import load_dotenv
 from fleet_rlm.config.loader import (
     ProfileEnvironmentContract,
     active_profile_contract,
-    load_runtime_settings,
     require_live_execution,
 )
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
-RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
+RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v2"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
-_APPROVED_ROOT_MODELS = frozenset(
-    name
-    for base in {_LIVE_ROOT_MODEL, _LIVE_ROOT_MODEL.removesuffix("-0731"), _LIVE_ROOT_MODEL + "-0731"}
-    for name in (base, f"openai/{base}")
-)
-_APPROVED_SUB_MODELS = frozenset(
-    name
-    for base in {_LIVE_SUB_MODEL, _LIVE_SUB_MODEL.removesuffix("-0731"), _LIVE_SUB_MODEL + "-0731"}
-    for name in (base, f"openai/{base}")
-)
+_LIVE_ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
+_LIVE_SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
+_MAX_MODEL_ID_CHARS = 256
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
     "live-b5-attachment-artifact-durability-evidence.json"
@@ -52,6 +42,7 @@ _SUCCESS_FIELDS = frozenset(
         "candidate",
         "timing",
         "models",
+        "qualification",
         "resources",
         "counts",
         "streaming",
@@ -72,14 +63,6 @@ _FAILURE_CATEGORIES = frozenset(
         "interrupted",
     }
 )
-
-
-def _model_family(name: object) -> str:
-    """Dated and undated spellings of one production model family."""
-    if not isinstance(name, str):
-        return ""
-    base = name.removeprefix("openai/")
-    return base.removesuffix("-0731")
 
 
 EXIT_PRECONDITION = 2
@@ -320,8 +303,10 @@ def _failure_receipt(
     started_at: str,
     sha: str | None = None,
     branch: str | None = None,
+    models: dict[str, str] | None = None,
+    qualification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    receipt: dict[str, Any] = {
         "schema": RECEIPT_SCHEMA,
         "candidate": None
         if sha is None or branch is None
@@ -337,6 +322,10 @@ def _failure_receipt(
         "failure": {"category": category, "phase": phase},
         "passed": False,
     }
+    if models is not None and qualification is not None:
+        receipt["models"] = dict(models)
+        receipt["qualification"] = qualification
+    return receipt
 
 
 def _load_receipt(path: Path) -> dict[str, Any]:
@@ -415,6 +404,8 @@ def _validate_success_receipt(payload: dict[str, Any], *, sha: str) -> None:
         section = payload.get(name)
         if not isinstance(section, dict) or set(section) != fields:
             raise ReceiptError(f"receipt_{name}")
+    if not _qualification_is_valid(payload["qualification"]):
+        raise ReceiptError("receipt_qualification")
     timing = payload["timing"]
     if (
         any(
@@ -534,6 +525,7 @@ def _build_success_receipt(
     lockfile_sha256: str,
     versions: dict[str, str],
     models: dict[str, str],
+    qualification: dict[str, Any],
     durability_evidence: dict[str, Any],
 ) -> dict[str, Any]:
     receipt = dict(payload)
@@ -547,9 +539,8 @@ def _build_success_receipt(
         "versions": versions,
         "lockfile_sha256": lockfile_sha256,
     }
-    if _model_family(receipt.get("models", {}).get("root")) != _model_family(models.get("root")) or _model_family(
-        receipt.get("models", {}).get("sub")
-    ) != _model_family(models.get("sub")):
+    receipt["qualification"] = qualification
+    if receipt.get("models") != models:
         raise ReceiptError("receipt_models")
     receipt["lanes"] = {
         "attachment_artifact_durability": {
@@ -565,7 +556,13 @@ def _build_success_receipt(
         "ci": "pending",
         "human_approval": "pending",
     }
-    _validate_success_receipt_extended(receipt, sha=sha, branch=branch, lockfile_sha256=lockfile_sha256)
+    _validate_success_receipt_extended(
+        receipt,
+        sha=sha,
+        branch=branch,
+        lockfile_sha256=lockfile_sha256,
+        expected_models=models,
+    )
     return receipt
 
 
@@ -575,13 +572,16 @@ def _validate_success_receipt_extended(
     sha: str,
     branch: str,
     lockfile_sha256: str,
+    expected_models: dict[str, str] | None = None,
 ) -> None:
     _validate_success_receipt(payload, sha=sha)
     candidate = payload["candidate"]
     if candidate.get("branch") != branch or candidate.get("lockfile_sha256") != lockfile_sha256:
         raise ReceiptError("candidate_fingerprint")
     models = payload.get("models")
-    if not _models_are_approved(models):
+    if not _models_are_valid(models):
+        raise ReceiptError("receipt_models")
+    if expected_models is not None and models != expected_models:
         raise ReceiptError("receipt_models")
     lanes = payload.get("lanes")
     if not isinstance(lanes, dict) or set(lanes) != {
@@ -619,12 +619,15 @@ def _validate_success_receipt_extended(
 
 
 def _bounded_failure_is_valid(payload: dict[str, Any], *, sha: str) -> bool:
-    if set(payload) != {"schema", "candidate", "timing", "failure", "passed"}:
+    base_fields = {"schema", "candidate", "timing", "failure", "passed"}
+    qualified_fields = base_fields | {"models", "qualification"}
+    payload_fields = set(payload)
+    if payload_fields not in (base_fields, qualified_fields):
         return False
     candidate = payload.get("candidate")
     timing = payload.get("timing")
     failure = payload.get("failure")
-    return bool(
+    bounded = bool(
         payload.get("schema") == RECEIPT_SCHEMA
         and isinstance(candidate, dict)
         and set(candidate) == {"sha", "branch", "tracked_tree_clean"}
@@ -638,6 +641,11 @@ def _bounded_failure_is_valid(payload: dict[str, Any], *, sha: str) -> bool:
         and isinstance(failure.get("phase"), str)
         and payload.get("passed") is False
     )
+    if not bounded:
+        return False
+    if payload_fields == base_fields:
+        return True
+    return _models_are_valid(payload.get("models")) and _qualification_is_valid(payload.get("qualification"))
 
 
 def _write_failure(
@@ -648,6 +656,8 @@ def _write_failure(
     started_at: str,
     sha: str | None = None,
     branch: str | None = None,
+    models: dict[str, str] | None = None,
+    qualification: dict[str, Any] | None = None,
 ) -> None:
     _atomic_write(
         output,
@@ -657,6 +667,8 @@ def _write_failure(
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         ),
     )
 
@@ -666,10 +678,51 @@ def _load_repo_env() -> None:
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
-def _configured_models(settings: Settings | None = None) -> dict[str, str]:
-    """Return the approved models resolved from the selected TOML profile."""
-    resolved = settings or load_runtime_settings()
-    return {"root": resolved.root_model, "sub": resolved.sub_model}
+def _qualification_metadata(
+    settings: Settings,
+    contract: ProfileEnvironmentContract,
+    *,
+    session_snapshot_override: str | None,
+    timeout_seconds: int,
+) -> dict[str, Any]:
+    """Return bounded, non-secret context for one candidate qualification."""
+    return {
+        "profile": contract.name,
+        "snapshots": {
+            "session": session_snapshot_override or settings.daytona_snapshot,
+            "child": settings.daytona_child_snapshot,
+        },
+        "limits": {
+            "lane_timeout_seconds": timeout_seconds,
+            "subprocess_grace_seconds": 60,
+            "lane_count": 2,
+        },
+    }
+
+
+def _qualification_is_valid(value: object) -> bool:
+    """Validate the non-secret qualification context recorded in a receipt."""
+    if not isinstance(value, dict) or set(value) != {"profile", "snapshots", "limits"}:
+        return False
+    profile = value["profile"]
+    snapshots = value["snapshots"]
+    limits = value["limits"]
+    return bool(
+        isinstance(profile, str)
+        and 0 < len(profile) <= 128
+        and isinstance(snapshots, dict)
+        and set(snapshots) == {"session", "child"}
+        and all(
+            snapshot is None or (isinstance(snapshot, str) and 0 < len(snapshot) <= 128)
+            for snapshot in snapshots.values()
+        )
+        and isinstance(limits, dict)
+        and set(limits) == {"lane_timeout_seconds", "subprocess_grace_seconds", "lane_count"}
+        and all(isinstance(limit, int) and not isinstance(limit, bool) for limit in limits.values())
+        and 0 < limits["lane_timeout_seconds"] <= 86_400
+        and limits["subprocess_grace_seconds"] == 60
+        and limits["lane_count"] == 2
+    )
 
 
 def _required_provider_environment(contract: ProfileEnvironmentContract) -> tuple[str, ...]:
@@ -677,16 +730,29 @@ def _required_provider_environment(contract: ProfileEnvironmentContract) -> tupl
     return contract.provider_environment_names
 
 
-def _models_are_approved(models: object) -> bool:
-    """Require the production Root/Sub pair while allowing DSPy normalization."""
+def _models_are_valid(models: object) -> bool:
+    """Validate a bounded Root/Sub model pair without a production allowlist."""
     return bool(
         isinstance(models, dict)
         and set(models) == {"root", "sub"}
         and isinstance(models.get("root"), str)
-        and models["root"] in _APPROVED_ROOT_MODELS
+        and 0 < len(models["root"]) <= _MAX_MODEL_ID_CHARS
+        and not any(character.isspace() or ord(character) < 32 for character in models["root"])
         and isinstance(models.get("sub"), str)
-        and models["sub"] in _APPROVED_SUB_MODELS
+        and 0 < len(models["sub"]) <= _MAX_MODEL_ID_CHARS
+        and not any(character.isspace() or ord(character) < 32 for character in models["sub"])
     )
+
+
+def _candidate_models_from_environment() -> dict[str, str]:
+    """Return the explicit Root/Sub pair selected for one live qualification."""
+    models = {
+        "root": os.environ.get(_LIVE_ROOT_MODEL_ENV, ""),
+        "sub": os.environ.get(_LIVE_SUB_MODEL_ENV, ""),
+    }
+    if not _models_are_valid(models):
+        raise ValueError("live qualification requires bounded FLEET_LIVE_ROOT_MODEL and FLEET_LIVE_SUB_MODEL")
+    return models
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -730,20 +796,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("Live proof candidate precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
-    models = _configured_models(settings)
-    child_env = os.environ.copy()
-    child_env.pop("FLEET_ROOT_MODEL", None)
-    child_env.pop("FLEET_SUB_MODEL", None)
-    if args.session_snapshot is not None:
-        try:
-            child_env[P27_SESSION_SNAPSHOT_ENV] = validate_snapshot_name(args.session_snapshot)
-        except ValueError:
-            _write_failure(
-                output, category="precondition_failed", phase="snapshot", started_at=started_at, sha=sha, branch=branch
-            )
-            print("Live proof snapshot precondition failed.", file=sys.stderr)
-            return EXIT_PRECONDITION
-    if not _models_are_approved(models):
+    try:
+        models = _candidate_models_from_environment()
+    except ValueError:
         _write_failure(
             output,
             category="precondition_failed",
@@ -754,7 +809,26 @@ def main(argv: list[str] | None = None) -> int:
         )
         print("Live proof model precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
-
+    child_env = os.environ.copy()
+    child_env.pop("FLEET_ROOT_MODEL", None)
+    child_env.pop("FLEET_SUB_MODEL", None)
+    child_env[_LIVE_ROOT_MODEL_ENV] = models["root"]
+    child_env[_LIVE_SUB_MODEL_ENV] = models["sub"]
+    if args.session_snapshot is not None:
+        try:
+            child_env[P27_SESSION_SNAPSHOT_ENV] = validate_snapshot_name(args.session_snapshot)
+        except ValueError:
+            _write_failure(
+                output, category="precondition_failed", phase="snapshot", started_at=started_at, sha=sha, branch=branch
+            )
+            print("Live proof snapshot precondition failed.", file=sys.stderr)
+            return EXIT_PRECONDITION
+    qualification = _qualification_metadata(
+        settings,
+        contract,
+        session_snapshot_override=args.session_snapshot,
+        timeout_seconds=args.timeout_seconds,
+    )
     worktree: Path | None = None
     lockfile_sha256: str | None = None
     interrupted = False
@@ -793,6 +867,7 @@ def main(argv: list[str] | None = None) -> int:
                         lockfile_sha256=lockfile_sha256,
                         versions=_installed_versions(worktree, child_env),
                         models=models,
+                        qualification=qualification,
                         durability_evidence=durability_evidence,
                     )
                     _atomic_write(output, receipt)
@@ -822,6 +897,8 @@ def main(argv: list[str] | None = None) -> int:
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         )
         print("Live proof was interrupted.", file=sys.stderr)
         return EXIT_INTERRUPTED
@@ -834,6 +911,8 @@ def main(argv: list[str] | None = None) -> int:
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         )
         if category == "receipt_invalid":
             print("Live proof receipt validation failed.", file=sys.stderr)
@@ -855,6 +934,8 @@ def main(argv: list[str] | None = None) -> int:
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         )
         print("Live proof receipt validation failed.", file=sys.stderr)
         return EXIT_RECEIPT
@@ -868,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
             sha=sha,
             branch=branch,
             lockfile_sha256=lockfile_sha256,
+            expected_models=models,
         )
     except (ReceiptError, KeyError):
         _write_failure(
@@ -877,13 +959,13 @@ def main(argv: list[str] | None = None) -> int:
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         )
         print("Live proof receipt validation failed.", file=sys.stderr)
         return EXIT_RECEIPT
 
-    if _model_family(receipt["models"].get("root")) != _model_family(models.get("root")) or _model_family(
-        receipt["models"].get("sub")
-    ) != _model_family(models.get("sub")):
+    if receipt["models"] != models:
         _write_failure(
             output,
             category="receipt_invalid",
@@ -891,6 +973,8 @@ def main(argv: list[str] | None = None) -> int:
             started_at=started_at,
             sha=sha,
             branch=branch,
+            models=models,
+            qualification=qualification,
         )
         print("Live proof receipt validation failed.", file=sys.stderr)
         return EXIT_RECEIPT
