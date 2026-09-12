@@ -1,4 +1,4 @@
-"""RLMFactory, model bundle, and native RLM Options."""
+"""Behavior contracts for program factory."""
 
 from __future__ import annotations
 
@@ -327,18 +327,6 @@ def test_child_copy_cannot_extend_turn_budget_deadline(monkeypatch: pytest.Monke
     assert shorter_child.root_lm.calls[-1]["timeout"] == 0.5
 
 
-def test_invalid_options_fail_before_construction() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.result import RLMConfigError
-
-    with pytest.raises(RLMConfigError):
-        RLMOptions(max_iters=0)
-    with pytest.raises(RLMConfigError):
-        RLMOptions(max_llm_calls=-1)
-    with pytest.raises(RLMConfigError):
-        RLMOptions(max_output_chars=0)
-
-
 def test_factory_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
@@ -487,11 +475,13 @@ def test_private_dspy_imports_are_confined_to_compat_layer() -> None:
     assert offenders == [], f"Private DSPy imports found outside compat layer: {offenders}"
 
 
-def test_compatibility_implementation_has_one_versioned_home() -> None:
-    from pathlib import Path
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("max_iters", 0), ("max_llm_calls", 0), ("max_llm_calls", -1), ("max_output_chars", 0)],
+)
+def test_rlm_options_reject_nonpositive_values(field: str, value: int) -> None:
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.result import RLMConfigError
 
-    from fleet_rlm.rlm.program import FleetJSONAdapter
-
-    root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "rlm"
-    assert not (root / "_dspy_compat.py").exists()
-    assert FleetJSONAdapter.__module__ == "fleet_rlm.rlm.program"
+    with pytest.raises(RLMConfigError, match=field):
+        RLMOptions(**{field: value})

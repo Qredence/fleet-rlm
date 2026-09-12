@@ -56,6 +56,34 @@ and do not construct stores, engines, models, or provider clients. The SSE
 layer projects typed, transport-neutral Runtime Events into the public client
 stream.
 
+The FastAPI HTTP/SSE service is the canonical execution interface. `fleet web`
+and `fleet-rlm serve-api` launch that service; `fleet cli` supervises the same
+backend and attaches the pi-tui client. A launcher may select a validated
+non-secret TOML profile explicitly with `--profile NAME`; omitted selection
+retains `config.default_profile`. Explicit profile loading occurs before
+provider, database, Daytona, or client initialization, and explicit profiles
+are incompatible with Uvicorn `--reload`.
+
+The Phase 4 campaign preserves this transport boundary. All four arms run as
+isolated FastAPI processes reached through the public attachment, Session,
+Turn, and SSE endpoints: A/B/D from the candidate checkout with their sealed
+arm profiles, C from the frozen-baseline checkout. Arm behavior differs by
+profile only; there is no public arm selector or alternate in-process campaign
+execution path. Live campaign modes require the profile's MLflow tracking
+server before admitting a trial, and every completed trial row links to its
+MLflow root trace identifier.
+
+For a bounded operator smoke of the live transport, the campaign driver
+supervises one disposable API service per arm from the pinned revisions. Its
+`--partial-live` mode sends exactly ten sealed exploratory trials through the
+public API/SSE contract, keeps one Session per trial, and records a partial
+receipt. This is transport evidence only: unknown provider spend remains
+explicit, and the receipt cannot certify recursive value or change the default
+profile.
+The 2026-09-10 execution is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
+`incomplete`.
+
 ### Composition
 
 `src/fleet_rlm/composition/` constructs the process-scoped runtime graph. The
@@ -91,10 +119,36 @@ The execution levels are distinct:
   `rlm_query_batched` to run isolated iterative child RLMs.
 
 The Root begins at native depth zero. Direct recursive children run at depth
-one. A child cannot create a grandchild RLM; further delegation uses the
-bounded Sub-LM fallback. Child batches preserve input order, reserve shared
-budgets atomically, and settle all-or-nothing. Children return evidence for
-Root verification and synthesis, not final authority.
+one and receive no Fleet recursive tools; further semantic work uses native
+DSPy calls. Root exposes only `rlm_query(capsule=...)` and
+`rlm_query_batched(capsules=...)`. Child batches preserve input order and reserve
+shared budgets atomically. Ordinary fully cleaned-up failures return typed
+partial outcomes; cancellation, authorization, and cleanup failures remain
+fatal. Children return evidence for Root verification and synthesis, not final
+authority.
+
+Recursive work is scheduled on the injected application event loop under one
+Turn-owned semaphore. The scheduler creates neither child event-loop threads
+nor a separate batch thread pool. Native child `dspy.RLM.forward` runs on an
+owned blocking worker because the pinned async RLM invokes its interpreter
+synchronously. Cancellation does not release worker ownership before settlement;
+the existing Root worker execution boundary is unchanged.
+
+Selected-input capsules use byte-accurate allocations and typed child results.
+Their read-only input reader reuses prepared Session/Project text capabilities,
+checks the cumulative byte allowance and supplied checksum, and reports only
+successfully accessed reference identifiers. Inline fragment delivery is tracked
+separately. Child answers cite canonical `[reference-N]` or `[fragment-N]`
+identifiers. Fleet rejects undeclared/unread citations and omitted required
+citations, returning validated `cited_evidence` separately from the access
+ledger. These identifiers prove access, not that a claim is true. Selected
+`artifact://<UUID>` locators use the Turn-bound ArtifactReader for authorization
+and checksum verification, with the remaining byte allowance checked before
+fetching content. Reads run on the application loop; an owned child worker waits
+for actual read settlement, and revoked authority prevents late delivery. An
+Artifact locator never grants independent storage authority. Recursive execution
+does not build a Session snapshot, copy committed history, or construct a
+nested Fleet executor. The existing Root history boundary is unchanged.
 
 DSPy creates invocation-local `REPLHistory` and owns trajectory semantics.
 Fleet supplies committed `dspy.History` and Turn-local bindings without
@@ -171,7 +225,9 @@ HTTP types and the backend's public SSE contract; it owns no model, provider,
 or execution lifecycle. The stream client validates framing and terminal
 ordering, live and durable projections converge through the client reducer,
 and presenters own interaction rather than backend semantics. Its specialized
-tooling and validation rules live in `tools/fleet-tui/AGENTS.md`.
+tooling and validation rules live in `tools/fleet-tui/AGENTS.md`. It is an
+operator-facing client of the canonical FastAPI service, not a campaign driver
+and not a second runtime.
 
 ## Dependency boundaries
 

@@ -193,7 +193,7 @@ async def test_val_rec_033_success_child_events_expose_only_approved_metadata() 
     root_actions = [
         {
             "reasoning": "delegate one bounded child",
-            "code": f"child_answer = rlm_query(prompt={child_prompt!r})",
+            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
         },
         {"reasoning": "finish", "code": "SUBMIT(answer='root-done')"},
     ]
@@ -236,9 +236,8 @@ async def test_val_rec_033_success_child_events_expose_only_approved_metadata() 
     tool_started = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolStarted)]
     assert len(tool_started) == 1
     started_input = dict(tool_started[0].input or {})
-    assert started_input["prompt_count"] == 1
-    assert started_input["prompt_chars"] == len(child_prompt)
-    assert set(started_input) == {"prompt_count", "prompt_chars"}
+    assert started_input["selected_input_bytes"] > len(child_prompt.encode("utf-8"))
+    assert set(started_input) == {"selected_input_bytes"}
 
     # The recursive Tool output projection is the bounded completion metadata.
     tool_completed = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolCompleted)]
@@ -270,7 +269,7 @@ async def test_val_rec_033_failed_child_events_stay_bounded_and_sentinel_free() 
     root_actions = [
         {
             "reasoning": "delegate one child that will oversubmit",
-            "code": f"child_answer = rlm_query(prompt={child_prompt!r})",
+            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
         },
         {"reasoning": "recover and finish", "code": "SUBMIT(answer='recovered')"},
     ]
@@ -305,10 +304,9 @@ async def test_val_rec_033_failed_child_events_stay_bounded_and_sentinel_free() 
 
     # The recursive Tool failure projection is the closed sanitized public
     # message of the typed oversized-output failure, never the answer body.
-    tool_failed = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolFailed)]
-    assert len(tool_failed) == 1
-    error_text = tool_failed[0].error or ""
-    assert error_text == "Turn output is too large"
+    tool_results = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolCompleted)]
+    assert len(tool_results) == 1
+    assert tool_results[0].output == {"status": "failed", "error_category": "child_failed"}
 
     # Run failure terminals, when present, are also sentinel-free.
     run_failed = [event.detail for event in events if isinstance(event.detail, RunFailed)]

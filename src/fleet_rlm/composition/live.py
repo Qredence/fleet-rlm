@@ -21,6 +21,7 @@ from uuid import UUID
 
 from fastapi import FastAPI
 
+from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.preparation import DefaultRunPreparer
 from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.composition.inventory import (
@@ -469,7 +470,6 @@ async def build_daytona_composition(
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
@@ -558,6 +558,7 @@ async def build_daytona_composition(
             skill_catalog=skill_catalog,
             settings=resolved,
             models=model_bundle,
+            artifact_reader=artifact_reader,
         )
         run_state = SqlAlchemyRunStateStore(
             session_factory,
@@ -855,6 +856,7 @@ def build_run_preparation(
     skill_catalog: SkillCatalog,
     settings: Settings,
     models: RLMModelBundle,
+    artifact_reader: ArtifactReader | None = None,
 ) -> DefaultRunPreparer:
     """
     Create a Daytona run preparer configured with models, runtime limits,
@@ -890,6 +892,8 @@ def build_run_preparation(
         ),
         attachments=attachment_lifecycle,
         environments=_DaytonaEnvironmentProvider(resources, settings),
-        capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
+        capabilities=_LiveCapabilityPreparer(
+            settings, skill_catalog, volume_paths=resources.volume_paths, artifact_reader=artifact_reader
+        ),
         runtime_variant=settings.runtime_variant,
     )

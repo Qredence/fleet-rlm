@@ -23,14 +23,16 @@ from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
+from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
-from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
+_P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
+_P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
 _LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
@@ -154,15 +156,21 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         pytest.fail("Phase 2 recursive canary is missing configured provider credentials")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'phase2-recursive.db').resolve()}"
     upgrade_to_head(database_url)
-    return policy.model_copy(
-        update={
-            "database_url": database_url,
-            "volume_name": f"fleet-rlm-phase2-recursive-{uuid4()}",
-            "rlm_max_iters": 7,
-            "rlm_max_llm_calls": 10,
-            "turn_timeout_seconds": 900,
-        }
-    )
+    overrides: dict[str, object] = {
+        "database_url": database_url,
+        "volume_name": f"fleet-rlm-phase2-recursive-{uuid4()}",
+        "rlm_max_iters": 7,
+        "rlm_max_llm_calls": 10,
+        "turn_timeout_seconds": 900,
+    }
+    session_snapshot = os.environ.get(_P27_SESSION_SNAPSHOT_ENV)
+    child_snapshot = os.environ.get(_P27_CHILD_SNAPSHOT_ENV)
+    if bool(session_snapshot) != bool(child_snapshot):
+        pytest.fail("P2.7 candidate snapshot overrides must include Session and SemanticChild images")
+    if session_snapshot:
+        overrides["daytona_snapshot"] = session_snapshot
+        overrides["daytona_child_snapshot"] = child_snapshot
+    return policy.model_copy(update=overrides)
 
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
@@ -318,10 +326,11 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "text": (
                         "Execute the narrow native DSPy Phase 2 recursive proof. Run exactly one recursive"
                         ' Daytona proof. First set root_marker = "root-only". Then make exactly one'
-                        " child_result = rlm_query(prompt=...) call; the child prompt must tell the fresh"
+                        " outcome = rlm_query(capsule={'task': ...}) call; the capsule task must tell the fresh"
                         " child interpreter to determine whether the Python name root_marker exists, return"
                         " exactly absent when it does not, and use typed SUBMIT(answer="
                         '"absent"); do not call rlm_query inside the child. After return, assert that'
+                        " outcome['status'] is completed, set child_result = outcome['answer'], and assert"
                         " root_marker is still root-only and child_result is exactly absent. Call"
                         " verify_phase2 exactly once with those values and require its ok result. Finally"
                         ' issue exactly one typed SUBMIT(answer="phase2 complete", evidence='

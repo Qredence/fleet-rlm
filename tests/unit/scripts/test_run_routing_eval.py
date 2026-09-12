@@ -25,7 +25,7 @@ def test_public_sse_chunks_reduce_semantic_route_facts() -> None:
     assert runner.answer_from_public_chunks(chunks) == "photosynthesis is biological"
 
 
-def test_public_sse_chunks_reduce_native_child_and_depth_fallback() -> None:
+def test_public_sse_chunks_reduce_native_child_without_legacy_fallback() -> None:
     chunks = [
         {"type": "tool-input-available", "toolName": "rlm_query", "input": {"prompt_count": 1, "prompt_chars": 117}},
         {
@@ -40,24 +40,23 @@ def test_public_sse_chunks_reduce_native_child_and_depth_fallback() -> None:
         },
         {
             "type": "data-status",
-            "data": {"phase": "recursive", "message": "call_index=1 recursive_depth=2 cleanup_status=completed"},
+            "data": {"phase": "recursive", "message": "call_index=1 recursive_depth=1 cleanup_status=completed"},
         },
         {
             "type": "tool-output-available",
             "toolCallId": "call-2",
-            "output": {"status": "completed", "recursive_depth": 2, "termination_mode": "depth_fallback"},
+            "output": {"status": "completed", "recursive_depth": 1, "termination_mode": "typed_submit"},
         },
         {"type": "data-structured-result", "data": {"value": {"answer": "204"}}},
     ]
 
     facts = runner.facts_from_public_chunks(chunks)
 
-    assert facts.max_native_child_depth == 2
-    assert facts.native_child_count == 1
-    assert facts.depth_fallback_count == 1
+    assert facts.max_native_child_depth == 1
+    assert facts.native_child_count == 2
     assert facts.recursive_prompt_chars == 117
-    assert facts.sandbox_count == 1
-    assert runner.classify_routing_facts(facts) == "recursive_depth_fallback"
+    assert facts.sandbox_count == 2
+    assert runner.classify_routing_facts(facts) == "recursive_child"
     assert runner.answer_from_public_chunks(chunks) == "204"
 
 

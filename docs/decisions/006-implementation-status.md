@@ -16,6 +16,36 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 3 re-cert and P4.5 live campaign (2026-09-11)
+
+Operator-gated live work on `fix/adr006-runtime-continuation` with MLflow
+`3.16.0` on canonical store `http://127.0.0.1:5001`.
+
+- **Phase 3 lane 2 (MVP complete):** receipt
+  `.scratch/live-receipts/mvp-complete-20260911.json` — `passed: false`.
+  The turn reached `stop`, but the model did not invoke `verify_semantic_work`
+  before workspace publish; semantic-step contract remains open.
+- **Phase 3 lane 3 (failed-run discard):** receipt
+  `.scratch/live-receipts/memory-failed-run-20260911-failed-run.json` —
+  `passed: true` after `rlm_wrap_up_seconds=0` and explicit budget-directive
+  override in the live prompt.
+- **P4.5 partial-live smoke:** receipt
+  `.scratch/benchmark-reports/phase4-partial-live-20260911.json` — ten sealed
+  exploratory rows (A3/B3/C2/D2), all cleanup confirmed, MLflow trace IDs on
+  every row; mechanical `incomplete` as expected.
+- **P4.5 full live ablation:** receipt
+  `.scratch/benchmark-reports/phase4-ablation-20260911.json` — **109/144**
+  admissions before halt (`cleanup_failure` / `unconfirmed_cleanup` on trial
+  B-p4-control-01-r1 with `http_400`). Charged spend **$5.56** (under cap).
+  Mechanical `phase4_decision` → **`incomplete`**.
+- **P4.6 recommendation memo:** `.scratch/benchmark-reports/phase4-p46-memo-20260911.md`
+  — **do not retain** simplified recursive profile as default; re-run remaining
+  admissions after fixing the late admission fault. **No default/profile change**
+  until operator approves a complete receipt.
+
+Harness fixes landed in `2aee1c93`: MLflow 3.x search preflight, shielded
+turn-root close, orphaned-sandbox sweep, extended telemetry wait.
+
 ### Phase 0 stabilization baseline (2026-09-10)
 
 - P0.1: the deterministic unit lane initially failed because the editable
@@ -132,8 +162,11 @@ classification must be completed before claiming a Phase 6 quality campaign.
   sync and async drivers retain one shared policy. Field insertion is shared,
   budget accounting stays in `budget.py`, and pinned DSPy marker/type/callback
   adaptation remains in `compat_3_3_1.py`. No model, version or retry-policy change.
-- P2.6: the Workspace operation audit still lacks provider-backed substitution
-  parity. Path/inode/bounds/CAS/atomicity owners remain intact.
+- P2.6: complete. The pinned Daytona SDK capability gate proves filesystem
+  download/list APIs lack Fleet's bounded cursor controls, while upload/delete
+  expose no append, patch, checksum/CAS, or atomic-publication contract. The
+  operation audit therefore retains the Workspace Agent as the sole filesystem
+  semantics owner; no custom operation exists only for historical reasons.
 - P2.7: future image definitions remove DSPy; Session/WorkspaceChild retain
   analysis packages, SemanticChild adds no Python packages. The runtime probe
   checks imports and exact versions from the selected profile. A standard-library-only
@@ -141,9 +174,20 @@ classification must be completed before claiming a Phase 6 quality campaign.
   and typed SUBMIT with no DSPy available. New immutable Session
   `fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5`
   images were created and their runtime probes passed; each disposable probe
-  Sandbox was deleted. Host-tool and representative RLM live execution, sealed
-  receipts, and operator policy promotion remain open. Existing names and
-  configuration remain rollback references.
+  Sandbox was deleted. Existing names and configuration remain rollback
+  references. The opt-in aggregate verifier now
+  checks/probes both candidate images, then runs the narrow Session host-tool/RLM
+  stream proof and SemanticChild recursive lane through verifier-only Settings
+  overrides; it writes one bounded receipt and never changes the configured
+  references.
+  The earlier 2026-09-10 candidate run remained non-promotable: image probes
+  passed, but the Session MVP failed during its first RLM Turn, before recursive
+  evidence. The focused replacement certification then passed on candidate
+  `caa4fd83b578f610e28f6f0e792b04aa0da41d9e`: both immutable probes, the
+  Session host-tool/RLM stream proof, and SemanticChild recursive proof passed
+  with disposable cleanup confirmed. The sealed bounded receipt is
+  `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`.
+  P2.7 is complete; manual promotion remains a separate operator decision.
 
 The Phase 1 retained-broker decision remains authoritative. This continuation
 does not complete Phase 2 or certify native containment, filesystem SDK parity,
@@ -485,7 +529,7 @@ Executable evidence lives in:
 - `tests/unit/backend/daytona/test_native_sdk_contract.py`
 - `tests/unit/backend/daytona/test_sdk_resource_errors.py`
 - `tests/unit/backend/daytona/test_native_interpreter.py`
-- `tests/unit/backend/daytona/test_run_environment_root_lease.py`
+- `tests/unit/backend/daytona/test_daytona_session_lifecycle.py`
 - `tests/unit/backend/test_host_tool_submit_broker.py`
 - `tests/live/backend/test_daytona_containment.py`
 - `scripts/benchmarks/attach_phase3_receipt.py`

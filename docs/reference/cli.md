@@ -3,10 +3,10 @@
 ## Commands
 
 ```bash
-uv run fleet cli [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
+uv run fleet cli [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
 uv run fleet doctor daytona
-uv run fleet web [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
-uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
+uv run fleet web [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind]
+uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind]
 ```
 
 Fleet has no caller authentication. Launchers default to `127.0.0.1` and reject
@@ -20,6 +20,14 @@ MLflow startup, or backend spawning. The
 launcher starts the backend in its own process group, waits up to 90 seconds for
 Daytona readiness, and runs pi-tui in the foreground. Node 22.19+, pnpm, the
 installed TUI workspace, and an unused port are required.
+
+Use `--profile NAME` when a launcher must select a policy explicitly. The
+selected TOML profile is validated before provider, database, Daytona, or TUI
+process initialization; environment variables can provide only values named by
+that profile. Omitting `--profile` preserves the committed
+`config.default_profile` behavior. An explicit profile cannot be combined with
+`--reload`, because an in-memory validated settings object cannot be carried
+safely into a Uvicorn reloader process.
 
 For the shipped `daytona-recursive` policy, `fleet cli`
 starts the installed MLflow server on
@@ -111,9 +119,57 @@ Artifact mode downloads content, checks length and SHA-256, fsyncs a temporary
 file, and atomically renames it. It does not start the interactive screen.
 
 `fleet web` and `fleet-rlm serve-api` are backend-only and use the profile
-selected by `[config] default_profile`. The standalone
+selected by `[config] default_profile`, unless `--profile NAME` is supplied.
+The standalone
 `pnpm --dir tools/fleet-tui start -- [options]` command connects pi-tui to an
 already-running API.
+
+### Phase 4 campaign transport
+
+The FastAPI HTTP/SSE service is the canonical backend interface. The TUI is an
+operator client of that same service and is not the campaign scheduler. To run
+the explicitly bounded campaign profile locally:
+
+```bash
+uv run fleet-rlm serve-api --profile phase4-campaign --port 8000
+uv run fleet cli --profile phase4-campaign
+uv run python scripts/benchmarks/run_phase4_campaign.py --dry-run \
+  --output .scratch/benchmark-reports/phase4-api-dry-run.json
+```
+
+The campaign driver supervises one isolated API service per arm (A/B/D from
+the candidate checkout, C from the frozen baseline) and sends every trial
+through `POST /api/attachments`,
+`POST /api/sessions`, and `POST /api/sessions/{id}/turns` over the public SSE
+contract. Arm behavior differs by sealed profile only. The profiles are opt-in;
+ordinary launchers retain their existing defaults. The prior receipt at
+`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
+incomplete, and superseded, so it is not value proof.
+
+Every live campaign mode requires the MLflow tracking server from the
+campaign profile to be reachable before it admits a trial (local server at
+`http://127.0.0.1:5001` by default). Each completed trial links its sealed
+receipt row to the trial's MLflow root trace identifier; completed rows
+without linkage keep the campaign `incomplete`.
+
+To exercise the same API/SSE path against the ordinary committed profile, run
+the fixed exploratory sample (the driver supervises all four arm services; no
+separately running backend is needed):
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+This admits ten sealed rows with every arm on supervised FastAPI services.
+It is deliberately partial and non-certifying; it records unknown
+cost instead of treating it as zero, and it leaves the ordinary launcher
+profile unchanged.
+
+The 2026-09-10 sample is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json`; it attempted ten
+rows and is intentionally marked `incomplete`, not certified value evidence.
 
 ## Daytona doctor
 

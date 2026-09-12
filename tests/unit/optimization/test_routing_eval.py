@@ -24,18 +24,18 @@ from fleet_rlm.optimization.routing import (
 from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
-def test_curated_scenarios_cover_the_six_owned_routes() -> None:
+def test_curated_scenarios_cover_native_and_recursive_routes() -> None:
     assert [scenario.expected_route for scenario in CURATED_ROUTING_SCENARIOS] == [
         "python_native",
         "semantic_single",
         "semantic_batched",
         "recursive_child",
-        "recursive_depth_fallback",
+        "recursive_child",
         "recursive_batch",
     ]
     assert all(scenario.prompt for scenario in CURATED_ROUTING_SCENARIOS)
@@ -49,7 +49,6 @@ def test_routing_classifier_maps_each_public_route_shape() -> None:
     assert classify_routing_facts(RoutingFacts(tool_counts={"llm_query_batched": 1})) == "semantic_batched"
     assert classify_routing_facts(RoutingFacts(native_child_count=2, max_native_child_depth=1)) == "recursive_child"
     assert classify_routing_facts(RoutingFacts(recursive_batch_calls=1)) == "recursive_batch"
-    assert classify_routing_facts(RoutingFacts(depth_fallback_count=1)) == "recursive_depth_fallback"
 
 
 def test_scoring_separates_final_answer_quality_from_routing_efficiency() -> None:
@@ -127,7 +126,7 @@ def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
     assert summary["run_indexes"] == [3]
 
 
-def test_native_child_to_sub_lm_fallback_has_no_second_sandbox() -> None:
+def test_native_child_semantic_call_has_no_second_sandbox() -> None:
     """The deterministic harness lane proves the fixed boundary with no provider."""
     adapter = dspy.JSONAdapter()
     created: list[DaytonaCodeInterpreter] = []
@@ -147,7 +146,7 @@ def test_native_child_to_sub_lm_fallback_has_no_second_sandbox() -> None:
         models=RLMModelBundle(
             dspy.utils.DummyLM(
                 [
-                    {"reasoning": "delegate from child", "code": "inner = rlm_query(prompt='inner slice')"},
+                    {"reasoning": "semantic judgment", "code": "inner = llm_query('inner slice')"},
                     {"reasoning": "complete child", "code": "SUBMIT(answer=inner)"},
                 ],
                 adapter=adapter,
@@ -159,19 +158,20 @@ def test_native_child_to_sub_lm_fallback_has_no_second_sandbox() -> None:
         deadline=time.monotonic() + 30,
     )
 
-    assert executor.tool(prompt="outer recursive classification") == "fallback element"
+    outcome = executor.tool(capsule={"task": "outer recursive classification"})
+    assert outcome["status"] == "completed"
+    assert "fallback element" in outcome["answer"]
     facts = facts_from_recursive_summary(
         executor.summary(),
         latency_ms=1,
-        tool_counts={"rlm_query": 2},
+        tool_counts={"rlm_query": 1},
         sandbox_count=len(created),
     )
 
     assert len(created) == 1
-    assert facts.depth_fallback_count == 1
     assert facts.native_child_count == 1
     assert facts.max_native_child_depth == 1
-    assert classify_routing_facts(facts) == "recursive_depth_fallback"
+    assert classify_routing_facts(facts) == "recursive_child"
     assert created[0]._shutdown
 
 

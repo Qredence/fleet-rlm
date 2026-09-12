@@ -30,6 +30,7 @@ from uuid import UUID
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
+from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments.models import PreparedAttachment
 from fleet_rlm.chat.run_authority import RunAuthority
@@ -59,6 +60,7 @@ from fleet_rlm.rlm.events import (
     has_reasoning,
     observe_tool,
     reconcile_trajectory,
+    recursive_summary,
 )
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
@@ -75,11 +77,11 @@ from fleet_rlm.rlm.program import (
     sanitize_base_url,
 )
 from fleet_rlm.rlm.recursion import (
+    ChildRuntimeAuthorizationError,
     ChildRuntimeFactory,
     DelegationMetrics,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
-    build_recursive_session_snapshot,
 )
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -228,6 +230,7 @@ class RLMExecutionSpec:
     tools: tuple[dspy.Tool, ...] = ()
     tool_event_views: Mapping[str, ToolEventView] = field(default_factory=dict)
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY
+    read_artifact: Callable[[UUID, int], Coroutine[Any, Any, bytes]] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_event_views", MappingProxyType(dict(self.tool_event_views)))
@@ -566,10 +569,10 @@ class WorkerOwnership:
             with contextlib.suppress(BaseException):
                 await self._effect.settle()
 
-        # Recursive batch workers run in a separate ThreadPoolExecutor. A
-        # Root task can finish after a batch has failed while those workers
-        # still own child leases, so wait for each ownership callback off the
-        # event loop before Run resources are released.
+        # Recursive child workers run on owned blocking threads joined through
+        # the Turn scheduler. A Root task can finish after a batch has failed
+        # while those workers still own child leases, so wait for each
+        # ownership callback off the event loop before Run resources are released.
         waiter_errors: list[BaseException] = []
         for waiter in tuple(self._blocking_waiters):
             owned = OwnedEffect.start(asyncio.to_thread(waiter))
@@ -1156,6 +1159,27 @@ def _public_failure_message(exc: BaseException) -> str:
     return "Turn failed"
 
 
+def _delegation_usage(context: RLMExecutionContext, executor: RecursiveRLMExecutor | None = None) -> dict[str, Any]:
+    """Build the delegation telemetry mapping merged into outcome usage.
+
+    The recursive executor is only available on the completed path; the
+    cancelled/failed paths fall back to the shared delegation metrics so the
+    SSE data-usage event still carries call counts and delegated bytes.  When
+    no reserved call count survived (cancel/fail), derive the count from
+    started child/batch calls so the payload never claims zero delegation
+    next to nonzero call counts.
+    """
+    summary = recursive_summary(executor, context.delegation.metrics)
+    call_count = summary.call_count
+    if not call_count:
+        snapshot = summary.delegation_metrics
+        call_count = snapshot.recursive_child_calls or snapshot.recursive_batch_calls
+    return {
+        "recursive_call_count": call_count,
+        "delegation_metrics": summary.delegation_metrics.as_dict(),
+    }
+
+
 class _RunRuntimeLease:
     """Release Run-local program callbacks and worker resources exactly once."""
 
@@ -1316,7 +1340,12 @@ class RLMRunner:
             outcome.append(
                 RLMOutcome(
                     terminal_status="cancelled",
-                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    usage=observed_usage(
+                        prediction[-1] if prediction else None,
+                        duration_ms=duration_ms,
+                        lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                        delegation=_delegation_usage(context),
+                    ),
                     public_error_message="Turn cancelled",
                     duration_ms=duration_ms,
                 )
@@ -1336,7 +1365,12 @@ class RLMRunner:
             outcome.append(
                 RLMOutcome(
                     terminal_status=_terminal_status(exc),
-                    usage=observed_usage(prediction[-1] if prediction else None, duration_ms=duration_ms),
+                    usage=observed_usage(
+                        prediction[-1] if prediction else None,
+                        duration_ms=duration_ms,
+                        lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                        delegation=_delegation_usage(context),
+                    ),
                     public_error_message=_public_failure_message(exc),
                     duration_ms=duration_ms,
                 )
@@ -1399,7 +1433,12 @@ class RLMRunner:
             RLMOutcome(
                 terminal_status="completed",
                 prediction=result,
-                usage=observed_usage(prediction[-1], duration_ms=duration_ms),
+                usage=observed_usage(
+                    prediction[-1],
+                    duration_ms=duration_ms,
+                    lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
+                    delegation=_delegation_usage(context, _recursive_executor),
+                ),
                 artifact_candidates=context.capabilities.drain_artifact_candidates(),
                 memory_candidates=context.capabilities.drain_memory_candidates(),
                 execution_details=tuple(observations.details),
@@ -1473,6 +1512,85 @@ class RLMRunner:
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
                 raise RLMConfigError("recursive child runtime is unavailable")
+
+            application_loop = asyncio.get_running_loop()
+
+            def check_selected_authority() -> None:
+                if context.identity.authority.revoked:
+                    raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
+                if time.monotonic() >= context.execution.deadline:
+                    raise TimeoutError("recursive child deadline exceeded")
+
+            async def read_selected_artifact(artifact_id: UUID, remaining_bytes: int) -> bytes:
+                check_selected_authority()
+                assert spec.read_artifact is not None
+                try:
+                    return await spec.read_artifact(artifact_id, remaining_bytes)
+                except ArtifactNotFoundError:
+                    raise ChildRuntimeAuthorizationError("selected Artifact is unavailable or unauthorized") from None
+                finally:
+                    check_selected_authority()
+
+            def read_selected_input(reference: str, remaining_bytes: int) -> str:
+                """Reuse prepared read capabilities, never interpret a locator as authority."""
+                check_selected_authority()
+                if reference.startswith("artifact://"):
+                    identifier = reference.removeprefix("artifact://")
+                    try:
+                        artifact_id = UUID(identifier)
+                    except ValueError:
+                        raise ChildRuntimeAuthorizationError(
+                            "selected Artifact is unavailable or unauthorized"
+                        ) from None
+                    if identifier != str(artifact_id) or spec.read_artifact is None:
+                        raise ChildRuntimeAuthorizationError("selected Artifact is unavailable or unauthorized")
+                    # The native callback is an owned blocking child worker. Do
+                    # not cancel this future on timeout: ownership must remain
+                    # until the host read actually settles, even after revocation.
+                    future = asyncio.run_coroutine_threadsafe(
+                        read_selected_artifact(artifact_id, remaining_bytes), application_loop
+                    )
+                    remaining = context.execution.deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("recursive child deadline exceeded")
+                    try:
+                        # Do not cancel a read that has crossed the fence: the
+                        # application loop retains ownership until the async
+                        # catalog/blob operation settles and performs its
+                        # post-read authority check.  The child worker remains
+                        # owned by the recursive scheduler meanwhile.
+                        raw = future.result(timeout=remaining)
+                    except TimeoutError:
+                        raise TimeoutError("recursive child deadline exceeded") from None
+                    try:
+                        return raw.decode("utf-8")
+                    except UnicodeDecodeError:
+                        raise ValueError("selected input must be UTF-8 text") from None
+                if ":" in reference:
+                    raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
+                tools = {str(tool.name): tool for tool in spec.tools}
+                if reference.startswith("projects/"):
+                    parts = reference.split("/", 2)
+                    if len(parts) != 3 or "read_project_text" not in tools:
+                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
+                    page = tools["read_project_text"](path=reference, max_chars=min(10_000, remaining_bytes))
+                else:
+                    reader = tools.get("read_workspace_text")
+                    if reader is None:
+                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
+                    page = reader(path=reference, max_chars=min(10_000, remaining_bytes))
+                # Host reads are synchronous at this boundary, but they still
+                # may cross a revocation/deadline while the filesystem or
+                # mounted Volume is servicing the request.  Recheck before
+                # any bytes are delivered to the child frame.
+                check_selected_authority()
+                if not isinstance(page, Mapping) or page.get("ok") is not True or page.get("eof") is not True:
+                    raise ValueError("select a bounded complete text input before delegation")
+                content = page.get("content")
+                if not isinstance(content, str):
+                    raise ValueError("selected input must be UTF-8 text")
+                return content
+
             recursive_executor = RecursiveRLMExecutor(
                 models=context.execution.models,
                 options=context.delegation.recursive_options,
@@ -1481,14 +1599,7 @@ class RLMRunner:
                 metrics=context.delegation.metrics,
                 observer=observations.publish,
                 is_authorized=lambda: not context.identity.authority.revoked,
-                snapshot=build_recursive_session_snapshot(
-                    request=context.session.request,
-                    history=context.session.history,
-                    session_context=context.session.session_context,
-                    workspace=spec.workspace,
-                    models=context.execution.models,
-                    workspace_memory_digest=context.session.workspace_memory_digest,
-                ),
+                selected_input_reader=read_selected_input,
             )
             # Register the executor's owned scheduler before any remaining
             # worker startup step can fail. Externally supplied schedulers are
@@ -1527,8 +1638,6 @@ class RLMRunner:
             recursive_tools = (
                 recursive_executor.tool,
                 recursive_executor.batched_tool,
-                recursive_executor.capsule_tool,
-                recursive_executor.readonly_partial_capsule_batch_tool,
             )
         all_tools = (*observed_tools, *recursive_tools)
         # A Run receives a fresh DSPy program and direct tool bindings. The broker
@@ -1800,21 +1909,32 @@ async def probe_root_lm(
     )
     try:
         with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=False):
-            prediction = await rlm.acall(
-                interpreter,
-                probe=(
-                    "Set marker = 'probe-slice'. On a later REPL iteration call "
-                    "child = rlm_query(prompt='Classify this selected value: ' + marker), "
-                    "then submit the child answer with typed SUBMIT(answer=child). "
-                    "Use at least three REPL iterations and keep the prompt bounded."
-                ),
+            effect = OwnedEffect.start(
+                asyncio.to_thread(
+                    rlm,
+                    interpreter,
+                    probe=(
+                        "Set marker = 'probe-slice'. On a later REPL iteration call "
+                        "child = rlm_query(capsule={'task': 'Classify the selected value', 'fragments': [marker]}), "
+                        "check child['status'] == 'completed', then submit the child answer "
+                        "with typed SUBMIT(answer=child['answer']). "
+                        "Use at least three REPL iterations and keep the prompt bounded."
+                    ),
+                )
             )
+            settled = await effect.settle()
+            if settled.caller_cancelled:
+                raise asyncio.CancelledError
+            prediction = settled.result()
     except AdapterParseError as exc:
         raise RLMProviderContractError("Root LM returned an unparseable RLM action") from exc
     except Exception as exc:
         raise RLMProviderContractError("Root LM RLM compatibility probe failed") from exc
     finally:
-        interpreter.shutdown()
+        try:
+            await OwnedEffect.start(asyncio.to_thread(recursive.wait_owned)).settle()
+        finally:
+            await OwnedEffect.start(asyncio.to_thread(interpreter.shutdown)).settle()
 
     trajectory = getattr(prediction, "trajectory", ())
     answer = getattr(prediction, "answer", None)

@@ -79,6 +79,15 @@ Startup never applies migrations automatically — initialize the database expli
 uv run fleet cli
 ```
 
+For an explicitly selected policy, pass its non-secret profile name to both
+launchers. The Phase 4 campaign profile is opt-in and does not change ordinary
+defaults:
+
+```bash
+uv run fleet-rlm serve-api --profile phase4-campaign --port 8000
+uv run fleet cli --profile phase4-campaign
+```
+
 **Backend only:**
 
 ```bash
@@ -101,6 +110,42 @@ uv run fleet doctor daytona
 
 > **Profile mismatch fails fast.** `fleet cli` requires a Daytona profile that matches your credentials. Select profiles with `/profiles` in the TUI or edit `default_profile`, then restart Fleet.
 
+FastAPI is Fleet's canonical backend interface. `fleet cli` supervises that
+backend and attaches the pi-tui client; the TUI does not define a second
+execution path. An explicit `--profile NAME` is validated before provider,
+database, Daytona, or TUI initialization. The existing `default_profile`
+selection remains unchanged when the option is omitted, and explicit profiles
+cannot be combined with `--reload`.
+
+The Phase 4 campaign sends all four arms (A/B/C/D) through supervised
+disposable FastAPI services via the public API/SSE transport, so lifecycle,
+authority, Daytona creation/deletion, and cleanup are measured on the same
+transport Fleet ships. The earlier receipt at
+`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
+incomplete, and superseded; it is not value proof. Live campaign modes
+require the profile's MLflow tracking server to be reachable before they
+admit a trial, and every completed trial links its receipt row to the
+trial's MLflow root trace.
+
+For a bounded live transport sample, run the fixed ten-trial API probe (the
+driver supervises all four arm services; no separately running backend is
+needed):
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+The probe keeps every arm on the public FastAPI/SSE path and writes a
+content-safe exploratory receipt. It is not the 144-
+trial value campaign and cannot mark Phase 4 complete; unknown spend remains
+explicit in that receipt.
+
+The 2026-09-10 exploratory receipt is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and remains
+`incomplete`.
+
 ## How a turn works
 
 ```text
@@ -119,8 +164,9 @@ The root agent can answer directly, delegate to sub-LMs, or fan out bounded recu
 
 | Command | What it does |
 | --- | --- |
-| `uv run fleet cli` | Start backend + pi-tui terminal (Daytona profile required) |
-| `uv run fleet web` | Start backend only on port 8000 |
+| `uv run fleet cli` | Start the canonical FastAPI backend + pi-tui terminal (Daytona profile required) |
+| `uv run fleet web` | Start the canonical FastAPI backend only on port 8000 |
+| `uv run fleet-rlm serve-api --profile NAME` | Start the backend with an explicit non-secret profile |
 | `uv run fleet doctor daytona` | Opt-in disposable probe of provider, DB, mounts, interpreter |
 | `uv run python scripts/db_init.py` | Initialize or upgrade database to Alembic head |
 | `make check` | Default validation lane (backend + TUI) |

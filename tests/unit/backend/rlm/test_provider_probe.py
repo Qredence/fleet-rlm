@@ -36,9 +36,9 @@ async def test_provider_probe_requires_multiple_native_actions_and_typed_submit(
     lm = dspy.utils.DummyLM(
         [
             {"reasoning": "initialize", "code": "marker = 'probe-slice'"},
-            {"reasoning": "delegate", "code": "child = rlm_query(prompt='Classify: ' + marker)"},
+            {"reasoning": "delegate", "code": "child = rlm_query(capsule={'task': 'Classify', 'fragments': [marker]})"},
             {"reasoning": "child submit", "code": "SUBMIT(answer='child-ok')"},
-            {"reasoning": "submit", "code": "SUBMIT(answer=child)"},
+            {"reasoning": "submit", "code": "SUBMIT(answer=child['answer'])"},
         ],
         adapter=dspy.JSONAdapter(),
     )
@@ -74,8 +74,11 @@ async def test_provider_probe_reports_native_extraction_fallback_for_forced_fina
         def summary(self) -> SimpleNamespace:
             return SimpleNamespace(call_count=1)
 
+        def wait_owned(self) -> None:
+            pass
+
     class FakeRLM:
-        async def acall(self, interpreter, **kwargs):
+        def __call__(self, interpreter, **kwargs):
             del interpreter
             assert "probe" in kwargs
             return SimpleNamespace(

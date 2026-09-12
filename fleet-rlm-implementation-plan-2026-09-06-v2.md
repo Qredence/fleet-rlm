@@ -311,8 +311,7 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
-**Progress (2026-09-10):** P2.1 through P2.5 are complete. P2.6 remains an
-SDK-parity audit. P2.7 has reduced image definitions
+**Progress (2026-09-10):** P2.1 through P2.6 are complete. P2.7 has reduced image definitions
 and verified new disposable runtime probes, but still needs representative live
 host-tool/RLM evidence, sealed receipts, and operator promotion.
 
@@ -442,14 +441,14 @@ recorded in the ADR006 continuation ledger; no DSPy version or retry policy chan
 
 **Done when:** upgrading DSPy primarily requires reviewing one small compatibility seam, not a large Fleet policy module.
 
-## P2.6 - Simplify Workspace file execution selectively
+## P2.6 - Simplify Workspace file execution selectively — complete
 
-**Status: audited, open (2026-09-10).** The operation audit still has no
-provider-backed read/list/stat substitution proof. Those operations require
-confinement, inode revalidation, bounds and cursor/checksum behavior beyond
-matching an SDK method name. Custom filesystem code is retained. Local
-Workspace Agent regressions cannot certify SDK parity; no replacement or
-phase completion is claimed.
+**Status: complete (2026-09-10).** The pinned Daytona SDK capability gate now
+proves its filesystem API lacks Fleet's bounded download and cursor controls,
+and has no append, patch, checksum/CAS, or atomic-publication contract. The
+operation audit therefore classifies every custom Workspace operation as
+semantic rather than historical. No unsafe SDK substitution was made; the
+Workspace Agent remains the sole filesystem semantics owner.
 
 **Rationale:** The custom Workspace Agent has stronger write/patch semantics than generic Volume APIs in some places, but read/list/search wrappers may duplicate Daytona SDK functionality.
 
@@ -460,11 +459,15 @@ phase completion is claimed.
 
 **Validate:** path traversal/symlink safety, checksum/CAS behavior, write atomicity, and read/list parity.
 
+The pinned-SDK capability gate and operation audit must also prove that no
+current custom operation is historical; path traversal, symlink, checksum/CAS,
+atomicity, and bounded-read contracts remain mandatory.
+
 **Done when:** there is no custom remote filesystem operation whose only reason for existence is historical.
 
 ## P2.7 - Minimize Daytona snapshot dependencies
 
-**Status: in progress (2026-09-10).** Audited Fleet's two `SandboxSerializable`
+**Status: complete (2026-09-10).** Audited Fleet's two `SandboxSerializable`
 implementations, the pinned DSPy serialization prelude, and broker setup:
 committed history and attachment context reconstruct using the standard
 library and broker helpers. Future Session/WorkspaceChild definitions omit
@@ -475,8 +478,23 @@ regression proves broker history/context reconstruction and typed SUBMIT
 without DSPy. New immutable Session `fleet-rlm-python313-v10` and
 SemanticChild `fleet-rlm-python313-child-v5` images were created and passed
 runtime probes; each probe's disposable Sandbox was deleted. Configured names
-and prior images are unchanged rollback references. Host-tool and representative
-RLM live execution, sealed receipts, and operator policy promotion remain open.
+and prior images are unchanged rollback references.
+
+An opt-in aggregate certification controller now preserves the configured
+rollback references while it checks and probes both immutable candidates, then
+runs a narrow Session host-tool/RLM stream proof and the SemanticChild recursive
+proof as separate evidence lanes. The broad Session MVP remains an independent
+lifecycle/durability proof and is not a P2.7 snapshot-dependency prerequisite.
+The 2026-09-10 live attempt did not pass: both disposable image probes succeeded,
+but the candidate-scoped Session MVP failed in its first RLM Turn. Its bounded
+aggregate receipt is `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r2.json`;
+the retained diagnostic receipt is `.scratch/p27-debug-mvp-test-20260910.json`.
+The replacement focused certification passed on candidate
+`caa4fd83b578f610e28f6f0e792b04aa0da41d9e`: both immutable image probes,
+the Session host-tool/RLM stream proof, and the SemanticChild recursive proof
+passed with disposable cleanup confirmed. Its sealed bounded receipt is
+`.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`.
+This completes P2.7; manual promotion remains a separate operator decision.
 
 **Rationale:** DSPy controls the RLM loop on the host. Installing DSPy inside every sandbox is unnecessary unless generated remote setup actually imports it.
 
@@ -486,16 +504,34 @@ RLM live execution, sealed receipts, and operator policy promotion remain open.
 - retain only packages generated Python is expected to use;
 - regenerate immutable snapshot identities instead of mutating existing names.
 
+**Certification contract:** certify only immutable Session and SemanticChild
+candidates; preserve the configured snapshot references until manual promotion;
+reject mutable names, dirty candidates, failing probes, and malformed receipts
+before promotion. The existing snapshot probe, focused Session stream verifier,
+and focused recursive verifier are the supported evidence paths.
+
+**Remaining operator action:** after receipt review, promote the configured
+snapshot references atomically using the documented deployment procedure; keep
+current images as rollback references.
+
 **Validate:** snapshot import probe, typed `SUBMIT`, committed history/context reconstruction, host tools, and representative RLM execution.
 
 **Done when:** the sandbox image contains only dependencies required inside the sandbox.
 
-**Phase 2 exit (pending P2.6 and P2.7):** one runtime graph, one provider
-package, one execution implementation, fewer resident/global owners.
+**Phase 2 exit:** one runtime graph, one provider package,
+one execution implementation, fewer resident/global owners.
 
 ---
 
 # Phase 3 - Test-suite consolidation
+
+**Status: consolidation implemented; affected live certification incomplete
+(2026-09-10).** P3.1–P3.4 and P3.6 are implemented, and the deterministic full
+gate passed. P3.5 preserves the existing live entry points and narrow matrix;
+its affected live run has three failing cases (two MVP cases and the failed-run
+memory-discard case). Phase 3 is not marked complete. The ownership inventory,
+scenario reconciliation, exact candidate SHA, passing receipts, and remaining
+certification failures are recorded in `docs/testing/phase3-consolidation-ledger.md`.
 
 The goal is **not** to concatenate hundreds of tests into a few giant files. The goal is to organize tests around stable behavior contracts and remove repeated setup/assertions for internals that no longer exist.
 
@@ -626,6 +662,145 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 # Phase 4 - Recursive RLM simplification and value proof
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
+
+**Status (2026-09-10): partially implemented; not complete.** The comparison
+baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
+renames capsule allocation to bytes, replaces the duplicate capsule result type
+with typed `ChildOutcome`/`ChildUsage`, records child-local LM usage, and stops
+echoing unread authorization references as evidence. Selected Session/Project
+text reads have a bounded access ledger; inline delivery is separate from reads.
+Selected Artifact UUIDs now resolve through the existing Turn-bound
+ArtifactReader, with authorization/integrity checks and a pre-fetch byte limit.
+Actual delivered read bytes are included in child input accounting. Child citation claims now use
+canonical bracketed reference/fragment identifiers and are validated against
+actual access/delivery before an answer is returned. Required citations cannot
+be silently omitted; `cited_evidence` is separate from access and is not a claim
+of semantic verification.
+
+The recursive scheduler now uses the application loop, one semaphore, and owned
+blocking native child execution, without private child loops or a recursive
+batch thread pool. Root worker execution remains unchanged. The local slice
+passed `make check` (79.0% coverage; 543 TUI tests); subsequent ownership
+refinements passed the focused RLM/routing/campaign tests. Live scheduler parity
+has not been exercised: the existing recursive verifier requires a clean,
+committed candidate. Local checkpoint commits are now operator-authorized;
+publication and deployment remain outside the approved scope.
+
+P4.4 is locally complete: Root exposes exactly the two typed capsule tools and
+the active routing evaluator no longer presents a depth-fallback route. P4.5
+now has a sealed 12-case corpus, balanced 144-trial schedule, four immutable
+arm specifications (including the frozen `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`
+baseline), public-rate reservations, content-safe receipts, and task-clustered
+bootstrap/retention logic. The explicit `phase4-campaign` profile constrains
+the root to six iterations/eight LM calls and children to four/four. No paid
+campaign has been launched. P4.5 live evidence and P4.6's resulting
+retention/deletion/default decision therefore remain open; no recursion default
+has changed.
+
+P4.4 migration is complete locally: Root registration exposes only
+`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)`, both returning
+typed outcomes. The batch returns ordered ordinary partial failures, and capsule
+children receive no Fleet recursion tool. Unused capsule/read-only tool
+constructors and properties are removed. Recursive Session snapshot construction,
+immutable history-copy wrappers, nested executors, prompt-only batch execution,
+and Fleet depth fallback have also been deleted. Capsule children use native
+semantic calls under the child budget. Deterministic callers and contract
+fixtures and credentialed live caller signatures are migrated; executing those
+live callers and the full completion audit remain open. The deletion revision passed `make check` after a batch deadline
+race was fixed by rechecking parent authority/deadline before return. Later
+live-caller and citation changes passed a fresh full `make check`. The subsequent
+Artifact wiring passed focused Root-to-child tests for successful scoped reads,
+missing/malformed references, and authority revocation during a read. Its full
+`make check` also passed (79.0% coverage; 543 TUI tests). No live evidence has
+been collected for these revisions.
+Earlier `make check` receipts above do not certify this later migration.
+
+The Phase 4 adapter boundary is explicit: arms C and D submit their isolated
+Session/attachment Turns through the FastAPI ASGI application and consume the
+public SSE stream, so lifecycle, authority, selected-input delivery, Daytona
+creation/deletion, and cleanup measurements come from the same transport used
+by Fleet. Arms A and B remain intentionally direct DSPy ablations; they do not
+claim to certify the FastAPI production path.
+
+The API-first campaign slice is now implemented locally. `serve-api`,
+`fleet web`, and the supervised `fleet cli` accept an explicit `--profile` and load
+that profile before resource initialization; explicit profile selection is
+rejected with `--reload`. The campaign driver supervises disposable candidate
+and frozen-baseline FastAPI services, waits for `/health` and `/health/ready`,
+uses one Session per trial, parses only the public UI-v1 SSE chunks, and joins
+process groups before cleanup. A credential-free fake service exercises the
+same HTTP/SSE client and lifecycle observer. The local protocol receipt at
+`.scratch/benchmark-reports/phase4-api-dry-run-20260910-v8.json` contains all
+144 scheduled attempts (12 cases × 3 repeats × 4 balanced rotations), but it is
+fixture transport evidence only and is not provider value proof.
+
+For the operator-approved API-first exploratory slice, use the ordinary
+committed profile (no `--profile`) and keep the candidate FastAPI service on
+loopback. `--partial-live` starts only the disposable frozen-baseline C service
+and routes C/D through the public attachment, Session, Turn, and UI-v1 SSE
+contract; A/B remain direct DSPy ablations. It admits exactly ten sealed rows
+(A3/B3/C2/D2 from `p4-suitable-01`) in three balanced rotations, retains the
+candidate-created Session/attachment records, and treats spend/optional D
+telemetry as explicitly non-gating observations. The resulting receipt is an
+exploratory partial sample and must remain `incomplete`; it cannot close P4.5,
+P4.6, or the Phase 4 exit.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
+  --partial-live --candidate-url http://127.0.0.1:8000 \
+  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+```
+
+The 2026-09-10 exploratory execution is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json`. It attempted
+all ten scheduled rows (A3/B3/C2/D2) across `ABCD`, `BCDA`, and `CDAB`; three
+A trials completed, seven rows failed or lacked required observations, no row
+was a verified success, and the mechanical result is `incomplete`. The frozen
+C service was verified at `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead` and its
+process cleanup completed. C recorded baseline timeout/cleanup loss, B's
+native-RLM rows were ordinary malformed-result failures, and D used the
+already-running ordinary candidate so its lifecycle telemetry and spend were
+unknown by design. The two D Sessions and attachment-backed Turns were kept
+in the candidate database and labeled `phase4-D-p4-suitable-01-r1` and
+`phase4-D-p4-suitable-01-r2`. This receipt is failed exploratory evidence,
+not P4.5 value proof; P4.5, P4.6, and the Phase 4 exit remain open.
+
+The immutable prior receipt at
+`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` remains failed,
+incomplete, and superseded. Its top-level observed spend is unknown, so the
+full 144-trial live driver refuses to treat it as zero when applying the
+cumulative US$50 cap. The ten-row exploratory path above intentionally does
+not use that cap as an admission gate; it records unknown spend explicitly and
+does not qualify as value evidence. Consequently P4.5 live evidence, the
+mechanical P4.6 decision, and the Phase 4 exit remain open; no live
+certification or recursive-default change is claimed.
+
+The follow-up failure-accounting slice keeps single-capsule measurements and
+successful access identifiers even when execution fails, without treating those
+accesses as a valid answer. Ownership cancellation remains fatal, and an
+unsettled worker cannot be converted into an ordinary partial result. The
+redundant executor constructed for each capsule has been removed; selected
+access and usage are invocation-local without a copied Session snapshot.
+
+Pricing preflight verified the official Databricks base-region conversion of
+US$0.07/DBU in the [pricing page's published data](https://www.databricks.com/en-pricing-assets/page-data/product/pricing/foundation-model-serving/page-data.json).
+At the listed V4 Flash rates
+of 2 input / 4 output DBU per million tokens, that is US$0.14 input / US$0.28
+output per million tokens in base regions. Regional applicability and complete
+worst-case admission bounds remain required before paid work; these figures
+alone are not a certified campaign cost bound.
+
+The agreed pilot is 12 tasks (six multi-document/data, three conflicting or
+incomplete-evidence, three simple controls), three repeats, four arms: at most
+144 runs, US$50 total model/Daytona spend, four hours including a 15-minute
+cleanup reserve, standard public pricing, one root trial and at most five
+Sandboxes concurrently. Retention requires at least +10 percentage points
+verified success on suitable tasks over the better non-recursive arm, a positive
+paired task-clustered 95% confidence-interval lower bound, and at most 2x cost per
+success and 2x p95 latency. Controls must not regress; safety failures are fatal.
+Ordinary cleaned-up sibling failures will become ordered typed partial results.
+An inconclusive outcome disables recursion by default; an incomplete campaign
+must remain explicitly incomplete rather than being called value proof.
 
 ## P4.1 - Normalize the capsule/result contract
 

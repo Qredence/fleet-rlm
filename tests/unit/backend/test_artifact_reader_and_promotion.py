@@ -20,9 +20,11 @@ class _Catalog:
 @dataclass
 class _Blobs:
     data: bytes
+    reads: int = 0
 
     async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
         del workspace_id, logical_path
+        self.reads += 1
         return self.data
 
 
@@ -55,6 +57,46 @@ async def test_artifact_reader_returns_only_integrity_checked_committed_content(
 
 
 @pytest.mark.asyncio
+async def test_artifact_byte_allowance_rejects_before_blob_fetch_and_accepts_exact_limit() -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
+    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+
+    ref = ArtifactRef(
+        uuid4(),
+        uuid4(),
+        uuid4(),
+        "text",
+        None,
+        "text/plain",
+        3,
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    )
+    access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
+    blobs = _Blobs(b"abc")
+    reader = ArtifactReader(catalog=_Catalog(StoredArtifact(ref, "private/artifact")), blobs=blobs)
+    with pytest.raises(ArtifactValidationError, match="byte allowance"):
+        await reader.content(access, ref.id, max_bytes=2)
+    assert blobs.reads == 0
+    assert (await reader.content(access, ref.id, max_bytes=3)).data == b"abc"
+    assert blobs.reads == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [True, 0, -1, 1.5])
+async def test_artifact_byte_allowance_rejects_invalid_limits(limit: object) -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess
+    from fleet_rlm.artifacts.reader import ArtifactReader
+
+    blobs = _Blobs(b"unused")
+    reader = ArtifactReader(catalog=_Catalog(None), blobs=blobs)
+    with pytest.raises(ArtifactValidationError, match="positive integer"):
+        await reader.content(ArtifactAccess(uuid4(), uuid4()), uuid4(), max_bytes=limit)
+    assert blobs.reads == 0
+
+
+@pytest.mark.asyncio
 async def test_artifact_reader_collapses_corrupt_or_missing_bytes_to_not_found() -> None:
     from fleet_rlm.artifacts.errors import ArtifactNotFoundError
     from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
@@ -68,6 +110,21 @@ async def test_artifact_reader_collapses_corrupt_or_missing_bytes_to_not_found()
 
     with pytest.raises(ArtifactNotFoundError):
         await reader.content(ArtifactAccess(user_id=uuid4(), workspace_id=uuid4()), ref.id)
+
+
+@pytest.mark.asyncio
+async def test_artifact_reader_rejects_metadata_declared_as_non_text_before_blob_fetch() -> None:
+    from fleet_rlm.artifacts.errors import ArtifactValidationError
+    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
+    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+
+    ref = ArtifactRef(uuid4(), uuid4(), uuid4(), "text", None, "application/octet-stream", 3, "a" * 64)
+    blobs = _Blobs(b"abc")
+    reader = ArtifactReader(catalog=_Catalog(StoredArtifact(ref, "private/artifact")), blobs=blobs)
+
+    with pytest.raises(ArtifactValidationError, match="supported text type"):
+        await reader.content(ArtifactAccess(uuid4(), uuid4()), ref.id, max_bytes=3)
+    assert blobs.reads == 0
 
 
 def test_artifact_promotion_validates_the_complete_owned_candidate_batch() -> None:

@@ -9,6 +9,8 @@ from uuid import UUID
 
 import dspy
 
+from fleet_rlm.artifacts.models import ArtifactAccess
+from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.preparation import RunPreparationCancelledError, RunPreparationTimeoutError
 from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded, ToolEventView
@@ -125,6 +127,7 @@ async def prepare_host_capabilities(
     base_event_views: Mapping[str, ToolEventView],
     workspace: WorkspaceCapabilityMetadata,
     workspace_fs: SessionWorkspaceFS | None = None,
+    artifact_reader: ArtifactReader | None = None,
     deadline: float,
 ) -> tuple[RLMExecutionSpec, SkillToolHost | EmptySkillHost, tuple[PreparationNotice, ...]]:
     """Resolve history and exact Skills identically for every Run environment."""
@@ -132,6 +135,15 @@ async def prepare_host_capabilities(
     history_tools = history_host.as_tools()
     event_views = {**base_event_views, **history_host.event_views()}
     selections = tuple(turn.input.skill_selections)
+
+    async def read_artifact(artifact_id: UUID, max_bytes: int) -> bytes:
+        assert artifact_reader is not None
+        content = await artifact_reader.content(
+            ArtifactAccess(user_id=turn.access.user_id, workspace_id=turn.access.workspace_id),
+            artifact_id,
+            max_bytes=max_bytes,
+        )
+        return content.data
 
     if getattr(skill_catalog, "unavailable", False):
         from fleet_rlm.skills.errors import InvalidSkillSelectionError
@@ -144,6 +156,7 @@ async def prepare_host_capabilities(
                 tools=(*base_tools, *history_tools),
                 tool_event_views=event_views,
                 workspace=workspace,
+                read_artifact=read_artifact if artifact_reader is not None else None,
             ),
             EmptySkillHost(),
             (PreparationNotice("skills_unavailable", "Skills are unavailable"),),
@@ -170,6 +183,7 @@ async def prepare_host_capabilities(
         tools=(*base_tools, *history_tools, *skill_host.as_tools()),
         tool_event_views={**event_views, **skill_host.event_views()},
         workspace=workspace,
+        read_artifact=read_artifact if artifact_reader is not None else None,
     )
     for skill in resolved.selected:
         skill_host.mark_preloaded(skill)

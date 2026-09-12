@@ -150,6 +150,59 @@ def test_trajectory_reconciliation_inserts_missing_earlier_step_before_later_liv
     ]
 
 
+def test_trajectory_reconciliation_reemits_code_when_a_midrun_iteration_has_no_live_execution() -> None:
+    """Live/trajectory misalignment re-emits corrected code under stable step IDs.
+
+    Regression for the live pi-digit proof: when one DSPy iteration yields no live execution
+    (malformed model code takes the no-execute path while still appending a trajectory
+    entry), later live steps no longer align with trajectory indices. Reconciliation then
+    re-emits the corrected same-step code plus the canonical backfill, so the raw SSE stream
+    carries MORE code chunks than trajectory steps (4 for 3 here) while distinct steps stay
+    bounded by max_iters. Live assertions must count distinct steps, not raw chunks.
+    """
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    # Live observations: iterations 1 and 3 executed (steps 1-2); iteration 2 produced
+    # malformed code, so DSPy recorded a trajectory entry without any live execution.
+    details = [
+        StepStarted(1),
+        RLMReasoning("reasoning A", 1),
+        RLMCode("code A", 1),
+        RLMOutput("output A", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("reasoning C", 2),
+        RLMCode("code C", 2),
+        RLMOutput("output C", 2),
+        StepFinished(2),
+    ]
+    live_codes = [item for item in details if isinstance(item, RLMCode)]
+
+    emissions = reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(1, "reasoning A", "code A", "output A"),
+            TrajectoryStep(2, "reasoning B", "code B", "output B"),
+            TrajectoryStep(3, "reasoning C", "code C", "output C"),
+        ),
+        max_chars=100,
+    )
+
+    emitted_codes = [item for item in emissions if isinstance(item, RLMCode)]
+    # One same-step correction (step 2) plus one canonical backfill (step 3).
+    assert [(item.code, item.step) for item in emitted_codes] == [("code B", 2), ("code C", 3)]
+    # Raw stream emissions exceed the trajectory length by design (2 live + 2 reconcile)...
+    assert len(live_codes) + len(emitted_codes) == 4
+    # ...while distinct steps stay bounded by the iteration count.
+    assert {item.step for item in [*live_codes, *emitted_codes]} == {1, 2, 3}
+    assert [(item.code, item.step) for item in details if isinstance(item, RLMCode)] == [
+        ("code A", 1),
+        ("code B", 2),
+        ("code C", 3),
+    ]
+
+
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep

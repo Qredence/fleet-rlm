@@ -1,34 +1,37 @@
-"""P39b deadline fence for the native child acall wait (VAL-REC-017).
-
-The one absolute Turn deadline must be enforced even while the synchronous
-DSPy Tool is blocked awaiting the child future (orchestrator note from the
-p35b review): a child native runtime that never completes cannot hold the
-recursive Tool past the deadline, and a child that swallows cancellation is
-retained under cleanup ownership instead of blocking the parent.
-
-All lanes are behavior-only: they observe the bounded typed timeout failure,
-lease settlement, and ownership join through the public Tool/executor
-surface, never through private symbol names.
-"""
+"""Behavior contracts for recursion fencing."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import threading
 import time
 from typing import Any
+from uuid import uuid4
 
 import dspy
 import pytest
 
-from fleet_rlm.rlm.events import Status
-from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.chat.run_authority import RunAuthority
+from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.rlm.events import RunCompleted, Status
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeCleanupError,
-    RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-from tests.unit.backend.rlm.fakes import ChildLeaseRecorder
+from fleet_rlm.rlm.runtime import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
+from fleet_rlm.sessions.models import TurnAccess
+from tests.support.recursion_scheduler import RecursiveRLMExecutor
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
 def _executor(
@@ -75,8 +78,8 @@ def test_child_acall_wait_is_fenced_by_the_absolute_deadline(
     executor = _executor(recorder, deadline=deadline, observer=events.append)
 
     began = time.monotonic()
-    with pytest.raises(TimeoutError, match="recursive child deadline exceeded"):
-        executor.tool(prompt="hanging child")
+    outcome = executor.tool(capsule={"task": "hanging child"})
+    assert outcome["status"] == "timed_out"
     elapsed = time.monotonic() - began
 
     # Bounded by the one absolute deadline, never unbounded.
@@ -134,8 +137,8 @@ async def test_cancellation_swallowing_child_is_retained_not_blocking(
     executor = _executor(recorder, deadline=deadline)
 
     began = time.monotonic()
-    with pytest.raises(TimeoutError, match="recursive child deadline exceeded"):
-        executor.tool(prompt="swallowing child")
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.tool(capsule={"task": "swallowing child"})
     elapsed = time.monotonic() - began
 
     # The fence fired and the Tool returned bounded; cancellation was sent
@@ -179,7 +182,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     from fleet_rlm.rlm.recursion import RecursiveBatchError
 
     with pytest.raises((TimeoutError, RecursiveBatchError)) as raised:
-        executor.batched_tool(prompts=["hanging"])
+        executor.batched_tool(capsules=[{"task": task} for task in ["hanging"]])
     if isinstance(raised.value, RecursiveBatchError):
         assert isinstance(raised.value.__cause__, TimeoutError)
     assert time.monotonic() - began < 2.0
@@ -203,12 +206,12 @@ def test_completed_child_is_not_disturbed_by_the_fence(
         async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
             del interpreter
             await asyncio.sleep(0)
-            return dspy.Prediction(answer=f"echo:{prompt}", trajectory=[])
+            return dspy.Prediction(answer=f"echo:{json.loads(prompt)['task']}", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: PromptChild())
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    assert executor.tool(prompt="fast child") == "echo:fast child"
+    assert executor.tool(capsule={"task": "fast child"})["answer"] == "echo:fast child"
     assert recorder.close_calls.get(1) == 1
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
@@ -233,8 +236,173 @@ def test_child_lm_deadline_error_keeps_its_own_classification(
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: LmDeadlineChild())
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    with pytest.raises(TimeoutError, match="recursive child LM deadline exceeded"):
-        executor.tool(prompt="lm deadline child")
+    outcome = executor.tool(capsule={"task": "lm deadline child"})
+    assert outcome["status"] == "timed_out"
+    assert outcome["error_category"] == "timeout"
     assert recorder.close_calls.get(1) == 1
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
+
+
+def _authorized_executor(
+    recorder: ChildLeaseRecorder,
+    root_actions: list[dict[str, str]],
+    *,
+    authority: RunAuthority,
+    options: RecursiveRLMOptions | None = None,
+) -> RecursiveRLMExecutor:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(root_actions, adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter)
+    return RecursiveRLMExecutor(
+        models=RLMModelBundle(root, sub),
+        options=options or RecursiveRLMOptions(),
+        child_runtime_factory=recorder.factory,
+        deadline=time.monotonic() + 30,
+        is_authorized=lambda: not authority.revoked,
+    )
+
+
+def test_val_rec_015_claim_loss_before_allocation_performs_no_reservation_or_acquisition() -> None:
+    """VAL-REC-015: claim loss before allocation rejects the recursive call at
+    the authorization fence with no reservation, no call index, no factory
+    acquisition, and no budget mutation."""
+    authority = RunAuthority()
+    recorder = ChildLeaseRecorder()
+    executor = _authorized_executor(
+        recorder,
+        [{"reasoning": "submit", "code": "SUBMIT(answer='never-runs')"}],
+        authority=authority,
+    )
+    authority.revoke()
+
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.tool(capsule={"task": "claimed slice"})
+
+    assert recorder.call_indexes == []
+    summary = executor.summary()
+    assert summary.call_count == 0
+    assert summary.delegated_prompt_chars == 0
+    assert summary.recursive_batch_calls == 0
+    assert summary.delegation_metrics.recursive_child_calls == 0
+
+
+def test_val_rec_015_claim_loss_rejects_every_subsequent_recursive_call() -> None:
+    """VAL-REC-015: after claim loss, no subsequent recursive call may
+    reserve or acquire: the first call completed while the claim was held,
+    and every later call (single and batched) is rejected at the fence."""
+    authority = RunAuthority()
+    recorder = ChildLeaseRecorder()
+    executor = _authorized_executor(
+        recorder,
+        [{"reasoning": "submit", "code": "SUBMIT(answer='held-ok')"}],
+        authority=authority,
+        options=RecursiveRLMOptions(max_calls=4),
+    )
+
+    assert executor.tool(capsule={"task": "held slice"})["answer"] == "held-ok"
+    authority.revoke()
+
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.tool(capsule={"task": "late single"})
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.batched_tool(capsules=[{"task": task} for task in ["late batch"]])
+
+    # The completed call is the only reservation and acquisition ever made.
+    assert recorder.call_indexes == [1]
+    assert executor.summary().call_count == 1
+    executor.wait_owned()
+    executor.raise_if_cleanup_failed()
+
+
+@pytest.mark.asyncio
+async def test_val_rec_015_claim_loss_during_blocked_child_discards_result_and_fails_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """VAL-REC-015 (Runner scope): claim loss while a child is blocked
+    discards the child's late result through the same authorization fence,
+    produces a failed parent outcome with no successful structured result or
+    terminal completion, performs no further allocation, and settles the
+    acquired lease exactly once before the claim is released."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockedChild:
+        async def acall(self, *, interpreter: object, prompt: str) -> dspy.Prediction:
+            del interpreter, prompt
+            started.set()
+            await asyncio.to_thread(release.wait, 10)
+            # This answer is produced after the claim was lost and must be
+            # discarded by the fence instead of settling as a success.
+            return dspy.Prediction(answer="late-claimed-answer", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockedChild())
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [{"reasoning": "delegate", "code": "answer = rlm_query(capsule={'task': 'claimed slice'})"}],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    recorder = ChildLeaseRecorder()
+    authority = RunAuthority()
+
+    async def never_cancelled() -> bool:
+        # Claim loss is modeled purely as authority revocation: the
+        # cancellation probe never fires in this lane.
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(
+            run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4()), authority=authority
+        ),
+        session=SessionView(
+            request="claim loss during recursive child",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iters=3, max_llm_calls=4),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=never_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            child_runtime_factory=recorder.factory,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+
+    stream = RLMRunner().stream(context)
+    events: list[object] = []
+
+    async def consume() -> None:
+        async for event in stream:
+            events.append(event)
+
+    consume_task = asyncio.create_task(consume())
+    assert await asyncio.to_thread(started.wait, 10)
+    # Claim loss revokes the shared authority while the child is blocked.
+    assert not authority.revoked
+    authority.revoke()
+    release.set()
+    await asyncio.wait_for(consume_task, timeout=15)
+
+    # Failed parent outcome: never completed, never a structured success.
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "failed"
+    assert stream.outcome.prediction is None
+    assert not any(isinstance(event.detail, RunCompleted) for event in events)
+    # The late child answer was discarded: it never reached any event.
+    assert "late-claimed-answer" not in repr(events)
+    # Exactly one acquisition; no further allocation after claim loss.
+    assert recorder.call_indexes == [1]
+    # The acquired lease settled exactly once before the claim released.
+    await asyncio.wait_for(stream.wait_owned(), timeout=10)
+    assert recorder.close_calls.get(1) == 1
+    assert all(lease.interpreter._shutdown for lease in recorder.leases)

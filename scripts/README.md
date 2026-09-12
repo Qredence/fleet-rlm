@@ -18,6 +18,7 @@
 | `live_phase1_stream_verify.py` | Run the narrow one-Turn Phase 1 native DSPy stream canary on the normal Daytona profile |
 | `live_phase2_recursive_verify.py` | Run the narrow Phase 2 dedicated-child native DSPy canary on `daytona-recursive` |
 | `live_daytona_verify.py` | Run the opt-in Daytona MVP proof and validate its bounded JSON receipt |
+| `live_p27_snapshot_verify.py` | Seal the opt-in P2.7 reduced-snapshot receipt from provider probes, the focused Session lane, and the SemanticChild lane |
 | `release_smoke.py` | Smoke-test installed wheel bytes, bundled assets, CLI entry points, and OpenAPI without provider startup |
 | `benchmark_daytona_lifecycle.py` | Benchmark full Daytona create-through-first-execution lifecycle and select retained versus per-Turn mode |
 | `benchmarks/corpus_chain.py` | Deterministic corpus-chain benchmark fixtures and report validation |
@@ -25,6 +26,7 @@
 | `benchmarks/attach_phase3_receipt.py` | Attach a validated, bounded Daytona native-feasibility receipt and capability metrics to an existing MLflow campaign run |
 | `benchmarks/record_mlflow_campaign.py` | Record one sealed runtime/adapter benchmark receipt as an explicit MLflow tracking run with identity params, full-run metrics, and evidence-lane tags |
 | `benchmarks/run_routing_eval.py` | Run the deterministic or opt-in live delegation-ladder benchmark, including bounded recursive batches |
+| `benchmarks/run_phase4_campaign.py` | Run the sealed 12-case, four-arm recursive ablation through the fail-closed US$50/four-hour envelope |
 | `benchmarks/judges.py` | Shared Fleet evaluation judge definitions and registration |
 | `benchmarks/scorers.py` | MLflow 3 GenAI custom scorers and evaluation metric definitions |
 | `benchmarks/manage_prompts.py` | Manage and version Fleet signature prompts in MLflow Prompt Registry |

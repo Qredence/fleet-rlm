@@ -19,28 +19,9 @@ from fleet_rlm.chat.run_lifecycle import (
     CommittedTurnReceipt,
     FailedRunReceipt,
     RunLifecycleService,
-    _RunClaimToken,
 )
-from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
-
-
-def _make_turn() -> tuple[ClaimedRun, TurnAccess]:
-    access = TurnAccess(uuid4(), uuid4())
-
-    async def not_cancelled() -> bool:
-        return False
-
-    turn = ClaimedRun(
-        uuid4(),
-        uuid4(),
-        access,
-        TurnInput("hello"),
-        SessionHistory(),
-        not_cancelled,
-        _RunClaimToken(uuid4()),
-    )
-    return turn, access
+from fleet_rlm.sessions.models import TurnAccess
+from tests.support.turn_lifecycle import claimed_run, completed_outcome
 
 
 def _make_candidate(access: TurnAccess, turn: ClaimedRun, name: str, data: bytes) -> ArtifactCandidate:
@@ -60,15 +41,6 @@ def _make_candidate(access: TurnAccess, turn: ClaimedRun, name: str, data: bytes
     )
 
 
-def _outcome(turn: ClaimedRun, candidates: tuple[ArtifactCandidate, ...]) -> RLMOutcome:
-    del turn
-    return RLMOutcome(
-        terminal_status="completed",
-        prediction=PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
-        artifact_candidates=candidates,
-    )
-
-
 class _CommitStore:
     def __init__(self) -> None:
         self.committed = None
@@ -84,7 +56,8 @@ class _CommitStore:
 
 @pytest.mark.asyncio
 async def test_candidate_reads_run_concurrently() -> None:
-    turn, access = _make_turn()
+    turn = claimed_run()
+    access = turn.access
     data_one, data_two = b'{"a": 1}', b'{"b": 2}'
     candidates = (
         _make_candidate(access, turn, "one", data_one),
@@ -113,7 +86,7 @@ async def test_candidate_reads_run_concurrently() -> None:
 
     sink = Sink()
     receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
-        turn, _outcome(turn, candidates), artifact_sink=sink
+        turn, completed_outcome(candidates=candidates), artifact_sink=sink
     )
 
     assert receipt.committed_turn.text == "done"
@@ -140,7 +113,8 @@ class _SnapshotSink:
 
 @pytest.mark.asyncio
 async def test_snapshot_failure_after_commit_does_not_roll_back_committed_turn() -> None:
-    turn, access = _make_turn()
+    turn = claimed_run()
+    access = turn.access
     data = b'{"answer": "kept"}'
     candidate = _make_candidate(access, turn, "kept", data)
 
@@ -166,7 +140,7 @@ async def test_snapshot_failure_after_commit_does_not_roll_back_committed_turn()
 
     receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
         turn,
-        _outcome(turn, (candidate,)),
+        completed_outcome(candidates=(candidate,)),
         artifact_sink=sink,
         result_snapshot_sink=snapshot_sink,
     )
@@ -191,7 +165,8 @@ class _CapturingCleanup:
 
 @pytest.mark.asyncio
 async def test_staging_rollback_is_detached_when_cleanup_supervisor_available() -> None:
-    turn, access = _make_turn()
+    turn = claimed_run()
+    access = turn.access
     data = b'{"ok": true}'
     candidate = _make_candidate(access, turn, "deferred", data)
 
@@ -215,7 +190,7 @@ async def test_staging_rollback_is_detached_when_cleanup_supervisor_available() 
     cleanup = _CapturingCleanup()
     lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=cleanup)
 
-    receipt = await lifecycle.finish(turn, _outcome(turn, (candidate,)), artifact_sink=sink)
+    receipt = await lifecycle.finish(turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink)
 
     assert receipt.committed_turn.text == "done"
     # Staging removal deferred: not executed before finish returned.
@@ -228,7 +203,8 @@ async def test_staging_rollback_is_detached_when_cleanup_supervisor_available() 
 
 @pytest.mark.asyncio
 async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> None:
-    turn, access = _make_turn()
+    turn = claimed_run()
+    access = turn.access
     data = b'{"ok": true}'
     candidate = _make_candidate(access, turn, "inline", data)
 
@@ -250,7 +226,7 @@ async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> Non
 
     sink = Sink()
     receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
-        turn, _outcome(turn, (candidate,)), artifact_sink=sink
+        turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink
     )
 
     assert receipt.committed_turn.text == "done"
@@ -260,7 +236,8 @@ async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> Non
 @pytest.mark.asyncio
 async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity() -> None:
     """When the supervisor is full (RunCleanupUnavailableError), staging cleanup runs inline."""
-    turn, access = _make_turn()
+    turn = claimed_run()
+    access = turn.access
     data = b'{"ok": true}'
     candidate = _make_candidate(access, turn, "fallback", data)
 
@@ -296,7 +273,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
     sink = Sink()
     lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=supervisor)
 
-    receipt = await lifecycle.finish(turn, _outcome(turn, (candidate,)), artifact_sink=sink)
+    receipt = await lifecycle.finish(turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink)
 
     assert receipt.committed_turn.text == "done"
     # Even though supervisor was saturated, inline fallback removed the staging file before finish returned
@@ -371,7 +348,7 @@ async def test_settle_emits_claim_transition_span_with_command_name(
     from fleet_rlm.rlm.result import empty_rlm_usage
 
     calls = _install_fake_mlflow(monkeypatch)
-    turn, _access = _make_turn()
+    turn = claimed_run()
     store = _TransitionStore()
 
     receipt = await RunLifecycleService(store, max_artifact_bytes=100).settle(

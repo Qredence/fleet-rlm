@@ -24,9 +24,9 @@ from fleet_rlm.daytona import recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
+from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._evidence import candidate_identity, write_receipt
-from tests.live.backend.test_phase1_daytona_stream import _strict_cleanup
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
@@ -189,14 +189,15 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
 
 def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
     """Record host-side ``rlm_query_batched`` answers so Root cannot fake order via verify_batch alone."""
-    original = RecursiveRLMExecutor._call_batched
+    original = RecursiveRLMExecutor._call_capsules_batched
 
-    def observed(self: RecursiveRLMExecutor, prompts: list[str]) -> list[str]:
-        answers = original(self, prompts)
-        evidence.batch_answers = [str(item).strip() for item in answers]
-        return answers
+    def observed(self: RecursiveRLMExecutor, capsules: list[dict[str, object]]) -> list[dict[str, object]]:
+        outcomes = original(self, capsules)
+        assert all(item["status"] == "completed" for item in outcomes)
+        evidence.batch_answers = [str(item["answer"]).strip() for item in outcomes]
+        return outcomes
 
-    monkeypatch.setattr(RecursiveRLMExecutor, "_call_batched", observed)
+    monkeypatch.setattr(RecursiveRLMExecutor, "_call_capsules_batched", observed)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
@@ -276,10 +277,11 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
                     "text": (
                         "Execute the narrow native DSPy two-child batch proof. Run exactly one recursive"
                         " Daytona batch. First set prompt_a and prompt_b to the exact strings below, then"
-                        " call results = rlm_query_batched(prompts=[prompt_a, prompt_b]) once."
+                        " call outcomes = rlm_query_batched(capsules=[{'task': prompt_a}, {'task': prompt_b}]) once."
                         f" prompt_a = {prompt_a!r}. prompt_b = {prompt_b!r}."
                         " Do not call rlm_query, do not call llm_query, and do not nest batching."
-                        " After the batch returns, in a later iteration call"
+                        " After the batch returns, require every outcome status to be completed and set"
+                        " results = [outcome['answer'] for outcome in outcomes]. In a later iteration call"
                         " verify_batch(results=results) exactly once and require its ok result. Finally"
                         " issue exactly one typed SUBMIT with a brief completion answer and evidence='two-child"
                         " rlm_query_batched'. Do not retry and do not use extraction fallback."

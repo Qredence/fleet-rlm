@@ -35,7 +35,10 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     root = dspy.utils.DummyLM(
         [
             {"reasoning": "prepare selected data", "code": "root_marker = 'root-only'"},
-            {"reasoning": "delegate selected row", "code": "child = rlm_query(prompt='classify selected row')"},
+            {
+                "reasoning": "delegate selected row",
+                "code": "child = rlm_query(capsule={'task': 'classify selected row'})['answer']",
+            },
             {
                 "reasoning": "check child scope",
                 "code": (
@@ -90,7 +93,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     assert len(tool_started) == len(tool_completed) == 1
     assert isinstance(tool_started[0].detail, ToolStarted)
     assert isinstance(tool_completed[0].detail, ToolCompleted)
-    assert tool_started[0].detail.input == {"prompt_count": 1, "prompt_chars": len("classify selected row")}
+    assert tool_started[0].detail.input == {"selected_input_bytes": 180}
     assert tool_completed[0].detail.output == {
         "status": "completed",
         "call_index": 1,
@@ -175,11 +178,13 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
         with pytest.raises(RuntimeError, match="worker startup failed"):
             await RLMRunner()._start_worker(context, ownership, observations)
         assert created
-        assert any(thread.is_alive() for thread in created[0]._scheduler._threads)
+        assert created[0]._scheduler._loop is asyncio.get_running_loop()
+        assert not created[0]._scheduler._closed
     finally:
         await ownership.wait_owned()
 
-    assert all(not thread.is_alive() for thread in created[0]._scheduler._threads)
+    assert created[0]._scheduler._closed
+    assert asyncio.get_running_loop().is_running()
 
 
 @pytest.mark.asyncio
@@ -187,7 +192,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
-        [{"reasoning": "delegate too late", "code": "rlm_query(prompt='late child request')"}],
+        [{"reasoning": "delegate too late", "code": "rlm_query(capsule={'task': 'late child request'})['answer']"}],
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -308,7 +313,7 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "delegate", "code": "child = rlm_query(prompt='small task')"},
+            {"reasoning": "delegate", "code": "child = rlm_query(capsule={'task': 'small task'})['answer']"},
             {"reasoning": "child submit", "code": "SUBMIT(answer='child')"},
             {"reasoning": "submit anyway", "code": "SUBMIT(answer='unexpected')"},
         ],
@@ -377,7 +382,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "batch", "code": "answers = rlm_query_batched(prompts=['blocked'])"},
+            {"reasoning": "batch", "code": "answers = rlm_query_batched(capsules=[{'task': 'blocked'}])"},
             {"reasoning": "submit", "code": "SUBMIT(answer='root')"},
         ],
         adapter=adapter,

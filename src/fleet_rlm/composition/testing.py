@@ -291,12 +291,14 @@ class TestingCapabilityPreparer:
         options: RLMOptions,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
+        artifact_reader: ArtifactReader | None = None,
     ) -> None:
         """Initialize a testing capability preparer with configured source limits."""
         from fleet_rlm.workspace.url import InMemoryUrlSourceStore
 
         del models, options
         self._skill_catalog = skill_catalog
+        self._artifact_reader = artifact_reader
         self._max_artifact_bytes = max_artifact_bytes
         self._max_url_bytes = max(1, int(max_url_bytes))
         self._url_store = InMemoryUrlSourceStore()
@@ -338,6 +340,7 @@ class TestingCapabilityPreparer:
             base_tools=(*attachment_tools, *url_tools),
             base_event_views={**attachment_event_views, **url_event_views},
             workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
+            artifact_reader=self._artifact_reader,
             deadline=deadline,
         )
         return PreparedHostCapabilities(
@@ -383,6 +386,7 @@ class DeterministicTurnPreparation:
         wrap_up_seconds: float = 300.0,
         max_artifact_bytes: int = 10_000_000,
         max_url_bytes: int = 10 * 1024 * 1024,
+        artifact_reader: ArtifactReader | None = None,
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
@@ -399,6 +403,7 @@ class DeterministicTurnPreparation:
                 options=resolved_options,
                 max_artifact_bytes=max_artifact_bytes,
                 max_url_bytes=max_url_bytes,
+                artifact_reader=artifact_reader,
             ),
         )
 
@@ -443,6 +448,7 @@ def install_testing_composition(
         artifact_reader=storage.artifact_reader,
         preparation=DeterministicTurnPreparation(
             attachments=storage.attachment_lifecycle,
+            artifact_reader=storage.artifact_reader,
             skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
             wrap_up_seconds=settings.rlm_wrap_up_seconds,

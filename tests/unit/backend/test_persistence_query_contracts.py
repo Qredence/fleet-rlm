@@ -10,7 +10,7 @@ from fleet_rlm.chat.run_lifecycle import RunClaim
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
 from fleet_rlm.sessions.models import TurnInput
-from tests.unit.backend.test_memory_promotion_outbox import _intents, _seed_with_intents
+from tests.support.memory_intents import _intents, _seed_with_intents
 
 
 @pytest.mark.asyncio

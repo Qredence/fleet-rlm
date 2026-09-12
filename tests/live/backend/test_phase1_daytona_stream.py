@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import os
 import tempfile
@@ -24,6 +23,7 @@ from fleet_rlm.config.loader import active_profile, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
+from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
@@ -31,6 +31,7 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
+_P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
 _LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
 _APPROVED_MODELS = frozenset(
@@ -43,7 +44,6 @@ _APPROVED_MODELS = frozenset(
     }
     for name in (base, f"openai/{base}")
 )
-_CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
 _ATTACHMENT_CONTENT = "phase-one capsule witness: CEDAR-17\n"
 _CONTRACT_ID = "fleet.phase1-daytona-stream"
 
@@ -201,23 +201,31 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         policy = require_live_execution()
     except FleetConfigurationError:
         pytest.fail("Phase 1 stream canary requires runtime.live_enabled=true")
-    if active_profile(policy) != "daytona" or policy.run_environment != "daytona":
-        pytest.fail("Phase 1 stream canary requires the normal daytona profile")
+    candidate_snapshot = os.environ.get(_P27_SESSION_SNAPSHOT_ENV)
+    permitted_profiles = {"daytona"}
+    if candidate_snapshot:
+        # P2.7 only overrides the selected Session image. The recursive profile
+        # remains a Daytona Session profile and is allowed solely for that
+        # aggregate candidate-certification path.
+        permitted_profiles.add("daytona-recursive")
+    if active_profile(policy) not in permitted_profiles or policy.run_environment != "daytona":
+        pytest.fail("Phase 1 stream canary requires an allowed Daytona profile")
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
         pytest.fail("Phase 1 stream canary requires the committed Root and Sub policy")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):
         pytest.fail("Phase 1 stream canary is missing configured provider credentials")
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'phase1-stream.db').resolve()}"
     upgrade_to_head(database_url)
-    return policy.model_copy(
-        update={
-            "database_url": database_url,
-            "volume_name": f"fleet-rlm-phase1-stream-{uuid4()}",
-            "rlm_max_iters": 5,
-            "rlm_max_llm_calls": 8,
-            "turn_timeout_seconds": 840,
-        }
-    )
+    overrides: dict[str, object] = {
+        "database_url": database_url,
+        "volume_name": f"fleet-rlm-phase1-stream-{uuid4()}",
+        "rlm_max_iters": 5,
+        "rlm_max_llm_calls": 8,
+        "turn_timeout_seconds": 840,
+    }
+    if candidate_snapshot:
+        overrides["daytona_snapshot"] = candidate_snapshot
+    return policy.model_copy(update=overrides)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
@@ -293,68 +301,6 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
             if name == call_name:
                 shapes.append({"args": len(node.args), "keywords": sorted(key.arg for key in node.keywords if key.arg)})
     return shapes
-
-
-async def _retry_cleanup(operation: Any) -> bool:
-    """Retry an asynchronous cleanup operation until it succeeds or all configured attempts fail.
-
-    Parameters:
-        operation (Any): Asynchronous cleanup operation to execute.
-
-    Returns:
-        bool: `True` if the operation succeeds, `False` after all attempts fail.
-    """
-    for delay in (*_CLEANUP_RETRY_DELAYS, None):
-        try:
-            await operation()
-            return True
-        except Exception:
-            if delay is None:
-                return False
-            await asyncio.sleep(delay)
-    return False
-
-
-async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
-    """
-    Delete tracked sandboxes and the owned volume, returning labels for cleanup failures.
-
-    Parameters:
-        resources (Any): Resource manager containing tracked sandboxes and cleanup clients.
-        volume_name (str): Name of the volume to delete.
-
-    Returns:
-        tuple[str, ...]: Cleanup failure labels, including "sandbox", "tracking", or "volume".
-    """
-    failures: list[str] = []
-    for sandbox_id in sorted(set(resources._sandbox_ids)):
-
-        async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
-            """Delete the specified Daytona sandbox if it exists.
-
-            Parameters:
-                sandbox_id (str): Identifier of the sandbox to delete.
-            """
-            sandbox = await resources.platform.get(sandbox_id)
-            if sandbox is not None:
-                await resources.platform.delete(sandbox)
-
-        if not await _retry_cleanup(delete_sandbox):
-            failures.append("sandbox")
-    try:
-        resources._sandbox_ids.clear()
-    except Exception:
-        failures.append("tracking")
-
-    async def delete_volume() -> None:
-        """Delete the configured volume if it exists."""
-        volume = await resources.client.volume.get(volume_name, create=False)
-        if volume is not None:
-            await resources.client.volume.delete(volume)
-
-    if not await _retry_cleanup(delete_volume):
-        failures.append("volume")
-    return tuple(failures)
 
 
 def _write_receipt(payload: dict[str, object]) -> None:

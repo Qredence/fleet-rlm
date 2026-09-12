@@ -62,7 +62,13 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert set(document["profiles"]) == {"daytona-recursive", "daytona-managed"}
+    assert set(document["profiles"]) == {
+        "daytona-recursive",
+        "daytona-managed",
+        "phase4-campaign",
+        "phase4-campaign-a",
+        "phase4-campaign-b",
+    }
     assert document["defaults"]["daytona"]["snapshot_env"] == "FLEET_DAYTONA_SNAPSHOT"
     assert document["defaults"]["daytona"]["child_snapshot_env"] == "FLEET_DAYTONA_CHILD_SNAPSHOT"
     assert document["defaults"]["daytona"]["org_id_env"] == "FLEET_DAYTONA_ORG_ID"
@@ -193,6 +199,33 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params
     assert settings.sub_llm_timeout_seconds == 90
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
+
+
+def test_explicit_phase4_profile_overrides_committed_default_without_ambient_selection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
+    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona-managed")
+
+    settings = config.load_runtime_settings(profile="phase4-campaign")
+
+    assert config.active_profile(settings) == "phase4-campaign"
+    assert settings.root_llm_max_tokens == 1_024
+    assert settings.sub_llm_max_tokens == 512
+    assert settings.rlm_max_iters == 6
+    assert settings.rlm_max_llm_calls == 8
+    assert settings.rlm_recursion_enabled is True
+
+
+@pytest.mark.parametrize("profile", ["", "missing-profile"])
+def test_explicit_profile_selection_rejects_blank_or_unknown_profile(
+    profile: str,
+) -> None:
+    with pytest.raises(FleetConfigurationError, match="profile"):
+        load_runtime_settings(profile=profile)
 
 
 def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(

@@ -20,6 +20,7 @@ from threading import Lock
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.models import (
     PreparedAttachments,
 )
@@ -1409,6 +1410,7 @@ class _LiveCapabilityPreparer:
     settings: Settings
     skill_catalog: SkillCatalog
     volume_paths: VolumePaths | None = None
+    artifact_reader: ArtifactReader | None = None
 
     def __post_init__(self) -> None:
         if self.volume_paths is None:
@@ -1559,6 +1561,7 @@ class _LiveCapabilityPreparer:
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,
             workspace_fs=session_workspace,
+            artifact_reader=self.artifact_reader,
             deadline=deadline,
         )
         return LivePreparedCapabilities(

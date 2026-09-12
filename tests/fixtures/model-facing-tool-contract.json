@@ -948,6 +948,169 @@
         "complete"
       ],
       "additionalProperties": true
+    },
+    "ChildUsage": {
+      "additionalProperties": false,
+      "description": "Invocation-local measurements; absent provider tokens are never zero.",
+      "properties": {
+        "child_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Child Calls",
+          "type": "integer"
+        },
+        "llm_calls": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Llm Calls",
+          "type": "integer"
+        },
+        "token_usage_status": {
+          "default": "unavailable",
+          "enum": [
+            "observed",
+            "unavailable"
+          ],
+          "title": "Token Usage Status",
+          "type": "string"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        },
+        "total_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Tokens"
+        }
+      },
+      "title": "ChildUsage",
+      "type": "object"
+    },
+    "child_outcome": {
+      "additionalProperties": false,
+      "description": "Bounded per-child evidence; private trajectories never cross this DTO.",
+      "properties": {
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "timed_out",
+            "cancelled"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "answer": {
+          "default": "",
+          "maxLength": 50000,
+          "title": "Answer",
+          "type": "string"
+        },
+        "source_references": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Source References",
+          "type": "array"
+        },
+        "delivered_fragments": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Delivered Fragments",
+          "type": "array"
+        },
+        "cited_evidence": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 48,
+          "title": "Cited Evidence",
+          "type": "array"
+        },
+        "uncertainty": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Uncertainty",
+          "type": "string"
+        },
+        "usage": {
+          "$ref": "#/$defs/ChildUsage"
+        },
+        "error_category": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Category"
+        },
+        "selected_input_bytes": {
+          "default": 0,
+          "maximum": 50000,
+          "minimum": 0,
+          "title": "Selected Input Bytes",
+          "type": "integer"
+        },
+        "result_bytes": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Result Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ChildOutcome",
+      "type": "object"
+    },
+    "child_outcome_array": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/child_outcome"
+      }
     }
   },
   "entries": [
@@ -2280,29 +2443,29 @@
       "name": "rlm_query",
       "category": "recursive",
       "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
-      "description": "Solve one self-contained bounded semantic subproblem. Pass only selected data, not the complete Turn, history, Attachment, or Workspace. Store the concise answer.",
+      "description": "Solve one bounded iterative subproblem from a capsule containing task, selected fragments, authorized references and allocation_bytes. Returns a typed outcome for Root verification.",
       "argument_schema": {
         "type": "object",
         "properties": {
-          "prompt": {
-            "type": "string"
+          "capsule": {
+            "additionalProperties": true,
+            "type": "object"
           }
         },
         "required": [
-          "prompt"
+          "capsule"
         ],
         "additionalProperties": false
       },
       "result_schema": {
-        "$ref": "#/$defs/text"
+        "$ref": "#/$defs/child_outcome"
       },
-      "availability_policy": "Available only when recursive execution is enabled: Root and native depth-one child RLMs receive it; deeper calls use the Sub-LM fallback.",
+      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and a selected-input reader.",
       "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
       "event_projection_policy": {
         "mode": "bounded_allowlist",
         "input": [
-          "prompt_count",
-          "prompt_chars"
+          "selected_input_bytes"
         ],
         "output": [
           "status",
@@ -2312,8 +2475,8 @@
           "termination_mode"
         ],
         "omits": [
-          "prompt",
-          "child answer"
+          "capsule",
+          "child answers"
         ],
         "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
       }
@@ -2322,32 +2485,33 @@
       "name": "rlm_query_batched",
       "category": "recursive",
       "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
-      "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Inputs and outputs preserve order; use only when every item needs iterative exploration.",
+      "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Pass capsules; ordered typed outcomes include ordinary cleaned-up failures. Use only when every item needs iterative exploration. Root only.",
       "argument_schema": {
         "type": "object",
         "properties": {
-          "prompts": {
+          "capsules": {
             "items": {
-              "type": "string"
+              "additionalProperties": true,
+              "type": "object"
             },
             "type": "array"
           }
         },
         "required": [
-          "prompts"
+          "capsules"
         ],
         "additionalProperties": false
       },
       "result_schema": {
-        "$ref": "#/$defs/text_array"
+        "$ref": "#/$defs/child_outcome_array"
       },
-      "availability_policy": "Available only when recursive execution is enabled and only on the Root; native children receive rlm_query but not the batched tool.",
+      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and a selected-input reader.",
       "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
       "event_projection_policy": {
         "mode": "bounded_allowlist",
         "input": [
-          "prompt_count",
-          "prompt_chars"
+          "capsule_count",
+          "selected_input_bytes"
         ],
         "output": [
           "status",
@@ -2355,7 +2519,7 @@
           "peak_child_concurrency"
         ],
         "omits": [
-          "prompts",
+          "capsules",
           "child answers"
         ],
         "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
