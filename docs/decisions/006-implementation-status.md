@@ -89,8 +89,23 @@ unchanged until the 144-row continuation above authorized P4.6.
   results are out of order" and the cell aborted before the append. Root then
   SUBMIT-ed without retry, matching the prompt's "do not retry" clause.
   Assertions were not weakened. Recursion stays disabled. Phase 5 is not
-  started. A further official recert needs a product change that keeps the
-  scripted second cell executable through the named write, then a new
+  started. Verbatim-prompt overlay landed on `36792ac8`.
+- **Phase 3 complete-MVP recert** on `36792ac8` (copy request-specified Sub-LM
+  prompts; `long-context` 2.0.1): `.scratch/live-receipts/mvp-complete-20260912-r5.json`
+  — `passed: false`, `proof_failed` / `fastapi_dspy_daytona_mvp`. Lane 1
+  durability passed. Lane 2 failed at `first_turn`. Diagnostic:
+  `.scratch/live-receipts/mvp-complete-20260912-r5-pytest.json` /
+  `mvp-complete-20260912-r5-pytest.log`. SSE names were
+  `issue_iteration_token`, `llm_query`, `llm_query_batched` —
+  `verify_semantic_work` count 0, still no `append_workspace_text`. Root
+  again planned append/publish in cell 2 but paraphrased the mandated
+  prompts (wrong strings, two batch items not three, positional
+  `verify_semantic_work`, no `accumulator.extend`). Cell 2 then hit
+  Sub-LM HTTP read timeouts, so verify and the named write never ran.
+  Root SUBMIT-ed on iteration 3 without retry. Assertions were not
+  weakened. Recursion stays disabled. Phase 5 is not started. Further
+  instruction overlays on this Root model are not getting exact prompt
+  copy; a later recert needs a different product lever, then a new
   `live_daytona_verify.py` run.
 - **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
   empty files with HTTP 400; `_error_observation` treated that as unconfirmed
