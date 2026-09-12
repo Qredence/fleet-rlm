@@ -1,10 +1,16 @@
 # Fleet RLM - implementation plan
 
-Revision: **2026-09-10 - simplification rewrite**. The filename is retained for stable links.
+Revision: **2026-09-12 - simplification closeout**. The filename is retained for stable links.
 
 This document is the **forward implementation plan**. It intentionally does not duplicate the historical evidence ledger. Completed work, dated receipts, provider observations, and certification status belong in [ADR 006 implementation status](docs/decisions/006-implementation-status.md).
 
-Reviewed input branch: `fix/adr006-runtime-continuation` at `dba3e3ab81144aec0b4e978c23c4fece52305cd7`, before this plan-only rewrite. At that revision the branch was 11 commits ahead of `main`; GitHub CI had passing quality/lint/TUI jobs but failing unit and Python 3.11/3.12/3.13 compatibility jobs. Re-establishing a reproducible green gate is the first implementation task.
+This branch now contains the completed simplification sequence through Phase 4:
+the retained broker is the sole production execution boundary, programs are
+fresh per Run, and Fleet child RLM tools are disabled by default. Recent local
+fixes preserve request-specified Sub-LM actions, prevent host setup cells from
+becoming public RLM steps, and realign a reused Root with a replaced durable
+binding. These fixes do not certify Phase 3 complete-MVP or Phase 5–6 operator
+gates; their dated evidence belongs in the ADR 006 ledger.
 
 Pinned runtime targets remain **DSPy 3.3.1**, **Daytona Python SDK 0.210.0**, and **MLflow 3.16.0**. Do not change those pins as part of architectural simplification unless a separately justified compatibility fix requires it.
 
@@ -665,6 +671,12 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
 **Status: complete (2026-09-12) — disable.** P4.1–P4.4 remain the simplified capsule path. The 144-trial P4.5 continuation receipt is `.scratch/benchmark-reports/phase4-ablation-20260912-continue.json` (108 retained rows + 36 remaining admissions, including retry of the HTTP 400 control). Mechanical `phase4_decision` is `incomplete` solely because 14 completed frozen-baseline C rows lack call-shape usage. Retain gates independently fail: paired bootstrap CI lower bound is 0.0 (point 0.167). Suitable verified successes: D 4 / A 0 / B 1 / C 1 of 18. P4.6 therefore disables Fleet child RLM tools by default (`recursion_enabled = false`); native `llm_query` stays. Recursion remains available on explicit profiles such as `phase4-campaign`.
+
+> **Historical context:** the detailed working notes below preserve pre-campaign
+> design and partial-receipt context. They are not current status. The status
+> above, P4.5/P4.6 headings, and the ADR 006 ledger are authoritative for the
+> completed campaign, default recursion policy, and remaining certification
+> gates.
 
 The comparison baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
 renames capsule allocation to bytes, replaces the duplicate capsule result type

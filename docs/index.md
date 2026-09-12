@@ -21,7 +21,7 @@ healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
 9. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 10. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 
-## Runtime decisions and active migration
+## Current runtime and active migration
 
 - [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md) — current legacy behavior.
 - [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
@@ -30,7 +30,12 @@ healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
 - [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and remaining work.
 - [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
 
-## Historical baselines
+The current production path is the retained broker-backed `legacy` runtime.
+Fleet child RLM tools are disabled by default; native `llm_query` remains.
+Phase 3 complete-MVP and Phase 5–6 operational certification are open. Read
+the status ledger before treating any dated receipt as a current guarantee.
+
+## Historical baselines and evidence
 
 - [Maintainability freeze](how-to-guides/maintainability-freeze.md)
 - [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
@@ -64,5 +69,6 @@ profile matrix, must be regenerated from its source rather than edited by hand.
 
 The maintained [ADR 006 implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
 and its [execution/status ledger](decisions/006-implementation-status.md) track
-implementation through Recursive RLM v2 separately from live certification and
-rollout authorization. Older scratch roadmaps remain historical references.
+implementation separately from live certification and rollout authorization.
+Historical baselines preserve their original evidence scope and do not override
+current code, policy, or generated contracts.

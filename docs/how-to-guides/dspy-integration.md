@@ -2,13 +2,13 @@
 
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
 The broker Root Sandbox may be reused across sequential successful Turns; DSPy's
-private `REPLHistory` and Turn capabilities are fresh for every invocation. The Root Model generates
-iterative Python, while the Sub Model answers `llm_query()` and ordered
-`llm_query_batched()` calls. The committed Daytona policies also expose
-`rlm_query(capsule=capsule)` and the Root-only ordered
-`rlm_query_batched(capsules=capsules)` for isolated iterative subproblems through
-bounded child `dspy.RLM` runtimes. Both model roles are host-configured; API
-clients cannot provide models, Signatures, or executable capabilities.
+private `REPLHistory` and Turn capabilities are fresh for every invocation. The
+Root Model generates iterative Python, while the Sub Model answers `llm_query()`
+and ordered `llm_query_batched()` calls. Fleet child tools
+`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)` remain available
+only to explicit profiles; the committed default disables them. Both model roles
+and every executable capability are host-configured; API clients cannot supply
+models, Signatures, or executable capabilities.
 
 This guide describes the selectable `legacy` runtime. Native DSPy execution
 does not imply use of ADR 006's experimental native Daytona interpreter.
@@ -26,8 +26,8 @@ work; see the [implementation status](../decisions/006-implementation-status.md)
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
 - `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=capsules)`
-  are the recursive primitives exposed by the committed Daytona policies.
-  Under the selected recursive policy, Root code keeps large input-specific
+  are recursive primitives exposed only by an explicit recursion-enabled policy.
+  Under that opt-in policy, Root code keeps large input-specific
   data in REPL variables and passes only the smallest sufficient slice to a
   child; the parent retains authority over public output and final `SUBMIT`.
 - A native depth-1 child uses a dedicated, disposable Daytona Sandbox with

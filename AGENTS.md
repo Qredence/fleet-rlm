@@ -47,7 +47,7 @@ Never expose credentials, tokens, `.env` values, provider secrets, or raw infras
 - Treat process-scoped LM instances as immutable templates. Turn-specific deadlines, retries, adapters, callbacks, or other mutable execution state must be isolated per Turn.
 - Turn ownership and deadlines bound LM, Tool, interpreter, and recursive work. Do not allow detached work to continue mutating Fleet state after settlement.
 - Recursive delegation depth is distinct from native RLM iteration count.
-- Native `dspy.RLM` is used by the selectable `legacy` runtime; the experimental native interpreter is a separate, gated adapter. Follow the ADR 006 status ledger before claiming cutover or containment.
+- Native `dspy.RLM` uses retained broker execution as the only production code-execution path; native `llm_query` remains available, while Fleet child RLM tools require an explicit opt-in profile. Follow the ADR 006 status ledger before claiming cutover, containment, value, or live certification.
 - Keep Daytona SDK integration inside `src/fleet_rlm/daytona/`.
 - Keep internal Runtime Events transport-neutral. Public clients consume the backend stream contract rather than defining parallel execution semantics.
 - State transitions, settlement, persistence, and resource cleanup must go through their owning lifecycle/service abstractions.
@@ -71,7 +71,7 @@ Regenerate from the owning source: `make api-sync`, `make stream-sync`, or `make
 
 Use the smallest validation lane that proves the change, then escalate when the affected contract requires it.
 Repeat or broaden passing checks only for new changes, failures, or unresolved concerns. Add meaningful regressions to the existing behavior-owning test file by default; create a new file only for a distinct contract, fixture/process boundary, generated-contract lane, or live marker. Coverage is a coarse floor, not a reason to test every internal branch.
-For documentation or agent-instruction-only changes, run `make check-docs` and `git diff --check`. Code lanes below apply when their code or executable contracts change.
+For documentation or agent-instruction-only changes, run `make check-docs` and `git diff --check`. Dated plans and receipts are historical evidence, not current certification; verify current behavior against code and `config/fleet.toml`. Code lanes below apply when their code or executable contracts change.
 
 ### Focused Python changes
 
