@@ -1594,6 +1594,9 @@ class RLMRunner:
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
             if callable(bind_budget):
                 bind_budget(getattr(state_context.execution.models, "budget", None))
+            bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
+            if callable(bind_request):
+                bind_request(state_context.session.request)
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,

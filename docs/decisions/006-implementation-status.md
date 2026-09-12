@@ -119,6 +119,20 @@ unchanged until the 144-row continuation above authorized P4.6.
   patch Root instructions again or run another paid recert shot on this
   model unless a later model or contract change justifies it. Phase 5
   is not started.
+- **Phase 3 complete-MVP recert** on `4cf4ee38` (Sub-LM HTTP timeout ceiling):
+  `.scratch/live-receipts/mvp-complete-20260912-r6.json` — `passed: false`,
+  `proof_failed` / `fastapi_dspy_daytona_mvp`. Lane 1 durability passed.
+  Lane 2 failed at `first_turn`. Root again planned append/publish in cell 2
+  but paraphrased the mandated Sub-LM prompts (`Summarize the Daytona MVP
+  proof…` / `What is Daytona?` instead of `Return exactly ROOT` /
+  `ALPHA`/`BETA`/`GAMMA`, two batch items, no `accumulator.extend`). The
+  invented Sub call then hit `Turn LM deadline exceeded` (~90s). Timeout
+  isolation is in place and is **not** Phase 3 certification. Diagnostic
+  pytest on the same SHA also failed (`verify_semantic_work` count was not
+  1). Assertions were not weakened. Recursion stays disabled. Phase 5 is
+  not started. The follow-up product lever restores request-specified
+  `llm_query` / `llm_query_batched` string literals at Daytona execute
+  rather than overlaying Root instructions again.
 - **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
   empty files with HTTP 400; `_error_observation` treated that as unconfirmed
   cleanup and halted at 109/144. The runner now skips empty uploads, confirms
