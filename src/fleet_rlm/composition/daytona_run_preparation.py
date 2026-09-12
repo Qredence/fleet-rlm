@@ -1010,14 +1010,20 @@ class _DaytonaEnvironmentProvider:
             return
         async with self._resident_root_transition_lock:
             async with self._resident_root_lock:
-                owner = self._resident_root_leases.pop(key, None)
-                self._resident_context_keys.pop(key, None)
+                owner = self._resident_root_leases.get(key)
             if owner is None:
                 return
             try:
                 await owner.close(notify=False, deadline=deadline)
             except BaseException:
-                return
+                # Keep the exact owner and context binding reachable for the
+                # environment shutdown/retry lane when close does not settle.
+                raise
+            async with self._resident_root_lock:
+                if self._resident_root_leases.get(key) is owner:
+                    self._resident_root_leases.pop(key, None)
+                    self._resident_context_keys.pop(key, None)
+                    self._prune_preparation_gate(key)
 
     async def _acquire_root_lease(
         self,

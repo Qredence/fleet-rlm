@@ -7,6 +7,8 @@ import ast
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.events import RLMCode
 from fleet_rlm.rlm.specified_prompt_rewrite import (
+    SpecifiedPromptRewriteState,
+    SpecifiedSubLMCall,
     apply_specified_sub_lm_prompts,
     normalize_action_code,
     specified_sub_lm_calls,
@@ -206,6 +208,38 @@ def test_request_name_prompts_restore_specified_literals() -> None:
     assert "accumulator.extend" in rewritten
 
 
+def test_request_scanner_only_extracts_exact_direct_calls() -> None:
+    request = 'my_llm_query("ignore identifier") client.llm_query("ignore attribute") llm_query("restore this")'
+    assert specified_sub_lm_calls(request) == (SpecifiedSubLMCall("llm_query", ("restore this",)),)
+
+
+def test_rewrite_only_replaces_exact_direct_calls() -> None:
+    request = 'llm_query("restore this")'
+    generated = (
+        'qualified = client.llm_query("generated qualified")\n'
+        'named = my_llm_query("generated named")\n'
+        'direct = llm_query("generated direct")'
+    )
+    rewritten = apply_specified_sub_lm_prompts(request, generated)
+    assert "client.llm_query('generated qualified')" in rewritten
+    assert "my_llm_query('generated named')" in rewritten
+    assert "direct = llm_query('restore this')" in rewritten
+
+
+def test_prompt_cursor_consumes_calls_in_order_and_resets_for_a_new_turn() -> None:
+    request = 'llm_query("first") llm_query("second")'
+    state = SpecifiedPromptRewriteState()
+    first = apply_specified_sub_lm_prompts(request, 'value = llm_query("generated")', state=state)
+    second = apply_specified_sub_lm_prompts(request, 'value = llm_query("generated")', state=state)
+    exhausted = apply_specified_sub_lm_prompts(request, 'value = llm_query("generated")', state=state)
+    assert _call_prompts(first, "llm_query") == [("first",)]
+    assert _call_prompts(second, "llm_query") == [("second",)]
+    assert _call_prompts(exhausted, "llm_query") == [("generated",)]
+    state.bind(request)
+    reset = apply_specified_sub_lm_prompts(request, 'value = llm_query("generated")', state=state)
+    assert _call_prompts(reset, "llm_query") == [("first",)]
+
+
 def test_unspecified_request_leaves_generated_llm_query_unchanged() -> None:
     generated = "single_result = llm_query('Summarize the notes.')\n_out = single_result"
     assert apply_specified_sub_lm_prompts("Please inspect notes/findings.md and summarize.", generated) == generated
@@ -231,6 +265,12 @@ def test_interpreter_execute_observes_rewritten_rlm_code() -> None:
     interpreter.bind_observer(observed.append, max_chars=4_000)
     interpreter.bind_turn_request(_MVP_REQUEST)
     interpreter.execute("single_result = llm_query('Summarize the Daytona MVP proof.')\n_out = single_result")
+    codes = [item.code for item in observed if isinstance(item, RLMCode)]
+    assert codes
+    assert "Return exactly ROOT" in codes[0]
+    assert "Summarize the Daytona MVP proof" not in codes[0]
+    assert captured == ["Return exactly ROOT"]
+    interpreter.shutdown()
 
 
 def test_interpreter_execute_rewrites_request_name_llm_query() -> None:

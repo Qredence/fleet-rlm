@@ -512,7 +512,7 @@ def test_trajectory_reconciliation_treats_equivalent_action_formatting_as_the_sa
     assert [item.code for item in emissions if isinstance(item, RLMCode)] == []
 
 
-def test_trajectory_reconciliation_does_not_reemit_earlier_code_after_later_submit() -> None:
+def test_trajectory_reconciliation_reemits_earlier_code_correction_after_later_submit() -> None:
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep
 
@@ -538,7 +538,9 @@ def test_trajectory_reconciliation_does_not_reemit_earlier_code_after_later_subm
         max_chars=100,
     )
 
-    assert [item.code for item in emissions if isinstance(item, RLMCode)] == []
+    assert [item.code for item in emissions if isinstance(item, RLMCode)] == [
+        'single_result = llm_query("Reply with exactly: COMPLETE")'
+    ]
     assert [item.code for item in details if isinstance(item, RLMCode)] == [
         'single_result = llm_query("Reply with exactly: COMPLETE")',
         'SUBMIT(answer="ok")',

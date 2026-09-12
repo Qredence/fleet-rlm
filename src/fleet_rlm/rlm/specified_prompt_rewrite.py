@@ -43,7 +43,42 @@ class SpecifiedSubLMCall:
     prompts: tuple[str, ...]
 
 
-def apply_specified_sub_lm_prompts(request: object, code: object) -> str:
+@dataclass(slots=True)
+class SpecifiedPromptRewriteState:
+    """Per-Turn cursor for request-specified native Sub-LM calls.
+
+    A generated action can be executed more than once during one Turn (for
+    example after a recoverable interpreter error).  The request's calls must
+    therefore be consumed in order across executions, while a new Turn must
+    start from the first specified call again.
+    """
+
+    request: str | None = None
+    _rewriter: _SpecifiedPromptRewriter | None = None
+    _bound: bool = False
+
+    def bind(self, request: object) -> None:
+        """Reset the call cursor for a newly bound Turn request."""
+        normalized = request if isinstance(request, str) and request else None
+        self.request = normalized
+        specified = specified_sub_lm_calls(normalized)
+        self._rewriter = _SpecifiedPromptRewriter(_queues_by_name(specified)) if specified else None
+        self._bound = True
+
+    def rewriter_for(self, request: object) -> _SpecifiedPromptRewriter | None:
+        """Return the cursor for ``request``, binding lazily for callers without a Turn hook."""
+        normalized = request if isinstance(request, str) and request else None
+        if not self._bound or self.request != normalized:
+            self.bind(normalized)
+        return self._rewriter
+
+
+def apply_specified_sub_lm_prompts(
+    request: object,
+    code: object,
+    *,
+    state: SpecifiedPromptRewriteState | None = None,
+) -> str:
     """
     Replace generated ``llm_query`` / ``llm_query_batched`` string or
     ``request``-name arguments with literals already present in the Turn
@@ -59,15 +94,22 @@ def apply_specified_sub_lm_prompts(request: object, code: object) -> str:
     """
     if not isinstance(code, str):
         return "" if code is None else str(code)
-    specified = specified_sub_lm_calls(request)
-    if not specified:
+    if state is not None:
+        rewriter = state.rewriter_for(request)
+        if rewriter is None:
+            return code
+    else:
+        specified = specified_sub_lm_calls(request)
+        if not specified:
+            return code
+        rewriter = _SpecifiedPromptRewriter(_queues_by_name(specified))
+    if rewriter is None:
         return code
     try:
         tree = ast.parse(_strip_action_code_fences(code), mode="exec")
     except SyntaxError:
         return code
-    queues = _queues_by_name(specified)
-    rewriter = _SpecifiedPromptRewriter(queues)
+    rewriter.changed = False
     updated = rewriter.visit(tree)
     inserted_extend = _restore_specified_accumulator_extend(request, updated)
     if not rewriter.changed and not inserted_extend:
@@ -183,6 +225,12 @@ def _next_call_span(text: str, start: int) -> tuple[int, int, SpecifiedName] | N
         found = text.find("llm_query", cursor)
         if found == -1:
             return None
+        # Only restore direct calls.  Substrings in identifiers, attributes,
+        # and qualified calls (``my_llm_query`` / ``client.llm_query``) are
+        # not request-specified native Sub-LM calls.
+        if found and (text[found - 1].isalnum() or text[found - 1] == "_" or text[found - 1] == "."):
+            cursor = found + len("llm_query")
+            continue
         rest = text[found + len("llm_query") :]
         if rest.startswith("_batched("):
             name: SpecifiedName = _BATCHED

@@ -160,12 +160,15 @@ default profile name. Re-enable Fleet child RLMs only with an explicit
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
-When recursion is enabled, each child receives a fresh,
-dedicated Daytona Sandbox, ordinary Daytona network egress, and the same Volume
-ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
-sibling scope cannot reach the Root `workspaces/<workspace-id>` mount. The
-child receives no Fleet Tools or credentials; strict cleanup purges its scope
-and deletes its Sandbox before Root success can commit.
+When recursion is enabled, each child receives a fresh, dedicated Daytona
+Sandbox and ordinary Daytona network egress. `rlm_query` selects the
+volume-less `semantic-child` profile when its child snapshot is configured;
+`workspace-child` is the explicit fallback for work that needs durable files
+and mounts the same Volume ID at
+`recursive/<workspace-id>/<run-id>/<call-index>`. That private sibling scope
+cannot reach the Root `workspaces/<workspace-id>` mount. The child receives no
+Fleet Tools or credentials; strict cleanup purges its scope and deletes its
+Sandbox before Root success can commit.
 `rlm.autonomous_memory_categories` is a TOML-only list of canonical Workspace
 Memory category names and defaults to `[]`, which omits `propose_memory` from
 the Root Tool inventory entirely. A non-empty profile allowlist enables a

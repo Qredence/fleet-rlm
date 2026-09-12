@@ -490,6 +490,9 @@ class DaytonaRuntime:
                 return
             try:
                 await owner.close(notify=False, deadline=deadline)
+            except asyncio.CancelledError:
+                self._retain_late_root_lease(owner)
+                raise
             except BaseException:
                 # The provider identity was already replaced. A failed close
                 # must not taint the successor or block reuse.

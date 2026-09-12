@@ -15,6 +15,7 @@ view over async Daytona sandboxes lives in ``broker.py``.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import contextlib
 import contextvars
@@ -86,7 +87,7 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
-from fleet_rlm.rlm.specified_prompt_rewrite import apply_specified_sub_lm_prompts
+from fleet_rlm.rlm.specified_prompt_rewrite import SpecifiedPromptRewriteState, apply_specified_sub_lm_prompts
 from fleet_rlm.runtime.errors import FilesystemToolError
 
 if TYPE_CHECKING:
@@ -420,11 +421,23 @@ _REPAIR_CATEGORIES = frozenset(
     }
 )
 _TERMINAL_CATEGORIES = frozenset({"CodeInterpreterError", "InterpreterLifecycleError"})
-_HOST_SETUP_MARKERS = (
-    "class _FleetCommittedHistory:",
-    "_fleet_load_committed_history(",
-    "_fleet_load_context_manifest(",
-)
+_HOST_SETUP_CLASS = "_FleetCommittedHistory"
+_HOST_SETUP_LOADERS = frozenset({"_fleet_load_committed_history", "_fleet_load_context_manifest"})
+
+
+def _host_setup_tree(code: str) -> ast.AST | None:
+    """Parse host setup source without treating comments or string data as code."""
+    try:
+        return ast.parse(code or "", mode="exec")
+    except (SyntaxError, ValueError):
+        return None
+
+
+def _contains_host_setup_loader(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _HOST_SETUP_LOADERS
+        for node in ast.walk(tree)
+    )
 
 
 def is_host_setup_action(code: str) -> bool:
@@ -434,8 +447,12 @@ def is_host_setup_action(code: str) -> bool:
     ``interpreter.execute`` before the first model-authored iteration. Those
     cells must not consume a public RLM step or appear as ``data-rlm-code``.
     """
-    source = code or ""
-    return any(marker in source for marker in _HOST_SETUP_MARKERS)
+    tree = _host_setup_tree(code)
+    if tree is None:
+        return False
+    return _contains_host_setup_loader(tree) or any(
+        isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name == _HOST_SETUP_CLASS for node in ast.walk(tree)
+    )
 
 
 class _FleetCodeExecutionError(CodeExecutionError):
@@ -568,6 +585,7 @@ class DaytonaCodeInterpreter:
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
         self._turn_request: str | None = None
+        self._specified_prompt_rewrite_state = SpecifiedPromptRewriteState()
         self._output_budget_exhausted = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
@@ -776,6 +794,7 @@ class DaytonaCodeInterpreter:
             self._turn_request = request
         else:
             self._turn_request = None
+        self._specified_prompt_rewrite_state.bind(self._turn_request)
 
     def bind_context_capsule(self, capsule: Any) -> None:
         """
@@ -939,7 +958,11 @@ class DaytonaCodeInterpreter:
         if self._backend is None:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
-        code = apply_specified_sub_lm_prompts(self._turn_request, code)
+        code = apply_specified_sub_lm_prompts(
+            self._turn_request,
+            code,
+            state=self._specified_prompt_rewrite_state,
+        )
         public = not is_host_setup_action(code)
         self._public_observation = public
         if public:
@@ -1366,7 +1389,8 @@ class DaytonaCodeInterpreter:
 
     @staticmethod
     def _raise_context_injection_error(code: str, raw: BackendExecutionResult) -> None:
-        if raw.error and "_fleet_load_context_manifest" in code:
+        tree = _host_setup_tree(code)
+        if raw.error and tree is not None and _contains_host_setup_loader(tree):
             raise DaytonaAdapterError(
                 message="prepared context failed integrity verification",
                 cause_type="ContextIntegrityError",

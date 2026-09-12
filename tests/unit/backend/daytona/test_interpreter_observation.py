@@ -415,6 +415,8 @@ def test_is_host_setup_action_detects_history_and_attachment_injection() -> None
     setup = "\n".join((history.sandbox_setup(), history.sandbox_assignment("history", "_raw_history")))
     assert is_host_setup_action(setup)
     assert is_host_setup_action("attachments = _fleet_load_context_manifest(_raw_attachments)")
+    assert not is_host_setup_action('print("_fleet_load_context_manifest(")')
+    assert not is_host_setup_action("client._fleet_load_context_manifest(raw)")
     assert not is_host_setup_action("print(history.messages[-1]['answer'])")
     assert not is_host_setup_action("SUBMIT(answer='1')")
 
