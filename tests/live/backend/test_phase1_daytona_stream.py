@@ -32,8 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
 _APPROVED_MODELS = frozenset(
     name
     for base in {

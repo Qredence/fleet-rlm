@@ -33,8 +33,8 @@ _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
 
 
@@ -137,7 +137,10 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     copied_policy.write_text(
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1),
+        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1)
+        # Explicit opt-in for this canary only: production keeps
+        # [defaults.rlm] recursion_enabled = false (P4.6).
+        .replace("recursion_enabled = false", "recursion_enabled = true", 1),
         encoding="utf-8",
     )
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
