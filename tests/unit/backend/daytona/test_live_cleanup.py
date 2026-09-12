@@ -9,6 +9,7 @@ import pytest
 
 from tests.live.backend import _cleanup
 from tests.live.backend._cleanup import _strict_cleanup
+from tests.live.backend._mvp_support import _strict_cleanup as _mvp_strict_cleanup
 
 
 class _Platform:
@@ -91,3 +92,41 @@ def test_cleanup_failure_is_reported_and_other_resources_still_settle(monkeypatc
         assert len(volume.delete_calls) == 1
     else:
         assert platform.delete_calls == ["sandbox-a"]
+
+
+def test_mvp_cleanup_skips_configured_shared_volume() -> None:
+    platform = _Platform()
+    volume = _VolumeClient()
+    resources = SimpleNamespace(
+        _sandbox_ids=["sandbox-b", "sandbox-a"],
+        platform=platform,
+        client=SimpleNamespace(volume=volume),
+    )
+
+    failures = asyncio.run(_mvp_strict_cleanup(resources, set(), "fleet-volume"))
+
+    assert failures == ()
+    assert platform.get_calls == ["sandbox-a", "sandbox-b"]
+    assert platform.delete_calls == ["sandbox-a", "sandbox-b"]
+    assert volume.get_calls == []
+    assert volume.delete_calls == []
+    assert resources._sandbox_ids == []
+
+
+def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
+    platform = _Platform()
+    volume = _VolumeClient()
+    resources = SimpleNamespace(
+        _sandbox_ids=["sandbox-a"],
+        platform=platform,
+        client=SimpleNamespace(volume=volume),
+    )
+    name = "fleet-rlm-live-mvp-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    failures = asyncio.run(_mvp_strict_cleanup(resources, set(), name))
+
+    assert failures == ()
+    assert platform.delete_calls == ["sandbox-a"]
+    assert volume.get_calls == [(name, False)]
+    assert len(volume.delete_calls) == 1
+    assert resources._sandbox_ids == []
