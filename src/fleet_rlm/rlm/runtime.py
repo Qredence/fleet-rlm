@@ -1173,7 +1173,7 @@ def _delegation_usage(context: RLMExecutionContext, executor: RecursiveRLMExecut
     call_count = summary.call_count
     if not call_count:
         snapshot = summary.delegation_metrics
-        call_count = snapshot.recursive_child_calls + snapshot.recursive_batch_calls
+        call_count = snapshot.recursive_child_calls or snapshot.recursive_batch_calls
     return {
         "recursive_call_count": call_count,
         "delegation_metrics": summary.delegation_metrics.as_dict(),

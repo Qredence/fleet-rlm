@@ -200,6 +200,24 @@ def test_trial_upper_bound_uses_approved_standard_rate_card() -> None:
         TrialEnvelope(1, 1, 0, 1, 60, 1, 1, 1, 1, 30).upper_bound_usd(PublicRateCard())
 
 
+def test_observation_raw_cost_prices_aggregate_sandbox_seconds_once() -> None:
+    case = load_cases(_CASES)[0]
+    rates = PublicRateCard()
+    observation = replace(_observation(case), sandbox_seconds=300, sandbox_count=5)
+    envelope = TrialEnvelope(1000, 500, 0, 1, 60, 5, 1, 2, 1)
+
+    expected_model = Decimal(100) * rates.input_usd_per_million / Decimal(1_000_000) + Decimal(
+        50
+    ) * rates.output_usd_per_million / Decimal(1_000_000)
+    expected_sandbox = (
+        Decimal(300)
+        / Decimal(3600)
+        * (rates.vcpu_usd_per_hour + Decimal(2) * rates.gib_ram_usd_per_hour + rates.gib_storage_usd_per_hour)
+    )
+
+    assert observation.observed_cost(rates, envelope) == expected_model + expected_sandbox
+
+
 def test_observation_parser_and_resource_shape_cost_are_fail_closed() -> None:
     valid = {
         "answer": "ok",
@@ -302,7 +320,7 @@ def test_campaign_halts_on_unconfirmed_cleanup() -> None:
     def runner(trial, case):
         observation = _observation(case)
         if trial.arm == "B":
-            return replace(observation, cleanup_confirmed=False)
+            return replace(observation, authorization_confirmed=False, cleanup_confirmed=False)
         return observation
 
     outcome = execute_campaign(cases=cases, preflight=policy, envelope=_envelope(), runner=runner, started_at=0)
@@ -702,6 +720,27 @@ def test_prior_receipt_charged_spend_takes_precedence_over_observed(tmp_path: Pa
         {"charged_spend_usd": "oops", "rows": [{"observed_cost_usd": "0.125"}]},
     )
 
+    assert run_phase4_campaign._prior_receipt_spend(invalid_path) == (None, "invalid")
+
+
+def test_prior_continuation_receipt_uses_cumulative_charged_spend(tmp_path: Path) -> None:
+    receipt_path = _write_prior_receipt(
+        tmp_path / "continuation.json",
+        {
+            "charged_spend_usd": "0.5",
+            "campaign": {"cumulative_charged_spend_usd": "1.25"},
+        },
+    )
+
+    assert run_phase4_campaign._prior_receipt_spend(receipt_path) == (1.25, "cumulative_charged")
+
+    invalid_path = _write_prior_receipt(
+        tmp_path / "invalid-continuation.json",
+        {
+            "charged_spend_usd": "0.5",
+            "campaign": {"cumulative_charged_spend_usd": "not-a-number"},
+        },
+    )
     assert run_phase4_campaign._prior_receipt_spend(invalid_path) == (None, "invalid")
 
 

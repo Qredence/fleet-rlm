@@ -105,7 +105,7 @@ def test_campaign_server_reads_arm_budgets_from_selected_profile(tmp_path) -> No
     assert recursive.rlm_recursion_enabled is True
     assert recursive.root_llm_max_tokens == 1_024
     assert recursive.sub_llm_max_tokens == 512
-    assert recursive.max_active_daytona_leases == 1
+    assert recursive.max_active_daytona_leases == 5
     assert recursive.turn_timeout_seconds == 90
 
     direct = _campaign_settings(

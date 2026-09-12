@@ -645,6 +645,31 @@ def test_recursive_tool_rejects_invalid_prompt_before_child_creation(prompt: str
     assert created == []
 
 
+def test_recursive_batched_tool_rejects_oversized_prompt_before_reservation() -> None:
+    created: list[DaytonaCodeInterpreter] = []
+    executor = _executor(
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        options=RecursiveRLMOptions(max_prompt_chars=10),
+        factory_calls=created,
+    )
+
+    with pytest.raises(ValueError, match="prompt bound"):
+        executor.batched_tool(capsules=[{"task": "x"}])
+    assert created == []
+
+
+def test_recursive_tool_applies_child_output_limit_in_characters() -> None:
+    answer = "é" * 20
+    executor = _executor(
+        [{"reasoning": "submit", "code": f"SUBMIT(answer='{answer}')"}],
+        # The serialized result is within the character budget while its
+        # UTF-8 representation is larger; the bound is intentionally chars.
+        options=RecursiveRLMOptions(child_max_output_chars=33),
+    )
+
+    assert executor.tool(capsule={"task": "unicode answer"})["answer"] == answer
+
+
 def test_recursive_tool_enforces_shared_call_budget() -> None:
     executor = _executor(
         [{"reasoning": "submit", "code": "SUBMIT(answer='ok')"}],

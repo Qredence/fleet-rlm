@@ -1271,7 +1271,7 @@ class RecursiveRLMExecutor:
         access_token = _selected_access.set(access)
         try:
             answer = self._call_with_profile(rendered, child_profile="semantic-child")
-            if len(answer.encode("utf-8")) > self._options.child_max_output_chars:
+            if len(answer) > self._options.child_max_output_chars:
                 raise RLMConfigError("capsule result exceeds child result bound")
             cited = access.validate_citations(answer)
         except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
@@ -1341,6 +1341,8 @@ class RecursiveRLMExecutor:
         if not capsules:
             raise ValueError("rlm_query_batched capsules must not be empty")
         normalized = tuple(SubproblemCapsule.from_mapping(item) for item in capsules)
+        if any(capsule.serialized_bytes > self._options.max_prompt_chars for capsule in normalized):
+            raise ValueError("capsule exceeds recursive prompt bound")
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
@@ -1365,6 +1367,8 @@ class RecursiveRLMExecutor:
                     batch_cancelled,
                     child_profile="semantic-child",
                 )
+                if len(answer) > self._options.child_max_output_chars:
+                    raise RLMConfigError("capsule result exceeds child result bound")
                 cited = access.validate_citations(answer)
             except (asyncio.CancelledError, FutureCancelledError):
                 raise

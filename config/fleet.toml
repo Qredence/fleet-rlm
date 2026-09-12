@@ -141,7 +141,9 @@ recursion_child_max_output_chars = 2000
 recursion_max_parallel_children = 4
 
 [profiles.phase4-campaign.runtime]
-max_active_daytona_leases = 1
+# The Turn's root lease consumes one permit; leave room for all four
+# concurrent recursive child leases used by the campaign arms.
+max_active_daytona_leases = 5
 turn_timeout_seconds = 90
 
 # Arm A: direct-answer baseline without Fleet recursion. Tight Root budgets

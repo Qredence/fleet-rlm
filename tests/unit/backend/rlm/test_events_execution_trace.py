@@ -196,6 +196,24 @@ def test_record_phase_success_counts_shared_histories_once() -> None:
     assert final["observed_lm_usage"] == {"test-root": {"input_tokens": 10, "output_tokens": 4, "total_tokens": 14}}
 
 
+def test_record_phase_success_merges_distinct_histories_with_same_model() -> None:
+    from fleet_rlm.rlm.events import record_phase_success
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+
+    metrics = DelegationMetrics()
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+    first = SimpleNamespace(model="shared-model", history=[{"usage": {"prompt_tokens": 10, "completion_tokens": 4}}])
+    second = SimpleNamespace(model="shared-model", history=[{"usage": {"prompt_tokens": 3, "completion_tokens": 2}}])
+
+    record_phase_success(phase, prediction, 0.0, None, metrics, lms=(first, second))
+
+    assert outputs[-1]["observed_lm_usage"] == {
+        "shared-model": {"input_tokens": 13, "output_tokens": 6, "total_tokens": 19}
+    }
+
+
 def test_observed_usage_merges_delegation_keys_through_validate_round_trip() -> None:
     from fleet_rlm.rlm.recursion import DelegationMetrics
 

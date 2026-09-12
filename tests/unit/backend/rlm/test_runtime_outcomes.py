@@ -349,7 +349,7 @@ def test_delegation_usage_falls_back_to_started_calls_without_executor() -> None
 
     out = _delegation_usage(context)
 
-    assert out["recursive_call_count"] == 2
+    assert out["recursive_call_count"] == 1
     assert out["delegation_metrics"]["lm_call_counts"] == [{"role": "root", "recursive_depth": 0, "count": 1}]
 
 

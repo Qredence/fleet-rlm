@@ -876,7 +876,12 @@ def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]
                 totals[key] = totals.get(key, 0) + value
         if totals:
             name = getattr(lm, "model", None) or f"lm-{index}"
-            merged[str(name)] = dict(totals)
+            existing = merged.setdefault(str(name), {})
+            for key, value in totals.items():
+                previous = existing.get(key)
+                existing[key] = (
+                    value + previous if isinstance(previous, int) and not isinstance(previous, bool) else value
+                )
     return merged
 
 

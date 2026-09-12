@@ -665,6 +665,10 @@ def _prior_receipt_spend(path: Path = PRIOR_RECEIPT_PATH) -> tuple[float | None,
         return None, "unreadable"
     if not isinstance(payload, Mapping):
         return None, "invalid"
+    campaign = payload.get("campaign")
+    if isinstance(campaign, Mapping) and "cumulative_charged_spend_usd" in campaign:
+        cumulative = _spend_amount(campaign.get("cumulative_charged_spend_usd"))
+        return (cumulative, "cumulative_charged") if cumulative is not None else (None, "invalid")
     charged = payload.get("charged_spend_usd")
     if charged is not None:
         numeric = _spend_amount(charged)
@@ -1160,7 +1164,7 @@ def run(args: argparse.Namespace) -> int:
     print(json.dumps({"receipt": str(output), "decision": payload["decision"], "attempted": payload["attempted"]}))
     if partial_live or partial_dry_run:
         return 0
-    return 0 if payload["decision"] in {"retain_simplified_profile", "disable", "safety_failure"} else 2
+    return 0 if payload["decision"] in {"retain_simplified_profile", "disable"} else 2
 
 
 def main(argv: list[str] | None = None) -> int:

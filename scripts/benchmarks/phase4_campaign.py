@@ -290,7 +290,9 @@ class TrialObservation:
             + Decimal(output_tokens) * rates.output_usd_per_million / _TOKEN_DIVISOR
             + Decimal(cache_read_tokens) * rates.cache_read_usd_per_million / _TOKEN_DIVISOR
         )
-        sandbox_hours = Decimal(sandbox_seconds * sandbox_count) / Decimal(3600)
+        # LifecycleObserver reports aggregate lifetime across all sandboxes;
+        # multiplying by sandbox_count again would overcharge recursive arms.
+        sandbox_hours = Decimal(sandbox_seconds) / Decimal(3600)
         shape = self.resource_shape
         sandbox = Decimal(0)
         if shape is not None:
