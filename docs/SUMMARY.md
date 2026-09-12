@@ -1,8 +1,9 @@
 # Table of contents
 
 Current guides, active migration records, and historical baselines are grouped
-in [Documentation Home](index.md). A dated decision or passing receipt is scoped
-to its recorded revision; it is not current production certification.
+in [Documentation Home](index.md). The retained broker-backed `legacy` runtime
+is current; Fleet child RLM tools are opt-in. A dated decision or passing receipt
+is scoped to its recorded revision and is not current production certification.
 
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
@@ -12,12 +13,13 @@ to its recorded revision; it is not current production certification.
 * [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
-* [Maintainability freeze](how-to-guides/maintainability-freeze.md)
-* [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
-* [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
-* [P41 behavior freeze](reference/behavior-freeze.md)
-* [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
-* [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
+* Historical baselines
+  * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
+  * [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
+  * [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
+  * [P41 behavior freeze](reference/behavior-freeze.md)
+  * [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
+  * [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 * [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
 * [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
 * [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)

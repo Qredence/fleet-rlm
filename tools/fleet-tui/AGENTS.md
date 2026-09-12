@@ -4,7 +4,7 @@ This file adds rules specific to `tools/fleet-tui/`.
 
 Repository-wide rules from [AGENTS.md](../../AGENTS.md) still apply.
 
-The maintained Fleet client is a pi-tui TypeScript terminal application. It consumes the backend's public stream/API contracts; it does not define a second execution protocol.
+The maintained Fleet client is a pi-tui TypeScript terminal application. It consumes the backend's public stream/API contracts; it does not define a second execution protocol or infer backend execution policy from transcript text.
 
 ## Tooling
 
@@ -41,7 +41,7 @@ Preserve:
 Cancellation uses `abort` followed by `[DONE]`, without `finish` or post-terminal
 usage. Preparation heartbeats may precede `start`; they are transient.
 
-Do not infer RLM recursion, depth, settlement, or execution state from model text or presentation details when the backend exposes typed evidence.
+Do not infer RLM recursion, depth, settlement, or execution state from model text or presentation details when the backend exposes typed evidence. The default backend policy disables Fleet child RLM tools; profile selection is restart-target policy, not a client-side execution switch.
 
 Live and durable projections should converge on equivalent user-visible state for equivalent committed information.
 

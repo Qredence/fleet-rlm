@@ -110,9 +110,9 @@ resource cleanup.
 ### RLM runtime
 
 `src/fleet_rlm/rlm/` owns Fleet's DSPy Signature inputs, process-scoped model
-templates, Session runtime reuse, per-Turn bindings, native options, Runtime
-Events, trajectory reconciliation, semantic query tools, and recursive child
-execution.
+templates, fresh per-Run program construction, per-Turn bindings, native
+options, Runtime Events, trajectory reconciliation, semantic query tools, and
+the opt-in recursive child executor.
 
 The execution levels are distinct:
 

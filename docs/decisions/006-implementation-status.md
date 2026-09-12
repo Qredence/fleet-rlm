@@ -16,6 +16,17 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Documentation and local runtime follow-up (2026-09-12)
+
+The current branch documents the completed simplification state: retained
+broker-backed `legacy` execution, fresh per-Run DSPy programs, and default
+`recursion_enabled = false`. Follow-up local fixes restore request-specified
+Sub-LM action literals, keep Fleet host setup out of public RLM-step projection,
+and discard a stale resident Root before reattaching to a replaced durable
+binding. They have focused deterministic coverage only. They do not alter the
+failed complete-MVP result, certify the configured Root model, or start Phase 5
+or Phase 6.
+
 ### Phase 4 exit (2026-09-12)
 
 Checkout `81ff6f84e` plus harness/docs. Continuation receipt

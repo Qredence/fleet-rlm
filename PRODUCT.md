@@ -10,7 +10,9 @@ Canonical Run Environment set: `daytona`.
 The selectable architecture is `legacy`: it runs native DSPy RLM with a
 broker-backed interpreter and may reuse a healthy Root Sandbox across sequential
 successful Turns. Each Run gets a fresh DSPy program. Native Daytona interpreter
-cutover is not selected; see the [status ledger](docs/decisions/006-implementation-status.md).
+cutover is not selected. Native `llm_query` remains available, while Fleet child
+RLM tools are disabled by default after the Phase 4 ablation and require an
+explicit profile. See the [status ledger](docs/decisions/006-implementation-status.md).
 
 ## What operators can do
 
@@ -61,8 +63,9 @@ come from the selected policy. See
 the [profile matrix](docs/reference/profile-matrix.md) before selecting a
 profile. Daytona requires a migrated database, a Daytona credential, and the
 provider values named by the selected policy. The current live proof does not
-yet establish Workspace Memory across real provider-backed Sandbox replacement
-and separate Sessions.
+establish complete-MVP behavior on the configured Root model, deployed Lakebase
+readiness, managed MLflow certification, or paid warm-pool demand. Those remain
+explicit operator gates rather than product guarantees.
 
 See the [configuration reference](docs/reference/configuration.md),
 [architecture](ARCHITECTURE.md), [HTTP API reference](docs/reference/http-api.md),
