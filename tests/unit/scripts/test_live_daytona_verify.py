@@ -40,6 +40,14 @@ def _clear_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
 
 
+def test_durability_evidence_path_matches_live_writer() -> None:
+    writer = Path("tests/live/backend/test_attachment_artifact_durability.py").read_text(encoding="utf-8")
+    relative = verifier.DURABILITY_EVIDENCE_RELATIVE.as_posix()
+
+    assert 'Path(".fleet-evidence/receipts/p35d")' in writer
+    assert relative == ".fleet-evidence/receipts/p35d/live-b5-attachment-artifact-durability-evidence.json"
+
+
 def _success_receipt(sha: str) -> dict[str, object]:
     return {
         "schema": verifier.RECEIPT_SCHEMA,
@@ -386,9 +394,9 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         del check, stdout, stderr
         calls.append((command, cwd, env, timeout))
         if "test_attachment_artifact_durability" in command[3]:
-            evidence_path = worktree / ".scratch/clean-backend-refoundation/assets"
+            evidence_path = worktree / verifier.DURABILITY_EVIDENCE_RELATIVE.parent
             evidence_path.mkdir(parents=True)
-            (evidence_path / "live-b5-attachment-artifact-durability-evidence.json").write_text(
+            (worktree / verifier.DURABILITY_EVIDENCE_RELATIVE).write_text(
                 json.dumps(
                     {
                         "gate": "B5",
