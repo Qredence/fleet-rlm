@@ -805,12 +805,21 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 # Phase 5 - Operational certification without feature growth
 
-**Status: local preparation in progress; external certification open.**
-Implementation and paid provider/model execution are authorized. Live admission
-still requires agreed limits and an identified candidate; commits, database
-mutations, deployment changes, and promotion require separate authorization.
-P2.7 snapshot probes, Lakebase preflight, and a local MLflow receipt are not
-Phase 5 closeout.
+**Status: in progress; bounded live evidence collected (2026-09-12).**
+The operator-authorized clean candidate `962f4a62f` passed v10/v5 image/runtime
+probes and one bounded non-recursive FastAPI control with MLflow linkage.
+Configured-loopback MLflow export passed its exercised scenarios, but token
+aggregation and fault/sampling evidence remain incomplete. Configured snapshots
+remain v7/v2; deployment and managed DB gates are open. The aggregate recursive
+snapshot canary also needs explicit opt-in policy reconciliation. None of these
+narrow receipts closes Phase 5 or changes complete-MVP quality evidence.
+
+The [ADR006 bounded execution entry](docs/decisions/006-implementation-status.md#phase-5-bounded-apimlflow-execution-2026-09-12)
+records exact scope and the hashed receipt index. The authorized limits were
+US$50, four hours including cleanup, one root trial and at most five concurrent
+Sandboxes. US$48 was conservatively charged as reservations, not actual spend;
+no further paid admission is planned from that receipt. Database mutations,
+deployment changes and promotion remain separately gated.
 
 ### Execution order and remaining operator inputs
 

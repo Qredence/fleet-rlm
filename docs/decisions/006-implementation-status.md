@@ -16,6 +16,54 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 5 bounded API/MLflow execution (2026-09-12)
+
+Operator approved a certification branch/commit and paid provider/model work
+within US$50, four hours including a 15-minute cleanup reserve, one root trial
+and at most five concurrent Sandboxes. Candidate
+`962f4a62ff0d589a15685882deb592ae7d438e7f` on
+`chore/phase5-operational-certification` was clean throughout execution. No
+push, deployment, managed database mutation, or snapshot promotion ran.
+
+The write-once index is
+`.scratch/phase5-certification-962f4a62f/evidence-index.json`; it hashes the
+bounded receipts in the same directory:
+- `snapshot-probes.json`: immutable Session v10 and SemanticChild v5 passed
+  provider image checks and runtime probes; both disposable Sandboxes were
+  confirmed deleted. Configured v7/v2 references remain unchanged.
+- `mlflow-configured.json`: the actual configured loopback backend passed
+  activation, DSPy/proxy export, root/child linkage, sanitization, feedback,
+  concurrent Session, repeated-lifespan and unavailable-backend checks. Receipt
+  eligibility remains false: token aggregation is unknown and sampling,
+  credential, saturation, slow-export and stalled-flush scenarios are not
+  exercised by this command. This is not managed MLflow evidence.
+- `api-smoke.json` and `api-lifecycle.json`: one control Turn used the existing
+  disposable FastAPI service/client helpers with `phase4-campaign-b`, unchanged
+  committed Root/Sub model identities, eight provider attempts, no retries,
+  disabled recursion and disabled warm capacity. The public HTTP/UI-v1 SSE
+  path completed with the expected answer. One Sandbox used 51 observed seconds;
+  Sandbox, owned Volume and service-process cleanup were confirmed. The
+  bounded-profile control is not default-budget or matched-quality evidence.
+- `api-mlflow-linkage.json`: SSE trace
+  `tr-8c176e0063551985246dd0f58ba168a9` was retrieved from configured MLflow with
+  state OK, 15 spans, one root, valid parent linkage and Session identity.
+  `tool.llm_query`, `RLM.sub_lm`, settlement, commit and cleanup spans were
+  present. Numeric SSE usage was present, but standard MLflow token-usage
+  attributes were absent; aggregation remains an actionable evidence gap.
+
+The campaign conservatively charged US$48 of reservations (US$3 for snapshot
+probes, US$45 for the single API admission). This is **not actual spend**.
+The existing V4 Flash rate card estimates the API smoke at about US$0.0074,
+excluding probes; the V4.1 price mapping and invoices were not independently
+verified. No further paid admission was made or planned from this receipt.
+
+The aggregate P2.7 verifier was not run: its recursive test requires an enabled
+`daytona-recursive` policy, now disabled by default. Do not turn recursion on in
+production to satisfy it; reconcile that caller with explicit opt-in separately.
+Phase 5 remains incomplete: aggregate snapshot policy, deployment identities,
+managed DB topology, complete MLflow evidence and production tolerances are open.
+The older complete-MVP quality failures are unchanged.
+
 ### Phase 5 local preparation (2026-09-12)
 
 Operator requested implementation of the Phase 4/5 continuation and authorized
