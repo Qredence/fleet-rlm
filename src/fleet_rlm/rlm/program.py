@@ -1339,6 +1339,34 @@ def _supports_turn_lm_copy(lm: Any) -> bool:
     )
 
 
+def _positive_timeout(value: object) -> float | None:
+    """Return a finite positive timeout, or ``None`` when the value is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    timeout = float(value)
+    if not math.isfinite(timeout) or timeout <= 0:
+        return None
+    return timeout
+
+
+def _configured_lm_timeout(lm: Any) -> float | None:
+    """Read the role HTTP timeout from a template or an already-bound proxy."""
+    stored = _positive_timeout(getattr(lm, "_fleet_role_timeout", None))
+    if stored is not None:
+        return stored
+    wrapped = lm.wrapped if isinstance(lm, DeadlineLMProxy) else lm
+    return _positive_timeout(getattr(wrapped, "kwargs", {}).get("timeout"))
+
+
+def _apply_role_timeout(lm: Any, role_timeout: float | None) -> None:
+    """Keep the role timeout on a copied runtime even when ``copy()`` dropped kwargs."""
+    if role_timeout is None:
+        return
+    kwargs = getattr(lm, "kwargs", None)
+    if isinstance(kwargs, dict):
+        kwargs["timeout"] = role_timeout
+
+
 class DeadlineLMProxy(dspy.BaseLM):
     """Turn-owned DSPy LM proxy with one retry owner and no instance method edits."""
 
@@ -1355,6 +1383,7 @@ class DeadlineLMProxy(dspy.BaseLM):
         budget: TurnBudget | None = None,
         admission: ProviderAdmission | None = None,
         can_finalize: bool = True,
+        role_timeout: float | None = None,
     ) -> None:
         """
         Initialize a deadline-enforcing language-model proxy.
@@ -1368,6 +1397,7 @@ class DeadlineLMProxy(dspy.BaseLM):
                 budget (TurnBudget | None): Optional turn budget shared by provider calls.
                 admission (ProviderAdmission | None): Optional provider admission controller.
                 can_finalize (bool): Whether the proxy may reserve time for finalization.
+                role_timeout (float | None): Immutable role HTTP timeout ceiling from the template.
         """
         super().__init__(
             model=getattr(wrapped, "model", "test/deadline"),
@@ -1377,6 +1407,8 @@ class DeadlineLMProxy(dspy.BaseLM):
             num_retries=0,
         )
         self.wrapped = wrapped
+        resolved_role_timeout = _positive_timeout(role_timeout) or _configured_lm_timeout(wrapped)
+        _apply_role_timeout(wrapped, resolved_role_timeout)
         self.kwargs = dict(getattr(wrapped, "kwargs", {}))
         self.history = getattr(wrapped, "history", [])
         self._fleet_deadline = deadline
@@ -1386,6 +1418,7 @@ class DeadlineLMProxy(dspy.BaseLM):
         self.budget = budget
         self.admission = admission
         self.can_finalize = can_finalize
+        self._fleet_role_timeout = resolved_role_timeout
 
     def __getattr__(self, name: str) -> Any:
         """Delegate attribute lookup to the wrapped language model."""
@@ -1447,6 +1480,7 @@ class DeadlineLMProxy(dspy.BaseLM):
             budget=self.budget,
             admission=self.admission,
             can_finalize=self.can_finalize,
+            role_timeout=self._fleet_role_timeout,
         )
         if "_fleet_trace_identity" in vars(self):
             copied._fleet_trace_identity = self._fleet_trace_identity
@@ -1482,6 +1516,7 @@ class DeadlineLMProxy(dspy.BaseLM):
             budget=budget.turn,
             admission=ProviderAdmission(budget, action, wrap_up, can_finalize),
             can_finalize=can_finalize,
+            role_timeout=_configured_lm_timeout(lm),
         )
         view._fleet_trace_identity = getattr(lm, "_fleet_trace_identity", lm)
         return view
@@ -1490,31 +1525,52 @@ class DeadlineLMProxy(dspy.BaseLM):
         """Persist the provider template, never a transient Turn deadline."""
         return self.wrapped.dump_state()
 
-    def _attempt_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def _attempt_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        call_deadline: float | None = None,
+    ) -> tuple[dict[str, Any], float]:
         """
         Add a bounded timeout to language-model call parameters based on the remaining turn budget.
 
         Parameters:
             kwargs (dict[str, Any]): Call parameters to copy and constrain.
+            call_deadline (float | None): Wall-clock end of the current provider call including retries.
 
         Returns:
-            dict[str, Any]: A copy of the call parameters with a calculated timeout when finite.
+            tuple[dict[str, Any], float]: Bounded call parameters and the monotonic clock used
+                for this attempt. Retries reuse that timestamp so remaining time is not
+                double-counted against the role ceiling.
         """
         bounded = dict(kwargs)
+        now = time.monotonic()
         available = _remaining_lm_timeout(
             self._fleet_deadline,
             self,
             bounded,
             reserve_seconds=self._fleet_reserve_seconds,
             error_message=self._deadline_error_message,
+            now=now,
         )
+        if call_deadline is not None:
+            available = min(available, call_deadline - now)
+        if available <= 0:
+            raise TimeoutError(self._deadline_error_message)
         if self.admission is not None:
             available = min(available, self.admission.reserve())
         elif self.budget is not None:
             available = min(available, self.budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS))
         if math.isfinite(available):
             bounded["timeout"] = available
-        return bounded
+        return bounded, now
+
+    def _retry_call_deadline(self, now: float, timeout: object) -> float | None:
+        """Bound retries to the first attempt's remaining role timeout."""
+        bounded = _positive_timeout(timeout)
+        if bounded is None:
+            return None
+        return now + bounded
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         """
@@ -1526,8 +1582,11 @@ class DeadlineLMProxy(dspy.BaseLM):
         Raises:
             Exception: The final retryable provider error when all retry attempts fail.
         """
+        call_deadline: float | None = None
         for attempt in range(self._fleet_retry_budget + 1):
-            bounded = self._attempt_kwargs(kwargs)
+            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
+            if call_deadline is None:
+                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
                 return self.wrapped.forward(*args, **bounded)
             except _RETRYABLE_LM_ERRORS:
@@ -1544,8 +1603,11 @@ class DeadlineLMProxy(dspy.BaseLM):
         Returns:
                 Any: The wrapped model's response.
         """
+        call_deadline: float | None = None
         for attempt in range(self._fleet_retry_budget + 1):
-            bounded = self._attempt_kwargs(kwargs)
+            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
+            if call_deadline is None:
+                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
                 return await self.wrapped.aforward(*args, **bounded)
             except _RETRYABLE_LM_ERRORS:
@@ -1586,6 +1648,7 @@ def _copy_lm_for_deadline(
     retry_budget = getattr(lm, "_fleet_retry_budget", getattr(lm, "num_retries", 0))
     if not isinstance(retry_budget, int) or isinstance(retry_budget, bool) or retry_budget < 0:
         retry_budget = 0
+    role_timeout = _configured_lm_timeout(lm)
     copied = lm.wrapped.copy(num_retries=0) if isinstance(lm, DeadlineLMProxy) else copy_lm(num_retries=0)
     if copied is lm:
         raise RLMModelBundleError("deadline-bound LM copy() must return an isolated runtime")
@@ -1598,6 +1661,7 @@ def _copy_lm_for_deadline(
         error_message=error_message,
         budget=budget if budget is not None else getattr(lm, "budget", None),
         can_finalize=can_finalize,
+        role_timeout=role_timeout,
     )
 
 
@@ -1617,6 +1681,7 @@ def _remaining_lm_timeout(
     *,
     reserve_seconds: float = 0.0,
     error_message: str = "Turn LM deadline exceeded",
+    now: float | None = None,
 ) -> float:
     """
     Calculate the timeout available for an LM call.
@@ -1627,6 +1692,8 @@ def _remaining_lm_timeout(
         call_kwargs (dict[str, Any]): Call arguments that may contain a timeout.
         reserve_seconds (float): Time to preserve after the call.
         error_message (str): Message for the timeout error.
+        now (float | None): Monotonic clock for this attempt. Callers that also bound
+            retries must pass the same timestamp so one attempt cannot consume two ticks.
 
     Returns:
         float: The smaller of the configured timeout and remaining available time.
@@ -1648,15 +1715,19 @@ def _remaining_lm_timeout(
         or reserve_seconds < 0
     ):
         raise ValueError("reserve_seconds must be finite and nonnegative")
-    remaining = math.inf if deadline is None else deadline - time.monotonic()
+    clock = time.monotonic() if now is None else now
+    remaining = math.inf if deadline is None else deadline - clock
     available = remaining - float(reserve_seconds)
     if available <= 0:
         raise TimeoutError(error_message)
-    configured = call_kwargs.get("timeout")
+    configured = _positive_timeout(call_kwargs.get("timeout"))
     if configured is None:
-        configured = getattr(lm, "kwargs", {}).get("timeout")
-    if isinstance(configured, (int, float)) and not isinstance(configured, bool) and configured > 0:
-        return min(float(configured), available)
+        configured = _configured_lm_timeout(lm)
+    role_timeout = _configured_lm_timeout(lm)
+    if role_timeout is not None:
+        configured = role_timeout if configured is None else min(configured, role_timeout)
+    if configured is not None:
+        return min(configured, available)
     return available
 
 

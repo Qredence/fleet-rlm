@@ -106,7 +106,19 @@ unchanged until the 144-row continuation above authorized P4.6.
   weakened. Recursion stays disabled. Phase 5 is not started. Further
   instruction overlays on this Root model are not getting exact prompt
   copy; a later recert needs a different product lever, then a new
-  `live_daytona_verify.py` run.
+  `live_daytona_verify.py` run. r5 closed the live loop on this Root.
+  Phase 3 complete-MVP stays **uncertified**. The Sub-LM HTTP timeout
+  isolation that followed is a separate product fix: native Sub attempts
+  keep `llm.sub.timeout_seconds = 90` as a hard ceiling after
+  `bind_turn_deadline`, remaining Turn time may only shrink it, and
+  provider retries share that ceiling so one packed `llm_query` then
+  concurrent `llm_query_batched` cell can finish under
+  `rlm.execution_timeout_s = 300` without stacking `90 + 90` per call.
+  Root/Sub model ids, MVP assertions, and `execution_timeout_s` are
+  unchanged. That timeout work does **not** certify Phase 3. Do not
+  patch Root instructions again or run another paid recert shot on this
+  model unless a later model or contract change justifies it. Phase 5
+  is not started.
 - **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
   empty files with HTTP 400; `_error_observation` treated that as unconfirmed
   cleanup and halted at 109/144. The runner now skips empty uploads, confirms
