@@ -61,7 +61,19 @@ unchanged until the 144-row continuation above authorized P4.6.
   longer treat a verification helper as license to `SUBMIT` while named
   host-tool writes remain; registered write/publish tools inject that
   fragment. Complete-MVP live wrap-up reserve is 60s so wrap-up cannot rewrite
-  the required third cell. Live recert was not rerun here.
+  the required third cell.
+- **Phase 3 complete-MVP recert** on `8a2b20277` (instruction/wrap-up fix plus
+  P4.6 disable): `.scratch/live-receipts/mvp-complete-20260912-r3.json` —
+  `passed: false`, `receipt_invalid` / `durability_receipt`. Lane 1 pytest
+  returned 0 (~105s), so B5 likely ran, but
+  `scripts/live_daytona_verify.py` reads
+  `.scratch/clean-backend-refoundation/assets/live-b5-attachment-artifact-durability-evidence.json`
+  while the durability test writes
+  `.fleet-evidence/receipts/p35d/live-b5-attachment-artifact-durability-evidence.json`.
+  Lane 2 (`test_complete_daytona_mvp_through_fastapi`) did not start.
+  Assertions were not weakened. Phase 5 is not started. A further official
+  recert needs the evidence path aligned, then a new `live_daytona_verify.py`
+  run.
 - **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
   empty files with HTTP 400; `_error_observation` treated that as unconfirmed
   cleanup and halted at 109/144. The runner now skips empty uploads, confirms
