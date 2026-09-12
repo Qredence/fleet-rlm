@@ -202,7 +202,10 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         # P2.7 lean SemanticChild sandboxes are Volume-less by contract: no
         # volume mount means no sibling scope to share. Isolation by absence
         # is the expected scope for that profile, not a scope violation.
-        evidence.volumeless_semantic_isolation = lease.volume_id is None and lease.volume_subpath in (None, "")
+        evidence.volumeless_semantic_isolation = lease.volume_id in (None, "") and lease.volume_subpath in (
+            None,
+            "",
+        )
         close = lease._close
 
         def observed_close() -> None:
