@@ -1,86 +1,38 @@
 # Fleet TUI — Agent Instructions
 
-This file adds rules specific to `tools/fleet-tui/`.
-
-Repository-wide rules from [AGENTS.md](../../AGENTS.md) still apply.
-
-The maintained Fleet client is a pi-tui TypeScript terminal application. It consumes the backend's public stream/API contracts; it does not define a second execution protocol or infer backend execution policy from transcript text.
+Applies to `tools/fleet-tui/`; repository rules and validation selection come from [AGENTS.md](../../AGENTS.md).
+The maintained client is a pi-tui TypeScript terminal application consuming backend HTTP/SSE contracts.
 
 ## Tooling
 
-- Node and pnpm versions are defined by the workspace.
-- Use pnpm from `tools/fleet-tui/`.
-- Run the complete TUI validation lane for code changes with `make tui-check`.
+- Use workspace-defined Node/pnpm versions and run pnpm from this package.
+- Run root Make targets from the repository root; TUI code uses the root guide's TUI lane.
+- Never hand-edit `src/generated/`; regenerate changed backend contracts using the root guide's source commands.
+- Documentation-only changes use the documentation lane without a terminal launch or live backend.
 
-Do not hand-edit generated files under `src/generated/`.
+## Ownership
 
-When the backend API or stream source contract changes, regenerate through the repository's root generation commands.
+- `fleet-turn-stream.ts` owns strict Turn stream lifecycle; `sse.ts` owns frame/chunk validation.
+- Live and durable projections convert typed backend information into client state.
+- `store.ts` owns transitions through dispatch/reducers; do not directly mutate shared state.
+- Transcript/screen/presenter modules own presentation, not execution semantics.
+- Slash commands extend the command registry/facade, without parallel parsing paths.
 
-## Architecture
+## Stream contract
 
-- `fleet-turn-stream.ts` owns strict Turn stream lifecycle.
-- `sse.ts` owns SSE/frame/chunk validation.
-- Live and durable projections convert backend contracts into client state.
-- `store.ts` owns state transitions; mutate state through the established dispatch/reducer path.
-- Transcript/screen/presenter modules own presentation, not backend execution semantics.
-- Slash commands use the established command registry/facade rather than independent parsing paths.
+Preserve one stream start, ordered intermediate chunks, one terminal outcome, and `[DONE]` last.
+Cancellation emits `abort` then `[DONE]`, without `finish` or post-terminal usage.
+Transient preparation heartbeats may precede `start`.
 
-Prefer extending these ownership boundaries instead of creating parallel state or protocol mechanisms.
+Use typed backend evidence for recursion, depth, settlement, and execution state;
+do not infer these from model text or presentation details.
+Live and durable projections must converge for equivalent committed information.
 
-## Stream invariants
+## Settings and errors
 
-The backend owns the public stream contract.
+Settings edit non-secret `config/fleet.toml` policy through the backend contract.
+Profile changes target a restart unless that contract explicitly says otherwise;
+the client does not independently enable child tools or switch execution policy.
 
-Preserve:
-
-- one stream start;
-- ordered intermediate chunks;
-- one terminal outcome;
-- `[DONE]` last.
-
-Cancellation uses `abort` followed by `[DONE]`, without `finish` or post-terminal
-usage. Preparation heartbeats may precede `start`; they are transient.
-
-Do not infer RLM recursion, depth, settlement, or execution state from model text or presentation details when the backend exposes typed evidence. The default backend policy disables Fleet child RLM tools; profile selection is restart-target policy, not a client-side execution switch.
-
-Live and durable projections should converge on equivalent user-visible state for equivalent committed information.
-
-## State and errors
-
-Use the established state reducer/dispatch model.
-
-Do not directly mutate shared TUI state.
-
-Use typed Fleet API errors and preserve bounded public error information.
-
-Do not display `.env`, provider credentials, or backend-private infrastructure details.
-
-## Settings
-
-Settings/profile UI edits non-secret `config/fleet.toml` policy through the backend settings contract.
-
-Do not read or expose secret environment values in the TUI.
-
-Treat profile changes as restart-target policy unless the backend contract explicitly says otherwise.
-
-## Validation
-
-For focused TypeScript changes, run the relevant workspace checks/tests.
-For changes limited to documentation or agent instructions, use the root
-documentation validation lane; no terminal launch or live backend is required.
-
-Before completing substantial TUI work, run:
-
-```bash
-make tui-check
-```
-
-Run root `make api-check` / generation commands when public backend contracts changed.
-
-Always run:
-
-```bash
-git diff --check
-```
-
-before completion.
+Use typed Fleet API errors and bounded public error information.
+Never read or display secret environment values, credentials, or private infrastructure errors.

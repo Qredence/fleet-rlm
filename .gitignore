@@ -73,7 +73,13 @@ outputs/
 
 # Agent/tooling state
 .claude/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/analyzing-rlm-performance/
+.agents/skills/analyzing-rlm-performance/*
+!.agents/skills/analyzing-rlm-performance/SKILL.md
+!.agents/skills/analyzing-rlm-performance/references/
 .worktrees/
 .codex/*
 !.codex/environments/

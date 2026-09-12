@@ -28,7 +28,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	install install-dev install-all \
 	dev format format-check lint typecheck \
 	test test-fast test-unit test-contract test-packaging test-db test-daytona-cov \
-	check quality-gate check-release check-docs check-security check-deps check-codebase-tree check-dependency-boundaries \
+	check quality-gate check-release check-docs check-instructions check-security check-deps check-codebase-tree check-dependency-boundaries \
 	api-check api-sync tui-check stream-check stream-sync \
 	build build-release release \
 	clean cli precommit-install precommit-run precommit \
@@ -66,7 +66,8 @@ help:
 	@echo "  make check            - Run the primary repo quality gate"
 	@echo "  make quality-gate     - Alias for the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
-	@echo "  make check-docs       - Run docs quality and harness engineering checks"
+	@echo "  make check-docs       - Run instructions, docs quality, and harness checks"
+	@echo "  make check-instructions - Validate agent guides and development-skill references"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
 	@echo "  make check-codebase-tree - Enforce import boundaries documented in ARCHITECTURE.md"
@@ -79,7 +80,7 @@ help:
 	@echo "Build & release:"
 	@echo "  make build            - Build Python distributions"
 	@echo "  make build-release    - Build and verify the backend-only distribution"
-	@echo "  make release          - Run clean + check + security + release artifacts"
+	@echo "  make release          - Clean, validate quality/security/metadata, then build artifacts"
 	@echo ""
 	@echo "Cloud:"
 	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
@@ -94,7 +95,7 @@ help:
 	@echo "  make daytona-child-snapshot-plan   - Print the non-secret SemanticChild plan"
 	@echo "  make daytona-child-snapshot-verify-runtime - Verify the native SemanticChild runtime"
 	@echo "  make profile-matrix          - Regenerate the TOML-derived provider/profile matrix"
-	@echo "  make clean            - Remove caches and local generated artifacts"
+	@echo "  make clean            - Remove project caches/build artifacts; preserve local data and logs"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
 	@echo "  make cli              - Show fleet-rlm CLI help"
@@ -178,9 +179,7 @@ daytona-child-snapshot-verify-runtime:
 profile-matrix:
 	uv run python scripts/generate_profile_matrix.py generate
 
-tui-check:
-	$(MAKE) api-check
-	$(MAKE) stream-check
+tui-check: api-check stream-check
 	# Run pnpm from inside the workspace so corepack resolves the pinned
 	# packageManager version (pnpm --dir resolves from the invocation CWD and
 	# misses it when make runs from the repo root).
@@ -193,12 +192,14 @@ check: lint format-check typecheck test-daytona-cov api-check tui-check check-co
 
 quality-gate: check
 
-check-release:
+check-release: check-instructions
 	uv run python scripts/validate_release.py hygiene
 	uv run python scripts/validate_release.py metadata
+
+check-instructions:
 	uv run python scripts/check_agents_md_freshness.py
 
-check-docs:
+check-docs: check-instructions
 	uv run python scripts/generate_profile_matrix.py check
 	uv run python scripts/check_docs_quality.py
 	uv run python scripts/check_harness_engineering.py
@@ -239,13 +240,22 @@ build-release: build
 	uvx twine check --strict dist/*
 	uv run python scripts/validate_release.py artifacts
 
-release: clean check check-security build-release
+# Keep phases ordered even when the caller enables parallel make.
+release:
+	$(MAKE) clean
+	$(MAKE) check check-security check-release
+	$(MAKE) build-release
 
 clean:
 	@echo "Cleaning caches and local generated artifacts..."
-	find . -type d \( -name ".ruff_cache" -o -name "__pycache__" -o -name ".pytest_cache" -o -name ".mypy_cache" \) -exec rm -rf {} + 2>/dev/null || true
-	rm -rf build dist .coverage .venv-release-smoke
-	rm -f server.log fleet_rlm.db
+	@for path in $(PYTHON_SOURCES) $(TUI_DIR)/src; do \
+		if [ -d "$$path" ]; then \
+			find "$$path" -type d \( -name node_modules -o -name .venv -o -name .git \) -prune -o \
+				-type d \( -name .ruff_cache -o -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache \) \
+				-prune -exec rm -rf {} + || exit $$?; \
+		fi; \
+	done
+	rm -rf .ruff_cache .pytest_cache .mypy_cache __pycache__ build dist .coverage .venv-release-smoke
 	@echo "Cleanup complete"
 
 precommit-install:

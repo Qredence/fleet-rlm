@@ -1,140 +1,72 @@
 # Fleet RLM — Agent Instructions
 
-`fleet-rlm` is an RLM-native system built around DSPy, Daytona, FastAPI, durable Sessions/Turns, and a maintained terminal client under `tools/fleet-tui/`.
+Fleet is a DSPy/Daytona backend with durable Sessions/Turns and a pi-tui client.
+This guide owns repository workflow and validation selection.
 
-This file defines repository-wide execution rules. `tools/fleet-tui/AGENTS.md` adds rules specific to the terminal client.
+## Task context
 
-## Working model
+- Inspect the affected implementation and tests; reuse existing ownership seams.
+- For ownership, lifecycle, or dependency changes, consult [ARCHITECTURE.md](ARCHITECTURE.md).
+- For terminal work, apply [tools/fleet-tui/AGENTS.md](tools/fleet-tui/AGENTS.md).
+- For setup, use [CONTRIBUTING.md](CONTRIBUTING.md); find task-specific guides through [docs/index.md](docs/index.md).
+- Current code, tests, pinned dependencies, `config/fleet.toml`, and generated checks outrank proposals and dated receipts.
 
-Before changing code:
+## Execution and authority
 
-1. Inspect the relevant implementation and its tests.
-2. Search for existing implementations, helpers, and established boundaries before introducing new abstractions.
-3. Read `ARCHITECTURE.md` when the task affects ownership, lifecycle, dependencies, domain boundaries, or cross-component behavior.
+- Complete authorized local work and affected checks, fixing introduced failures without repeated approval; stop at completion or a concrete blocker.
+- Preserve unrelated staged, unstaged, and untracked work; never reset, clean, stash, overwrite, or revert others' changes.
+- Commits, amendments, pushes, PRs, deployment, publication, and shared-infrastructure changes require explicit requests.
+- Credentialed provider, Daytona, database, and benchmark runs are explicit operator actions; use existing entry points and report their evidence scope.
+- Use `uv run` for Python. Delegate only when explicitly requested or required by applicable instructions.
+- User instructions take precedence over skill guidance, subject to system/developer instructions. If a skill blocks work, cite its exact instruction and required input.
+- Coding-agent authentication/model and Fleet runtime provider configuration are separate; discussing one does not authorize changing the other.
 
-Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract checks, and executable validation as authoritative. `docs/index.md` maps current guides; ADR proposals, plans, and dated receipts do not override executable contracts.
+## Architecture constraints
 
-## Execution
-
-- Treat action requests as instructions to implement and validate through completion or a concrete blocker. Resolve routine, reversible choices from repository evidence and user intent.
-- For simple/local tasks, act directly; avoid long plans, routine tool narration, speculative exploration, and questions that repository evidence can answer.
-- Ask only when missing information materially changes the outcome or additional authority is needed. Prepare authorized, reviewable work before asking; do not ask again for authority already granted.
-- Keep changes focused, reuse existing modules, and prefer the simplest complete implementation. Remove obsolete code only when safe, verified, and directly relevant. Do not clean up unrelated files.
-- For architectural work, keep a concise task list and validate meaningful stages. Use `uv run` for Python commands.
-- Treat follow-ups as steering unless the user cancels or replaces the task. Answer status questions briefly, then continue.
-- Delegate only when explicitly requested or required by applicable instructions; assign bounded responsibilities and preserve others' edits.
-
-## Instructions and communication
-
-- Explicit user instructions take precedence over skill guidelines, subject to system and developer instructions. Apply skills to the actual task; guidance edits do not themselves require API credentials or live calls.
-- Distinguish the coding agent's authentication/model from Fleet's runtime provider configuration. Do not change either merely because the other is discussed.
-- If a skill blocks progress, cite its exact file and instruction, explain why it applies, and state the input needed. Do not infer extra approval requirements.
-- Use concise, plain language. Lead with results and evidence; state limits. Prefer short paragraphs and useful lists; avoid repeated summaries, stock phrases, and unnecessary formatting.
-
-## Git and external effects
-
-Preserve pre-existing staged, unstaged, and untracked changes. Do not reset, clean, stash, overwrite, or revert changes you did not make.
-Do not commit, amend, push, open pull requests, deploy, publish, mutate shared infrastructure, or perform other externally visible actions unless explicitly requested.
-Never expose credentials, tokens, `.env` values, provider secrets, or raw infrastructure errors.
-
-## Hard architecture invariants
-
-- `src/fleet_rlm/` is the canonical Python backend.
-- Keep FastAPI routes as transport adapters; obtain application/runtime dependencies through the established composition/dependency seams.
-- Use `dspy.LM` as Fleet's LLM abstraction. Do not introduce direct LiteLLM application usage.
-- Use the repository-pinned DSPy implementation and current official DSPy documentation as the behavioral contract when DSPy/RLM behavior matters.
-- DSPy owns native RLM history and trajectory semantics. Fleet must not independently duplicate, compact, truncate, reset, or reconstruct native `REPLHistory`.
-- Treat process-scoped LM instances as immutable templates. Turn-specific deadlines, retries, adapters, callbacks, or other mutable execution state must be isolated per Turn.
-- Turn ownership and deadlines bound LM, Tool, interpreter, and recursive work. Do not allow detached work to continue mutating Fleet state after settlement.
+- `src/fleet_rlm/` is canonical. FastAPI routes use composition/dependency seams as transport adapters.
+- Use native `dspy.RLM` and `dspy.LM`, with the pinned implementation and official DSPy documentation; no direct application LiteLLM usage.
+- DSPy owns native `REPLHistory` and trajectory semantics; Fleet must not duplicate, compact, truncate, reset, or reconstruct them.
+- Process-scoped LMs are immutable templates; isolate mutable deadlines, retries, adapters, and callbacks per Turn.
+- Turn ownership/deadlines bound LM, Tool, interpreter, and recursive work through settlement; detached work must not mutate settled state.
 - Recursive delegation depth is distinct from native RLM iteration count.
-- Native `dspy.RLM` uses retained broker execution as the only production code-execution path; native `llm_query` remains available, while Fleet child RLM tools require an explicit opt-in profile. Follow the ADR 006 status ledger before claiming cutover, containment, value, or live certification.
-- Keep Daytona SDK integration inside `src/fleet_rlm/daytona/`.
-- Keep internal Runtime Events transport-neutral. Public clients consume the backend stream contract rather than defining parallel execution semantics.
-- State transitions, settlement, persistence, and resource cleanup must go through their owning lifecycle/service abstractions.
-- Alembic owns live schema evolution.
-- `config/fleet.toml` owns runtime policy and profile configuration. Do not encode current provider/model choices in application code or repository instructions.
-- Secrets may only come from explicitly configured environment references and must never be exposed through settings APIs, traces, logs, SSE payloads, or public exceptions.
+- Retained broker execution is the production path; native semantic queries remain available. Fleet child RLM tools require explicit profile opt-in.
+- Consult the [ADR 006 ledger](docs/decisions/006-implementation-status.md) before claiming cutover, containment, recursive value, or live certification.
+- Daytona SDK integration stays in `src/fleet_rlm/daytona/`; internal Runtime Events remain transport-neutral.
+- Clients consume backend contracts. State transitions, persistence, settlement, and cleanup use their owning services; Alembic owns live schema evolution.
+- `config/fleet.toml` owns runtime policy; keep current provider/model choices out of application code and instructions.
+- Secrets come only from configured environment references; never expose values, credentials, or raw infrastructure failures in settings, logs, traces, SSE, or public errors.
 
-See `ARCHITECTURE.md` for component ownership and dependency structure.
+## Generated content
 
-## Generated artifacts
+Never hand-edit generated contracts or client types. Change their owning sources:
 
-Do not hand-edit generated contracts or generated client types, including:
+| Artifact | Regenerate / verify |
+| --- | --- |
+| `openapi.yaml`, `tools/fleet-tui/src/generated/openapi.ts` | `make api-sync` / `make api-check` |
+| TUI stream/chunk validation artifacts | `make stream-sync` / `make stream-check` |
+| `docs/reference/profile-matrix.md` | `make profile-matrix` / `make check-docs` |
 
-- `openapi.yaml`
-- `tools/fleet-tui/src/generated/openapi.ts`
-- generated TUI stream/chunk validation artifacts and `docs/reference/profile-matrix.md` (`make profile-matrix`)
+Bundled Skill Markdown is runtime content: inspect its catalog and contract tests when editing it.
 
-Regenerate from the owning source: `make api-sync`, `make stream-sync`, or `make profile-matrix`; verify with the corresponding check target. Bundled Skill Markdown is model-facing runtime content: inspect its catalog and contract tests when editing it.
+## Validation selection
 
-## Validation
+Use affected lanes below; repeat passing checks only for new changes or unresolved concerns.
+Add regressions to existing behavior-owning tests; see [testing strategy](docs/how-to-guides/testing-strategy.md) for fixtures and suite boundaries.
 
-Use the smallest validation lane that proves the change, then escalate when the affected contract requires it.
-Repeat or broaden passing checks only for new changes, failures, or unresolved concerns. Add meaningful regressions to the existing behavior-owning test file by default; create a new file only for a distinct contract, fixture/process boundary, generated-contract lane, or live marker. Coverage is a coarse floor, not a reason to test every internal branch.
-For documentation or agent-instruction-only changes, run `make check-docs` and `git diff --check`. Dated plans and receipts are historical evidence, not current certification; verify current behavior against code and `config/fleet.toml`. Code lanes below apply when their code or executable contracts change.
+| Changed contract | Required lane |
+| --- | --- |
+| Documentation / agent instructions only | `make check-docs` |
+| Focused Python | `uv run pytest <relevant-tests> -q`; `uv run ruff check <changed-paths>`; `uv run ruff format --check <changed-paths>` |
+| Typed application interfaces or implementations | Also `uv run ty check src` |
+| TUI code | `make tui-check` |
+| HTTP schemas/routes, settings, streams, generated interfaces | Regenerate affected contracts above; `make api-sync` and `make api-check` |
+| Ownership, imports, integrations, package boundaries | `make check-codebase-tree`; `make check-dependency-boundaries` |
+| Multiple subsystems, lifecycle, public contracts, configuration resolution | `make check` |
+| Release/security work or release-ready validation | `make check-security`; `make build-release`; `make check-release` |
 
-### Focused Python changes
-
-Run relevant tests and checks: `uv run pytest <relevant-tests> -q`, `uv run ruff check <changed-paths>`, and `uv run ruff format --check <changed-paths>`.
-
-Run `uv run ty check src` when typed application interfaces or implementations change.
-
-### API or generated contracts
-
-After changing public HTTP schemas, routes, settings contracts, stream contracts, or generated client interfaces:
-
-```bash
-make api-sync
-make api-check
-```
-
-### TUI
-
-For code changes under `tools/fleet-tui/`:
-
-Run `make tui-check`.
-
-Follow `tools/fleet-tui/AGENTS.md`.
-
-### Architecture or dependency boundaries
-
-When moving responsibilities, imports, provider integrations, or package boundaries:
-
-```bash
-make check-codebase-tree
-make check-dependency-boundaries
-```
-
-### Broad or cross-cutting changes
-
-Run `make check` for changes spanning multiple subsystems, lifecycle semantics, public contracts, configuration resolution, or other repository-wide invariants.
-
-### Release or security work
-
-When the task affects these concerns or release-ready validation is explicitly requested:
-
-```bash
-make check-security
-make build-release
-make check-release
-git diff --check
-```
-
-### Live validation
-
-Credentialed Daytona, model-provider, database, benchmark, and other live tests are explicit operator actions.
-
-Do not enable or infer live credentials merely to satisfy ordinary validation.
-
-When live validation is requested, use the existing repository live-test or verification entry points and report exactly what was exercised.
+Guidance-only changes need no live backend or credentials. Local checks do not establish live certification.
 
 ## Completion
 
-Before finishing:
-
-1. Review the diff for unintended changes.
-2. Run every validation lane applicable to the touched contract.
-3. Run `git diff --check`.
-4. Report what changed, what was validated, and anything that could not be validated.
-
-Do not claim live, release, security, or integration guarantees from narrower tests alone.
+Review the diff, run applicable checks and `git diff --check`, and report changes, results, and blockers.
+State evidence limits; narrow checks do not establish broader live, release, security, or integration guarantees.

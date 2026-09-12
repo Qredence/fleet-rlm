@@ -28,52 +28,13 @@ including provider-specific names such as `DATABRICKS_TOKEN`; see
 [`docs/reference/configuration.md`](docs/reference/configuration.md). Never
 commit credentials or use a Daytona API key as an API bearer token.
 
-## Architecture rules
-
-- Read `AGENTS.md` and `ARCHITECTURE.md` before changing backend ownership; read
-  `tools/fleet-tui/AGENTS.md` for terminal-client work.
-- Keep routes as HTTP translators and retrieve runtime modules through
-  `api/dependencies.py`.
-- Keep Daytona SDK imports inside `src/fleet_rlm/daytona/`.
-- Keep Runtime Events transport-neutral; `api/sse.py` owns public projection.
-- Let `RunLifecycle.finish()` own Artifact publication and Turn Commit; keep
-  terminal ordering and cleanup in `TurnCoordinator`.
-- Let Alembic own live schema evolution. Do not add startup `create_all`.
-- Do not add `/api/v1`, WebSocket execution, compatibility aliases, or a
-  graphical frontend contract.
-- Do not hand-edit `openapi.yaml` or
-  `tools/fleet-tui/src/generated/openapi.ts`; use `make api-sync`.
-
 ## Development workflow
 
-Start with the smallest relevant lane:
-
-```bash
-uv run pytest tests/unit/backend/path_to_test.py -q
-uv run ruff check path/to/changed.py
-uv run ruff format --check path/to/changed.py
-uv run ty check src
-```
-
-For terminal changes:
-
-```bash
-make tui-check
-```
-
-For documentation and agent-instruction changes, run:
-
-```bash
-make check-docs
-git diff --check
-```
-
-Run `make check` for broad code, lifecycle, configuration, or public-contract
-changes. Release work additionally requires `make check-release`,
-`make check-security`, and `make build-release`. Follow the validation matrix
-in [AGENTS.md](AGENTS.md); report the checks actually run. Credentialed Daytona
-tests require explicit `FLEET_LIVE=1`; live scripts have their own documented
-admission gates and remain explicit operator actions.
+[AGENTS.md](AGENTS.md) owns workflow boundaries and the validation matrix.
+Use [ARCHITECTURE.md](ARCHITECTURE.md) when changing component ownership and
+[the TUI guide](tools/fleet-tui/AGENTS.md) for terminal-client work.
+The [testing strategy](docs/how-to-guides/testing-strategy.md) describes fixtures,
+suite selection, and explicit live-test entry points.
 
 ## Documentation and generated files
 

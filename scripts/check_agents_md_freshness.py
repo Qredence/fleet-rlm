@@ -34,11 +34,12 @@ class AgentsMdValidator:
     errors: list[ValidationError] = field(default_factory=list)
 
     ALLOWED_AGENT_PATHS: ClassVar[frozenset[str]] = frozenset({"AGENTS.md", "tools/fleet-tui/AGENTS.md"})
+    DEVELOPMENT_SKILL: ClassVar[str] = ".agents/skills/analyzing-rlm-performance/SKILL.md"
 
     # Patterns for extracting references
     LINK_PATTERN = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
     CODE_BLOCK_PATTERN = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-    MAKEFILE_TARGET_PATTERN = re.compile(r"`make\s+(\w+)`")
+    MAKEFILE_TARGET_PATTERN = re.compile(r"(?:^|[;&|])[ \t]*make[ \t]+([a-zA-Z_][a-zA-Z0-9_-]*)", re.MULTILINE)
     CLI_COMMAND_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
         re.compile(r"`(uv\s+run\s+fleet[^\s`]*)"),
         re.compile(r"`(uv\s+run\s+fleet-rlm[^\s`]*)"),
@@ -81,8 +82,47 @@ class AgentsMdValidator:
             self._validate_file(agents_file)
 
         self._validate_cross_references(agents_files)
+        self._validate_claude_import()
+        self._validate_development_skill()
 
         return self.errors
+
+    def _validate_claude_import(self) -> None:
+        """Keep Claude on the canonical repository instructions."""
+        path = self.repo_root / "CLAUDE.md"
+        if not path.is_file() or path.read_text(encoding="utf-8").strip() != "@AGENTS.md":
+            self.errors.append(ValidationError("CLAUDE.md", "invalid_import", "expected only @AGENTS.md"))
+
+    def _validate_development_skill(self) -> None:
+        """Validate the owned skill without inspecting installed third-party skills."""
+        entry = self.repo_root / self.DEVELOPMENT_SKILL
+        if not entry.is_file():
+            self.errors.append(ValidationError(self.DEVELOPMENT_SKILL, "missing_skill", "development skill is missing"))
+            return
+        skill_root = entry.parent.resolve()
+        pending = [entry.resolve()]
+        visited: set[Path] = set()
+        while pending:
+            path = pending.pop()
+            if path in visited:
+                continue
+            visited.add(path)
+            content = path.read_text(encoding="utf-8")
+            self._check_links(path, content)
+            for match in self.LINK_PATTERN.finditer(content):
+                target = match.group(2).split("#")[0]
+                if not target or target.startswith(self.EXTERNAL_PREFIXES):
+                    continue
+                linked = (path.parent / target).resolve()
+                if linked.is_relative_to(skill_root) and linked.is_file() and linked.suffix == ".md":
+                    pending.append(linked)
+        for path in sorted(entry.parent.rglob("*.md")):
+            if path.resolve() not in visited:
+                self.errors.append(
+                    ValidationError(
+                        str(path.relative_to(self.repo_root)), "unreachable_reference", "not linked from SKILL.md"
+                    )
+                )
 
     def _validate_structure(self, agents_files: list[Path]) -> None:
         """Require the root guide and the one intentionally specialized guide."""
@@ -136,7 +176,7 @@ class AgentsMdValidator:
         self._check_path_references(agents_file, content_without_code)
 
         # Check Makefile targets
-        self._check_makefile_targets(agents_file, content_without_code)
+        self._check_makefile_targets(agents_file, content)
 
         # Check CLI commands (limited subset for CI efficiency)
         self._check_cli_commands(agents_file, content_without_code)
@@ -284,8 +324,10 @@ class AgentsMdValidator:
         target_pattern = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_-]*):", re.MULTILINE)
         valid_targets = set(target_pattern.findall(makefile_content))
 
-        # Find referenced targets in AGENTS.md
-        for match in self.MAKEFILE_TARGET_PATTERN.finditer(content):
+        # Inspect inline examples and fenced commands without interpreting prose or executing them.
+        snippets = self.CODE_BLOCK_PATTERN.findall(content)
+        snippets.extend(re.findall(r"`([^`\n]+)`", self._remove_code_blocks(content)))
+        for match in self.MAKEFILE_TARGET_PATTERN.finditer("\n".join(snippets)):
             target = match.group(1)
             if target not in valid_targets:
                 self.errors.append(

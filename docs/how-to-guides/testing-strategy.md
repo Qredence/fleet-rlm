@@ -128,7 +128,8 @@ render cost (`transcript.bench.ts`), and cleanup.
 For authored guides and agent instructions, run `make check-docs` and
 `git diff --check`. The documentation gate checks the generated profile matrix,
 internal documentation links and reachability, CLI/OpenAPI sanity, the root
-agent-guide line budget, and script inventory/help. It does not verify every
+agent-guide line budget, guide/Claude-import integrity, documented Make targets,
+development-skill reference reachability, and script inventory/help. It does not verify every
 prose claim, external URL, or historical receipt.
 
 Bundled Skill Markdown is loaded by the runtime. After correcting its bodies

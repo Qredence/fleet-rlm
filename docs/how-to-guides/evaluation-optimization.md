@@ -300,3 +300,28 @@ IDs remain stable. Group identity values and sealed-test content remain absent
 from the public manifest. These mechanics prevent declared-group leakage; they
 do not certify semantic independence of examples whose provenance omits a shared
 source.
+
+## Phase 4 transport evidence
+
+The Phase 4 campaign uses the canonical FastAPI transport. All four arms run as
+isolated FastAPI processes reached through the public attachment, Session,
+Turn, and SSE endpoints: A/B/D from the candidate checkout with their sealed
+arm profiles, C from the frozen-baseline checkout. Arm behavior differs by
+profile only; there is no public arm selector or alternate in-process campaign
+execution path. Live campaign modes require the profile's MLflow tracking
+server before admitting a trial, and every completed trial row links to its
+MLflow root trace identifier.
+
+For a bounded operator smoke of the live transport, the campaign driver
+supervises one disposable API service per arm from the pinned revisions. Its
+`--partial-live` mode sends exactly ten sealed exploratory trials through the
+public API/SSE contract, keeps one Session per trial, and records a partial
+receipt. This is transport evidence only: unknown provider spend remains
+explicit, and the receipt cannot certify recursive value or change the default
+profile.
+The 2026-09-10 execution is retained at
+`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
+`incomplete`.
+
+This historical description does not supersede the
+[ADR 006 status ledger](../decisions/006-implementation-status.md).

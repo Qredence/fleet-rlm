@@ -26,7 +26,7 @@ deletion does not contain detached process-session children, and the native
 worker/lease branch has been removed. Turn preparation and the RLM runner
 accept only retained broker execution. Fleet child RLM tools (`rlm_query` /
 `rlm_query_batched`) are opt-in: `[defaults.rlm] recursion_enabled = false`
-after the 2026-09-12 P4.6 ablation. Native `llm_query` remains the semantic
+in the shipped policy. Native `llm_query` remains the semantic
 delegation path. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
 owns dated evidence and remaining gates; this page describes current ownership.
 
@@ -58,7 +58,8 @@ schemas, routes, OpenAPI derivation, and SSE projection. Routes are transport
 adapters: they obtain runtime services through composition and dependency seams
 and do not construct stores, engines, models, or provider clients. The SSE
 layer projects typed, transport-neutral Runtime Events into the public client
-stream.
+stream. Fleet exposes no `/api/v1`, WebSocket execution, compatibility aliases,
+or graphical frontend contract.
 
 The FastAPI HTTP/SSE service is the canonical execution interface. `fleet web`
 and `fleet-rlm serve-api` launch that service; `fleet cli` supervises the same
@@ -68,25 +69,10 @@ retains `config.default_profile`. Explicit profile loading occurs before
 provider, database, Daytona, or client initialization, and explicit profiles
 are incompatible with Uvicorn `--reload`.
 
-The Phase 4 campaign preserves this transport boundary. All four arms run as
-isolated FastAPI processes reached through the public attachment, Session,
-Turn, and SSE endpoints: A/B/D from the candidate checkout with their sealed
-arm profiles, C from the frozen-baseline checkout. Arm behavior differs by
-profile only; there is no public arm selector or alternate in-process campaign
-execution path. Live campaign modes require the profile's MLflow tracking
-server before admitting a trial, and every completed trial row links to its
-MLflow root trace identifier.
-
-For a bounded operator smoke of the live transport, the campaign driver
-supervises one disposable API service per arm from the pinned revisions. Its
-`--partial-live` mode sends exactly ten sealed exploratory trials through the
-public API/SSE contract, keeps one Session per trial, and records a partial
-receipt. This is transport evidence only: unknown provider spend remains
-explicit, and the receipt cannot certify recursive value or change the default
-profile.
-The 2026-09-10 execution is retained at
-`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
-`incomplete`.
+Campaign transport design and the historical partial-run receipt are documented
+in [evaluation and monitoring](docs/how-to-guides/evaluation-optimization.md#phase-4-transport-evidence).
+The [ADR 006 ledger](docs/decisions/006-implementation-status.md) owns subsequent
+campaign results and certification status.
 
 ### Composition
 
@@ -330,7 +316,6 @@ structural ownership; Python and TypeScript type/lint/format checks enforce
 implementation hygiene; and `make check-docs` / `make check-release` validate
 documentation, configuration, script, and repository guidance surfaces.
 
-Use the narrowest applicable lane first and escalate to `make check` for
-cross-component lifecycle, configuration, public-contract, or dependency
-changes. Credentialed Daytona, provider, database, and benchmark checks are
-explicit operator actions and are not implied by deterministic local tests.
+[AGENTS.md](AGENTS.md#validation-selection) owns validation selection and live-run
+authority; the [testing strategy](docs/how-to-guides/testing-strategy.md) describes
+suite mechanics.
