@@ -1748,7 +1748,10 @@ class RLMRunner:
         """
         trajectory = normalize_prediction_trajectory(prediction)
         for item in reconcile_trajectory(
-            observations.details, trajectory, max_chars=context.execution.options.max_output_chars
+            observations.details,
+            trajectory,
+            max_chars=context.execution.options.max_output_chars,
+            request=context.session.request,
         ):
             # ``reconcile_trajectory`` appends the canonical details to the
             # observation list; emit them without recording them a second time.

@@ -420,6 +420,22 @@ _REPAIR_CATEGORIES = frozenset(
     }
 )
 _TERMINAL_CATEGORIES = frozenset({"CodeInterpreterError", "InterpreterLifecycleError"})
+_HOST_SETUP_MARKERS = (
+    "class _FleetCommittedHistory:",
+    "_fleet_load_committed_history(",
+    "_fleet_load_context_manifest(",
+)
+
+
+def is_host_setup_action(code: str) -> bool:
+    """Return whether ``code`` is Fleet host SandboxSerializable injection.
+
+    DSPy injects committed Session History and attachment capsules through
+    ``interpreter.execute`` before the first model-authored iteration. Those
+    cells must not consume a public RLM step or appear as ``data-rlm-code``.
+    """
+    source = code or ""
+    return any(marker in source for marker in _HOST_SETUP_MARKERS)
 
 
 class _FleetCodeExecutionError(CodeExecutionError):
@@ -556,6 +572,7 @@ class DaytonaCodeInterpreter:
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
+        self._public_observation = True
         self._observation_namespace = uuid4().hex
         self._last_execution: tuple[str, str] | None = None
         self._no_progress_repair_used = False
@@ -807,6 +824,8 @@ class DaytonaCodeInterpreter:
         Raises:
                 TurnBudgetExhausted: If the output detail exceeds the remaining execution-output budget.
         """
+        if not self._public_observation:
+            return
         if isinstance(detail, RLMOutput) and detail.output and self._turn_budget is not None:
             if self._output_budget_exhausted:
                 return
@@ -921,7 +940,10 @@ class DaytonaCodeInterpreter:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
         code = apply_specified_sub_lm_prompts(self._turn_request, code)
-        self._observation_step += 1
+        public = not is_host_setup_action(code)
+        self._public_observation = public
+        if public:
+            self._observation_step += 1
         step = self._observation_step
         output_stream_id = f"interpreter:{self._observation_namespace}:output:{step}"
         output_state = _OutputStreamState()

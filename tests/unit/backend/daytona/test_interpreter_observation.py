@@ -11,10 +11,12 @@ from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,
     DaytonaCodeInterpreter,
     InProcessInterpreterBackend,
+    is_host_setup_action,
     sandbox_backend,
 )
 from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted, ToolCompleted, ToolStarted
 from fleet_rlm.rlm.result import RunNoProgressError
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
 
 def test_non_strict_shutdown_retains_a_broker_with_pending_cleanup() -> None:
@@ -406,3 +408,30 @@ def test_context_defaults_to_empty_list_without_capsule() -> None:
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     assert interpreter.execute("_out = str(len(context))") == "0"
     assert interpreter.execute("_out = str(type(context).__name__)") == "list"
+
+
+def test_is_host_setup_action_detects_history_and_attachment_injection() -> None:
+    history = CommittedSessionHistory([{"request": "prior", "answer": "settled"}])
+    setup = "\n".join((history.sandbox_setup(), history.sandbox_assignment("history", "_raw_history")))
+    assert is_host_setup_action(setup)
+    assert is_host_setup_action("attachments = _fleet_load_context_manifest(_raw_attachments)")
+    assert not is_host_setup_action("print(history.messages[-1]['answer'])")
+    assert not is_host_setup_action("SUBMIT(answer='1')")
+
+
+def test_host_history_injection_does_not_consume_public_rlm_step() -> None:
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_observer(observed.append, max_chars=1_000)
+    history = CommittedSessionHistory([{"request": "prior", "answer": "settled"}])
+    setup = "\n".join((history.sandbox_setup(), history.sandbox_assignment("history", "_raw_history")))
+
+    interpreter.execute(setup, variables={"_raw_history": history.to_sandbox().decode("utf-8")})
+    result = interpreter.execute("value = history.messages[0]['answer']\n_out = str(value)")
+
+    assert result == "settled"
+    codes = [item for item in observed if isinstance(item, RLMCode)]
+    assert [item.step for item in codes] == [1]
+    assert "_FleetCommittedHistory" not in codes[0].code
+    assert [item.step for item in observed if isinstance(item, StepStarted)] == [1]
+    interpreter.shutdown()

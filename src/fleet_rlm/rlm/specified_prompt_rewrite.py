@@ -1,18 +1,34 @@
 """Restore request-specified native Sub-LM prompt literals in generated actions.
 
 When a Turn request already contains ``llm_query`` / ``llm_query_batched``
-string literals, generated Root code must use those strings unchanged. This
-module rewrites only matching call arguments; it does not invent statements.
+string literals, generated Root code must use those strings unchanged. When
+the same request also specifies ``accumulator.extend([single_result,
+*batch_results])`` and the generated cell calls ``verify_semantic_work``
+without that extend, the specified statement is restored immediately before
+verify. This module does not invent prompts or statements that are absent
+from the request.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from fleet_rlm.rlm.submit_validation import _strip_action_code_fences
+
+
+def normalize_action_code(code: object) -> str:
+    """Return parseable action source in a stable ``ast.unparse`` form."""
+    if not isinstance(code, str) or not code:
+        return "" if code is None else str(code)
+    try:
+        return ast.unparse(ast.parse(_strip_action_code_fences(code), mode="exec"))
+    except (SyntaxError, RecursionError):
+        return code
+
 
 _SINGLE = "llm_query"
 _BATCHED = "llm_query_batched"
@@ -29,8 +45,9 @@ class SpecifiedSubLMCall:
 
 def apply_specified_sub_lm_prompts(request: object, code: object) -> str:
     """
-    Replace generated ``llm_query`` / ``llm_query_batched`` string arguments
-    with literals already present in the Turn request, in request order.
+    Replace generated ``llm_query`` / ``llm_query_batched`` string or
+    ``request``-name arguments with literals already present in the Turn
+    request, in request order.
 
     Parameters:
         request (object): Current Turn request text, or ``None`` when unbound.
@@ -52,13 +69,83 @@ def apply_specified_sub_lm_prompts(request: object, code: object) -> str:
     queues = _queues_by_name(specified)
     rewriter = _SpecifiedPromptRewriter(queues)
     updated = rewriter.visit(tree)
-    if not rewriter.changed:
+    inserted_extend = _restore_specified_accumulator_extend(request, updated)
+    if not rewriter.changed and not inserted_extend:
         return code
     ast.fix_missing_locations(updated)
     try:
         return ast.unparse(updated)
     except RecursionError:
         return code
+
+
+_SPECIFIED_ACCUMULATOR_EXTEND = "accumulator.extend([single_result,*batch_results])"
+
+
+def _compact_python(text: str) -> str:
+    return re.sub(r"\s+", "", text)
+
+
+def _request_specifies_accumulator_extend(request: object) -> bool:
+    return isinstance(request, str) and _SPECIFIED_ACCUMULATOR_EXTEND in _compact_python(request)
+
+
+def _has_accumulator_extend(tree: ast.AST) -> bool:
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "accumulator"
+        and node.func.attr == "extend"
+        for node in ast.walk(tree)
+    )
+
+
+def _contains_direct_verify_semantic_work(statement: ast.stmt) -> bool:
+    """Return whether a statement invokes verify outside a nested statement block."""
+    pending: list[ast.AST] = [statement]
+    while pending:
+        node = pending.pop()
+        if node is not statement and isinstance(node, ast.stmt):
+            continue
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "verify_semantic_work":
+            return True
+        pending.extend(ast.iter_child_nodes(node))
+    return False
+
+
+def _verify_semantic_work_location(node: ast.AST) -> tuple[list[ast.stmt], int] | None:
+    """Locate the statement list that directly contains the first verify call."""
+    for _field, value in ast.iter_fields(node):
+        if isinstance(value, list):
+            if all(isinstance(item, ast.stmt) for item in value):
+                statements = cast(list[ast.stmt], value)
+                for index, statement in enumerate(statements):
+                    if _contains_direct_verify_semantic_work(statement):
+                        return statements, index
+                for statement in statements:
+                    location = _verify_semantic_work_location(statement)
+                    if location is not None:
+                        return location
+        elif isinstance(value, ast.AST) and not isinstance(value, ast.stmt):
+            location = _verify_semantic_work_location(value)
+            if location is not None:
+                return location
+    return None
+
+
+def _restore_specified_accumulator_extend(request: object, tree: ast.AST) -> bool:
+    """Insert the request-specified accumulator extend before verify when omitted."""
+    if not _request_specifies_accumulator_extend(request) or not isinstance(tree, ast.Module):
+        return False
+    if _has_accumulator_extend(tree):
+        return False
+    location = _verify_semantic_work_location(tree)
+    if location is None:
+        return False
+    body, index = location
+    body.insert(index, ast.parse("accumulator.extend([single_result, *batch_results])", mode="exec").body[0])
+    return True
 
 
 def specified_sub_lm_calls(request: object) -> tuple[SpecifiedSubLMCall, ...]:
@@ -197,6 +284,16 @@ def _is_string_or_string_list(node: ast.AST) -> bool:
     return isinstance(node, ast.List) and all(_string_constant(element) is not None for element in node.elts)
 
 
+def _is_request_name(node: ast.AST) -> bool:
+    return isinstance(node, ast.Name) and node.id == "request"
+
+
+def _is_restorable_prompt_arg(node: ast.AST) -> bool:
+    if _is_string_or_string_list(node) or _is_request_name(node):
+        return True
+    return isinstance(node, ast.List) and bool(node.elts) and all(_is_request_name(element) for element in node.elts)
+
+
 class _SpecifiedPromptRewriter(ast.NodeTransformer):
     """Replace generated Sub-LM string arguments from per-name request queues."""
 
@@ -215,7 +312,7 @@ class _SpecifiedPromptRewriter(ast.NodeTransformer):
         if not queue:
             return node
         target = _named_or_first_arg(node, "prompt" if name == _SINGLE else "prompts")
-        if target is None or not _is_string_or_string_list(target):
+        if target is None or not _is_restorable_prompt_arg(target):
             return node
         prompts = queue.pop(0)
         replacement: ast.AST = (
