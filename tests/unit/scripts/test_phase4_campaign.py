@@ -19,6 +19,7 @@ from scripts.benchmarks.phase4_campaign import (
     execute_campaign,
     execute_partial_campaign,
     load_cases,
+    load_continuation_rows,
     observation_from_mapping,
     paired_bootstrap,
     partial_schedule,

@@ -1056,6 +1056,7 @@ def execute_campaign(
     started_at: float | None = None,
     clock: Callable[[], float] | None = None,
     initial_spent_usd: float = 0.0,
+    retained_rows: Sequence[ScoredTrial] = (),
 ) -> CampaignOutcome:
     """Run a serial campaign through one pre-admission/settlement owner."""
     simulated = started_at is not None
@@ -1069,10 +1070,17 @@ def execute_campaign(
         initial_spent_usd=initial_spent_usd,
     )
     by_id = {case.identifier: case for case in cases}
+    retained_by_key = {(row.trial.arm, row.trial.case_id, row.trial.repeat): row for row in retained_rows}
+    if len(retained_by_key) != len(retained_rows):
+        raise ValueError("retained campaign rows must have unique trial keys")
     output: list[ScoredTrial] = []
     upper = float(envelope.upper_bound_usd(rates))
     now = started
     for trial in balanced_schedule(cases):
+        retained = retained_by_key.get((trial.arm, trial.case_id, trial.repeat))
+        if retained is not None:
+            output.append(retained)
+            continue
         try:
             budget.reserve(upper_bound_usd=upper, now=now, max_trial_seconds=envelope.maximum_lifetime_seconds)
         except CampaignAdmissionError:

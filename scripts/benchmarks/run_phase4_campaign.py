@@ -56,6 +56,7 @@ from scripts.benchmarks.phase4_campaign import (
     execute_campaign,
     execute_partial_campaign,
     load_cases,
+    load_continuation_rows,
     paired_bootstrap,
     partial_schedule,
     policy_sha256,
@@ -1213,6 +1214,16 @@ def run(args: argparse.Namespace) -> int:
                 else None
             ),
         }
+        if continue_path is not None:
+            campaign_metadata.update(
+                {
+                    "continue_from": str(continue_path.relative_to(REPO_ROOT)),
+                    "retained_rows": len(retained_rows),
+                    "retried_admission_faults": dropped_admission_faults,
+                    "candidate_dirty": candidate_dirty,
+                    "candidate_dirty_sha256": candidate_dirty_sha256,
+                }
+            )
     payload = receipt(
         rows,
         corpus_digest=corpus_sha256(corpus),
