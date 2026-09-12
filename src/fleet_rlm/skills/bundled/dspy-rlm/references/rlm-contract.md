@@ -24,13 +24,17 @@ Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubuserconten
 For deterministic computation, parsing, search, or aggregation, use Python
 directly. Reserve `llm_query(prompt)` for one bounded semantic judgment and
 `llm_query_batched(prompts)` for multiple independent semantic judgments with
-self-contained prompts. Load Fleet Host Capability bodies only when their
+self-contained prompts. When the request already specifies those prompt
+strings, pass them unchanged and in the given order; do not paraphrase,
+expand, or replace them. Load Fleet Host Capability bodies only when their
 discovery metadata establishes relevance to the current request.
 Keep each intermediate code action concise: prefer a few thousand characters,
 keep large values in REPL variables or Session Workspace, and never paste a
-long report or repeat the complete request in generated code. The Daytona
-interpreter rejects an action above its 12,000-character safety bound with
-bounded repair feedback so the next action can be smaller.
+long report or the complete request as unused text. When the request specifies
+exact Python statements or Sub-LM prompt strings, emit those statements in
+that order with those strings unchanged; do not omit listed accumulator updates.
+The Daytona interpreter rejects an action above its 12,000-character
+safety bound with bounded repair feedback so the next action can be smaller.
 Use `rlm_query(capsule={'task': task})` when the selected subproblem benefits from its own
 bounded REPL loop. Keep large input-specific values in parent REPL variables,
 pass only the smallest sufficient slice, and retain the child answer in a

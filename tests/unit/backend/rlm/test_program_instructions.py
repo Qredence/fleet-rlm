@@ -105,6 +105,10 @@ def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> No
     assert "guarded ``json.loads`` fallback" in TOOL_RLM_INSTRUCTIONS
     assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
     assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
+    assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS
+    assert "pass them unchanged and in the given order" in TOOL_RLM_INSTRUCTIONS
+    assert "do not omit listed accumulator updates" in TOOL_RLM_INSTRUCTIONS
+    assert "request as unused text" in TOOL_RLM_INSTRUCTIONS
 
 
 def test_default_signature_orders_capabilities_before_semantic_calls() -> None:

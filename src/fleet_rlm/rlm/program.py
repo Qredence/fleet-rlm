@@ -695,8 +695,10 @@ Neither model substitutes for deterministic computation in the REPL."""
 REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is answered with sufficient evidence:"""
 
 TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
-   intermediate code action concise (prefer a few thousand characters; never paste a long report or repeat the
-   full request in code). Never repeat an identical interpreter action: use its output, choose a different action, or
+   intermediate code action concise (prefer a few thousand characters; never paste a long report or the complete
+   request as unused text). When the request specifies exact Python statements or Sub-LM prompt strings, emit those
+   statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
+   prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
    relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
    print the complete value. Validate the result is a mapping with ``.get('content')``; ``content`` may be raw
@@ -708,9 +710,11 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
    its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
    a URL whose cached result is already available.
-3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine.
-4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments; make each prompt
-   self-contained. Prefer the cheapest sufficient mechanism."""
+3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine. If the request
+   already specifies the prompt string, pass that string unchanged.
+4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
+   self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
+   Prefer the cheapest sufficient mechanism."""
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only

@@ -3,7 +3,7 @@ name: long-context
 description: Use bounded retrieval to analyze large documents, transcripts, code, or datasets.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "2.0.0"
+  version: "2.0.1"
   affordances:
     - fetch_url
     - llm_query_batched
@@ -29,7 +29,7 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
 1. Inspect variable names, types, lengths, and small previews. Do not print a whole large value. For a relevant URL, call `fetch_url` once and keep its returned `content` in a variable.
 2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices.
 3. When the relevant regions are unknown, scan every bounded chunk for structured candidates before reducing them. Query ranking may prioritize reading order, but it must not exclude unseen evidence.
-4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets or source identifiers. Use `rlm_query` only for the rare selected subproblem that needs a fresh iterative Python investigation; it is not the normal route for extraction, counting, parsing, aggregation, or independent excerpts.
+4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets or source identifiers, unless the request already specifies the exact prompt strings: then pass those strings unchanged and in the given order; do not add offsets, paraphrase, or substitute different wording. Use `rlm_query` only for the rare selected subproblem that needs a fresh iterative Python investigation; it is not the normal route for extraction, counting, parsing, aggregation, or independent excerpts.
 5. Reconcile candidates against definitions, scope, dates, exceptions, amendments, cross-references, and precedence rules relevant to the task.
 6. Recover complete operative language from the original variable, then re-slice it to verify quotes, offsets, qualifiers, and conclusions.
 7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count. Do not `SUBMIT` an entire large `llm_query` or `llm_query_batched` blob; keep declared answers within the Turn output character budget.
