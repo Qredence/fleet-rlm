@@ -311,9 +311,10 @@ State why the other two are rejected/deferred and what rollback means.
 
 # Phase 2 - Runtime subtraction and source simplification
 
-**Progress (2026-09-10):** P2.1 through P2.6 are complete. P2.7 has reduced image definitions
-and verified new disposable runtime probes, but still needs representative live
-host-tool/RLM evidence, sealed receipts, and operator promotion.
+**Progress (2026-09-10):** P2.1 through P2.7 are complete. New immutable Session
+`fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5` images
+were probed and certified; configured/code fallbacks still resolve to v7/v2 until
+operator promotion (P5.1).
 
 ## P2.1 - Remove the duplicate `runtime/daytona` package boundary — complete
 
@@ -663,8 +664,9 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
-**Status (2026-09-10): partially implemented; not complete.** The comparison
-baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
+**Status: complete (2026-09-12) — disable.** P4.1–P4.4 remain the simplified capsule path. The 144-trial P4.5 continuation receipt is `.scratch/benchmark-reports/phase4-ablation-20260912-continue.json` (108 retained rows + 36 remaining admissions, including retry of the HTTP 400 control). Mechanical `phase4_decision` is `incomplete` solely because 14 completed frozen-baseline C rows lack call-shape usage. Retain gates independently fail: paired bootstrap CI lower bound is 0.0 (point 0.167). Suitable verified successes: D 4 / A 0 / B 1 / C 1 of 18. P4.6 therefore disables Fleet child RLM tools by default (`recursion_enabled = false`); native `llm_query` stays. Recursion remains available on explicit profiles such as `phase4-campaign`.
+
+The comparison baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
 renames capsule allocation to bytes, replaces the duplicate capsule result type
 with typed `ChildOutcome`/`ChildUsage`, records child-local LM usage, and stops
 echoing unread authorization references as evidence. Selected Session/Project
@@ -863,7 +865,9 @@ Internally they may accept/construct a `SubproblemCapsule`, but remove legacy pr
 
 **Done when:** recursive capability is understandable from two names and one contract.
 
-## P4.5 - Run the matched recursion ablation
+## P4.5 - Run the matched recursion ablation — complete (2026-09-12)
+
+**Status: complete as a 144-admission campaign; mechanical decision `incomplete` due to frozen-C call-shape telemetry, retain gates failed.** Receipt `.scratch/benchmark-reports/phase4-ablation-20260912-continue.json`. All authorization and per-row sandbox cleanup confirmed. Charged spend on the continuation plus prior bound remained under US$50.
 
 **Rationale:** Child RLM infrastructure should remain only if it improves results enough to justify sandboxes, scheduling, tests, and operational cost.
 
@@ -884,7 +888,9 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 **Done when:** the result clearly identifies when child RLMs help and when they do not.
 
-## P4.6 - Delete recursive infrastructure that does not justify itself
+## P4.6 - Delete recursive infrastructure that does not justify itself — complete (2026-09-12)
+
+**Status: complete — disable by default.** `[defaults.rlm] recursion_enabled = false`. Default Root instructions omit Fleet `rlm_query` tools. Recursive executor and tools still exist for explicit opt-in profiles. Recursion code is not deleted in this step so `phase4-campaign` can still run; P6.3 may remove unused machinery after cutover.
 
 **Rationale:** Recursion is not sacred. The simplest successful RLM should win.
 
@@ -896,11 +902,13 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 **Done when:** Fleet pays the code/runtime complexity cost of recursive children only when evidence supports it.
 
-**Phase 4 exit:** recursion is either a small proven feature or intentionally absent from the default architecture.
+**Phase 4 exit:** Fleet child RLMs are intentionally absent from the default architecture. Native `llm_query` / `llm_query_batched` remain. Opt-in recursion is an explicit profile override, not a production default.
 
 ---
 
 # Phase 5 - Operational certification without feature growth
+
+**Status: not started.** Do not begin Phase 5 until explicitly requested. P2.7 snapshot probes, a 2026-09-12 Lakebase preflight, and a local MLflow receipt are not Phase 5 closeout.
 
 ## P5.1 - Reconcile immutable snapshot and configuration identities
 
@@ -986,6 +994,8 @@ Also separate promotion gates:
 ---
 
 # Phase 6 - Promotion, rollback, and final deletion
+
+**Status: not started.** Phase 6 follows Phase 5.
 
 ## P6.1 - Build one clean promotion candidate
 

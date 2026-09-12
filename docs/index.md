@@ -4,10 +4,9 @@ Fleet RLM has one Python backend under `src/fleet_rlm/` and one maintained
 development client under `tools/fleet-tui/`. It exposes a compact Session-first
 FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 
-The current selectable runtime is `legacy`, using native DSPy RLM with resident
-Session reuse. The native Daytona adapter is experimental. Guides describe
-current behavior; decision records and plans distinguish targets from shipped
-contracts and dated validation evidence.
+The current selectable runtime is `legacy`: native DSPy RLM on the retained
+broker interpreter, with a fresh program per Run. Sequential Turns may reuse a
+healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
 
 ## Start here
 

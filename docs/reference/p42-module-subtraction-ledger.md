@@ -12,8 +12,8 @@ and [ADR 006 status](../decisions/006-implementation-status.md) for new work.
 This ledger began as the P42 pre-change inventory. Later phase commits realized
 its target ownership; the rows below are kept as an auditable responsibility map:
 
-- **P42–P45:** Session-state contract, complete committed History, and resident
-  Root RLM/interpreter runtime are implemented.
+- **P42–P45:** Session-state contract and complete committed History remain;
+  resident Root RLM/interpreter reuse was deleted in P2.3 (fresh program per Run).
 - **P46–P47:** the native DSPy kernel contraction and isolated child snapshot
   path are implemented.
 - **P48:** Daytona broker, root/child lifecycle, lease cleanup, and Workspace

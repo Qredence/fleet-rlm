@@ -7,10 +7,10 @@ workspace; this repository does not maintain a graphical Web frontend.
 
 Canonical Run Environment set: `daytona`.
 
-The selectable architecture is `legacy`: it runs native DSPy RLM and may reuse
-a healthy resident Session interpreter across sequential successful Turns.
-ADR 006's native Daytona adapter and fresh-context cutover remain experimental;
-see the [status ledger](docs/decisions/006-implementation-status.md).
+The selectable architecture is `legacy`: it runs native DSPy RLM with a
+broker-backed interpreter and may reuse a healthy Root Sandbox across sequential
+successful Turns. Each Run gets a fresh DSPy program. Native Daytona interpreter
+cutover is not selected; see the [status ledger](docs/decisions/006-implementation-status.md).
 
 ## What operators can do
 

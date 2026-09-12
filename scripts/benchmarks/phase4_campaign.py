@@ -884,7 +884,6 @@ class CampaignOutcome:
     rows: tuple[ScoredTrial, ...]
     budget: dict[str, object]
 
-
 def is_pre_turn_http_fault(observation: TrialObservation) -> bool:
     """Whether the trial died on a 4xx before any Sandbox was admitted."""
     category = observation.error_category
@@ -1045,9 +1044,6 @@ def load_continuation_rows(
         if not scored.observation.cleanup_confirmed:
             raise ValueError("continuation receipt has an unconfirmed provider cleanup")
         retained.append(scored)
-    return tuple(retained), tuple(faults)
-
-
 def execute_campaign(
     *,
     cases: Sequence[Phase4Case],

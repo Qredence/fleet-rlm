@@ -1,9 +1,17 @@
 # P42 session-state behavior freeze
 
-This versioned record describes the resident Session behavior retained by
-`runtime.variant = "legacy"`. [ADR 004](../decisions/004-turn-interpreter-context.md)
+**Superseded (2026-09-12).** P2.3 deleted resident Session RLM reuse. Current
+production behavior is a fresh DSPy program per Run on the retained broker
+path; sequential clean Turns may reuse the broker Root Sandbox, not a resident
+Python/DSPy object graph. Keep this file as the historical P42 contract. Proof
+pointers below that name deleted files (`test_session_runtime.py`,
+`test_recursion_session_snapshot.py`) are archival; the live reuse contract is
+`tests/unit/backend/rlm/test_session_runtime_reuse.py`.
+
+This versioned record describes the resident Session behavior that
+`runtime.variant = "legacy"` used before P2.3. [ADR 004](../decisions/004-turn-interpreter-context.md)
 defines the future fresh-context target; the [ADR 006 ledger](../decisions/006-implementation-status.md)
-records its implementation and open certification gates.
+records implementation and remaining gates.
 
 **Status:** approved behavior contract — deterministic implementation is present
 and covered by the contract and unit lanes.

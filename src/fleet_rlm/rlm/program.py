@@ -716,6 +716,17 @@ WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Sessio
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
 relevant paths, keep each page bounded, and never crawl an entire Workspace."""
 
+WORKSPACE_MUTATION_TOOL_NAMES = frozenset({
+    "append_workspace_text",
+    "write_workspace_text",
+    "publish_workspace_artifact",
+})
+
+WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspace writes or artifact publishes, call the matching host tools
+(``write_workspace_text``, ``append_workspace_text``, ``publish_workspace_artifact``) and require a successful ``ok``
+result before ``SUBMIT``. Sandbox-local ``open()`` is not Session Workspace. A successful verification helper does not
+complete the request if a named write or publish remains."""
+
 RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative
    Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
    parsing, aggregation, or independent semantic excerpts.
@@ -761,12 +772,12 @@ class RLMInstructionFragments:
 def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
     """Build instruction fragments for the selected recursion policy."""
     step = 6 if recursion_enabled else 5
-    verification = f"""{step}. Verify within the same action when possible, then issue exactly one typed ``SUBMIT`` with every active
+    verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
    that action when practical. Use a later iteration only when verification cannot be completed in the same
-   action. Once sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
-   action. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
+   action. Once the request is fully satisfied and sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
+   action. Completing a verification helper does not finish the Turn while named host-tool work remains. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
    code block. Never pass positional arguments.
    A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
    or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
@@ -835,7 +846,12 @@ class FleetRLMSignature(dspy.Signature):
     )
 
 
-FleetRLMSignature.instructions = compose_rlm_instructions(recursion_enabled=True)
+FleetRLMSignature.instructions = compose_rlm_instructions(recursion_enabled=False)
+
+
+def _tool_names_need_instruction_overlay(tool_names: frozenset[str]) -> bool:
+    """Whether registered tools add instruction fragments beyond the base recipe."""
+    return "read_workspace_text_batch" in tool_names or bool(tool_names & WORKSPACE_MUTATION_TOOL_NAMES)
 
 
 def root_signature_for_recursion(
@@ -849,6 +865,8 @@ def root_signature_for_recursion(
     instructions = compose_rlm_instructions(recursion_enabled=recursion_enabled)
     if "read_workspace_text_batch" in tool_names:
         instructions += "\n\n" + WORKSPACE_BATCH_RLM_INSTRUCTIONS
+    if tool_names & WORKSPACE_MUTATION_TOOL_NAMES:
+        instructions += "\n\n" + WORKSPACE_MUTATION_RLM_INSTRUCTIONS
     if skill_instructions:
         instructions += "\n\n" + "\n\n".join(skill_instructions)
     return signature.with_instructions(instructions)
@@ -921,16 +939,14 @@ def _materialize_context_manifest(
                 data = body
                 encoding = "bytes"
             attachment_id = str(entry["attachment_id"])
-            values.append(
-                {
-                    "id": attachment_id,
-                    "filename": str(entry["filename"]),
-                    "content_type": entry.get("content_type"),
-                    "byte_size": expected_size,
-                    "data": data,
-                    "encoding": encoding,
-                }
-            )
+            values.append({
+                "id": attachment_id,
+                "filename": str(entry["filename"]),
+                "content_type": entry.get("content_type"),
+                "byte_size": expected_size,
+                "data": data,
+                "encoding": encoding,
+            })
             accesses.append(attachment_id)
         except Exception as exc:
             raise ValueError("prepared context failed integrity verification") from exc
@@ -1879,20 +1895,17 @@ def build_program(spec: RLMProgramSpec) -> Any:
         Any: The configured native DSPy RLM instance.
     """
     sig = spec.signature
+    tool_names = frozenset(str(tool.name) for tool in spec.tools or ())
     if (
         isinstance(sig, type)
         and issubclass(sig, dspy.Signature)
-        and (
-            spec.recursion_enabled
-            or spec.skill_instructions
-            or any(str(tool.name) == "read_workspace_text_batch" for tool in spec.tools or ())
-        )
+        and (spec.recursion_enabled or spec.skill_instructions or _tool_names_need_instruction_overlay(tool_names))
     ):
         sig = root_signature_for_recursion(
             sig,
             recursion_enabled=spec.recursion_enabled,
             skill_instructions=spec.skill_instructions,
-            tool_names=frozenset(str(tool.name) for tool in spec.tools or ()),
+            tool_names=tool_names,
         )
     return build_native_rlm(
         signature=sig,

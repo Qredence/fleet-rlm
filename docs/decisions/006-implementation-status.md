@@ -16,6 +16,63 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 4 exit (2026-09-12)
+
+Checkout `81ff6f84e` plus harness/docs. Continuation receipt
+`.scratch/benchmark-reports/phase4-ablation-20260912-continue.json`:
+**144/144** admissions, service cleanup confirmed, no safety halt.
+Original mechanical `phase4_decision` = **`incomplete`** (14 completed frozen-C
+rows lack call-shape usage in SSE). Trace closeout overlay
+`.scratch/benchmark-reports/phase4-ablation-20260912-overlay.json` backfilled
+all **14** C-gap rows from local MLflow (`http://127.0.0.1:5001`, experiment
+`fleet-rlm`); overlay `phase4_decision` = **`disable`**. Retain is
+independently impossible: bootstrap CI lower bound **0.0**. P4.6 applied
+**disable**: `[defaults.rlm] recursion_enabled = false`. Native `llm_query`
+remains.
+
+Value-proof memo (trace closeout):
+`.scratch/benchmark-reports/phase4-value-proof-20260912.md`. P4.6 disable memo:
+`.scratch/benchmark-reports/phase4-p46-memo-20260912.md`. Trace sample (**49**
+traces): zero `child_lm_calls` > 0, zero `RLM.recursive_call` / `rlm_query`
+spans, zero `sub_lm_calls_depth_0` (native `llm_query` also unused on the
+sealed 12-case corpus). Children were offered on arms C/D but not required by
+the corpus; this ablation does not test depth-1 need on long-context work.
+Phase 5 (snapshot promotion, deployed Lakebase closeout, MLflow backend cert)
+is **not started**.
+
+The simplification-plan phases in
+[`fleet-rlm-implementation-plan-2026-09-06-v2.md`](../../fleet-rlm-implementation-plan-2026-09-06-v2.md)
+are the forward sequence. The "Implemented through Phase 6" checklist later in
+this file uses the older ADR 006 numbering and is not that sequence.
+
+### Phase 3 recert, P4.5 harness fix, and docs reconcile (2026-09-12)
+
+Checkout `81ff6f84e` plus the P4.5 admission-fault harness (empty control-case
+attachments were HTTP 400 / vacuous-cleanup halt). Recursion default was
+unchanged until the 144-row continuation above authorized P4.6.
+
+- **Phase 3 complete-MVP recert** on `81ff6f84e`:
+  `.scratch/live-receipts/mvp-complete-20260912.json` — `passed: false` at
+  `first_turn`. `verify_semantic_work` ran; `append_workspace_text` did not.
+  Assertions were not weakened. A steering-only rerun
+  (`.scratch/live-receipts/mvp-complete-20260912-r2.json`) failed earlier with
+  `Turn output is invalid` after SUBMIT of unbound names; that steering change
+  was reverted. Follow-up product fix (this checkout): Root instructions no
+  longer treat a verification helper as license to `SUBMIT` while named
+  host-tool writes remain; registered write/publish tools inject that
+  fragment. Complete-MVP live wrap-up reserve is 60s so wrap-up cannot rewrite
+  the required third cell. Live recert was not rerun here.
+- **P4.5 halt cause:** control cases upload empty attachments; Fleet rejects
+  empty files with HTTP 400; `_error_observation` treated that as unconfirmed
+  cleanup and halted at 109/144. The runner now skips empty uploads, confirms
+  vacuous cleanup for pre-turn 4xx, and `--continue-from` retries those faults.
+- **P4.6:** no default/profile change from the incomplete 109-row receipt
+  (superseded by the 144-row disable in the section above).
+- **P5.1:** v10/v5 remain probed candidates; configured/code fallbacks stay
+  v7/v2. Warm pool remains disabled. Phase 5 is not started.
+- **P6.5:** `ARCHITECTURE.md`, this ledger's numbering note, and DSPy mapping
+  docs now describe fresh-per-Run programs on the retained broker path.
+
 ### Phase 3 re-cert and P4.5 live campaign (2026-09-11)
 
 Operator-gated live work on `fix/adr006-runtime-continuation` with MLflow
@@ -496,27 +553,29 @@ implementation and evidence requirements are satisfied.
 
 Checked items mean that the implementation or its local evidence is present in
 this checkout. They do not promote the runtime, certify the provider topology,
-or authorize paid capacity.
+or authorize paid capacity. **Numbering below is the older ADR 006 task list**
+(database lineage as Phase 1, native interpreter as Phase 3, capsules as Phase 6).
+It is not the 2026-09-10 simplification plan's Phase 0–6 sequence.
 
 ### Implemented through Phase 6
 
 - [x] Phase 0 vocabulary, ownership boundaries, evidence-lane distinctions, and the maintained plan/status ledger are in place.
 - [x] Phase 1 additive Sandbox Binding lineage and Session status enforcement are covered by upgrade, dirty-data, downgrade, and preservation tests.
 - [x] Phase 1.1 Daytona 0.210.0 integration, typed error/resource-race handling, benchmark comparison axes, and MLflow privacy/lifecycle mechanics are implemented and locally tested.
-- [x] Phase 3 native-interpreter adapter/replay mechanics cover fresh contexts, native built-ins, typed submission, bounded output, authority checks, and retained cleanup behavior.
+- [x] Native-interpreter adapter/replay mechanics were implemented, then removed with P2.4; broker execution is the sole in-tree code-execution implementation. The 2026-09-08 native receipt remains a containment no-go.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
-- [x] Phase 5 fresh per-Run native RLM/context/binding/worker mechanics are available through an explicit feasibility seam; the single selectable runtime remains `legacy`.
-- [x] Phase 6 bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered all-or-nothing batches, explicit read-only partial sibling outcomes, and typed child outcomes are implemented.
-- [x] Repository-wide local validation passed: `make check` (exit 0), 78.61% backend coverage against a 75% threshold, generated-contract checks, 543 TUI tests, and documentation/boundary checks.
+- [x] Fresh per-Run RLM/program construction is production behavior on `legacy`; the native worker/lease branch is gone.
+- [x] Bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered typed sibling outcomes, and exactly two Root recursive tools (`rlm_query`, `rlm_query_batched`) are implemented.
+- [x] Repository-wide local validation passed on earlier candidates (`make check`, coverage floor, generated-contract checks, TUI tests). Re-run the current checkout before treating those counts as fresh.
 
 ### Certification still open
 
-- [x] PostgreSQL certification: the corrected exclusive campaign passed six contention scenarios and retained projected plans in `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json` (Alembic `019fe0010001`, PostgreSQL `170011`). The disposable target was removed after sealing.
+- [x] PostgreSQL certification: the corrected exclusive campaign passed six contention scenarios and retained projected plans in `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json` (Alembic `019fe0010001`, PostgreSQL `170011`). The disposable target was removed after sealing. Deployed Lakebase closeout is Phase 5 and is not started.
 - [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so `legacy` and the broker remain required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
-- [ ] Native interpreter startup and capability checks on every production profile, including mounted WorkspaceChild behavior.
-- [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled.
-- [ ] Complete MLflow exporter fault-injection, token-aggregation, configured-backend certification, and matched semantic/recursive quality-per-cost ablations. The local 3.16 receipt `.fleet-evidence/receipts/adr006/mlflow-local-certification-20260908T1858.json` is retained with unexercised cases visible; the failed MVP sample `.fleet-evidence/receipts/adr006/mvp-20260908T1905.json` keeps the quality gate open.
-- [ ] Safe program loading, immutable promotion/rollback, native cutover, and subtraction of resident/broker migration machinery.
+- [x] Native interpreter production startup is withdrawn: P2.4 removed the in-tree native execution path. Broker remains the sole code-execution implementation.
+- [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled. Phase 5 owns any later canary.
+- [ ] Complete MLflow exporter fault-injection, token-aggregation, and configured-backend certification. Phase 3 complete-MVP live quality remains failed. P4.5 matched ablation is retained separately and does not close MLflow certification.
+- [ ] Phase 5 snapshot promotion, Phase 6 clean SHA / rollback rehearsal / GEPA. Not started.
 
 ## Evidence and next tasks
 
@@ -554,19 +613,8 @@ certify the pending architecture or authorize native selection.
 
 Remaining sequence:
 
-1. Retain deployed Alembic-head inventories for supported targets; the
-   exclusive disposable PostgreSQL campaign and representative query plans are
-   complete in the sealed receipt, while any additional deployment remains an
-   operator-owned target.
-2. Resolve the retained native no-go by certifying remote detached-process
-   containment, then exercise fresh-context durable continuity and stop/start or
-   replacement behavior before selecting native in policy. Until then, keep the
-   proven broker route and its rollback machinery.
-3. Reconcile every profile's cold/mount/capability behavior and warm capacity; do
-   not infer paid warm capacity from image creation alone.
-4. Complete MLflow backend/export-outage/concurrency certification and run matched
-   recursive ablations with evidence-validity checks. Keep typed partial sibling
-   publication behind a separately reviewed read-only policy.
-5. Retain explicitly authorized live lanes before enabling cutover, immutable
-   program promotion, deleting resident/broker rollback code, or activating
-   broader child defaults.
+1. Phase 5 when explicitly requested: snapshot promotion (v10/v5), deployed
+   Lakebase inventory, configured MLflow, keep warm pool off.
+2. Keep the proven broker route. Native production remains a provider no-go.
+3. Phase 6 after Phase 5: clean SHA, rollback rehearsal, leftover deletion,
+   docs numbering. GEPA only after that.

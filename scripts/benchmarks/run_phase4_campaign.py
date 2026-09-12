@@ -110,6 +110,11 @@ def _parser() -> argparse.ArgumentParser:
         help="run the fixed ten-trial exploratory sample against local fake APIs",
     )
     parser.add_argument("--dry-run", action="store_true", help="run the local deterministic adapter smoke path")
+    parser.add_argument(
+        "--continue-from",
+        type=Path,
+        help="halted Phase 4 receipt whose executed rows are retained; pre-turn HTTP 4xx rows are retried",
+    )
     return parser
 
 
@@ -916,7 +921,7 @@ def run(args: argparse.Namespace) -> int:
     cases = load_cases(corpus)
     load_dotenv(REPO_ROOT / ".env", override=False)
     continue_from = getattr(args, "continue_from", None)
-    candidate_revision = _candidate_revision(require_clean=live)
+    candidate_revision = _candidate_revision(require_clean=live and continue_from is None)
     candidate_dirty, candidate_dirty_sha256 = (
         _candidate_dirty_fingerprint() if partial_live or continue_from is not None else (False, None)
     )
@@ -1004,6 +1009,7 @@ def run(args: argparse.Namespace) -> int:
                 envelope=envelope,
                 runner=runner,
                 initial_spent_usd=prior_spend if prior_spend is not None else 0.0,
+                retained_rows=retained_rows,
             )
             rows = outcome.rows
             budget_ledger = outcome.budget

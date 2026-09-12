@@ -90,7 +90,7 @@ def test_data_analysis_signature_keeps_outputs_and_receives_fleet_operating_poli
         (SkillSelectionRef(data_analysis.card.id, data_analysis.card.version),),
     )
 
-    signature = resolved_signature(resolved)
+    signature = resolved_signature(resolved, recursion_enabled=True)
 
     assert set(signature.output_fields) == {"answer", "findings", "metrics", "anomalies"}
     for name, field in DataAnalysisSignature.output_fields.items():
