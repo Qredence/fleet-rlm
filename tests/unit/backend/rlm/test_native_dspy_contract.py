@@ -457,11 +457,13 @@ def test_composition_version_guard_error_is_bounded_and_typed(
 def test_rlm_usage_contract_accepts_only_the_exact_observed_shape() -> None:
     from fleet_rlm.rlm.result import validate_rlm_usage
 
-    usage = validate_rlm_usage({
-        "iterations": 2,
-        "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
-        "duration_ms": 12,
-    })
+    usage = validate_rlm_usage(
+        {
+            "iterations": 2,
+            "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
+            "duration_ms": 12,
+        }
+    )
     assert usage == {
         "iterations": 2,
         "observed_lm_usage": {"root": {"prompt_tokens": 4, "cached": False}},
@@ -504,11 +506,13 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 
     assert observed_usage(Prediction(), duration_ms=1)["observed_lm_usage"] == {"root": {"prompt_tokens": 4}}
     with pytest.raises(ValueError):
-        validate_rlm_usage({
-            "iterations": 0,
-            "observed_lm_usage": {"root": {forbidden: 99}},
-            "duration_ms": 1,
-        })
+        validate_rlm_usage(
+            {
+                "iterations": 0,
+                "observed_lm_usage": {"root": {forbidden: 99}},
+                "duration_ms": 1,
+            }
+        )
 
 
 def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -738,14 +742,16 @@ def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pyte
     token = turn_tracing._fleet_trace_active.set(True)
     try:
         callback.on_lm_start("call-1", root, {"prompt": "p"})
-        root.history.append({
-            "outputs": outputs,
-            "usage": {
-                "prompt_tokens": 8,
-                "completion_tokens": 20,
-                "completion_tokens_details": {"reasoning_tokens": 18},
-            },
-        })
+        root.history.append(
+            {
+                "outputs": outputs,
+                "usage": {
+                    "prompt_tokens": 8,
+                    "completion_tokens": 20,
+                    "completion_tokens_details": {"reasoning_tokens": 18},
+                },
+            }
+        )
         callback.on_lm_end("call-1", outputs)
     finally:
         turn_tracing._fleet_trace_active.reset(token)
@@ -765,10 +771,12 @@ def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest
 
     monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
 
-    inputs = _lm_input_profile({
-        "prompt": "readable prompt " + "x" * 400,
-        "messages": [{"role": "user", "content": "readable message"}],
-    })
+    inputs = _lm_input_profile(
+        {
+            "prompt": "readable prompt " + "x" * 400,
+            "messages": [{"role": "user", "content": "readable message"}],
+        }
+    )
     outputs = _lm_output_profile({"content": "readable answer"})
 
     assert inputs["prompt_preview"].startswith("readable prompt")
@@ -831,21 +839,23 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     token = turn_tracing._fleet_trace_active.set(True)
     try:
         callback.on_lm_start("call-2", root, {"prompt": "child-prompt-sentinel"})
-        root.history.append({
-            "usage": {
-                "prompt_tokens": 7,
-                "completion_tokens": 3,
-                "total_tokens": 10,
-                "completion_tokens_details": SimpleNamespace(
-                    model_dump=lambda: {"reasoning_tokens": 2, "video_tokens": 9}
-                ),
-                "cache_read_input_tokens": 4,
-                "prompt_cache_hit_tokens": 4,
-                "unsafe_usage": "must-not-be-traced",
-            },
-            "prompt": "must-not-be-traced",
-            "outputs": "must-not-be-traced",
-        })
+        root.history.append(
+            {
+                "usage": {
+                    "prompt_tokens": 7,
+                    "completion_tokens": 3,
+                    "total_tokens": 10,
+                    "completion_tokens_details": SimpleNamespace(
+                        model_dump=lambda: {"reasoning_tokens": 2, "video_tokens": 9}
+                    ),
+                    "cache_read_input_tokens": 4,
+                    "prompt_cache_hit_tokens": 4,
+                    "unsafe_usage": "must-not-be-traced",
+                },
+                "prompt": "must-not-be-traced",
+                "outputs": "must-not-be-traced",
+            }
+        )
         callback.on_lm_end(
             "call-2",
             {

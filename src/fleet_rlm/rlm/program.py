@@ -720,11 +720,13 @@ WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Sessio
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
 relevant paths, keep each page bounded, and never crawl an entire Workspace."""
 
-WORKSPACE_MUTATION_TOOL_NAMES = frozenset({
-    "append_workspace_text",
-    "write_workspace_text",
-    "publish_workspace_artifact",
-})
+WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
+    {
+        "append_workspace_text",
+        "write_workspace_text",
+        "publish_workspace_artifact",
+    }
+)
 
 WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspace writes or artifact publishes, call the matching host tools
 (``write_workspace_text``, ``append_workspace_text``, ``publish_workspace_artifact``) and require a successful ``ok``
@@ -943,14 +945,16 @@ def _materialize_context_manifest(
                 data = body
                 encoding = "bytes"
             attachment_id = str(entry["attachment_id"])
-            values.append({
-                "id": attachment_id,
-                "filename": str(entry["filename"]),
-                "content_type": entry.get("content_type"),
-                "byte_size": expected_size,
-                "data": data,
-                "encoding": encoding,
-            })
+            values.append(
+                {
+                    "id": attachment_id,
+                    "filename": str(entry["filename"]),
+                    "content_type": entry.get("content_type"),
+                    "byte_size": expected_size,
+                    "data": data,
+                    "encoding": encoding,
+                }
+            )
             accesses.append(attachment_id)
         except Exception as exc:
             raise ValueError("prepared context failed integrity verification") from exc

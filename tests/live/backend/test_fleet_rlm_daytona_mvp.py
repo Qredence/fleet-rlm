@@ -123,12 +123,14 @@ class _ProofLedger:
         checksum = hashlib.sha256(
             json.dumps(expected_accumulator, ensure_ascii=False, separators=(",", ":")).encode()
         ).hexdigest()
-        self.semantic_calls.append({
-            "single_result": single_result,
-            "batch_results": list(batch_results),
-            "accumulator": list(accumulator),
-            "checksum": checksum,
-        })
+        self.semantic_calls.append(
+            {
+                "single_result": single_result,
+                "batch_results": list(batch_results),
+                "accumulator": list(accumulator),
+                "checksum": checksum,
+            }
+        )
         return {"ok": True, "batch_count": len(batch_results), "checksum": checksum}
 
     def verify_workspace_reload(self, workspace_content: str, accumulator_present: bool) -> dict[str, object]:
@@ -137,10 +139,12 @@ class _ProofLedger:
             raise ValueError("interpreter state survived across Runs")
         if self.workspace_checksum is None or checksum != self.workspace_checksum:
             raise ValueError("workspace content changed across Sandbox replacement")
-        self.reload_calls.append({
-            "accumulator_present": accumulator_present,
-            "workspace_checksum": checksum,
-        })
+        self.reload_calls.append(
+            {
+                "accumulator_present": accumulator_present,
+                "workspace_checksum": checksum,
+            }
+        )
         return {"ok": True, "checksum": checksum}
 
 
@@ -486,46 +490,50 @@ def test_complete_daytona_mvp_through_fastapi(
     )
     skill = app.state.skill_catalog.require(stable_skill_id("long-context"))
     proof_tools = (token_tool, semantic_tool, reload_tool)
-    proof_views = MappingProxyType({
-        "issue_iteration_token": ToolEventView(
-            output_projection=lambda _result: {"issued": True},
-        ),
-        "verify_semantic_work": ToolEventView(
-            input_projection=lambda values: {
-                "iteration_token_type": type(values.get("iteration_token")).__name__,
-                "single_result_type": type(values.get("single_result")).__name__,
-                "batch_results_type": type(values.get("batch_results")).__name__,
-                "batch_result_item_types": sorted({type(value).__name__ for value in values.get("batch_results", ())})
-                if isinstance(values.get("batch_results"), (list, tuple))
-                else [],
-                "batch_count": len(values["batch_results"])
-                if isinstance(values.get("batch_results"), (list, tuple))
-                else 0,
-                "accumulator_type": type(values.get("accumulator")).__name__,
-                "accumulator_item_types": sorted({type(value).__name__ for value in values.get("accumulator", ())})
-                if isinstance(values.get("accumulator"), (list, tuple))
-                else [],
-                "accumulator_count": len(values["accumulator"])
-                if isinstance(values.get("accumulator"), (list, tuple))
-                else 0,
-            },
-            output_projection=lambda result: {
-                "ok": bool(result.get("ok")),
-                "batch_count": int(result.get("batch_count", 0)),
-                "checksum": str(result.get("checksum", "")),
-            },
-        ),
-        "verify_workspace_reload": ToolEventView(
-            input_projection=lambda values: {
-                "content_chars": len(str(values.get("workspace_content", ""))),
-                "accumulator_present": bool(values.get("accumulator_present")),
-            },
-            output_projection=lambda result: {
-                "ok": bool(result.get("ok")),
-                "checksum": str(result.get("checksum", "")),
-            },
-        ),
-    })
+    proof_views = MappingProxyType(
+        {
+            "issue_iteration_token": ToolEventView(
+                output_projection=lambda _result: {"issued": True},
+            ),
+            "verify_semantic_work": ToolEventView(
+                input_projection=lambda values: {
+                    "iteration_token_type": type(values.get("iteration_token")).__name__,
+                    "single_result_type": type(values.get("single_result")).__name__,
+                    "batch_results_type": type(values.get("batch_results")).__name__,
+                    "batch_result_item_types": sorted(
+                        {type(value).__name__ for value in values.get("batch_results", ())}
+                    )
+                    if isinstance(values.get("batch_results"), (list, tuple))
+                    else [],
+                    "batch_count": len(values["batch_results"])
+                    if isinstance(values.get("batch_results"), (list, tuple))
+                    else 0,
+                    "accumulator_type": type(values.get("accumulator")).__name__,
+                    "accumulator_item_types": sorted({type(value).__name__ for value in values.get("accumulator", ())})
+                    if isinstance(values.get("accumulator"), (list, tuple))
+                    else [],
+                    "accumulator_count": len(values["accumulator"])
+                    if isinstance(values.get("accumulator"), (list, tuple))
+                    else 0,
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "batch_count": int(result.get("batch_count", 0)),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+            "verify_workspace_reload": ToolEventView(
+                input_projection=lambda values: {
+                    "content_chars": len(str(values.get("workspace_content", ""))),
+                    "accumulator_present": bool(values.get("accumulator_present")),
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+        }
+    )
 
     secret_values = tuple(
         value
