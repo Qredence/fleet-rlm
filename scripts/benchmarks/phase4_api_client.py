@@ -184,13 +184,21 @@ def _blank(category: str) -> TrialObservation:
 
 
 def _source_material(case: Phase4Case) -> bytes:
+    if not case.sources:
+        return b""
     return "\n\n".join(f"[{key}] {case.sources[key]}" for key in sorted(case.sources)).encode("utf-8")
 
 
 def _request_text(case: Phase4Case) -> str:
+    if case.sources:
+        preamble = (
+            "Use only the sealed source records in the attached text document. "
+            "Do not use network access or prior turns. "
+        )
+    else:
+        preamble = "Do not use network access, attachments, or prior turns. "
     return (
-        "Use only the sealed source records in the attached text document. Do not use network access or prior turns. "
-        f"Answer this question: {case.question}\n"
+        f"{preamble}Answer this question: {case.question}\n"
         "Return exactly one JSON object with string fields `answer`, `evidence`, and `uncertainty`; `evidence` "
         "must be a JSON array of source IDs that support the answer. Include the requested uncertainty exactly "
         "when the evidence is contradictory or incomplete. Do not make any forbidden claim."
@@ -458,26 +466,33 @@ class Phase4ApiTrialRunner:
             timeout = httpx.Timeout(self.timeout_seconds, connect=10.0)
             with httpx.Client(timeout=timeout, transport=self.transport) as client:
                 label = _record_label(trial, case)
-                upload = client.post(
-                    f"{self.base_url}/api/attachments",
-                    files={
-                        "attachment": (
-                            f"{label}.txt",
-                            _source_material(case),
-                            "text/plain; charset=utf-8",
-                        )
-                    },
-                    headers={"x-fleet-phase4-trial": token},
-                )
-                if not 200 <= upload.status_code < 300:
-                    raise Phase4ApiClientError(f"http_{upload.status_code}")
-                attachment_id = upload.json().get("id")
-                if not isinstance(attachment_id, str):
-                    raise Phase4ApiClientError("attachment_unavailable")
-                try:
-                    UUID(attachment_id)
-                except ValueError as exc:
-                    raise Phase4ApiClientError("attachment_unavailable") from exc
+                material = _source_material(case)
+                attachment_ids: list[str] = []
+                # Control cases have no sealed sources. Fleet rejects empty
+                # uploads with HTTP 400; skip the attachment rather than
+                # treating that admission fault as a provider leak.
+                if material:
+                    upload = client.post(
+                        f"{self.base_url}/api/attachments",
+                        files={
+                            "attachment": (
+                                f"{label}.txt",
+                                material,
+                                "text/plain; charset=utf-8",
+                            )
+                        },
+                        headers={"x-fleet-phase4-trial": token},
+                    )
+                    if not 200 <= upload.status_code < 300:
+                        raise Phase4ApiClientError(f"http_{upload.status_code}")
+                    attachment_id = upload.json().get("id")
+                    if not isinstance(attachment_id, str):
+                        raise Phase4ApiClientError("attachment_unavailable")
+                    try:
+                        UUID(attachment_id)
+                    except ValueError as exc:
+                        raise Phase4ApiClientError("attachment_unavailable") from exc
+                    attachment_ids = [attachment_id]
                 session = client.post(
                     f"{self.base_url}/api/sessions",
                     json={"title": f"phase4-{label}"},
@@ -498,7 +513,7 @@ class Phase4ApiTrialRunner:
                     f"{self.base_url}/api/sessions/{session_id}/turns",
                     json={
                         "text": _request_text(case),
-                        "attachment_ids": [attachment_id],
+                        "attachment_ids": attachment_ids,
                         "skill_selections": [],
                     },
                     headers={
