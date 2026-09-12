@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import type { FleetTurn } from "../../fleet-api-client.js";
 import type { FleetUIMessageChunk } from "../../sse.js";
 import { serializeCanonicalEvent, type CanonicalEvent } from "../canonical.js";
-import { adaptDurableTurns } from "../durable-adapter.js";
+import { adaptDurableTurns, latestDurableTraceId } from "../durable-adapter.js";
 import { adaptLiveChunk } from "../live-adapter.js";
 import { projectDurableTurns } from "../durable-projection.js";
 import { LiveTurnProjector } from "../live-projection.js";
@@ -133,4 +133,16 @@ describe("canonical event fixtures", () => {
       });
     });
   }
+});
+
+describe("durable trace targeting", () => {
+  it("selects the latest assistant trace even when turns arrive in pages", () => {
+    const turns = [
+      { id: "user-1", role: "user", metadata: { traceId: "trace:user" }, parts: [] },
+      { id: "assistant-1", role: "assistant", metadata: { traceId: "trace:first" }, parts: [] },
+      { id: "assistant-2", role: "assistant", metadata: { traceId: "trace:last" }, parts: [] },
+    ] as unknown as FleetTurn[];
+
+    expect(latestDurableTraceId(turns)).toBe("trace:last");
+  });
 });

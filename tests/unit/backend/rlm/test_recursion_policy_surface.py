@@ -270,7 +270,7 @@ def test_val_rec_005_child_batch_attempt_fails_without_reservation_or_allocation
     assert all(lease.state.value == "CLOSED" for lease in factory.leases)
 
 
-def test_val_rec_005_root_receives_exactly_the_approved_recursive_pair_through_public_composition() -> None:
+def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_public_composition() -> None:
     """VAL-REC-005: the Root native RLM composed through the public Runner
     receives the approved recursive Tools, including the strict capsule path,
     by their public names."""
@@ -301,7 +301,12 @@ def test_val_rec_005_root_receives_exactly_the_approved_recursive_pair_through_p
     asyncio.run(drive())
 
     tool_names = [str(tool.name) for tool in captured.get("tools", ())]
-    assert tool_names == ["rlm_query", "rlm_query_batched", "rlm_query_capsule"]
+    assert tool_names == [
+        "rlm_query",
+        "rlm_query_batched",
+        "rlm_query_capsule",
+        "rlm_query_capsules_readonly_batched",
+    ]
 
 
 @pytest.mark.asyncio

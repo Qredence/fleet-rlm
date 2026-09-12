@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import math
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
@@ -43,9 +42,7 @@ from fleet_rlm.rlm.runtime import (
     RLMInterpreter,
     RunIdentity,
     SessionView,
-    program_fingerprint_for_context,
 )
-from fleet_rlm.rlm.session_runtime import ProgramFingerprint, SessionKey, SessionRLMRegistry
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
@@ -74,17 +71,30 @@ class RunPreparationUnavailableError(RunPreparationError):
 @dataclass(slots=True)
 class _PreparedTurnResources:
     cleanups: tuple[AsyncCleanup, ...]
+    pre_commit_cleanup_indices: frozenset[int] = frozenset()
     _closed: bool = field(default=False, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
     _close_error: BaseException | None = field(default=None, init=False)
     _completed_cleanups: set[int] = field(default_factory=set, init=False, repr=False)
 
+    async def aclose_pre_commit(self) -> None:
+        """Close the narrow execution boundary required before success commit.
+
+        Explicit pre-commit obligations must settle before durable success.
+        Retained broker preparation currently registers none; attachment removal,
+        capabilities and provider lease release remain post-settlement owners.
+        """
+        await self._aclose_indices(self.pre_commit_cleanup_indices)
+
     async def aclose(self) -> None:
+        await self._aclose_indices(frozenset(range(len(self.cleanups))), close_all=True)
+
+    async def _aclose_indices(self, indices: frozenset[int], *, close_all: bool = False) -> None:
         async with self._lock:
             if self._closed:
                 return
             first_error: BaseException | None = None
-            for index in reversed(range(len(self.cleanups))):
+            for index in sorted(indices, reverse=True):
                 if index in self._completed_cleanups:
                     continue
                 cleanup = self.cleanups[index]
@@ -103,8 +113,9 @@ class _PreparedTurnResources:
                 # transient provider/gate failure.
                 self._close_error = RuntimeError("prepared Turn cleanup failed")
                 raise self._close_error from first_error
-            self._close_error = None
-            self._closed = True
+            if close_all:
+                self._close_error = None
+                self._closed = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,15 +131,16 @@ class PreparedTurn:
     attachments: tuple[PreparedAttachment, ...] = ()
     capabilities: PreparedCapabilities | None = None
     program: RLMExecutionSpec | None = None
-    program_fingerprint: ProgramFingerprint | None = None
     authorization: RunAuthority | None = None
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
     memory_intent_builder: MemoryIntentBuilder | None = None
     # Internal engineering-observability correlation only: the preparation
-    # fleet_turn root's MLflow trace id, attached by TurnRuntime after
+    # fleet_turn root's MLflow trace and span ids, attached by TurnRuntime after
     # preparation. Never persisted, never projected into SSE/product events.
     preparation_trace_id: str | None = None
+    preparation_span_id: str | None = None
+    image_identity: str | None = None
 
     @property
     def resources(self) -> _PreparedTurnResources:
@@ -139,6 +151,10 @@ class PreparedTurn:
         if self.post_commit_memory_promotion is not None:
             await self.post_commit_memory_promotion.wait_owned()
         await self._resources.aclose()
+
+    async def aclose_before_commit(self) -> None:
+        """Contain native execution resources before a successful Turn commits."""
+        await self._resources.aclose_pre_commit()
 
 
 # Historical spellings retained while callers migrate to the Turn terminology.
@@ -257,11 +273,7 @@ class RunEnvironment:
     # Composition-owned loop bridge for async host Tools invoked through
     # DSPy's synchronous interpreter seam.
     async_bridge: AsyncToolBridge | None = None
-    # Optional fresh native context factory.  The provider owns context
-    # acquisition and returns both the interpreter and its cleanup callback;
-    # legacy environments leave this unset and retain their existing resident
-    # interpreter path.
-    native_interpreter_factory: Callable[..., Any] | None = None
+    image_identity: str | None = None
 
 
 class RunEnvironmentProvider(Protocol):
@@ -301,10 +313,9 @@ class DefaultRunPreparer:
         environments: RunEnvironmentProvider,
         capabilities: CapabilityPreparer,
         recursive_options: RecursiveRLMOptions | None = None,
-        session_runtime_registry: SessionRLMRegistry | None = None,
         wrap_up_seconds: float = 300.0,
         budget_limits: BudgetLimits | None = None,
-        runtime_variant: Literal["legacy", "native-turn-scoped"] = "legacy",
+        runtime_variant: Literal["legacy"] = "legacy",
     ) -> None:
         self._models = models
         self._options = options
@@ -314,10 +325,9 @@ class DefaultRunPreparer:
         self._recursive_options = recursive_options or RecursiveRLMOptions()
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._budget_limits = budget_limits or BudgetLimits()
-        self._session_runtime_registry = session_runtime_registry
-        if runtime_variant not in {"legacy", "native-turn-scoped"}:
-            raise ValueError("runtime_variant is invalid")
-        self._runtime_variant = runtime_variant
+        if runtime_variant != "legacy":
+            raise ValueError("only retained broker execution is supported")
+        self._runtime_variant: Literal["legacy"] = runtime_variant
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         """
@@ -340,16 +350,6 @@ class DefaultRunPreparer:
                 raise RunPreparationCancelledError("Turn cancelled")
         except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
             raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
-
-        if self._session_runtime_registry is not None:
-            await self._session_runtime_registry.evict_configured_idle(deadline=deadline)
-            await self._session_runtime_registry.close_unhealthy(
-                SessionKey(
-                    workspace_id=str(run.access.workspace_id),
-                    session_id=str(run.session_id),
-                ),
-                deadline=deadline,
-            )
 
         with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
             try:
@@ -389,32 +389,11 @@ class DefaultRunPreparer:
             turn_environment_release = RetainableEnvironmentRelease(environment.release)
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
-        native_interpreter: RLMInterpreter | None = environment.interpreter
-        native_interpreter_cleanup: AsyncCleanup | None = None
 
         async def remove_staged() -> None:
             await self._remove_staged(environment.attachment_sink, staged)
 
         try:
-            if self._runtime_variant == "native-turn-scoped":
-                factory = environment.native_interpreter_factory
-                if factory is None:
-                    raise RunPreparationUnavailableError("native Turn-scoped interpreter is unavailable")
-                try:
-                    created = factory(deadline=deadline)
-                    if inspect.isawaitable(created):
-                        created = await created
-                    if not isinstance(created, tuple) or len(created) != 2:
-                        raise TypeError("native interpreter factory returned an invalid owner")
-                    candidate, cleanup = created
-                    if candidate is None or not callable(cleanup):
-                        raise TypeError("native interpreter factory returned an invalid owner")
-                    native_interpreter = candidate
-                    native_interpreter_cleanup = cleanup
-                except RunPreparationError:
-                    raise
-                except Exception as exc:
-                    raise RunPreparationUnavailableError("native Turn-scoped interpreter is unavailable") from exc
             self._check_deadline(deadline)
             with turn_phase_span(
                 "Turn.stage_attachments",
@@ -480,11 +459,6 @@ class DefaultRunPreparer:
             if capabilities is not None:
                 cleanups.append(capabilities.aclose)
             cleanups.append(remove_staged)
-            # Resources close in reverse registration order. The native
-            # context/gateway must settle before any root or preparation-gate
-            # release can make the Session sandbox reusable.
-            if native_interpreter_cleanup is not None:
-                cleanups.append(native_interpreter_cleanup)
             await asyncio.shield(_PreparedTurnResources(tuple(cleanups)).aclose())
             raise
 
@@ -496,10 +470,6 @@ class DefaultRunPreparer:
         if turn_environment_release is not None:
             cleanups.append(turn_environment_release.release)
         cleanups.extend((capabilities.aclose, remove_staged))
-        # See the exception path above: native context containment is the
-        # first cleanup action, never a best-effort tail after root release.
-        if native_interpreter_cleanup is not None:
-            cleanups.append(native_interpreter_cleanup)
         resources = _PreparedTurnResources(tuple(cleanups))
         try:
             turn_budget = TurnBudget(
@@ -557,7 +527,7 @@ class DefaultRunPreparer:
             execution=ExecutionRuntime(
                 models=turn_models,
                 options=self._options,
-                interpreter=native_interpreter,
+                interpreter=environment.interpreter,
                 cancellation_requested=run.cancellation_requested,
                 deadline=deadline,
                 wrap_up_seconds=self._wrap_up_seconds,
@@ -584,13 +554,11 @@ class DefaultRunPreparer:
             capabilities=capabilities,
             program=capabilities.spec,
             # The runner calls the same helper again with its observed and
-            # recursive Tool wrappers; this preparation value is the composed
-            # program identity available before execution starts.
-            program_fingerprint=program_fingerprint_for_context(execution),
             authorization=run.authority,
             result_snapshot_sink=environment.result_snapshot_sink,
             post_commit_memory_promotion=environment.post_commit_memory_promotion,
             memory_intent_builder=environment.memory_intent_builder,
+            image_identity=environment.image_identity,
         )
 
     async def aclose(self) -> bool:

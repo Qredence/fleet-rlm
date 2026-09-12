@@ -2,6 +2,11 @@
 
 Status: proposed; native feasibility mechanics are available, while policy selection, cutover, and live evidence gates remain open.
 
+Read implementation and dated results in the [status ledger](006-implementation-status.md).
+Normative statements below describe the target architecture, not proof that
+each phase is complete. The selectable `legacy` runtime remains the current
+product contract until the cutover gates pass.
+
 Date: 2026-09-06.
 
 Source baseline: `main` at `bcb85cc7b29d625e4c399cbf0a56459d0617302e`.
@@ -50,9 +55,9 @@ and MLflow as an evidence system rather than an execution controller.
 
 - Keep DSPy at `3.3.1`; upgrade the Daytona Python SDK to exactly `0.210.0` in an
   independently reversible change. Neither version is an open-ended latest pin.
-- Keep the current MLflow 3 dependency policy. Certify the exact version resolved
-  by `uv.lock`, its DSPy integration, and the configured tracking backend; an
-  unrelated MLflow upgrade is not part of this decision.
+- Pin MLflow to `3.16.0` with `opentelemetry-sdk==1.44.0`. Certify the exact
+  versions resolved by `uv.lock`, their DSPy integration, the configured
+  tracking backend, and the bounded trace/assessment lifecycle.
 - Keep model choices, budgets, environment profiles, and endpoints in resolved
   `config/fleet.toml` policy. Secrets come only from configured references.
 - Preserve one `runtime.variant`. Keep `legacy` as the only selectable value
@@ -431,11 +436,11 @@ what is removed and which behavior-level tests preserve its obligations.
 
 Implementation/evidence recorded through Phase 6:
 
-- [x] Daytona 0.210.0 and DSPy 3.3.1 are pinned/resolved, with the existing MLflow policy retained.
+- [x] Daytona 0.210.0, DSPy 3.3.1, MLflow 3.16.0, and OpenTelemetry SDK 1.44.0 are pinned/resolved.
 - [x] Additive lineage/status constraints, settlement/publication behavior, and generated Runtime Event/TUI contracts remain covered by the local checks.
 - [x] Native built-ins stay native; capsule children receive bounded selected input and cannot become final publication authority.
 - [x] Scripted lifecycle, adapter replay, and credentialed live operator lanes are explicitly distinguished.
-- [x] Session and SemanticChild snapshot definitions are immutable, `.env`-resolved, and have retained no-Volume runtime-probe receipts.
+- [ ] Session and SemanticChild snapshot definitions are immutable and `.env`-resolved, with historical no-Volume runtime-probe receipts retained. The configured v7/v2 identities still drift from the current contract; replacement identities `fleet-rlm-python313-v9` and `fleet-rlm-python313-child-v4` passed actual-SDK disposable probes on 2026-09-10, while sealed receipt retention and deployment-reference promotion remain open.
 
 Open acceptance gates:
 

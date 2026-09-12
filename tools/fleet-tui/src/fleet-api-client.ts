@@ -14,6 +14,8 @@ export type FleetAttachment = components["schemas"]["AttachmentResponse"];
 export type FleetWorkspaceFileList = components["schemas"]["WorkspaceFileListResponse"];
 export type FleetWorkspaceFileEntry = components["schemas"]["WorkspaceFileEntryResponse"];
 export type FleetWorkspaceFileRead = components["schemas"]["WorkspaceFileReadResponse"];
+export type FleetTraceFeedbackRequest = components["schemas"]["TraceFeedbackRequest"];
+export type FleetTraceFeedbackResponse = components["schemas"]["TraceFeedbackResponse"];
 
 export type FleetSkillSelection = {
   id: string;
@@ -93,6 +95,19 @@ export class FleetApiClient {
       afterSequence = page.next_after_sequence ?? null;
     }
     throw new FleetApiError(502, "Fleet API returned too many Turn pages");
+  }
+
+  async submitTraceFeedback(
+    sessionId: string,
+    feedback: FleetTraceFeedbackRequest,
+  ): Promise<FleetTraceFeedbackResponse> {
+    return this.requestJson<FleetTraceFeedbackResponse>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/traces/feedback`,
+      {
+        method: "POST",
+        body: JSON.stringify(feedback),
+      },
+    );
   }
 
   async listSkills(): Promise<FleetSkillCard[]> {

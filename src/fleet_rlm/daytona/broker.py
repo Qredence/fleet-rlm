@@ -12,6 +12,7 @@ import asyncio
 import base64
 import contextlib
 import hashlib
+import hmac
 import inspect
 import json
 import keyword
@@ -23,7 +24,7 @@ import uuid
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
-from threading import Lock, Thread
+from threading import Event, Lock, Thread
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -555,6 +556,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
                         "tool_name": req.get("tool_name"),
                         "args": req.get("args") or [],
                         "kwargs": req.get("kwargs") or {},
+                        "request_key": req.get("request_key"),
                         "lease_token": token,
                     })
                     if len(out) >= max_items:
@@ -592,6 +594,7 @@ class _BrokerHandler(BaseHTTPRequestHandler):
                     "tool_name": data.get("tool_name"),
                     "args": data.get("args") or [],
                     "kwargs": data.get("kwargs") or {},
+                    "request_key": data.get("request_key"),
                     "lease_token": None,
                     "completed": False,
                     "event": event,
@@ -664,18 +667,38 @@ if __name__ == "__main__":
 
 TOOL_WRAPPER_TEMPLATE = """
 def {tool_name}({signature}):
+    import hashlib as _hashlib
     import json as _json
     import urllib.error as _urllib_error
     import urllib.request as _urllib_request
     import uuid as _uuid
 
     call_id = str(_uuid.uuid4())
+    request_key = None
+    if {retryable!r}:
+        # A request key is deliberately emitted only for the broker's explicit
+        # read-only/retryable allow-list.  The host cache is scoped to one
+        # execution, so this is transport-retry deduplication, not an
+        # exactly-once claim for arbitrary external writes.
+        _canonical = _json.dumps(
+            {{
+                "tool_name": "{tool_name}",
+                "args": [{args_list}],
+                "kwargs": {{{kwargs_dict}}},
+            }},
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        request_key = _hashlib.sha256(_canonical.encode("utf-8")).hexdigest()
     payload = _json.dumps(
         {{
             "id": call_id,
             "tool_name": "{tool_name}",
             "args": [{args_list}],
             "kwargs": {{{kwargs_dict}}},
+            "request_key": request_key,
         }}
     ).encode("utf-8")
     req = _urllib_request.Request(
@@ -722,6 +745,30 @@ _MAX_PENDING_POLL_BACKOFF_EXPONENT = 30
 
 _MAX_CALLBACK_WORKERS = 8
 
+# Only tools with a stable, read-only contract receive transport retry
+# deduplication.  The cache is per ``execute_with_callbacks`` call, never
+# process-global, and callers may add a custom name only by opting in at the
+# explicit ``register_tools`` boundary.
+DEFAULT_RETRYABLE_TOOL_NAMES = frozenset(
+    {
+        "list_workspace_files",
+        "stat_workspace_file",
+        "read_workspace_text",
+        "read_workspace_text_batch",
+        "list_project_files",
+        "stat_project_file",
+        "read_project_text",
+        "read_workspace_memory",
+        "list_memories",
+        "search_memories",
+        "read_attachment",
+        "read_curated_input",
+    }
+)
+
+_MAX_DEDUPE_ENTRIES = 256
+_DEDUPE_WAIT_SECONDS = 120.0
+
 _EXECUTION_STAT_KEYS = (
     "poll_count",
     "empty_poll_count",
@@ -755,6 +802,10 @@ _EXECUTION_STAT_KEYS = (
     "output_wait_elapsed_ms",
     "execution_wall_ms",
     "run_code_ms",
+    "dedupe_hit_count",
+    "dedupe_wait_count",
+    "dedupe_wait_timeout_count",
+    "dedupe_execution_count",
 )
 
 
@@ -804,6 +855,7 @@ class DaytonaHttpToolBroker:
         self._broker_token: str | None = None
         self._broker_session_id: str | None = None
         self._injected_tools: set[str] = set()
+        self._retryable_tool_names: frozenset[str] = frozenset()
         self._pending_wrappers: list[str] = []
         self._stopped = False
         # One pooled client for the whole broker lifetime: the preview proxy
@@ -819,6 +871,9 @@ class DaytonaHttpToolBroker:
         self._metrics_lock = Lock()
         self._active_execution_stats: dict[str, int] | None = None
         self.last_execution_stats: dict[str, int] = {}
+        self._dedupe_lock = Lock()
+        self._dedupe_results: dict[str, tuple[str, Any]] = {}
+        self._dedupe_inflight: dict[str, Event] = {}
 
     @staticmethod
     def _new_execution_stats() -> dict[str, int]:
@@ -834,6 +889,9 @@ class DaytonaHttpToolBroker:
                 return self._active_execution_stats, False
             stats = self._new_execution_stats()
             self._active_execution_stats = stats
+            with self._dedupe_lock:
+                self._dedupe_results.clear()
+                self._dedupe_inflight.clear()
             return stats, True
 
     def _finish_execution_stats(self, stats: dict[str, int], *, owner: bool) -> None:
@@ -1004,15 +1062,45 @@ class DaytonaHttpToolBroker:
             status_code=provider_status_code(last_error),
         ) from last_error
 
-    def register_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
+    def register_tools(
+        self,
+        tools: Mapping[str, Callable[..., Any]],
+        *,
+        retryable_tool_names: set[str] | frozenset[str] | tuple[str, ...] | None = None,
+    ) -> None:
+        """Bind host tools and select the narrowly safe retryable subset.
+
+        Retry keys are generated for the default read-only catalog unless a
+        caller supplies an explicit subset.  The subset is intentionally a
+        boundary-level policy: a request identifier alone never makes a write
+        exactly-once.
+        """
+        selected_retryables = set() if retryable_tool_names is None else {str(name) for name in retryable_tool_names}
+        unknown_retryables = selected_retryables.difference(tools)
+        if unknown_retryables:
+            raise DaytonaAdapterError(
+                message="retryable tool policy names an unbound tool",
+                cause_type="InvalidToolPolicyError",
+            )
+        unsafe_retryables = selected_retryables.difference(DEFAULT_RETRYABLE_TOOL_NAMES)
+        if unsafe_retryables:
+            raise DaytonaAdapterError(
+                message="retryable tool policy names a tool without a read-only broker contract",
+                cause_type="InvalidToolPolicyError",
+            )
+        invalid_names = [name for name in tools if not name.isidentifier() or keyword.iskeyword(name)]
+        if invalid_names:
+            raise DaytonaAdapterError(
+                message=f"invalid tool name: {invalid_names[0]}", cause_type="InvalidToolNameError"
+            )
         self.ensure_started()
         self._pending_wrappers.append(reset_binding_source(tuple(self._injected_tools)))
         self._injected_tools.clear()
+        self._retryable_tool_names = frozenset(selected_retryables)
         for name, fn in tools.items():
-            if not name.isidentifier() or keyword.iskeyword(name):
-                msg = f"invalid tool name: {name}"
-                raise DaytonaAdapterError(message=msg, cause_type="InvalidToolNameError")
-            self._pending_wrappers.append(self._tool_wrapper_source(name, fn))
+            self._pending_wrappers.append(
+                self._tool_wrapper_source(name, fn, retryable=name in self._retryable_tool_names)
+            )
             self._injected_tools.add(name)
 
     def drain_wrapper_sources(self) -> str:
@@ -1312,7 +1400,9 @@ class DaytonaHttpToolBroker:
                 run_started_ns = time.perf_counter_ns()
                 try:
                     bucket.append(run_code())
-                except Exception as exc:
+                except BaseException as exc:
+                    # Transfer cancellation and other control-flow exceptions
+                    # to the owning caller rather than losing them in a thread.
                     bucket.append(exc)
                 finally:
                     # A fenced caller may already have settled its statistics.
@@ -1334,7 +1424,7 @@ class DaytonaHttpToolBroker:
                     break
                 wait_s = 0.0 if empty_polls == 0 else self._poll_backoff_delay(empty_polls)
                 poll_started_ns = time.perf_counter_ns()
-                if self._poll_once(tool_executor, wait_s=wait_s):
+                if self._poll_once(tool_executor, wait_s=wait_s, check_authority=check_authority):
                     # A fulfilled callback is progress. Poll again immediately
                     # so a sequence of model/tool calls does not pay an extra
                     # fixed sleep after every useful broker response.
@@ -1343,6 +1433,11 @@ class DaytonaHttpToolBroker:
                 empty_polls += 1
                 self._sleep_remaining_poll_delay(wait_s, poll_started_ns)
             thread.join(timeout=1.0)
+            if bucket and isinstance(bucket[0], BaseException):
+                interrupted = bucket[0]
+                if not isinstance(interrupted, Exception):
+                    # Do not drain additional host work after cancellation.
+                    raise interrupted
             for _ in range(5):
                 if check_authority is not None:
                     check_authority()
@@ -1359,6 +1454,8 @@ class DaytonaHttpToolBroker:
             if check_authority is not None:
                 check_authority()
             if isinstance(outcome, BaseException):
+                if not isinstance(outcome, Exception):
+                    raise outcome
                 if isinstance(outcome, DaytonaAdapterError):
                     raise outcome
                 raise DaytonaAdapterError(
@@ -1527,6 +1624,7 @@ class DaytonaHttpToolBroker:
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
         *,
         wait_s: float = 0.0,
+        check_authority: Callable[[], Any] | None = None,
     ) -> bool:
         """
         Poll for pending broker requests and fulfill them concurrently.
@@ -1606,15 +1704,67 @@ class DaytonaHttpToolBroker:
         self._record_metric("callback_dispatch_count", len(requests_out))
         dispatch_started_ns = time.perf_counter_ns()
         try:
-            list(executor.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor), work))
+            list(executor.map(lambda item: item[0].run(self._fulfill, item[1], tool_executor, check_authority), work))
         finally:
             self._record_duration("callback_dispatch_ms", dispatch_started_ns, max_key="callback_dispatch_max_ms")
         return True
+
+    @staticmethod
+    def _request_key(item: Mapping[str, Any], *, tool_name: str) -> str | None:
+        """Return a validated retry key for an explicitly retryable request."""
+        raw = item.get("request_key")
+        if not isinstance(raw, str) or len(raw) != 64:
+            return None
+        try:
+            int(raw, 16)
+            canonical = json.dumps(
+                {
+                    "tool_name": tool_name,
+                    "args": item.get("args") or [],
+                    "kwargs": item.get("kwargs") or {},
+                },
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except (TypeError, ValueError):
+            return None
+        expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        return raw if tool_name and hmac.compare_digest(raw, expected) else None
+
+    def _claim_dedupe(self, key: str) -> tuple[tuple[str, Any] | None, Event, bool]:
+        """Claim or join one per-execution retryable request."""
+        with self._dedupe_lock:
+            cached = self._dedupe_results.get(key)
+            if cached is not None:
+                return cached, Event(), False
+            existing = self._dedupe_inflight.get(key)
+            if existing is not None:
+                return None, existing, False
+            event = Event()
+            self._dedupe_inflight[key] = event
+            return None, event, True
+
+    def _publish_dedupe(self, key: str, event: Event, outcome: tuple[str, Any] | None) -> None:
+        """Publish one retryable outcome and wake duplicate request waiters."""
+        with self._dedupe_lock:
+            if outcome is not None:
+                if len(self._dedupe_results) >= _MAX_DEDUPE_ENTRIES and key not in self._dedupe_results:
+                    self._dedupe_results.pop(next(iter(self._dedupe_results)), None)
+                self._dedupe_results[key] = outcome
+            self._dedupe_inflight.pop(key, None)
+            event.set()
+
+    def _cached_dedupe(self, key: str) -> tuple[str, Any] | None:
+        with self._dedupe_lock:
+            return self._dedupe_results.get(key)
 
     def _fulfill(
         self,
         item: dict[str, Any],
         tool_executor: Callable[[str, list[Any], dict[str, Any]], Any],
+        check_authority: Callable[[], Any] | None = None,
     ) -> None:
         """
         Fulfill a pending tool request and submit its result or sanitized error to the broker.
@@ -1629,22 +1779,60 @@ class DaytonaHttpToolBroker:
         name = str(item.get("tool_name") or "")
         args = list(item.get("args") or [])
         kwargs = dict(item.get("kwargs") or {})
+        dedupe_key = self._request_key(item, tool_name=name) if name in self._retryable_tool_names else None
+        dedupe_event: Event | None = None
+        dedupe_owner = False
+        outcome: tuple[str, Any] | None = None
+        if dedupe_key is not None:
+            cached, dedupe_event, dedupe_owner = self._claim_dedupe(dedupe_key)
+            if cached is not None:
+                outcome = cached
+                self._record_metric("dedupe_hit_count")
+            elif not dedupe_owner:
+                self._record_metric("dedupe_wait_count")
+                wait_deadline = time.monotonic() + _DEDUPE_WAIT_SECONDS
+                while outcome is None and time.monotonic() < wait_deadline:
+                    if check_authority is not None:
+                        check_authority()
+                    if dedupe_event.wait(timeout=min(0.05, wait_deadline - time.monotonic())):
+                        outcome = self._cached_dedupe(dedupe_key)
+                        if outcome is not None:
+                            self._record_metric("dedupe_hit_count")
+                        break
+                if outcome is None:
+                    # A read-only duplicate may execute after the bounded
+                    # wait. This keeps a stuck first request from holding the
+                    # callback worker forever; no write is classified here.
+                    self._record_metric("dedupe_wait_timeout_count")
         tool_started_ns = time.perf_counter_ns()
         try:
-            result = tool_executor(name, args, kwargs)
-            validate_json_value(result, path=f"Tool {name} result")
-            body: dict[str, Any] = {"id": call_id, "lease_token": lease, "result": result}
-        except Exception as exc:
-            message = sanitize_provider_message(str(exc))
-            # One sanitized WARNING per host-tool failure; never log args,
-            # kwargs, or tool content.
-            logger.warning("host tool %s failed: %s", name or "<unknown>", message)
-            body = {
-                "id": call_id,
-                "lease_token": lease,
-                "error": message,
-            }
+            if outcome is None:
+                if dedupe_key is not None:
+                    self._record_metric("dedupe_execution_count")
+                try:
+                    if check_authority is not None:
+                        check_authority()
+                    result = tool_executor(name, args, kwargs)
+                    validate_json_value(result, path=f"Tool {name} result")
+                except Exception as exc:
+                    message = sanitize_provider_message(str(exc))
+                    # One sanitized WARNING per host-tool failure; never log
+                    # args, kwargs, or tool content.
+                    logger.warning("host tool %s failed: %s", name or "<unknown>", message)
+                    outcome = ("error", message)
+                else:
+                    outcome = ("result", result)
+            if outcome[0] == "error":
+                body = {
+                    "id": call_id,
+                    "lease_token": lease,
+                    "error": outcome[1],
+                }
+            else:
+                body = {"id": call_id, "lease_token": lease, "result": outcome[1]}
         finally:
+            if dedupe_key is not None and dedupe_event is not None and dedupe_owner:
+                self._publish_dedupe(dedupe_key, dedupe_event, outcome)
             self._record_duration("tool_execution_ms", tool_started_ns, max_key="tool_execution_max_ms")
 
         post_started_ns = time.perf_counter_ns()
@@ -1674,7 +1862,13 @@ class DaytonaHttpToolBroker:
             headers["X-Daytona-Preview-Token"] = self._broker_token
         return headers
 
-    def _tool_wrapper_source(self, tool_name: str, tool_func: Callable[..., Any]) -> str:
+    def _tool_wrapper_source(
+        self,
+        tool_name: str,
+        tool_func: Callable[..., Any],
+        *,
+        retryable: bool | None = None,
+    ) -> str:
         signature = inspect.signature(tool_func)
         params = list(signature.parameters.values())
         sig_parts: list[str] = []
@@ -1708,6 +1902,7 @@ class DaytonaHttpToolBroker:
             kwargs_dict=", ".join(kwargs_parts),
             broker_port=self._broker_port,
             broker_secret=self._broker_secret,
+            retryable=(tool_name in self._retryable_tool_names) if retryable is None else retryable,
         )
 
 
@@ -1730,6 +1925,11 @@ def _is_session_delete_settled(exc: BaseException) -> bool:
 
 
 _BRIDGE_SERVICE_POLL_S = 0.5
+
+
+async def _await_bridge_value(awaitable: Any) -> Any:
+    """Adapt a non-coroutine awaitable for ``run_coroutine_threadsafe``."""
+    return await awaitable
 
 
 class SyncBridgeDispatcher:
@@ -1767,7 +1967,13 @@ class SyncBridgeDispatcher:
         """Return the registered composition loop, if any."""
         return self._service_loop
 
-    def run(self, awaitable: Any) -> Any:
+    def run(
+        self,
+        awaitable: Any,
+        *,
+        deadline: float | None = None,
+        check_authority: Callable[[], None] | None = None,
+    ) -> Any:
         """Run an awaitable on the composition-owned event loop.
 
         Args:
@@ -1776,7 +1982,9 @@ class SyncBridgeDispatcher:
         Returns:
             The awaitable's result.
         """
-        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(awaitable)
+        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(
+            awaitable, deadline=deadline, check_authority=check_authority
+        )
 
 
 class _SyncBridgeLoop:
@@ -1824,7 +2032,13 @@ class _SyncBridgeLoop:
                 return registered
         return self._caller_loop
 
-    def run(self, awaitable: Any) -> Any:
+    def run(
+        self,
+        awaitable: Any,
+        *,
+        deadline: float | None = None,
+        check_authority: Callable[[], None] | None = None,
+    ) -> Any:
         """
         Execute an awaitable on the service event loop and wait for its result.
 
@@ -1851,16 +2065,33 @@ class _SyncBridgeLoop:
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise self._bridge_error("synchronous Daytona bridge called from its owning event loop")
+        bridge_awaitable: Any | None = None
         try:
-            future = asyncio.run_coroutine_threadsafe(awaitable, loop)
-        except RuntimeError as exc:
+            bridge_awaitable = awaitable if inspect.iscoroutine(awaitable) else _await_bridge_value(awaitable)
+            future = asyncio.run_coroutine_threadsafe(bridge_awaitable, loop)
+        except (RuntimeError, TypeError) as exc:
+            if bridge_awaitable is not None:
+                bridge_awaitable.close()
             if inspect.iscoroutine(awaitable):
                 awaitable.close()
             raise self._bridge_error("synchronous Daytona bridge service loop is unavailable") from exc
         while True:
             try:
-                return future.result(timeout=_BRIDGE_SERVICE_POLL_S)
+                timeout = _BRIDGE_SERVICE_POLL_S
+                if deadline is not None:
+                    timeout = min(timeout, max(0.0, deadline - time.monotonic()))
+                if check_authority is not None:
+                    check_authority()
+                if deadline is not None and timeout <= 0:
+                    future.cancel()
+                    raise TimeoutError("async host Tool exceeded its Turn deadline")
+                return future.result(timeout=timeout)
             except TimeoutError:
+                if check_authority is not None:
+                    check_authority()
+                if deadline is not None and time.monotonic() >= deadline:
+                    future.cancel()
+                    raise TimeoutError("async host Tool exceeded its Turn deadline") from None
                 if loop.is_closed() or not loop.is_running():
                     future.cancel()
                     if inspect.iscoroutine(awaitable):
@@ -2045,6 +2276,7 @@ def tombstone_sync_sandbox(sandbox: Any) -> None:
 __all__ = [
     "BROKER_SERVER_CODE",
     "DEFAULT_BROKER_PORT",
+    "DEFAULT_RETRYABLE_TOOL_NAMES",
     "FINAL_OUTPUT_MARKER",
     "TOOL_WRAPPER_TEMPLATE",
     "DaytonaHttpToolBroker",

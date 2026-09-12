@@ -36,7 +36,7 @@ from fleet_rlm.chat.run_ownership import (
     shield_cleanup,
     stop_heartbeat,
 )
-from fleet_rlm.observability.tracing import annotate_trace_io, turn_phase_span, turn_trace
+from fleet_rlm.observability.tracing import annotate_trace_io, record_settlement_status, turn_phase_span, turn_trace
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
@@ -210,13 +210,18 @@ class OpenedTurnStream:
             await self._opened_owner.wait_owned()
 
 
-def _attach_preparation_trace_id(prepared: PreparedTurn, trace_id: str | None) -> PreparedTurn:
+def _attach_preparation_trace_id(
+    prepared: PreparedTurn,
+    trace_id: str | None,
+    span_id: str | None = None,
+) -> PreparedTurn:
     """
     Attach a preparation trace identifier for internal phase correlation.
 
     Parameters:
         prepared (PreparedTurn): Prepared run to annotate.
         trace_id (str | None): Preparation trace identifier, if available.
+        span_id (str | None): Internal preparation span identifier, if available.
 
     Returns:
         PreparedTurn: The annotated run, or the original run when no identifier is
@@ -225,7 +230,11 @@ def _attach_preparation_trace_id(prepared: PreparedTurn, trace_id: str | None) -
     if not trace_id:
         return prepared
     try:
-        return replace(prepared, preparation_trace_id=trace_id)  # type: ignore[type-var]
+        return replace(
+            prepared,
+            preparation_trace_id=trace_id,
+            preparation_span_id=span_id,
+        )  # type: ignore[type-var]
     except (TypeError, AttributeError, ValueError):
         return prepared
 
@@ -359,6 +368,15 @@ class _ClaimLost:
 _FinalizationWait: TypeAlias = RunSettlement | _ClaimLost | None
 
 
+def _record_settlement(receipt: RunSettlement) -> RunSettlement:
+    """Annotate the active trace with the durable Fleet settlement result."""
+    if isinstance(receipt, CommittedTurnReceipt):
+        record_settlement_status("completed", durable=True)
+    elif isinstance(receipt, FailedRunReceipt):
+        record_settlement_status(receipt.terminal_status, durable=receipt.durable)
+    return receipt
+
+
 def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
     return state.heartbeat is not None and state.heartbeat.lost.is_set()
 
@@ -457,7 +475,7 @@ class TurnRuntime:
                 )
                 raise
             annotate_trace_io(request=start.input.text, response_text="Turn prepared")
-            return _attach_preparation_trace_id(prepared, handle.trace_id)
+            return _attach_preparation_trace_id(prepared, handle.trace_id, handle._span_id)
 
     async def _prepare_claimed(
         self,
@@ -553,16 +571,16 @@ class TurnRuntime:
         if preparation_pending:
             state.run.authority.revoke()
             with contextlib.suppress(BaseException):
-                await shield_cleanup(self._lifecycle.settle(state.run, failure))
+                _record_settlement(await shield_cleanup(self._lifecycle.settle(state.run, failure)))
             await shield_cleanup(self._handoff_preparation_cleanup(state.run, state))
             return
         if cancel_like:
             try:
-                await shield_cleanup(self._lifecycle.finish(state.run, failure))
+                _record_settlement(await shield_cleanup(self._lifecycle.finish(state.run, failure)))
             finally:
                 state.run.authority.revoke()
             return
-        await shield_cleanup(self._lifecycle.finish(state.run, failure))
+        _record_settlement(await shield_cleanup(self._lifecycle.finish(state.run, failure)))
 
     async def _cancel_preparation_tasks(self, state: _PreparationState) -> bool:
         tasks = tuple(task for task in (state.preparation_task, state.heartbeat_lost) if task is not None)
@@ -736,6 +754,10 @@ class TurnRuntime:
             expose_trace_id=self._mlflow_expose_trace_id,
             trace_phase="execution",
             preparation_trace_id=getattr(prepared, "preparation_trace_id", None),
+            preparation_span_id=getattr(prepared, "preparation_span_id", None),
+            runtime_variant=getattr(getattr(prepared.execution, "execution", None), "runtime_variant", None),
+            program_fingerprint=str(getattr(prepared, "program_fingerprint", "") or "") or None,
+            image_identity=getattr(prepared, "image_identity", None),
         ) as handle:
             async for event in self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event
@@ -907,7 +929,9 @@ class TurnRuntime:
             claim_lost = _heartbeat_claim_lost(state)
             if not claim_lost:
                 try:
-                    receipt = await self._lifecycle.settle(run, failure)
+                    settled = await self._lifecycle.settle(run, failure)
+                    _record_settlement(settled)
+                    receipt = settled
                 except BaseException:
                     if not _heartbeat_claim_lost(state):
                         raise
@@ -971,9 +995,11 @@ class TurnRuntime:
             await self._stop_claim_waiter(state)
             run.authority.revoke()
             try:
-                receipt = await self._lifecycle.settle(
-                    run,
-                    RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
+                receipt = _record_settlement(
+                    await self._lifecycle.settle(
+                        run,
+                        RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
+                    )
                 )
             finally:
                 await self._handoff_cleanup_or_drain(
@@ -1056,11 +1082,19 @@ class TurnRuntime:
             settlement_inputs["iterations"] = resolution.usage.get("iterations")
             settlement_inputs["memory_candidate_count"] = len(resolution.memory_candidates)
         with turn_phase_span("Turn.settlement", inputs=settlement_inputs):
+            if isinstance(resolution, RLMOutcome) and resolution.succeeded:
+                # Native contexts and their callback gateway are the only
+                # prepared resources that must be contained before durable
+                # success. Other resources own post-commit artifact and
+                # provider lifecycle work and remain in the normal drain.
+                close_before_commit = getattr(prepared, "aclose_before_commit", None)
+                if callable(close_before_commit):
+                    await close_before_commit()
             finish_kwargs: dict[str, Any] = {}
             builder = getattr(prepared, "memory_intent_builder", None)
             if builder is not None:
                 finish_kwargs["memory_intents_builder"] = builder
-            return await self._lifecycle.finish(
+            receipt = await self._lifecycle.finish(
                 run,
                 resolution,
                 artifact_sink=prepared.artifact_sink,
@@ -1068,6 +1102,7 @@ class TurnRuntime:
                 memory_promotion=prepared.post_commit_memory_promotion,
                 **finish_kwargs,
             )
+            return _record_settlement(receipt)
 
     async def _settle_cancellation(
         self,
@@ -1086,9 +1121,11 @@ class TurnRuntime:
             claim_lost = _heartbeat_claim_lost(state)
             if not claim_lost:
                 with contextlib.suppress(BaseException):
-                    await self._lifecycle.settle(
-                        run,
-                        RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                    _record_settlement(
+                        await self._lifecycle.settle(
+                            run,
+                            RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()),
+                        )
                     )
                 claim_lost = _heartbeat_claim_lost(state)
             await self._handoff_cleanup_or_drain(
@@ -1331,6 +1368,8 @@ class TurnRuntime:
             effective_claim_lost = True
             try:
                 receipt = await self._revoke_claim(run, claim_loss_usage or empty_rlm_usage())
+                if receipt is not None:
+                    _record_settlement(receipt)
             except BaseException as exc:
                 remember(exc)
                 return
@@ -1372,7 +1411,7 @@ class TurnRuntime:
                 await apply_claim_loss()
             if cleanup_error is None and not committed:
                 try:
-                    await self._lifecycle.complete_settling(run)
+                    _record_settlement(await self._lifecycle.complete_settling(run))
                 except BaseException as exc:
                     remember(exc)
         finally:
@@ -1489,6 +1528,8 @@ class TurnRuntime:
             await stop_heartbeat(heartbeat)
             try:
                 receipt = await self._revoke_claim(run, empty_rlm_usage())
+                if receipt is not None:
+                    _record_settlement(receipt)
                 if receipt is not None and heartbeat.definitive_loss and self._claim_loss_fence is not None:
                     await self._claim_loss_fence(run.session_id)
             finally:
@@ -1499,7 +1540,7 @@ class TurnRuntime:
                 # commit owns the terminal state, so there is nothing to
                 # fence or release.
                 return
-            await self._lifecycle.complete_settling(run)
+            _record_settlement(await self._lifecycle.complete_settling(run))
         finally:
             await stop_heartbeat(heartbeat)
 

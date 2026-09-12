@@ -345,6 +345,9 @@ def ingest_traces(args: argparse.Namespace) -> dict[str, Any]:
         raise DatasetError("expectations mapping must be a JSON object of trace_id -> expectations object")
 
     mlflow = _configure_mlflow(args)
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
     traces = mlflow.search_traces(
         locations=[args.experiment_id],
         filter_string=f"tag.{args.tag} = 'true'",

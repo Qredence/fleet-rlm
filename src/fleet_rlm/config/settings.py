@@ -211,8 +211,49 @@ class Settings(BaseModel):
     ] = Field(default=None)
     daytona_org_id: Annotated[
         str | None,
-        FleetFieldPolicy(toml_path="daytona.org_id", group="Daytona", label="Organization ID", editor="text", rank=46),
+        FleetFieldPolicy(
+            toml_path=None,
+            doc="Daytona organization ID resolved at runtime from daytona.org_id_env",
+        ),
     ] = Field(default=None)
+    daytona_warm_pool_enabled: Annotated[
+        bool,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_enabled",
+            group="Daytona",
+            label="SemanticChild warm pool enabled",
+            editor="boolean",
+            rank=118,
+        ),
+    ] = Field(
+        default=False,
+        description="Allow an explicit operator warm-pool reconciliation for clean SemanticChild sandboxes",
+    )
+    daytona_warm_pool_size: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_size",
+            group="Daytona",
+            label="SemanticChild warm pool size",
+            editor="number",
+            rank=119,
+        ),
+    ] = Field(
+        default=0,
+        ge=0,
+        le=32,
+        description="Desired clean SemanticChild warm-pool capacity; zero keeps capacity drained",
+    )
+    daytona_warm_pool_region: Annotated[
+        str | None,
+        FleetFieldPolicy(
+            toml_path="daytona.warm_pool_region",
+            group="Daytona",
+            label="SemanticChild warm pool region",
+            editor="text",
+            rank=120,
+        ),
+    ] = Field(default=None, description="Optional Daytona target region for the owned SemanticChild warm pool")
     llm_api_key: Annotated[
         SecretStr | None,
         FleetFieldPolicy(
@@ -770,6 +811,19 @@ class Settings(BaseModel):
         default=None,
         description="MLflow experiment name when tracing is enabled",
     )
+    mlflow_experiment_purpose: Annotated[
+        str | None,
+        FleetFieldPolicy(
+            toml_path="mlflow.experiment_purpose", group="MLflow", label="Experiment purpose", editor="text", rank=117
+        ),
+    ] = Field(
+        default=None,
+        description=(
+            "Optional purpose recorded as the fleet.experiment.purpose tag on the "
+            "configured MLflow experiment (e.g. runtime, evaluation, optimization). "
+            "A conflicting recorded purpose fails configuration."
+        ),
+    )
     mlflow_tracking_uri: Annotated[
         str,
         FleetFieldPolicy(toml_path="mlflow.tracking_uri", group="MLflow", label="Tracking URI", editor="text", rank=56),
@@ -1111,6 +1165,13 @@ _ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
         label="SemanticChild snapshot environment variable",
         rank=116,
         resolves_to="daytona_child_snapshot",
+    ),
+    EnvironmentReferenceSpec(
+        toml_path="daytona.org_id_env",
+        group="Daytona",
+        label="Organization ID environment variable",
+        rank=46,
+        resolves_to="daytona_org_id",
     ),
     EnvironmentReferenceSpec(
         toml_path="mlflow.experiment_name_env",

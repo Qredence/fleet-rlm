@@ -1,4 +1,4 @@
-/** Status, theme, and general slash commands: /help, /clear, /cancel, /status, /redo, /trace, /theme, /exit. */
+/** Status, theme, and general slash commands: /help, /clear, /cancel, /status, /redo, /trace, /feedback, /theme, /exit. */
 
 import { formatObservedTokens } from "../format.js";
 import type { PendingSkillSelection } from "../store.js";
@@ -6,7 +6,7 @@ import { getAvailableThemes, getThemeName, setTheme } from "../theme.js";
 import { committedTokenCounts } from "../usage-summary.js";
 
 import { listCommands, type CommandSpec } from "./registry.js";
-import { appendSystem, notifySuccess } from "./shared.js";
+import { appendSystem, errorMessage, notifySuccess } from "./shared.js";
 
 export const helpCommand: CommandSpec = {
   name: "help",
@@ -106,11 +106,54 @@ export const traceCommand: CommandSpec = {
   description: "Show the full MLflow trace ID for the current Run",
   usage: "/trace",
   handler: (_args, ctx) => {
-    const traceId = ctx.store.getState().run.traceId;
+    const state = ctx.store.getState();
+    const traceId = state.run.traceId ?? state.lastTraceId;
     appendSystem(
       ctx.store,
-      traceId ? `Trace: ${traceId}` : "No trace ID recorded for the current Run.",
+      traceId ? `Trace: ${traceId}` : "No trace ID recorded for the current Session.",
     );
+  },
+};
+
+export const feedbackCommand: CommandSpec = {
+  name: "feedback",
+  description: "Record thumbs-up or thumbs-down feedback for the latest execution trace",
+  usage: "/feedback <up|down> [comment]",
+  handler: async (args, ctx) => {
+    const state = ctx.store.getState();
+    if (["submitting", "running", "cancelling"].includes(state.run.phase)) {
+      appendSystem(ctx.store, "Wait for the current Run to settle before recording feedback.");
+      return;
+    }
+    const sessionId = state.session?.id;
+    if (!sessionId) {
+      appendSystem(ctx.store, "Feedback requires an active Session.");
+      return;
+    }
+    const traceId = state.run.traceId ?? state.lastTraceId;
+    if (!traceId) {
+      appendSystem(ctx.store, "No completed execution trace is available for feedback.");
+      return;
+    }
+    const direction = args[0]?.toLowerCase();
+    if (direction !== "up" && direction !== "down") {
+      appendSystem(ctx.store, "Usage: /feedback <up|down> [comment]");
+      return;
+    }
+    const comment = args.slice(1).join(" ").trim();
+    try {
+      const response = await ctx.client.submitTraceFeedback(sessionId, {
+        trace_id: traceId,
+        value: direction === "up",
+        ...(comment ? { comment } : {}),
+      });
+      notifySuccess(
+        ctx,
+        `Feedback recorded for trace ${response.trace_id}: ${response.value ? "up" : "down"}.`,
+      );
+    } catch (error) {
+      appendSystem(ctx.store, `Could not record feedback: ${errorMessage(error)}`);
+    }
   },
 };
 

@@ -1,6 +1,7 @@
 /** Session lifecycle slash commands: /sessions, /rename, /resume, /reload. */
 
 import { projectDurableTurns } from "../durable-projection.js";
+import { latestDurableTraceId } from "../durable-adapter.js";
 
 import type { CommandContext, CommandSpec } from "./registry.js";
 import { appendSystem, errorMessage } from "./shared.js";
@@ -151,6 +152,7 @@ async function loadSession(
       type: "session/hydrate",
       session: { id: session.id, title: session.title, status: session.status, resumed: true },
       events: projectDurableTurns(turns),
+      latestTraceId: latestDurableTraceId(turns),
     });
     appendSystem(
       ctx.store,

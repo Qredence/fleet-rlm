@@ -11,7 +11,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable, Generator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 
@@ -20,15 +20,12 @@ if TYPE_CHECKING:
 
 import dspy
 from dspy import CodeExecutionError, CodeInterpreter, CodeInterpreterError, FinalOutput
-from dspy.clients.base_lm import BaseLM
-from dspy.signatures.signature import Signature
+from dspy.clients.base_lm import BaseLM as BaseLM
+from dspy.signatures.signature import Signature as Signature
 from dspy.utils.callback import BaseCallback
-from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.json_types import JsonValue
-from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, TurnBudget
 from fleet_rlm.rlm.result import _safe_usage_entry, truncate_public_text
-from fleet_rlm.rlm.submit_validation import is_submit_only_code
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +60,18 @@ def assert_dspy_version() -> None:
         )
 
 
+def is_native_rlm(value: object) -> bool:
+    """Return whether ``value`` is the exact pinned DSPy RLM implementation.
+
+    DSPy 3.3.1 exposes the caller-owned interpreter contract on the native
+    ``dspy.RLM`` class. Structural test doubles are deliberately not treated
+    as native execution: only an object whose concrete type is the installed
+    class is routed through the positional interpreter seam. Keep this
+    version-sensitive identity decision in the compatibility seam.
+    """
+    return type(value) is dspy.RLM
+
+
 def copy_output_fields(
     output_fields: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]] | None:
@@ -82,98 +91,6 @@ def needs_binding_refresh(
     return desired_generation != installed_generation or not broker_ready
 
 
-# ---------------------------------------------------------------------------
-# Bounded re-ask adapter for the pinned JSON action protocol
-# ---------------------------------------------------------------------------
-
-RETRY_CORRECTION_FIELD = "fleet_retry_correction"
-BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
-WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
-
-_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
-
-
-def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
-    """
-    Build bounded corrective feedback for one failed action attempt.
-
-    The raw LM response is never echoed back: provider output is untrusted
-    prompt-facing text, so only the failure category is described.
-
-    Parameters:
-        attempt (int): The retry attempt number, starting at 1.
-        exc (AdapterParseError): The parse failure that triggered the retry.
-
-    Returns:
-        str: Bounded instruction text for the corrected re-ask.
-    """
-    message = str(getattr(exc, "message", "") or "")
-    if _EMPTY_RESPONSE_MARKER in message:
-        return (
-            f"Correction (attempt {attempt}): the previous response produced no parseable output. "
-            "It was empty or null, typically because generation exhausted the output-token budget "
-            "before emitting any text. Respond now with one JSON object containing exactly the "
-            "required output fields. Keep reasoning short and do not repeat earlier analysis."
-        )
-    return (
-        f"Correction (attempt {attempt}): the previous response was not a JSON object containing "
-        "the required output fields. Respond now with one JSON object containing exactly the "
-        "required output fields; no surrounding prose, markdown, or code fences."
-    )
-
-
-def _correction_field_name(signature: type[Signature]) -> str:
-    """
-    Pick the retry-correction input field name free of caller collisions.
-
-    Parameters:
-        signature (type[Signature]): The base signature used by the failed call.
-
-    Returns:
-        str: The reserved field name, suffixed per collision until it is free.
-    """
-    field = RETRY_CORRECTION_FIELD
-    suffix = 1
-    while field in signature.fields:
-        suffix += 1
-        field = f"{RETRY_CORRECTION_FIELD}_{suffix}"
-    return field
-
-
-def _retry_call_arguments(
-    signature: type[Signature],
-    inputs: dict[str, Any],
-    attempt: int,
-    exc: AdapterParseError,
-) -> tuple[type[Signature], dict[str, Any]]:
-    """
-    Extend one failed action call with a bounded corrective input field.
-
-    The base signature is extended afresh on every retry, so a caller that
-    already defines the reserved correction field keeps its own input value
-    untouched: the adapter appends the next collision-free correction field
-    instead of overwriting caller context.
-
-    Parameters:
-        signature (type[Signature]): The base signature used by the failed call;
-            never a previously extended retry signature.
-        inputs (dict[str, Any]): The inputs used by the failed call; never mutated.
-        attempt (int): The retry attempt number, starting at 1.
-        exc (AdapterParseError): The parse failure that triggered the retry.
-
-    Returns:
-        tuple[type[Signature], dict[str, Any]]: The retry signature and inputs.
-    """
-    correction_field = _correction_field_name(signature)
-    retry_signature = signature.append(
-        correction_field,
-        dspy.InputField(desc="Bounded corrective feedback for the previous failed attempt; follow it."),
-    )
-    retry_inputs = dict(inputs)
-    retry_inputs[correction_field] = _retry_correction_feedback(attempt, exc)
-    return retry_signature, retry_inputs
-
-
 def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
     """Whether DSPy supplied its native ``generate_action`` iteration marker."""
     value = inputs.get("iteration")
@@ -184,449 +101,6 @@ def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
     except (ValueError, TypeError):
         return False
     return current >= 1 and total >= current
-
-
-def _append_input_field(
-    signature: type[Signature],
-    inputs: Mapping[str, Any],
-    *,
-    preferred_name: str,
-    description: str,
-    value: str,
-) -> tuple[type[Signature], dict[str, Any], str]:
-    """Append one collision-free input field without mutating caller inputs."""
-    field = preferred_name
-    suffix = 1
-    while field in signature.fields:
-        suffix += 1
-        field = f"{preferred_name}_{suffix}"
-    extended = signature.append(field, dspy.InputField(desc=description))
-    extended_inputs = dict(inputs)
-    extended_inputs[field] = value
-    return extended, extended_inputs, field
-
-
-def _budget_directive(remaining: float, *, attempts_exhausted: bool = False) -> str:
-    """Create a directive requiring immediate submission when exploration must end.
-
-    Parameters:
-        remaining (float): Estimated seconds remaining in the time budget.
-        attempts_exhausted (bool): Whether the exploration attempt limit has been reached.
-
-    Returns:
-        str: A directive containing the budget reason, remaining time, and required SUBMIT action.
-    """
-    seconds = max(0, int(remaining))
-    reason = "Exploration attempt budget exhausted" if attempts_exhausted else "Time budget nearly exhausted"
-    return (
-        f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
-        "using evidence already gathered. Do not explore, call tools, or execute additional code. "
-        "Return exactly one SUBMIT(...) action."
-    )
-
-
-def _wrap_up_correction(reason: str) -> str:
-    return (
-        "Wrap-up correction: the previous action was not a single compliant SUBMIT call "
-        f"({reason}). Use only existing variables and safe serialization; return exactly one SUBMIT(...) action."
-    )
-
-
-def _action_code(response: object) -> object:
-    if not isinstance(response, Sequence) or isinstance(response, (str, bytes, bytearray)) or not response:
-        return None
-    first = response[0]
-    return first.get("code") if isinstance(first, Mapping) else None
-
-
-class FleetJSONAdapter(dspy.JSONAdapter):
-    """The pinned JSON action protocol plus a bounded corrective re-ask.
-
-    DSPy 3.3.1 raises ``AdapterParseError`` for an empty or unparseable action
-    response without retrying: the legacy ``Retry`` module is removed and
-    ``LM.num_retries`` only covers transient provider failures. One provider
-    hiccup -- typically reasoning consuming the entire completion budget
-    before any output token is emitted -- would otherwise discard a whole
-    Turn's trajectory. Following DSPy's own adapter-level fallback precedent
-    (``ChatAdapter.use_json_adapter_fallback``, ``dspy/adapters/chat_adapter.py``),
-    this subclass keeps the stock ``JSONAdapter`` protocol authoritative and
-    only adds a bounded re-ask of the same LM with corrective feedback appended
-    as a signature input. The final ``AdapterParseError`` propagates unchanged
-    once retries are exhausted, so Fleet's failure mapping stays intact.
-
-    Parameters:
-        max_parse_retries: Additional LM attempts after the first failed action
-            response. Defaults to ``DEFAULT_PARSE_RETRIES``.
-        deadline: Absolute monotonic deadline for this execution, when bound.
-        wrap_up_seconds: Reserved final-answer window for native action calls.
-    """
-
-    def __init__(
-        self,
-        *,
-        max_parse_retries: int = DEFAULT_PARSE_RETRIES,
-        deadline: float | None = None,
-        wrap_up_seconds: float = 0.0,
-        budget: TurnBudget | None = None,
-    ) -> None:
-        """
-        Initialize the adapter with deadline, wrap-up, and parse-retry budgets.
-
-        Parameters:
-            max_parse_retries (int): Number of additional attempts allowed after the
-                initial parse failure.
-            deadline (float | None): Absolute deadline for adapter processing.
-            wrap_up_seconds (float): Time reserved for final-answer submission.
-            budget (TurnBudget | None): Optional turn budget used to control adapter
-                limits.
-
-        Raises:
-            ValueError: If a budget value is invalid.
-        """
-        super().__init__()
-        self._budget = AdapterBudget(
-            deadline=deadline,
-            reserve_seconds=wrap_up_seconds,
-            max_parse_retries=max_parse_retries,
-            turn=budget,
-        )
-        self._explicit_budget = budget is not None
-        self._wrap_up_entered = False
-        self._wrap_up_rejection_reason: str | None = None
-        self._wrap_up_remaining_ms: int | None = None
-
-    @property
-    def _wrap_up_seconds(self) -> float:
-        """Return the time reserved for the final wrap-up phase."""
-        return self._budget.reserve_seconds
-
-    @property
-    def _wrap_up_attempts(self) -> int:
-        """Return the number of finalization attempts used by the adapter."""
-        return self._budget.finalization_used
-
-    def _remaining(self) -> float | None:
-        """Return the remaining budget time in seconds, or `None` when no deadline is set."""
-        return self._budget.remaining()
-
-    def _lm_for_request(self, lm: BaseLM, *, action: bool, wrap_up: bool) -> BaseLM:
-        # Local import avoids coupling the DSPy compatibility module's import
-        # initialization to program construction, which consumes this module.
-        """
-        Prepare the language model for an adapter request with deadline and budget tracking.
-
-        Parameters:
-            lm (BaseLM): Language model to wrap.
-            action (bool): Whether the request is for a native action.
-            wrap_up (bool): Whether the request is part of the wrap-up phase.
-
-        Returns:
-            BaseLM: A deadline-aware language model proxy.
-
-        Raises:
-            ValueError: If the request attempts to switch turn budgets after budget state has been established.
-        """
-        from fleet_rlm.rlm.program import DeadlineLMProxy
-
-        if isinstance(lm, DeadlineLMProxy) and lm.budget is not None and lm.budget is not self._budget.turn:
-            if self._explicit_budget or any(self._budget.turn.snapshot().values()):
-                raise ValueError("adapter cannot switch Turn budgets")
-            self._budget.turn = lm.budget
-        return DeadlineLMProxy.for_adapter(lm, self._budget, action=action, wrap_up=wrap_up)
-
-    def _enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
-        """Record the first reserve transition and any bounded rejection reason."""
-        if not self._wrap_up_entered:
-            self._wrap_up_entered = True
-            self._wrap_up_remaining_ms = max(0, round(remaining * 1000))
-        if rejection_reason is not None:
-            self._wrap_up_rejection_reason = rejection_reason
-
-    def wrap_up_summary(self) -> dict[str, Any]:
-        """Return bounded engineering metadata for the current adapter call."""
-        return {
-            "wrap_up_entered": self._wrap_up_entered,
-            "wrap_up_attempts": self._wrap_up_attempts,
-            "wrap_up_rejection_reason": self._wrap_up_rejection_reason,
-            "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
-        }
-
-    def _next_wrap_up_attempt(self) -> None:
-        """Reclassify an already-charged late response as finalization."""
-        self._budget.reclassify_late_response()
-
-    def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
-        """Determine whether the current action iteration must enter wrap-up mode.
-
-        Parameters:
-                remaining (float | None): The time remaining for the current turn, in seconds.
-
-        Returns:
-                `True` if wrap-up is enabled and the action iteration is at or below its
-                time reserve or has exhausted exploration, `False` otherwise.
-        """
-        return bool(
-            remaining is not None
-            and self._wrap_up_seconds > 0
-            and _iteration_is_action(inputs)
-            and (remaining <= self._wrap_up_seconds or self._budget.turn.exploration_exhausted())
-        )
-
-    def _with_wrap_up_directive(
-        self,
-        signature: type[Signature],
-        inputs: Mapping[str, Any],
-        remaining: float,
-        *,
-        field_name: str | None = None,
-    ) -> tuple[type[Signature], dict[str, Any], str]:
-        """
-        Prepare inputs with a mandatory final-answer budget directive.
-
-        Parameters:
-                signature (type[Signature]): The input signature to update.
-                inputs (Mapping[str, Any]): Current input values.
-                remaining (float): Time remaining for finalization.
-                field_name (str | None): Existing input field to receive the directive, if available.
-
-        Returns:
-                tuple[type[Signature], dict[str, Any], str]: The updated signature, input
-                values, and field name containing the directive.
-        """
-        directive = _budget_directive(remaining, attempts_exhausted=self._budget.turn.exploration_exhausted())
-        if field_name is not None and field_name in signature.fields:
-            updated = dict(inputs)
-            updated[field_name] = directive
-            return signature, updated, field_name
-        extended, extended_inputs, inserted_field = _append_input_field(
-            signature,
-            inputs,
-            preferred_name=BUDGET_DIRECTIVE_FIELD,
-            description="Mandatory final-answer budget directive; follow it exactly.",
-            value=directive,
-        )
-        return extended, extended_inputs, inserted_field
-
-    def _with_wrap_up_correction(
-        self,
-        signature: type[Signature],
-        inputs: Mapping[str, Any],
-        *,
-        reason: str,
-    ) -> tuple[type[Signature], dict[str, Any]]:
-        extended, extended_inputs, _ = _append_input_field(
-            signature,
-            inputs,
-            preferred_name=WRAP_UP_CORRECTION_FIELD,
-            description="Mandatory correction for the final SUBMIT action; follow it exactly.",
-            value=_wrap_up_correction(reason),
-        )
-        return extended, extended_inputs
-
-    def __call__(
-        self,
-        lm: BaseLM,
-        lm_kwargs: dict[str, Any],
-        signature: type[Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """
-        Drive the DSPy adapter through the bounded repair and finalization policy.
-
-        Parameters:
-            lm (BaseLM): Language model used to generate the response.
-            lm_kwargs (dict[str, Any]): Keyword arguments for the language model.
-            signature (type[Signature]): DSPy signature describing the request.
-            demos (list[dict[str, Any]]): Demonstration examples passed to the adapter.
-            inputs (dict[str, Any]): Input values for the request.
-
-        Returns:
-            list[dict[str, Any]]: Parsed adapter output records.
-        """
-        machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
-        try:
-            request = next(machine)
-            while True:
-                call_lm, call_kwargs, request_signature, request_inputs = request
-                try:
-                    response = super().__call__(call_lm, call_kwargs, request_signature, demos, request_inputs)
-                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
-                    try:
-                        request = machine.throw(exc)
-                    except StopIteration as done:
-                        return done.value
-                else:
-                    try:
-                        request = machine.send(response)
-                    except StopIteration as done:
-                        return done.value
-        finally:
-            machine.close()
-
-    async def acall(
-        self,
-        lm: BaseLM,
-        lm_kwargs: dict[str, Any],
-        signature: type[Signature],
-        demos: list[dict[str, Any]],
-        inputs: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """Drive the shared repair policy through the stock DSPy adapter."""
-        machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
-        try:
-            request = next(machine)
-            while True:
-                call_lm, call_kwargs, request_signature, request_inputs = request
-                try:
-                    response = await super().acall(call_lm, call_kwargs, request_signature, demos, request_inputs)
-                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
-                    try:
-                        request = machine.throw(exc)
-                    except StopIteration as done:
-                        return done.value
-                else:
-                    try:
-                        request = machine.send(response)
-                    except StopIteration as done:
-                        return done.value
-        finally:
-            machine.close()
-
-    def _repair_steps(
-        self,
-        lm: BaseLM,
-        lm_kwargs: dict[str, Any],
-        signature: type[Signature],
-        inputs: dict[str, Any],
-    ) -> Generator[
-        tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-    ]:
-        """Drive request repair and wrap-up processing for an LM interaction.
-
-        Yields:
-            tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]]:
-                The LM, call arguments, signature, and inputs for the next request.
-
-        Returns:
-            list[dict[str, Any]]:
-                The parsed response accepted as the final result.
-        """
-        lm = self._lm_for_request(lm, action=False, wrap_up=False)
-        attempt = 0
-        base_signature = signature
-        base_inputs = dict(inputs)
-        wrap_up = False
-        request_signature = signature
-        request_inputs = dict(inputs)
-        directive_field: str | None = None
-        while True:
-            remaining = self._remaining()
-            action = _iteration_is_action(base_inputs)
-            if action and self._wrap_up_required(base_inputs, remaining):
-                wrap_up = True
-                assert remaining is not None
-                self._enter_wrap_up(remaining)
-            if wrap_up and remaining is not None:
-                request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                    request_signature,
-                    request_inputs,
-                    remaining,
-                    field_name=directive_field,
-                )
-            call_lm = self._lm_for_request(lm, action=action, wrap_up=wrap_up)
-            try:
-                response = yield call_lm, dict(lm_kwargs), request_signature, request_inputs
-            except (LMTimeoutError, TimeoutError):
-                if not wrap_up and action and self._wrap_up_seconds > 0:
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining)
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
-                        )
-                        continue
-                raise
-            except AdapterParseError as exc:
-                if wrap_up:
-                    if not self._budget.can_finalize():
-                        raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
-                    self._wrap_up_rejection_reason = "unparseable_json"
-                    request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="unparseable JSON",
-                    )
-                    continue
-                if action and self._wrap_up_seconds > 0:
-                    # A response can finish after the provider timeout was
-                    # reduced to the reserve boundary. Treat that parse
-                    # failure as the first wrap-up attempt so its one
-                    # corrective re-ask shares the same two-attempt ceiling
-                    # as every other final-answer path.
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
-                        self._next_wrap_up_attempt()
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
-                        )
-                        request_signature, request_inputs = self._with_wrap_up_correction(
-                            request_signature,
-                            request_inputs,
-                            reason="unparseable JSON",
-                        )
-                        continue
-                if not self._budget.can_repair(attempt):
-                    raise
-                attempt += 1
-                request_signature, request_inputs = _retry_call_arguments(
-                    base_signature,
-                    base_inputs,
-                    attempt,
-                    exc,
-                )
-                continue
-            if remaining is not None:
-                after_response = self._remaining()
-                if not wrap_up and action and after_response is not None and after_response <= self._wrap_up_seconds:
-                    wrap_up = True
-                    self._enter_wrap_up(after_response)
-                    self._next_wrap_up_attempt()
-                    if is_submit_only_code(_action_code(response)):
-                        # The late normal response already satisfies the
-                        # wrap-up grammar. Execute it as the initial
-                        # final-answer attempt instead of spending reserve
-                        # time on an unnecessary re-ask.
-                        return response
-                    request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                        request_signature,
-                        request_inputs,
-                        after_response,
-                        field_name=directive_field,
-                    )
-                if wrap_up and action and not is_submit_only_code(_action_code(response)):
-                    self._wrap_up_rejection_reason = "exploration_or_additional_code"
-                    if not self._budget.can_finalize():
-                        raise TimeoutError("wrap-up action did not submit before the Turn deadline")
-                    request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="exploration or additional code",
-                    )
-                    continue
-                return response
-            return response
 
 
 class _RLMReasoningCallback(BaseCallback):
@@ -1146,7 +620,7 @@ def bind_native_rlm_observer(
     """
     from fleet_rlm.rlm.result import RLMConfigError
 
-    if type(rlm) is not dspy.RLM:
+    if not is_native_rlm(rlm):
         raise RLMConfigError("reasoning observation requires native dspy.RLM")
     predictor = getattr(rlm, "generate_action", None)
     if not isinstance(predictor, dspy.Predict):
@@ -1194,7 +668,6 @@ __all__ = [
     "CodeInterpreter",
     "CodeInterpreterError",
     "FinalOutput",
-    "FleetJSONAdapter",
     "ReasoningObserver",
     "UncertifiedDSpyVersionError",
     "assert_dspy_version",
@@ -1202,6 +675,7 @@ __all__ = [
     "copy_output_fields",
     "daytona_provider_contract",
     "is_final_output",
+    "is_native_rlm",
     "needs_binding_refresh",
     "wrap_final_output",
 ]

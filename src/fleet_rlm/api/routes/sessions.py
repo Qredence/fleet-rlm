@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
@@ -10,9 +11,9 @@ from fastapi import APIRouter, Query
 
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
+    RuntimeInventoryIfReadyDep,
     SessionCatalogDep,
     SessionPrewarmDep,
-    SessionRuntimeRegistryDep,
 )
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
@@ -26,7 +27,6 @@ from fleet_rlm.api.schemas import (
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
 from fleet_rlm.observability.posthog import get_client, get_distinct_id
-from fleet_rlm.rlm.session_runtime import SessionKey
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
@@ -171,7 +171,7 @@ async def patch_session(
     body: SessionPatchRequest,
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
-    runtime_registry: SessionRuntimeRegistryDep,
+    inventory: RuntimeInventoryIfReadyDep,
 ) -> SessionDetailResponse:
     """
     Update the title or status of a session within the authenticated user's workspace.
@@ -190,7 +190,8 @@ async def patch_session(
         raise http_error(422, "session_no_fields", "No fields to update")
     if body.title is not None and not body.title.strip():
         raise http_error(422, "session_title_empty", "Title must not be empty")
-    if body.status is not None and body.status.strip().lower() not in {"active", "archived"}:
+    normalized_status = body.status.strip().lower() if body.status is not None else None
+    if normalized_status is not None and normalized_status not in {"active", "archived"}:
         raise http_error(422, "session_status_invalid", "Status must be active or archived")
     try:
         record = await repo.update(
@@ -198,7 +199,7 @@ async def patch_session(
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
             title=body.title,
-            status=body.status,
+            status=normalized_status,
         )
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
@@ -206,22 +207,26 @@ async def patch_session(
         # Internal validation failures must not leak exception text into the
         # public contract; collapse them to the closed invalid_request code.
         raise http_error(422, "invalid_request", "Invalid request") from exc
-    if record.status == "archived" and runtime_registry is not None:
-        # Archiving is the public Session-retirement operation.  It must not
-        # leave an in-memory interpreter carrying stale capabilities alive.
-        try:
-            await runtime_registry.delete_session(
-                SessionKey(workspace_id=str(identity.workspace_id), session_id=str(session_id)),
-                drain_seconds=1.0,
-            )
-        except (RuntimeError, TimeoutError) as exc:
-            # The durable archive already succeeded.  Do not expose provider or
-            # interpreter details if resident retirement cannot finish now.
-            raise http_error(
-                503,
-                "session_runtime_retirement_pending",
-                "Session archived; runtime retirement is pending",
-            ) from exc
+    if normalized_status == "archived":
+        resources = getattr(inventory, "run_environment_resources", None) if inventory is not None else None
+        runtime = getattr(resources, "runtime", None)
+        close_root = getattr(runtime, "close_root_session", None)
+        if callable(close_root):
+            try:
+                await close_root(
+                    identity.workspace_id,
+                    session_id,
+                    deadline=asyncio.get_running_loop().time() + 30.0,
+                )
+            except Exception as exc:
+                # The database transition is durable, but provider retirement
+                # remains pending and must be retried rather than reported as
+                # complete. Keep provider/SDK details out of the API error.
+                raise http_error(
+                    503,
+                    "session_retirement_pending",
+                    "Session retirement is pending",
+                ) from exc
     ph = get_client()
     if ph is not None:
         ph.capture(

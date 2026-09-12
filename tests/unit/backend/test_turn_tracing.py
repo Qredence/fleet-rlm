@@ -185,6 +185,23 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
     assert current_turn_trace_id() is None
 
 
+def test_consecutive_sessions_do_not_contaminate_trace_tags(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A second Session in the same process must never inherit the first's identity."""
+    calls = _install_fake_mlflow(monkeypatch)
+    first_session, second_session = uuid4(), uuid4()
+    for session_id in (first_session, second_session):
+        with turn_trace(session_id, uuid4(), enabled=True):
+            assert current_turn_trace_id() is not None
+
+    root_updates = [kwargs for kwargs in calls.update_kwargs if "session_id" in kwargs]
+    assert [kwargs["session_id"] for kwargs in root_updates] == [str(first_session), str(second_session)]
+    for kwargs, session_id in zip(root_updates, (first_session, second_session), strict=True):
+        assert kwargs["tags"]["fleet.session_id"] == str(session_id)
+        assert kwargs["tags"]["fleet.run_id"] == kwargs["metadata"]["fleet.run_id"]
+    # Each root starts from a clean context: no stale cross-Session trace id survives.
+    assert current_turn_trace_id() is None
+
+
 def test_turn_trace_preparation_phase_records_phase_tag_without_link(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,6 +257,48 @@ def test_turn_trace_execution_phase_records_one_way_preparation_link(
     }
     assert tagged[0]["metadata"]["fleet.trace_phase"] == "execution"
     assert tagged[0]["metadata"]["fleet.preparation_trace_id"] == "tr-preparation-1"
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
+def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        runtime_variant="native-turn-scoped",
+        program_fingerprint="program-digest",
+        image_identity="image-digest",
+    ):
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert (
+        tagged[0]["tags"].items()
+        >= {
+            "fleet.runtime_variant": "native-turn-scoped",
+            "fleet.program_fingerprint": "program-digest",
+            "fleet.image_identity": "image-digest",
+        }.items()
+    )
+    assert tagged[0]["metadata"]["fleet.runtime_variant"] == "native-turn-scoped"
+
+
+def test_execution_trace_rejects_unbounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution", image_identity="x" * 257):
+        pass
+    tagged = [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+    assert "fleet.image_identity" not in tagged[0]["tags"]
+
+
+def test_settlement_status_is_recorded_separately_from_span_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.observability.tracing import record_settlement_status
+
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution"):
+        record_settlement_status("completed", durable=True)
+    assert calls.span_attributes[-1] == {"settlement_status": "completed", "settlement_durable": True}
     assert calls.update_kwargs[-1] == {"state": "OK"}
 
 
@@ -503,6 +562,40 @@ def test_turn_trace_preserves_explicit_failed_annotation(monkeypatch: pytest.Mon
     with turn_trace(uuid4(), uuid4(), enabled=True):
         annotate_trace_io(request="q", response_text="Turn failed", failed=True)
 
+    assert calls.update_kwargs[-1] == {"state": "ERROR"}
+
+
+def test_successful_model_execution_followed_by_commit_failure_marks_root_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=PredictionResult(
+            display_text="model answer",
+            outputs={"answer": "model answer"},
+            schema_id="fleet.test",
+            schema_version="1",
+        ),
+        usage=empty_rlm_usage(),
+    )
+    commit_failure = FailedRunReceipt(
+        run_id=uuid4(),
+        terminal_status="failed",
+        failure_code="commit_failed",
+        public_message="Turn could not be committed",
+        durable=True,
+    )
+
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        TurnRuntime._annotate_receipt("model request", outcome, commit_failure)
+
+    assert calls.span_outputs[-1] == {"answer": "Turn could not be committed"}
+    assert calls.span_statuses[-1] == "ERROR"
     assert calls.update_kwargs[-1] == {"state": "ERROR"}
 
 

@@ -435,7 +435,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
     from fleet_rlm.chat.preparation import RunPreparationTimeoutError
-    from fleet_rlm.runtime.daytona.run_environment import _DaytonaEnvironmentProvider
+    from fleet_rlm.composition.daytona_run_preparation import _DaytonaEnvironmentProvider
 
     entered = threading.Event()
     release_lookup = threading.Event()

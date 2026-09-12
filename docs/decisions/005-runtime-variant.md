@@ -16,3 +16,8 @@ Omitted variant values resolve to `legacy` for existing policy compatibility;
 the committed policy names it explicitly. Tests pin both defaults and editor
 rejection without writes. Lifecycle benchmark receipts record `runtime_variant`.
 Future benchmark formats must carry the same identity for comparisons.
+
+Native DSPy RLM already runs inside `legacy`; the rejected `native` selector
+refers to the execution-architecture migration, not adoption of DSPy itself.
+The [ADR 006 ledger](006-implementation-status.md) tracks the experimental
+adapter and the independent production gates.

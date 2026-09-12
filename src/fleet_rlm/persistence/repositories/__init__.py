@@ -13,6 +13,7 @@ from fleet_rlm.persistence.repositories.turns import (
     InMemoryRunStateStore,
     SqlAlchemyRunStateStore,
 )
+from fleet_rlm.persistence.repositories.warm_pool import SqlAlchemyWarmPoolOwnershipStore
 
 __all__ = [
     "InMemoryRunStateStore",
@@ -22,4 +23,5 @@ __all__ = [
     "SqlAlchemyRunStateStore",
     "SqlAlchemySandboxBindingStore",
     "SqlAlchemySessionCatalog",
+    "SqlAlchemyWarmPoolOwnershipStore",
 ]

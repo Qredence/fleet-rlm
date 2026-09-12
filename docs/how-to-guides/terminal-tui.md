@@ -105,15 +105,16 @@ any history that the backend committed after an interruption.
 
 On resume, the store atomically replaces its state with persisted Turn text and
 Fleet trajectory parts. Live and durable data use the same projection rules.
-Transient status, delivery, cancellation reason, and latest Run outcome remain
-operator state and are not inserted into durable transcript messages.
+Transient preparation and delivery status remain operator state. A settled
+cancellation reloads the backend's bounded cancellation tombstone rather than
+the interrupted reasoning, code, or Tool evidence.
 
 ## Commands and Skills
 
 Use `/help` for the current slash-command list. Important commands include
 `/sessions`, `/rename`, `/resume`, `/reload`, `/status`, `/settings`,
 `/profiles`, `/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
-`/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`,
+`/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`, `/feedback`,
 and `/exit`. `/settings`
 is a local-only TOML policy editor whose overlay stays open for successive
 field edits (environment-pinned and single-valued fields are read-only, and
@@ -136,7 +137,21 @@ committed Artifact with content-length and SHA-256 verification;
 `/artifacts` lists Artifact ids in the conversation. `/redo` resubmits the last
 prompt with a fresh idempotency key, and `/reload` re-fetches committed Turns
 for the current Session without switching Sessions. `/trace` prints the full
-MLflow trace ID of the current Run.
+MLflow trace ID of the current Run. `/feedback up [comment]` or
+`/feedback down [comment]` records one human assessment for the most recent
+durable assistant execution trace and prints the selected trace ID in the
+confirmation.
+
+Feedback is session-bound: the client restores the target from assistant
+message metadata while hydrating the complete paginated Turn history, clears
+it when switching Sessions, and never targets a preparation trace. The command
+is unavailable while a Run is active or when no completed execution trace is
+available. Comments are trimmed and bounded by the API; MLflow stores them as
+the optional sanitized rationale, subject to the configured trace-content
+policy. Each submission is a separate MLflow assessment. Feedback writes are
+not automatically retried because an ambiguous response may follow a
+successful write and a retry could create a duplicate assessment.
+It records operator satisfaction, not verified correctness or evidence coverage.
 
 `/clear` resets only the current local presentation. It does not delete or
 rewrite durable Session History; resuming the Session restores committed Turns.

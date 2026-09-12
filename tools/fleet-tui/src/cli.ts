@@ -10,6 +10,7 @@ import {
 import { createFleetTui } from "./tui/application.js";
 import { DraftStore } from "./tui/draft-store.js";
 import { projectDurableTurns } from "./tui/durable-projection.js";
+import { latestDurableTraceId } from "./tui/durable-adapter.js";
 
 export { type CliOptions, parseArgs };
 
@@ -23,7 +24,8 @@ export async function run(options: CliOptions): Promise<void> {
   const sessionId = options.sessionId;
   const resumed = Boolean(sessionId);
   const session = sessionId ? await client.getSession(sessionId) : await client.createSession();
-  const initialEvents = resumed ? projectDurableTurns(await client.listTurns(session.id)) : [];
+  const initialTurns = resumed ? await client.listTurns(session.id) : [];
+  const initialEvents = projectDurableTurns(initialTurns);
 
   process.stdout.write(`Fleet session: ${session.id}\n`);
   await createFleetTui({
@@ -31,6 +33,7 @@ export async function run(options: CliOptions): Promise<void> {
     session,
     resumed,
     initialEvents,
+    latestTraceId: latestDurableTraceId(initialTurns),
     draftStore: new DraftStore(),
   }).start();
 }

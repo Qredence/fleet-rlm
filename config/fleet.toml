@@ -1,5 +1,6 @@
 [config]
 schema_version = 1
+# The committed policy is [defaults] itself; profiles override only deployment-specific values.
 default_profile = "daytona-recursive"
 
 [defaults.application]
@@ -73,8 +74,13 @@ database_url_env = "FLEET_DATABASE_URL"
 api_key_env = "FLEET_DAYTONA_API_KEY"
 snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
 child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
+org_id_env = "FLEET_DAYTONA_ORG_ID"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
+warm_pool_enabled = false
+warm_pool_size = 0
+# Set only when an operator has chosen the provider target for an explicit capacity campaign.
+warm_pool_region = ""
 
 [defaults.logging]
 level = "INFO"
@@ -83,6 +89,7 @@ level = "INFO"
 tracing_enabled = true
 tracking_uri = "http://127.0.0.1:5001"
 experiment_name = "fleet-rlm"
+experiment_purpose = "runtime"
 expose_trace_id = true
 async_logging = true
 trace_sampling_ratio = 1.0
@@ -99,9 +106,15 @@ enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
-# The committed policy is [defaults] itself: recursive child RLMs (one native
-# depth), DSPy verbose host logging, local MLflow tracing, and the Root/Sub
-# model pair above. The profile table stays empty because the schema requires
-# at least one profile; everything a profile would override already lives in
-# [defaults].
+# The local/disposable profile inherits the complete default policy: recursive
+# child RLMs (one native depth), DSPy verbose host logging, local MLflow tracing,
+# and the Root/Sub model pair above. The managed profile below overrides only
+# the production database contract.
 [profiles.daytona-recursive]
+
+# Explicit managed-production profile. Keep the local/disposable profile above
+# as the default until the Lakebase maintenance-window rehearsal and native
+# containment gates are complete; operators select this profile by changing
+# [config] default_profile in the deployment artifact.
+[profiles.daytona-managed.storage]
+database_url_env = "FLEET_DATABASE_URL"

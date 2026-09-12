@@ -140,6 +140,33 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
 
 
 @pytest.mark.asyncio
+async def test_precommit_cleanup_closes_only_native_context_then_full_drain_skips_it() -> None:
+    from fleet_rlm.chat.preparation import PreparedTurn, _PreparedTurnResources
+
+    operations: list[str] = []
+
+    async def release_environment() -> None:
+        operations.append("release-environment")
+
+    async def close_native_context() -> None:
+        operations.append("close-native-context")
+
+    prepared = PreparedTurn(
+        execution=SimpleNamespace(),
+        artifact_sink=None,
+        _resources=_PreparedTurnResources(
+            (release_environment, close_native_context),
+            pre_commit_cleanup_indices=frozenset({1}),
+        ),
+    )
+
+    await prepared.aclose_before_commit()
+    assert operations == ["close-native-context"]
+    await prepared.aclose()
+    assert operations == ["close-native-context", "release-environment"]
+
+
+@pytest.mark.asyncio
 async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
     import asyncio
 

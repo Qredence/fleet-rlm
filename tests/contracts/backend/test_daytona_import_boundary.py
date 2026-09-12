@@ -17,7 +17,6 @@ EXPECTED_DAYTONA_MODULES = {
     "errors.py",
     "interpreter.py",
     "interpreter_output.py",
-    "native_interpreter.py",
     "lifecycle.py",
     "platform.py",
     "provisioning.py",
@@ -25,6 +24,7 @@ EXPECTED_DAYTONA_MODULES = {
     "runtime.py",
     "sandbox_lease.py",
     "session_manager.py",
+    "warm_pool.py",
     "_cleanup.py",
     "_lease.py",
 }

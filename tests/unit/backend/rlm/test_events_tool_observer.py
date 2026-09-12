@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Mapping
+from threading import Thread
 from typing import Any
 
 import dspy
@@ -322,6 +323,47 @@ def test_observe_tool_rejects_non_tools_and_resolves_awaitable_results() -> None
     wrapped = observe_tool(dspy.Tool(async_tool), observed.append, ToolEventView())
     assert wrapped() == "unsupported"
     assert [type(item) for item in observed] == [ToolStarted, ToolCompleted]
+
+
+@pytest.mark.asyncio
+async def test_async_tool_uses_the_composition_bridge_inside_dspy_event_loop() -> None:
+    observed: list[Any] = []
+    bridge_calls = 0
+
+    class Bridge:
+        def run(self, awaitable: Any, **_kwargs: Any) -> Any:
+            nonlocal bridge_calls
+            bridge_calls += 1
+            result: list[Any] = []
+            failure: list[Exception] = []
+
+            def resolve() -> None:
+                try:
+                    result.append(asyncio.run(awaitable))
+                except Exception as exc:  # pragma: no cover - assertion below reports it
+                    failure.append(exc)
+
+            worker = Thread(target=resolve)
+            worker.start()
+            worker.join()
+            if failure:
+                raise failure[0]
+            return result[0]
+
+    async def async_tool(value: int) -> dict[str, int]:
+        await asyncio.sleep(0)
+        return {"value": value}
+
+    wrapped = observe_tool(
+        dspy.Tool(async_tool),
+        observed.append,
+        ToolEventView.metadata_only(),
+        async_bridge=Bridge(),
+    )
+
+    assert wrapped.func(value=7) == {"value": 7}
+    assert bridge_calls == 1
+    assert [type(event).__name__ for event in observed] == ["ToolStarted", "ToolCompleted"]
 
 
 def test_no_progress_guard_closes_the_tool_observation_before_failing() -> None:

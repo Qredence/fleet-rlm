@@ -164,6 +164,8 @@ export type State = {
   session: Session | null;
   messages: Message[];
   run: Run;
+  /** Most recent durable execution trace available for /feedback and /trace. */
+  lastTraceId: string | null;
   pendingSkillSelections: PendingSkillSelection[];
   pendingAttachments: PendingAttachment[];
   /** Last locally submitted prompt, retained for /redo across view resets. */
@@ -200,6 +202,7 @@ function initialState(): State {
       completedSteps: 0,
       traceId: null,
     },
+    lastTraceId: null,
     pendingSkillSelections: [],
     pendingAttachments: [],
     lastPrompt: null,
@@ -208,7 +211,7 @@ function initialState(): State {
 
 type Event =
   | { type: "session/init"; session: Session }
-  | { type: "session/hydrate"; session: Session; events: Event[] }
+  | { type: "session/hydrate"; session: Session; events: Event[]; latestTraceId?: string | null }
   | { type: "user/submit"; text: string }
   | { type: "user/prompt-restore"; text: string }
   | {
@@ -310,6 +313,7 @@ function reduce(state: State, event: Event): State {
       const hydrated = event.events.reduce<State>(reduce, {
         ...initialState(),
         session: event.session,
+        lastTraceId: event.latestTraceId ?? null,
         ...(sameSession
           ? {
               pendingSkillSelections: state.pendingSkillSelections,
@@ -398,6 +402,7 @@ function reduce(state: State, event: Event): State {
           checkpointVersion: event.checkpointVersion,
           traceId: event.traceId ?? state.run.traceId,
         },
+        lastTraceId: event.traceId ?? state.run.traceId ?? state.lastTraceId,
       };
     case "run/cancelling":
       return { ...state, run: { ...state.run, phase: "cancelling" } };

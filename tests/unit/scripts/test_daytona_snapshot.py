@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
+import daytona._async.snapshot as snapshot_module
 import pytest
+from daytona import Image
+from daytona._async.snapshot import AsyncSnapshotService
 
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, snapshot_dependency_import_names
 from scripts import daytona_snapshot
 
 
@@ -30,6 +34,61 @@ def test_help_needs_no_credentials(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(SystemExit, match="0"):
         daytona_snapshot.main(["--help"])
     assert "immutable Fleet Daytona Snapshot" in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("profile", ["session", "semantic-child"])
+@pytest.mark.parametrize("succeeds", [True, False])
+async def test_runtime_probe_checks_profile_dependencies_and_cleans_up(
+    monkeypatch: pytest.MonkeyPatch, profile: str, succeeds: bool
+) -> None:
+    spec = daytona_snapshot._spec("fleet-probe-v1", profile)
+    operations: list[str] = []
+    context = object()
+
+    async def create_context():
+        return context
+
+    async def run_code(code, *, context):
+        assert context is not None
+        compile(code, "snapshot-probe", "exec")
+        assert "dspy" not in code
+        assert f"dependencies = {snapshot_dependency_import_names(spec.profile)!r}" in code
+        assert "importlib.import_module(module)" in code
+        assert "importlib.metadata.version(distribution) == version" in code
+        return SimpleNamespace(stdout="fleet-snapshot-runtime-ok" if succeeds else "", error=None)
+
+    async def delete_context(received):
+        assert received is context
+        operations.append("delete-context")
+
+    sandbox = SimpleNamespace(
+        id="probe",
+        code_interpreter=SimpleNamespace(
+            create_context=create_context, run_code=run_code, delete_context=delete_context
+        ),
+    )
+
+    async def create(**_kwargs):
+        return sandbox
+
+    async def delete(received):
+        assert received is sandbox
+        operations.append("delete-sandbox")
+
+    async def get(sandbox_id):
+        assert sandbox_id == "probe"
+        operations.append("confirm-absence")
+        return None
+
+    platform = SimpleNamespace(create=create, delete=delete, get=get)
+    monkeypatch.setattr(daytona_snapshot, "LiveDaytonaPlatform", lambda *_args: platform)
+    if succeeds:
+        await daytona_snapshot.verify_runtime(object(), spec)
+    else:
+        with pytest.raises(RuntimeError, match="snapshot runtime probe failed"):
+            await daytona_snapshot.verify_runtime(object(), spec)
+    assert operations == ["delete-context", "delete-sandbox", "confirm-absence"]
 
 
 @pytest.mark.asyncio
@@ -105,6 +164,65 @@ async def test_create_is_idempotent_without_overwriting_existing_snapshot() -> N
         snapshot=SimpleNamespace(get=get, create=create),
     )
     await daytona_snapshot.create_snapshot(client, spec)
+
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_snapshot_sdk_skips_build_context_upload_for_fleet_image() -> None:
+    """Fleet's declarative image has no local build context to upload."""
+    spec = DaytonaSandboxSpec("fleet-test-v1")
+
+    class ObjectStorageAPI:
+        async def get_push_access(self) -> object:
+            pytest.fail("empty Fleet image must not request object-storage credentials")
+
+    assert (
+        await AsyncSnapshotService.process_image_context(
+            ObjectStorageAPI(), daytona_snapshot.build_snapshot_image(spec)
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_snapshot_sdk_uploads_local_build_context_once_without_fleet_retry(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Exercise Daytona's uploader path separately from sandbox filesystem I/O."""
+    source = tmp_path / "context.txt"
+    source.write_text("small build context", encoding="utf-8")
+    image = Image.base("python:3.13-slim").add_local_file(source, "/opt/context.txt")
+    calls: list[tuple[str, str, str]] = []
+
+    class PushAccess:
+        storage_url = "https://object-storage.invalid"
+        access_key = "access"
+        secret = "secret"
+        session_token = "session"
+        bucket = "bucket"
+        region = "region"
+        organization_id = "organization"
+
+    class ObjectStorageAPI:
+        async def get_push_access(self) -> PushAccess:
+            return PushAccess()
+
+    class Storage:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        async def upload(self, source_path: str, organization_id: str, archive_path: str) -> str:
+            calls.append((source_path, organization_id, archive_path))
+            return "uploaded-context-hash"
+
+    monkeypatch.setattr(snapshot_module, "AsyncObjectStorage", Storage)
+    hashes = await AsyncSnapshotService.process_image_context(ObjectStorageAPI(), image)
+
+    assert hashes == ["uploaded-context-hash"]
+    assert len(calls) == 1
+    assert calls[0][0] == str(source)
+    assert calls[0][1] == "organization"
+    assert calls[0][2].endswith("context.txt")
 
 
 @pytest.mark.asyncio

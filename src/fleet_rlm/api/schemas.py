@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, model_serializer, model_validator
 
 from fleet_rlm.artifacts.models import ArtifactKind
 
@@ -251,6 +251,31 @@ class UIMessageResponse(BaseModel):
 class SessionTurnPageResponse(BaseModel):
     items: list[UIMessageResponse]
     next_after_sequence: int | None = None
+
+
+class TraceFeedbackRequest(BaseModel):
+    """One human thumbs assessment for an execution trace."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    trace_id: str = Field(min_length=1, max_length=256)
+    value: StrictBool
+    comment: str | None = Field(default=None, max_length=2_000)
+
+    @model_validator(mode="after")
+    def validate_trace_id(self) -> TraceFeedbackRequest:
+        if not self.trace_id.strip() or self.trace_id != self.trace_id.strip():
+            raise ValueError("trace_id must be a non-whitespace value")
+        return self
+
+
+class TraceFeedbackResponse(BaseModel):
+    """Closed public result for a recorded MLflow assessment."""
+
+    trace_id: str
+    name: Literal["user_feedback"] = "user_feedback"
+    value: bool
+    assessment_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -36,7 +36,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	daytona-snapshot-create daytona-snapshot-check daytona-snapshot-plan daytona-snapshot-verify-runtime \
 	daytona-child-snapshot-create daytona-child-snapshot-check daytona-child-snapshot-plan daytona-child-snapshot-verify-runtime \
 	profile-matrix \
-	benchmark-daytona-lifecycle benchmark-native-long-context
+	benchmark-daytona-lifecycle
 
 help:
 	@echo "Setup:"
@@ -60,7 +60,6 @@ help:
 	@echo "  make test-db          - Run explicit configured-database tests (db marker)"
 	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
 	@echo "  make benchmark-daytona-lifecycle - Measure full Daytona create-through-first-execution lifecycle"
-	@echo "  make benchmark-native-long-context - Measure native whole-value URL context at 1/5/10 MiB"
 	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
 	@echo ""
 	@echo "Quality:"
@@ -144,11 +143,6 @@ test-db:
 test-daytona-cov:
 	mkdir -p .scratch/coverage
 	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS) --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
-
-NATIVE_LONG_CONTEXT_OUTPUT ?= .scratch/benchmark-reports/native-long-context-$(shell date +%Y-%m-%d).json
-
-benchmark-native-long-context:
-	uv run python scripts/benchmarks/run_native_long_context.py --output $(NATIVE_LONG_CONTEXT_OUTPUT)
 
 benchmark-daytona-lifecycle:
 	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json

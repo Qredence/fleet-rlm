@@ -1,8 +1,8 @@
 """Daytona runtime composition and process-lifetime resource ownership.
 
 Composition constructs Modules; it contains no Turn behavior.  The per-Turn
-environment/capability adapters live in ``runtime.daytona.run_environment``
-and the Workspace Volume gateway assembly in ``runtime.daytona.workspace_gateway``.
+environment/capability adapters live in ``composition.daytona_run_preparation``
+and the Workspace Volume gateway assembly in ``composition.daytona_workspace_gateway``.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import FastAPI
 
 from fleet_rlm.chat.preparation import DefaultRunPreparer
+from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.composition.inventory import (
     CompositionError,
     RuntimeDatabaseLifecycle,
@@ -34,15 +35,12 @@ from fleet_rlm.composition.inventory import (
 )
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
-from fleet_rlm.daytona.session_manager import DEFAULT_IDLE_STOP_SECONDS
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
-from fleet_rlm.runtime.daytona.run_environment import DaytonaRuntimeResources
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
@@ -85,6 +83,8 @@ def require_daytona_settings(settings: Settings) -> None:
     missing: list[str] = []
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         missing.append("FLEET_DAYTONA_API_KEY")
+    if not (settings.daytona_org_id or "").strip():
+        missing.append("FLEET_DAYTONA_ORG_ID")
     if not (settings.daytona_snapshot or "").strip():
         missing.append("FLEET_DAYTONA_SNAPSHOT")
     if settings.rlm_recursion_enabled and not (settings.daytona_child_snapshot or "").strip():
@@ -160,10 +160,6 @@ async def _finish_daytona_disposal(
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
     from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
-    from fleet_rlm.runtime.daytona.run_environment import (
-        has_pending_resource_cleanup,
-        wait_resource_cleanup,
-    )
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
     while asyncio.get_running_loop().time() < retry_deadline:
@@ -172,15 +168,6 @@ async def _finish_daytona_disposal(
         if callable(close_runner):
             with contextlib.suppress(BaseException):
                 await close_runner(drain_seconds=1)
-
-        registry = getattr(inventory, "session_runtime_registry", None)
-        if registry is not None:
-            with contextlib.suppress(BaseException):
-                await registry.shutdown(drain_seconds=1)
-            wait_deferred = getattr(registry, "wait_deferred_closes", None)
-            if callable(wait_deferred):
-                with contextlib.suppress(BaseException):
-                    await wait_deferred(timeout=1)
 
         preparation = getattr(inventory, "run_preparation", None)
         close_preparation = getattr(preparation, "aclose", None)
@@ -203,8 +190,7 @@ async def _finish_daytona_disposal(
             not components_settled
             or cleanup_pending
             or bool(getattr(preparation, "has_pending_acquisitions", False))
-            or bool(getattr(registry, "has_deferred_closes", False))
-            or has_pending_resource_cleanup()
+            or bool(resources is not None and resources.has_pending_cleanup())
             or has_pending_lease_ownership()
         )
         if not pending:
@@ -215,8 +201,9 @@ async def _finish_daytona_disposal(
         # Wait briefly for owned tasks that are still attached to this loop.
         # Foreign-loop ownership is deliberately reported as unresolved by the
         # wait helpers, so this task never clears a bridge needed elsewhere.
-        with contextlib.suppress(BaseException):
-            await wait_resource_cleanup(timeout=0.25)
+        if resources is not None:
+            with contextlib.suppress(BaseException):
+                await resources.wait_pending_cleanup(timeout=0.25)
         with contextlib.suppress(BaseException):
             await wait_lease_ownership(timeout=0.25)
         await asyncio.sleep(0.25)
@@ -414,7 +401,7 @@ async def run_deferred_orphan_cleanup(
     the readiness-critical path. Failures and timeouts are logged and left for a
     later startup.
     """
-    from fleet_rlm.runtime.daytona.workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
+    from fleet_rlm.composition.daytona_workspace_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 
     committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
     completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
@@ -487,6 +474,11 @@ async def build_daytona_composition(
     from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.composition.daytona_run_preparation import resolve_settings
+    from fleet_rlm.composition.daytona_workspace_gateway import (
+        DaytonaWorkspaceGateway,
+        DaytonaWorkspaceVolumeGateway,
+    )
     from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
@@ -499,11 +491,6 @@ async def build_daytona_composition(
     from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
-    from fleet_rlm.runtime.daytona.run_environment import resolve_settings
-    from fleet_rlm.runtime.daytona.workspace_gateway import (
-        DaytonaWorkspaceGateway,
-        DaytonaWorkspaceVolumeGateway,
-    )
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
 
@@ -565,14 +552,12 @@ async def build_daytona_composition(
         local_scope = LocalScope()
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
-        session_runtime_registry = SessionRLMRegistry(idle_timeout=DEFAULT_IDLE_STOP_SECONDS)
         run_preparation = build_run_preparation(
             resources,
             attachment_lifecycle=attachment_lifecycle,
             skill_catalog=skill_catalog,
             settings=resolved,
             models=model_bundle,
-            session_runtime_registry=session_runtime_registry,
         )
         run_state = SqlAlchemyRunStateStore(
             session_factory,
@@ -686,7 +671,6 @@ async def build_daytona_composition(
 
         runner = RLMRunner(
             factory=RLMFactory(verbose=resolved.rlm_verbose),
-            runtime_registry=session_runtime_registry,
         )
         coordinator = TurnRuntime(
             lifecycle=lifecycle,
@@ -714,7 +698,6 @@ async def build_daytona_composition(
             run_state_store=run_state,
             database=database_lifecycle,
             model_bundle=model_bundle,
-            session_runtime_registry=session_runtime_registry,
             orphan_cleanup_task=orphan_cleanup_task,
             memory_outbox_task=memory_outbox_task,
         )
@@ -804,18 +787,7 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     if callable(close_runner):
         await phase(close_runner(drain_seconds=30))
 
-    runtime_registry = getattr(inventory, "session_runtime_registry", None)
     deferred_settled = not errors
-    if runtime_registry is not None:
-        shutdown_result = await phase(runtime_registry.shutdown(drain_seconds=30))
-        if shutdown_result is phase_failed:
-            deferred_settled = False
-            logger.warning("Session runtime shutdown reported an error; provider ownership is retained")
-        wait_deferred = getattr(runtime_registry, "wait_deferred_closes", None)
-        if callable(wait_deferred):
-            result = await phase(wait_deferred(timeout=30))
-            if result is phase_failed or result is False:
-                deferred_settled = False
 
     preparation = getattr(inventory, "run_preparation", None)
     close_preparation = getattr(preparation, "aclose", None)
@@ -883,7 +855,6 @@ def build_run_preparation(
     skill_catalog: SkillCatalog,
     settings: Settings,
     models: RLMModelBundle,
-    session_runtime_registry: SessionRLMRegistry | None = None,
 ) -> DefaultRunPreparer:
     """
     Create a Daytona run preparer configured with models, runtime limits,
@@ -895,12 +866,11 @@ def build_run_preparation(
         skill_catalog (SkillCatalog): Skills available to live capabilities.
         settings (Settings): Runtime and budget configuration.
         models (RLMModelBundle): Models used for run execution.
-        session_runtime_registry (SessionRLMRegistry | None): Optional registry for session-scoped runtime state.
 
     Returns:
         DefaultRunPreparer: The configured run preparer.
     """
-    from fleet_rlm.runtime.daytona.run_environment import (
+    from fleet_rlm.composition.daytona_run_preparation import (
         _DaytonaEnvironmentProvider,
         _LiveCapabilityPreparer,
     )
@@ -919,8 +889,7 @@ def build_run_preparation(
             finalization_seconds=settings.rlm_wrap_up_seconds,
         ),
         attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(resources, settings, session_runtime_registry),
+        environments=_DaytonaEnvironmentProvider(resources, settings),
         capabilities=_LiveCapabilityPreparer(settings, skill_catalog, volume_paths=resources.volume_paths),
-        session_runtime_registry=session_runtime_registry,
         runtime_variant=settings.runtime_variant,
     )

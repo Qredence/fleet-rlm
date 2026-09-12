@@ -4,6 +4,10 @@ Status: accepted target; production cutover is gated by native-interpreter
 feasibility and benchmark parity. The legacy variant still implements the
 [Session runtime ADR](ADR-session-scoped-rlm-state.md).
 
+See the [ADR 006 status ledger](006-implementation-status.md) for the current
+feasibility result and containment gates. Fresh context creation alone does not
+prove remote process termination or authorize native policy selection.
+
 ## Decision
 
 InterpreterContext is fresh per Turn. No correctness may depend on Python globals

@@ -129,7 +129,7 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("storage.database_url_env", "Storage", "Database URL environment variable", "text", (), None),
     ("daytona.api_key_env", "Daytona", "API key environment variable", "text", (), None),
     ("daytona.snapshot_env", "Daytona", "Session snapshot environment variable", "text", (), None),
-    ("daytona.org_id", "Daytona", "Organization ID", "text", (), "daytona_org_id"),
+    ("daytona.org_id_env", "Daytona", "Organization ID environment variable", "text", (), None),
     ("daytona.volume_name", "Daytona", "Volume name", "text", (), "volume_name"),
     ("daytona.volume_mount_path", "Daytona", "Volume mount path", "text", (), "volume_mount_path"),
     (
@@ -237,6 +237,17 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         "mlflow_http_request_timeout_seconds",
     ),
     ("daytona.child_snapshot_env", "Daytona", "SemanticChild snapshot environment variable", "text", (), None),
+    ("mlflow.experiment_purpose", "MLflow", "Experiment purpose", "text", (), "mlflow_experiment_purpose"),
+    (
+        "daytona.warm_pool_enabled",
+        "Daytona",
+        "SemanticChild warm pool enabled",
+        "boolean",
+        (),
+        "daytona_warm_pool_enabled",
+    ),
+    ("daytona.warm_pool_size", "Daytona", "SemanticChild warm pool size", "number", (), "daytona_warm_pool_size"),
+    ("daytona.warm_pool_region", "Daytona", "SemanticChild warm pool region", "text", (), "daytona_warm_pool_region"),
 )
 
 
@@ -361,7 +372,12 @@ def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.Mo
         "FLEET_DATABASE_URL",
         "POSTHOG_PROJECT_TOKEN",
     ):
-        monkeypatch.setenv(name, f"test-{name}")
+        value = (
+            "postgresql://fleet_app:password@lakebase.example/fleet?sslmode=require"
+            if name == "FLEET_DATABASE_URL"
+            else f"test-{name}"
+        )
+        monkeypatch.setenv(name, value)
     for name in (
         "FLEET_MLFLOW_EXPERIMENT_NAME",
         "FLEET_MLFLOW_TRACE_CATALOG",

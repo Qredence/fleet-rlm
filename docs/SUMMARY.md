@@ -1,5 +1,9 @@
 # Table of contents
 
+Current guides, active migration records, and historical baselines are grouped
+in [Documentation Home](index.md). A dated decision or passing receipt is scoped
+to its recorded revision; it is not current production certification.
+
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
@@ -26,6 +30,7 @@
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)
+  * [Workspace Agent filesystem operation audit](reference/workspace-agent-operation-audit.md)
   * [Source Layout](reference/source-layout.md)
   * [Performance Budget Decision](reference/performance-budget.md)
 * [Lakebase Postgres](how-to-guides/lakebase-postgres.md)

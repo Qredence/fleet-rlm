@@ -2,9 +2,10 @@
 
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
 policy file. The active profile is selected by the `[config] default_profile` key
-inside that file. Set `default_profile` to `daytona-recursive` (the shipped
-and only committed profile) before starting any backend or running
-`fleet doctor`. Policy is strict, resolved once at process
+inside that file. Set `default_profile` to `daytona-recursive` for local or
+disposable certification, or to `daytona-managed` for a production Lakebase
+deployment, before starting any backend or running `fleet doctor`. Policy is
+strict, resolved once at process
 startup, and takes effect only after restart. The [generated profile matrix](profile-matrix.md)
 shows the provider, token, recursion, and environment contract derived from the
 same TOML file.
@@ -24,14 +25,18 @@ references fail startup.
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
 The committed policy uses the OpenAI-compatible Chat Completion API and routes
 Root and Sub through the Databricks Unity AI Gateway MLflow endpoint, which
-requires `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, and `FLEET_DAYTONA_API_KEY`.
-The committed policy is intentionally small: the single `daytona-recursive`
-profile is the whole policy (it lives in `[defaults]`; recursive child RLMs,
-DSPy verbose host logging, and local MLflow tracing are all on).
+requires `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, and
+`FLEET_DAYTONA_ORG_ID`.
+The committed policy keeps `daytona-recursive` as the safe local/disposable
+default (it inherits the complete policy from `[defaults]`) and declares an
+explicit `daytona-managed` production profile. The managed profile inherits
+the same Daytona, model, and local-MLflow settings but requires
+`FLEET_DATABASE_URL` to be a TLS PostgreSQL URL authenticated as `fleet_app`.
 
 | Profile | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona-recursive` (default) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY` | Configure `FLEET_DATABASE_URL` at Alembic head for durable deployment; local SQLite is suitable for development. Local MLflow tracing is enabled. |
+| `daytona-recursive` (default) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled. |
+| `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DATABASE_URL` | TLS Lakebase PostgreSQL as `fleet_app`, at Alembic head; local MLflow tracing remains enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
 applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
@@ -39,7 +44,7 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 ## Policy settings
 
 `runtime.variant` selects the execution architecture. Its default and only
-implemented value is `legacy`; `native` and `capsule` are rejected at startup
+selectable value is `legacy`; `native` and `capsule` are rejected at startup
 and are absent from the settings editor. Existing policies that omit it keep
 the legacy behavior. `runtime.environment = "daytona"` selects the provider
 environment independently. See [ADR 005](../decisions/005-runtime-variant.md).
@@ -74,6 +79,11 @@ shutdown flush, and process-global autolog teardown; application construction
 performs no external MLflow probe, and an unavailable setup marks that lifespan
 inactive instead of poisoning later lifespans.
 
+The lock pins MLflow `3.16.0` with `opentelemetry-sdk==1.44.0`. Feedback
+assessments use the same application-owned MLflow lifecycle as tracing; they
+are session-bound, execution-only, and are never allowed to reset or flush the
+global exporter while a request is in flight.
+
 MLflow trace payloads are bounded and readable by default: prompts, generated
 code, tool payloads, responses, reasoning, and system-prompt fields are
 available in the authorized engineering trace destination. Set
@@ -88,9 +98,7 @@ content visibility.
 
 > Migration note: the `mlflow.trace_content_mode` setting is removed. Existing
 > `fleet.toml` files that still set `trace_content_mode = "safe"` will fail
-> validation with an unknown-key error; delete the key. Trace content is now
-> bounded and sanitized by default; set `mlflow.trace_content_enabled = false`
-> explicitly for operational-only traces.
+> validation with an unknown-key error; delete the key.
 
 PostHog product analytics are policy-controlled by the optional `[posthog]`
 section. `posthog.enabled` switches analytics on or off, `posthog.project_token_env`
@@ -138,14 +146,17 @@ The `[rlm]` recursion settings include `recursion_enabled` and bound the native
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs
-that Fleet may run concurrently; the committed default is `5` and it is not a
+that Fleet may run concurrently; the committed default is `4` and it is not a
 model-facing concurrency control.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
 override them. The committed Daytona profiles inherit recursive execution from
-`[defaults.rlm]`; `daytona-recursive` is the selected default profile.
+`[defaults.rlm]`; `daytona-recursive` is the selected default profile. The
+managed profile's database URL policy is enforced while loading that profile;
+Alembic-head compatibility is checked by application/supervisor readiness and
+by `scripts/lakebase_preflight.py` before traffic moves.
 Each child receives a fresh,
 dedicated Daytona Sandbox, ordinary Daytona network egress, and the same Volume
 ID mounted at `recursive/<workspace-id>/<run-id>/<call-index>`. That private
@@ -227,6 +238,7 @@ Fleet restart.
 | --- | --- | --- |
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required for durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
+| `FLEET_DAYTONA_ORG_ID` | `daytona.org_id_env` | Daytona organization routing identifier; required by live Daytona composition |
 | `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in the committed policy | Databricks credential for the configured Chat Completion endpoint |
 | `FLEET_LLM_BASE_URL` | Root/Sub `base_url_env` in the committed policy | Databricks Unity AI Gateway MLflow base (`/chat/completions` is appended) |
 | `DATABRICKS_HOST` | MLflow/evaluation tooling | Databricks workspace root; not the Fleet Root/Sub Chat Completions base |

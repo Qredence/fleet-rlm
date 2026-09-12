@@ -23,7 +23,8 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter, _RLMTraceCallback
+from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback, is_native_rlm
+from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     RLMConfigError,
@@ -406,7 +407,13 @@ ToolObserver: TypeAlias = Callable[[ObservationDetail | Status | WarningEvent], 
 class AsyncToolBridge(Protocol):
     """Composition-owned bridge for awaiting async host Tools from DSPy sync code."""
 
-    def run(self, awaitable: Any) -> Any:
+    def run(
+        self,
+        awaitable: Any,
+        *,
+        deadline: float | None = None,
+        check_authority: Callable[[], None] | None = None,
+    ) -> Any:
         """
         Run a host operation through the asynchronous bridge.
 
@@ -543,7 +550,13 @@ def _validate_tool_arguments(
         raise
 
 
-def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | None = None) -> Any:
+def _resolve_awaitable_result(
+    result: Any,
+    *,
+    async_bridge: AsyncToolBridge | None = None,
+    deadline: float | None = None,
+    is_authorized: Callable[[], bool] | None = None,
+) -> Any:
     """
     Resolve an awaitable tool result using the available asynchronous execution context.
 
@@ -574,7 +587,16 @@ def _resolve_awaitable_result(result: Any, *, async_bridge: AsyncToolBridge | No
         if callable(cancel):
             cancel()
         raise RuntimeError("async Tool requires a persistent async bridge")
-    return result
+
+    # DSPy executes interpreter actions synchronously, including from its
+    # asynchronous ``RLM.aforward`` loop. A composition-owned bridge is the
+    # only safe way to wait for an async host Tool without nesting an event
+    # loop or leaking the coroutine back into JSON validation.
+    def check_authority() -> None:
+        if is_authorized is not None and not is_authorized():
+            raise RunCancelledError("Turn authority was revoked during async Tool execution")
+
+    return async_bridge.run(result, deadline=deadline, check_authority=check_authority)
 
 
 def _execute_observed_tool(
@@ -587,6 +609,7 @@ def _execute_observed_tool(
     after_result: ToolAfterResult | None,
     guards: RunToolGuards | None,
     async_bridge: AsyncToolBridge | None,
+    is_authorized: Callable[[], bool] | None,
 ) -> Any:
     """
     Execute a validated tool call and report its result or failure.
@@ -612,7 +635,13 @@ def _execute_observed_tool(
     try:
         if guards is not None:
             guards.reserve_tool()
-        result = _resolve_awaitable_result(source.func(**validated), async_bridge=async_bridge)
+        deadline = guards.budget.deadline if guards is not None and guards.budget is not None else None
+        result = _resolve_awaitable_result(
+            source.func(**validated),
+            async_bridge=async_bridge,
+            deadline=deadline,
+            is_authorized=is_authorized,
+        )
         try:
             validate_json_value(result, path=f"Tool {source.name} result")
         except (TypeError, ValueError):
@@ -693,6 +722,7 @@ def _run_observed_tool(
         after_result,
         guards,
         async_bridge,
+        is_authorized,
     )
     _check_tool_progress(source, result, arguments, observer, event_view, trace, guards)
     projected_output = event_view.output(result)
@@ -1090,7 +1120,7 @@ async def invoke_native_rlm(
 ) -> Any:
     """Invoke the RLM operation using the caller-owned interpreter when required."""
     native_call_args: tuple[Any, ...] = ()
-    if type(rlm) is dspy.RLM:
+    if is_native_rlm(rlm):
         if context.execution.interpreter is None:
             raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
         native_call_args = (context.execution.interpreter,)

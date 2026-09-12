@@ -12,7 +12,7 @@ Before changing code:
 2. Search for existing implementations, helpers, and established boundaries before introducing new abstractions.
 3. Read `ARCHITECTURE.md` when the task affects ownership, lifecycle, dependencies, domain boundaries, or cross-component behavior.
 
-Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract checks, and executable validation as authoritative; documentation does not override executable contracts.
+Treat current code, tests, `config/fleet.toml`, dependency pins, generated-contract checks, and executable validation as authoritative. `docs/index.md` maps current guides; ADR proposals, plans, and dated receipts do not override executable contracts.
 
 ## Execution
 
@@ -47,6 +47,7 @@ Never expose credentials, tokens, `.env` values, provider secrets, or raw infras
 - Treat process-scoped LM instances as immutable templates. Turn-specific deadlines, retries, adapters, callbacks, or other mutable execution state must be isolated per Turn.
 - Turn ownership and deadlines bound LM, Tool, interpreter, and recursive work. Do not allow detached work to continue mutating Fleet state after settlement.
 - Recursive delegation depth is distinct from native RLM iteration count.
+- Native `dspy.RLM` is used by the selectable `legacy` runtime; the experimental native interpreter is a separate, gated adapter. Follow the ADR 006 status ledger before claiming cutover or containment.
 - Keep Daytona SDK integration inside `src/fleet_rlm/daytona/`.
 - Keep internal Runtime Events transport-neutral. Public clients consume the backend stream contract rather than defining parallel execution semantics.
 - State transitions, settlement, persistence, and resource cleanup must go through their owning lifecycle/service abstractions.
@@ -62,9 +63,9 @@ Do not hand-edit generated contracts or generated client types, including:
 
 - `openapi.yaml`
 - `tools/fleet-tui/src/generated/openapi.ts`
-- generated TUI stream/chunk validation artifacts
+- generated TUI stream/chunk validation artifacts and `docs/reference/profile-matrix.md` (`make profile-matrix`)
 
-When their source contract changes, regenerate them using repository commands and include the generated changes.
+Regenerate from the owning source: `make api-sync`, `make stream-sync`, or `make profile-matrix`; verify with the corresponding check target. Bundled Skill Markdown is model-facing runtime content: inspect its catalog and contract tests when editing it.
 
 ## Validation
 

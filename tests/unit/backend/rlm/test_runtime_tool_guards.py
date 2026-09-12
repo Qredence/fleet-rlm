@@ -16,14 +16,14 @@ def test_workspace_failure_is_cleared_only_by_successful_same_workspace_write() 
     other = {"path": "notes/other.md", "content": "new", "overwrite": True}
 
     guards.failed("write_workspace_text", original)
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "old", "eof": True})
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"ok": True, "content": "old", "eof": True})
     guards.completed("write_workspace_text", other, {"ok": True})
 
     assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
 
     repaired = {**original, "content": "new", "overwrite": True}
     guards.completed("write_workspace_text", repaired, {"ok": True})
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "new", "eof": True})
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"ok": True, "content": "new", "eof": True})
     assert guards.integrity.unresolved == ()
 
 
@@ -32,8 +32,25 @@ def test_required_target_scope_ignores_unrelated_diagnostic_mutations() -> None:
 
     guards.failed("write_workspace_text", {"path": "notes/diagnostic.md"})
     guards.completed("write_workspace_text", {"path": "notes/report.md", "content": "new"}, {"ok": True})
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"content": "new", "eof": True})
+    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"ok": True, "content": "new", "eof": True})
 
+    assert guards.integrity.unresolved == ()
+
+
+def test_required_targets_are_unresolved_before_any_worker_action() -> None:
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+
+    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
+
+
+def test_publish_workspace_artifact_clears_only_a_successful_required_target() -> None:
+    guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
+    arguments = {"path": "notes/report.md", "kind": "markdown"}
+
+    guards.completed("publish_workspace_artifact", arguments, {"ok": False, "error": "not_found"})
+    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
+
+    guards.completed("publish_workspace_artifact", arguments, {"ok": True, "artifact_candidate_id": "artifact-1"})
     assert guards.integrity.unresolved == ()
 
 
@@ -75,7 +92,7 @@ def test_unrelated_failure_does_not_block_verified_required_target() -> None:
         {"path": "date.txt", "content": "2026-07-20"},
         {"ok": True},
     )
-    guards.completed("read_workspace_text", {"path": "date.txt"}, {"content": "2026-07-20", "eof": True})
+    guards.completed("read_workspace_text", {"path": "date.txt"}, {"ok": True, "content": "2026-07-20", "eof": True})
 
     assert guards.integrity.unresolved == ()
 
@@ -98,7 +115,7 @@ def test_cleanup_warning_does_not_invalidate_verified_primary_mutation() -> None
         {"path": "date.txt", "content": "2026-07-20"},
         {"ok": True, "warnings": [{"code": "cleanup_failed"}]},
     )
-    guards.completed("read_workspace_text", {"path": "date.txt"}, {"content": "2026-07-20", "eof": True})
+    guards.completed("read_workspace_text", {"path": "date.txt"}, {"ok": True, "content": "2026-07-20", "eof": True})
 
 
 def test_successful_append_repairs_the_same_required_workspace_target() -> None:
@@ -126,14 +143,14 @@ def test_project_write_failure_is_cleared_only_by_verified_project_read_back() -
     other = {"path": "fleet-rlm/other.md", "content": "new", "overwrite": True}
 
     guards.failed("write_project_text", original)
-    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"content": "old", "eof": True})
+    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"ok": True, "content": "old", "eof": True})
     guards.completed("write_project_text", other, {"ok": True})
 
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
 
     repaired = {**original, "content": "new", "overwrite": True}
     guards.completed("write_project_text", repaired, {"ok": True})
-    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"content": "new", "eof": True})
+    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"ok": True, "content": "new", "eof": True})
     assert guards.integrity.unresolved == ()
 
 
@@ -151,7 +168,7 @@ def test_project_tools_join_obligations_through_the_ledger_and_progress_guard() 
     guards = RunToolGuards(required_targets=workspace_obligations("deliver the report to projects/fleet-rlm/review.md"))
 
     guards.failed("write_project_text", {"path": "fleet-rlm/scratch.md"})
-    assert guards.integrity.unresolved == ()  # unrelated diagnostic mutations stay out of scope
+    assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
 
     arguments = {"path": "fleet-rlm/review.md", "content": "conflicted", "overwrite": False}
     conflict = {"ok": False, "error": "conflict"}
@@ -165,7 +182,9 @@ def test_project_tools_join_obligations_through_the_ledger_and_progress_guard() 
 
     repaired = {**arguments, "content": "final", "overwrite": True}
     guards.completed("write_project_text", repaired, {"ok": True})
-    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"content": "final", "eof": True})
+    guards.completed(
+        "read_project_text", {"path": "fleet-rlm/review.md"}, {"ok": True, "content": "final", "eof": True}
+    )
     assert guards.integrity.unresolved == ()
 
 
@@ -192,7 +211,7 @@ def test_tool_namespace_is_authoritative_over_path_prefixes() -> None:
     guards.completed(
         "read_workspace_text",
         {"path": "projects/fleet-rlm/review.md"},
-        {"content": "final", "eof": True},
+        {"ok": True, "content": "final", "eof": True},
     )
     assert guards.integrity.unresolved == ("project_workspace:fleet-rlm/review.md",)
 
@@ -200,7 +219,7 @@ def test_tool_namespace_is_authoritative_over_path_prefixes() -> None:
     # slug) stays in the project namespace instead of flipping to session.
     session_guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
     session_guards.failed("edit_project_text", {"path": "workspace/notes/report.md"})
-    assert session_guards.integrity.unresolved == ()
+    assert session_guards.integrity.unresolved == ("session_workspace:notes/report.md",)
 
 
 def test_delete_and_edit_tools_join_guard_targets_in_both_namespaces() -> None:
@@ -238,7 +257,7 @@ def test_delete_edit_targets_respect_required_target_scoping() -> None:
     guards = RunToolGuards(required_targets=frozenset({"session_workspace:notes/report.md"}))
 
     guards.failed("delete_workspace_path", {"path": "notes/diagnostic.md"})
-    assert guards.integrity.unresolved == ()  # unrelated deletes stay out of scope
+    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
 
     guards.failed("edit_workspace_text", {"path": "notes/report.md"})
     assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)

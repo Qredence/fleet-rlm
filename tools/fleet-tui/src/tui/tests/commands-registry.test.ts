@@ -24,6 +24,7 @@ const REGISTRATION_ORDER = [
   "redo",
   "reload",
   "trace",
+  "feedback",
   "theme",
   "exit",
 ];

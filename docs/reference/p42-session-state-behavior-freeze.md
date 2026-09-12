@@ -1,9 +1,14 @@
 # P42 session-state behavior freeze
 
+This versioned record describes the resident Session behavior retained by
+`runtime.variant = "legacy"`. [ADR 004](../decisions/004-turn-interpreter-context.md)
+defines the future fresh-context target; the [ADR 006 ledger](../decisions/006-implementation-status.md)
+records its implementation and open certification gates.
+
 **Status:** approved behavior contract — deterministic implementation is present
 and covered by the contract and unit lanes.
-**Supersedes:** only the P41 *Native RLM execution per Turn* behavior, which is
-targeted for supersession by the approved Session-scoped resident contract below. It
+**Supersedes:** only the P41 *Native RLM execution per Turn* behavior, replaced
+in the legacy runtime by the Session-scoped resident contract below. It
 does **not** rewrite the sealed [P41 behavior freeze](behavior-freeze.md), which
 remains the historical, certified baseline for
 `1801d24a938eda37b53ebb2f543fd01e3c6bdaf6`.

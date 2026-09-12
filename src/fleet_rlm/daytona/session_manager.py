@@ -55,6 +55,7 @@ from fleet_rlm.daytona.sandbox_lease import (
     schedule_owned_close,
 )
 from fleet_rlm.runtime.bindings import (
+    BindingGenerationAuthority,
     SandboxBinding,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
@@ -72,15 +73,11 @@ class _LateLeaseOwner:
 
     lease: InterpreterLease
     permit: DaytonaAdmissionPermit
-    manager: DaytonaSessionManager
     session_id: UUID
     user_id: UUID
     workspace_id: UUID
     run_id: UUID
     retry_task: asyncio.Task[None] | None = None
-
-
-_LATE_LEASE_OWNERS: dict[int, _LateLeaseOwner] = {}
 
 
 @dataclass(slots=True)
@@ -100,15 +97,11 @@ class _LateAcquisitionOwner:
 
     acquisition: asyncio.Task[InterpreterLease]
     permit: DaytonaAdmissionPermit
-    manager: DaytonaSessionManager
     request: LeaseRequest
     run_id: UUID
     # Usually an asyncio.Task on the manager loop; a closed-loop fallback may
     # retain the concurrent Future returned by ``schedule_owned_close``.
     cleanup_task: Any | None = None
-
-
-_LATE_ACQUISITION_OWNERS: dict[int, _LateAcquisitionOwner] = {}
 
 
 class ActiveLeaseConflictError(RuntimeError):
@@ -131,7 +124,9 @@ PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
 _PREWARM_CLAIM_WAIT_SECONDS = 60.0
 
 
-async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float) -> None:
+async def _claim_session_lease(
+    registry: ActiveLeaseRegistry, session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float
+) -> None:
     """Claim the per-session active lease, waiting out a best-effort pre-warm.
 
     Real-versus-real and overlapping pre-warm conflicts still raise
@@ -143,7 +138,7 @@ async def _claim_session_lease(session_id: UUID, run_id: UUID, *, workspace_id: 
     claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
     while True:
         try:
-            get_active_lease_registry().acquire(session_id, run_id, workspace_id=workspace_id)
+            registry.acquire(session_id, run_id, workspace_id=workspace_id)
             return
         except ActiveLeaseConflictError as exc:
             if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
@@ -195,13 +190,6 @@ class ActiveLeaseRegistry:
             return matches[0] if len(matches) == 1 else None
 
 
-_REGISTRY = ActiveLeaseRegistry()
-
-
-def get_active_lease_registry() -> ActiveLeaseRegistry:
-    return _REGISTRY
-
-
 @dataclass(slots=True)
 class InterpreterLease:
     """Acquired interpreter binding for one Run with an explicit close state."""
@@ -217,6 +205,13 @@ class InterpreterLease:
     volume_subpath: str | None = None
     created_sandbox: bool = False
     sandbox: Any | None = field(default=None, repr=False)
+    user_id: str | None = None
+    # Native context deletion does not contain detached subprocesses. This
+    # obligation belongs to the exact acquired sandbox, including reused roots.
+    requires_sandbox_deletion: bool = False
+    # Durable SandboxBinding generation captured at acquisition time. Cleanup
+    # must only mutate the exact provider identity and generation it owns.
+    binding_generation: int = 1
     _released: bool = field(default=False, init=False, repr=False)
     _state: LeaseState = field(default=LeaseState.OPEN, init=False, repr=False)
     _on_release: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -366,10 +361,15 @@ class LeaseRequest:
     run_id: UUID | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class _AcquisitionContext:
     expected: ExpectedWorkspaceMount
     binding: SandboxBinding | None
+    # Set immediately after a successful binding commit, before lease
+    # construction can fail.  This is deliberately separate from ``binding``
+    # (the pre-acquisition read) so cleanup never falls back to a stale
+    # identity when the durable re-read is unavailable.
+    persisted_binding: SandboxBinding | None = None
 
 
 class BindingStoreLike(Protocol):
@@ -445,6 +445,9 @@ class DaytonaSessionManager:
         self._volume_client = volume_client
         self._volume_config = volume_config
         self._bindings = bindings
+        self._binding_authority = BindingGenerationAuthority()
+        # Claims are scoped to this resource owner, never shared between application compositions.
+        self._active_leases = ActiveLeaseRegistry()
         self._admission = admission or DaytonaAdmission()
         self._dispatcher = dispatcher
         self._sandbox_spec = sandbox_spec
@@ -463,6 +466,8 @@ class DaytonaSessionManager:
         # its caller so shutdown can retry the exact owner.
         self._release_leases: dict[asyncio.Task[None], InterpreterLease] = {}
         self._late_cleanup_tasks: set[Any] = set()
+        self._late_lease_owners: dict[int, _LateLeaseOwner] = {}
+        self._late_acquisition_owners: dict[int, _LateAcquisitionOwner] = {}
         # Provider calls which outlive the Turn deadline remain owned until the
         # SDK task settles; this fence is independent of caller references.
         self._provider_tasks: set[asyncio.Future[Any]] = set()
@@ -475,6 +480,59 @@ class DaytonaSessionManager:
             volume_config=volume_config,
             sandbox_spec=sandbox_spec,
         )
+
+    @property
+    def active_leases(self) -> ActiveLeaseRegistry:
+        """Return the claim owner scoped to this Session manager."""
+        return self._active_leases
+
+    def _observe_binding(self, binding: SandboxBinding | None) -> None:
+        """Publish the latest durable generation to synchronous native guards."""
+        if binding is None:
+            return
+        authority = getattr(self, "_binding_authority", None)
+        if authority is not None:
+            authority.observe(binding)
+
+    def is_binding_current(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+    ) -> bool:
+        """Return whether a native callback still owns the observed binding."""
+        authority = getattr(self, "_binding_authority", None)
+        if authority is None:
+            # Minimal test doubles constructed without ``__init__`` retain the
+            # historical callback seam; real managers always install the
+            # durable-generation authority above.
+            return True
+        return authority.is_current(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            sandbox_id=sandbox_id,
+            generation=generation,
+        )
+
+    def revoke_binding(
+        self,
+        *,
+        session_id: UUID,
+        workspace_id: UUID,
+        sandbox_id: str,
+        generation: int,
+    ) -> None:
+        """Synchronously revoke one native generation before asynchronous cleanup."""
+        authority = getattr(self, "_binding_authority", None)
+        if authority is not None:
+            authority.revoke(
+                session_id=session_id,
+                workspace_id=workspace_id,
+                sandbox_id=sandbox_id,
+                generation=generation,
+            )
 
     def _mark_sandbox_owned(self, sandbox_id: str) -> None:
         with self._owned_sandbox_lock:
@@ -496,8 +554,8 @@ class DaytonaSessionManager:
             or any(not lease._released for lease in self._release_leases.values())
             or self._idle_tasks
             or sandbox_owned
-            or any(owner.manager is self for owner in _LATE_LEASE_OWNERS.values())
-            or any(owner.manager is self for owner in _LATE_ACQUISITION_OWNERS.values())
+            or bool(self._late_lease_owners)
+            or bool(self._late_acquisition_owners)
             or bool(self._unpublished_leases)
         )
 
@@ -598,7 +656,9 @@ class DaytonaSessionManager:
         run_id = request.run_id or uuid4()
         session_id = request.session_id
         await self._cancel_idle_stop(session_id, workspace_id=request.workspace_id, deadline=deadline)
-        await _claim_session_lease(session_id, run_id, workspace_id=request.workspace_id, deadline=deadline)
+        await _claim_session_lease(
+            self._active_leases, session_id, run_id, workspace_id=request.workspace_id, deadline=deadline
+        )
         claim_held = True
         permit: DaytonaAdmissionPermit | None = None
         try:
@@ -639,7 +699,7 @@ class DaytonaSessionManager:
                     permit.release()
             finally:
                 if claim_held:
-                    get_active_lease_registry().release(session_id, run_id, workspace_id=request.workspace_id)
+                    self._active_leases.release(session_id, run_id, workspace_id=request.workspace_id)
             raise
 
     @staticmethod
@@ -676,7 +736,7 @@ class DaytonaSessionManager:
                 try:
                     owner.permit.release()
                 finally:
-                    get_active_lease_registry().release(
+                    self._active_leases.release(
                         owner.request.session_id,
                         owner.run_id,
                         workspace_id=owner.request.workspace_id,
@@ -685,18 +745,17 @@ class DaytonaSessionManager:
             late_owner = _LateLeaseOwner(
                 lease,
                 owner.permit,
-                self,
                 owner.request.session_id,
                 owner.request.user_id,
                 owner.request.workspace_id,
                 owner.run_id,
             )
-            _LATE_LEASE_OWNERS[id(lease)] = late_owner
+            self._late_lease_owners[id(lease)] = late_owner
             self._mark_sandbox_owned(lease.sandbox_id)
             await self._run_late_owner_cleanup(late_owner)
         finally:
-            if acquisition.done() and _LATE_ACQUISITION_OWNERS.get(id(acquisition)) is owner:
-                _LATE_ACQUISITION_OWNERS.pop(id(acquisition), None)
+            if acquisition.done() and self._late_acquisition_owners.get(id(acquisition)) is owner:
+                self._late_acquisition_owners.pop(id(acquisition), None)
 
     def _schedule_late_acquisition_fallback(self, owner: _LateAcquisitionOwner) -> bool:
         """Run settled late acquisition cleanup when its owner loop is closing."""
@@ -760,8 +819,8 @@ class DaytonaSessionManager:
         run_id: UUID,
     ) -> None:
         """Own an acquisition that outlives its caller before scheduling cleanup."""
-        owner = _LateAcquisitionOwner(acquisition, permit, self, request, run_id)
-        _LATE_ACQUISITION_OWNERS[id(acquisition)] = owner
+        owner = _LateAcquisitionOwner(acquisition, permit, request, run_id)
+        self._late_acquisition_owners[id(acquisition)] = owner
         if self._schedule_late_acquisition_owner(owner):
             return
 
@@ -820,21 +879,19 @@ class DaytonaSessionManager:
             return
 
         owner.permit.release()
-        get_active_lease_registry().release(
+        self._active_leases.release(
             owner.session_id,
             owner.run_id,
             workspace_id=owner.workspace_id,
         )
         self._mark_sandbox_released(lease.sandbox_id)
-        _LATE_LEASE_OWNERS.pop(id(lease), None)
+        self._late_lease_owners.pop(id(lease), None)
 
     async def _retry_late_owners(self, deadline: float) -> bool:
         """Start retryable late-owner cleanup and wait only through shutdown bound."""
         current_loop = asyncio.get_running_loop()
         tasks: list[asyncio.Future[Any]] = []
-        for owner in tuple(_LATE_ACQUISITION_OWNERS.values()):
-            if owner.manager is not self:
-                continue
+        for owner in tuple(self._late_acquisition_owners.values()):
             # A Task still pending on another loop cannot be awaited or moved
             # to this loop.  Its original done callback remains responsible for
             # adopting it; retaining the owner here is the safe outcome.
@@ -857,9 +914,7 @@ class DaytonaSessionManager:
                     # concurrent Future.  Wrap it only for this loop's bounded
                     # wait; the owner retains the underlying Future.
                     tasks.append(asyncio.wrap_future(task))
-        for owner in tuple(_LATE_LEASE_OWNERS.values()):
-            if owner.manager is not self:
-                continue
+        for owner in tuple(self._late_lease_owners.values()):
             task = owner.retry_task
             if task is None or task.done():
                 task = asyncio.create_task(
@@ -894,6 +949,32 @@ class DaytonaSessionManager:
         self, lease: InterpreterLease, request: LeaseRequest, *, deadline: float | None = None
     ) -> None:
         """Confirm the old Sandbox is stopped before its ownership is released."""
+        if lease.requires_sandbox_deletion:
+            await self._persist_native_binding_state(
+                lease,
+                request,
+                provider_state="fencing",
+                deadline=deadline,
+            )
+            timeout_s = 30.0
+            if deadline is not None:
+                timeout_s = max(0.1, min(timeout_s, deadline - asyncio.get_running_loop().time()))
+            retirement = self._sandbox_retirement_lease(
+                lease.sandbox_id, confirm_timeout_s=timeout_s, provider_request_timeout_s=timeout_s
+            )
+            receipt = await retirement.aclose()
+            if not receipt.clean:
+                raise RuntimeError("native sandbox deletion was not confirmed")
+            # Do not upsert a stale binding here: recovery may already have
+            # installed a replacement. The exact retired ID now resolves absent;
+            # normal acquisition preserves Volume scope and creates a new root.
+            await self._persist_native_binding_state(
+                lease,
+                request,
+                provider_state="quarantined",
+                deadline=deadline,
+            )
+            return
         await self._fence_binding(
             SandboxBinding(
                 session_id=request.session_id,
@@ -903,6 +984,7 @@ class DaytonaSessionManager:
                 volume_subpath=lease.volume_subpath or workspace_volume_subpath(request.workspace_id),
                 mount_path=lease.mount_path,
                 provider_state="running",
+                generation=lease.binding_generation,
             ),
             deadline=deadline,
         )
@@ -940,6 +1022,32 @@ class DaytonaSessionManager:
                 )
                 raise RuntimeError("sandbox retirement was not confirmed")
 
+    async def _persist_native_binding_state(
+        self,
+        lease: InterpreterLease,
+        request: LeaseRequest,
+        *,
+        provider_state: str,
+        deadline: float | None = None,
+    ) -> None:
+        """Advance the native binding only while it still names this lease."""
+        binding = await self._get_binding_for_workspace(
+            request.session_id,
+            request.workspace_id,
+            deadline=deadline,
+        )
+        if binding is None or binding.sandbox_id != lease.sandbox_id or binding.generation != lease.binding_generation:
+            # Recovery or another owner may already have installed a newer
+            # binding. Never let retirement of the old native root overwrite it.
+            return
+        persisted = await _provider_call(
+            self._bindings.upsert(replace(binding, provider_state=provider_state, last_verified_at=datetime.now(UTC))),
+            deadline=deadline,
+            operation=f"Native Sandbox {provider_state} persistence",
+            owner=self._provider_tasks,
+        )
+        self._observe_binding(persisted)
+
     async def _get_binding_for_workspace(
         self,
         session_id: UUID,
@@ -961,6 +1069,7 @@ class DaytonaSessionManager:
         if callable(scoped_get):
             binding = await read(scoped_get(session_id, workspace_id=workspace_id))
             if binding is not None:
+                self._observe_binding(binding)
                 return binding
             # Distinguish an absent binding from a Session binding in another
             # Workspace so a cross-tenant request cannot overwrite it.
@@ -977,6 +1086,7 @@ class DaytonaSessionManager:
                 message="sandbox binding does not match workspace scope",
                 cause_type="WorkspaceMountMismatch",
             )
+        self._observe_binding(binding)
         return binding
 
     async def fence_session(
@@ -1002,12 +1112,13 @@ class DaytonaSessionManager:
 
     async def _fence_binding(self, binding: SandboxBinding, *, deadline: float | None = None) -> None:
         """Persist fencing around one bounded, owned provider stop."""
-        await _provider_call(
+        fenced = await _provider_call(
             self._bindings.upsert(replace(binding, provider_state="fencing", last_verified_at=datetime.now(UTC))),
             deadline=deadline,
             operation="Sandbox fence persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(fenced)
         if binding.sandbox_id is None:
             return
         # Lease-backed (QRE-156/AC4): recovery fencing rides the shared
@@ -1042,12 +1153,13 @@ class DaytonaSessionManager:
             operation="Sandbox fencing",
             owner=self._provider_tasks,
         )
-        await _provider_call(
+        quarantined = await _provider_call(
             self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=datetime.now(UTC))),
             deadline=deadline,
             operation="Sandbox quarantine persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(quarantined)
 
     def _bind_lease_ownership(
         self,
@@ -1063,7 +1175,7 @@ class DaytonaSessionManager:
                 permit.release()
             finally:
                 self._mark_sandbox_released(lease.sandbox_id)
-                get_active_lease_registry().release(session_id, run_id, workspace_id=workspace_id)
+                self._active_leases.release(session_id, run_id, workspace_id=workspace_id)
 
         lease._on_release = _clear_active
 
@@ -1091,7 +1203,13 @@ class DaytonaSessionManager:
                 sandbox, context.expected, request.session_id, run_id, created_sandbox, deadline=deadline
             )
             return await self._persist_binding_and_build_lease(
-                request, run_id, context.expected, sandbox, created_sandbox, deadline=deadline
+                request,
+                run_id,
+                context.expected,
+                sandbox,
+                created_sandbox,
+                deadline=deadline,
+                context=context,
             )
         except _ProviderCallDeadlineError as exc:
             # Keep this owned acquisition task alive until the provider call
@@ -1106,7 +1224,7 @@ class DaytonaSessionManager:
                     sandbox,
                     created_sandbox=created_sandbox,
                     deadline=deadline,
-                    binding=context.binding,
+                    binding=context.persisted_binding,
                 )
             raise DaytonaLeaseAcquisitionTimeoutError(f"Daytona {exc.operation} timed out") from None
         except BaseException:
@@ -1121,7 +1239,7 @@ class DaytonaSessionManager:
                     sandbox,
                     created_sandbox=created_sandbox,
                     deadline=deadline,
-                    binding=context.binding,
+                    binding=context.persisted_binding,
                 )
             raise
 
@@ -1302,22 +1420,44 @@ class DaytonaSessionManager:
         # prevents a reused Sandbox from remaining durably ``running`` while an
         # interpreter shutdown or provider fence is still owned out of band.
         candidate = binding
-        if candidate is None:
-            with contextlib.suppress(BaseException):
-                candidate = await self._get_binding_for_workspace(
-                    request.session_id,
-                    request.workspace_id,
-                    deadline=deadline,
-                )
+        # A binding can commit successfully and then lease construction can
+        # fail (most commonly while creating the interpreter).  Re-read after
+        # every failure so cleanup fences the exact durable identity that was
+        # published, rather than the pre-acquisition binding.  If the read
+        # itself fails, the carried identity is the only safe fallback; never
+        # let an unrelated/newer generation be fenced by this cleanup owner.
+        durable_binding: SandboxBinding | None = None
+        durable_read_failed = False
+        try:
+            durable_binding = await self._get_binding_for_workspace(
+                request.session_id,
+                request.workspace_id,
+                deadline=deadline,
+            )
+        except Exception:
+            durable_read_failed = True
+        if not durable_read_failed:
+            if durable_binding is None or durable_binding.sandbox_id != sandbox_id:
+                candidate = None
+            elif candidate is not None and (
+                candidate.sandbox_id != durable_binding.sandbox_id or candidate.generation != durable_binding.generation
+            ):
+                # A replacement won after this acquisition published its
+                # binding.  Retire this provider object but preserve the
+                # replacement row untouched.
+                candidate = None
+            else:
+                candidate = durable_binding
         if candidate is not None and candidate.sandbox_id == sandbox_id:
             state = "quarantined" if created_sandbox else "fencing"
             with contextlib.suppress(BaseException):
-                await _provider_call(
+                fenced = await _provider_call(
                     self._bindings.upsert(replace(candidate, provider_state=state, last_verified_at=None)),
                     deadline=deadline,
                     operation="Failed Sandbox fencing persistence",
                     owner=self._provider_tasks,
                 )
+                self._observe_binding(fenced)
 
         # Keep interpreter shutdown and provider retirement in one ordered lease
         # owner. If shutdown fails, SandboxLease retains the interpreter and does
@@ -1388,27 +1528,69 @@ class DaytonaSessionManager:
         sandbox: Any,
         created_sandbox: bool,
         deadline: float | None = None,
+        context: _AcquisitionContext | None = None,
     ) -> InterpreterLease:
         """Persist the verified provider binding and construct the caller-owned interpreter lease."""
         session_id = request.session_id
         sid = _sandbox_id(sandbox)
-        await _provider_call(
-            self._bindings.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id=sid,
-                    workspace_id=request.workspace_id,
-                    volume_id=expected.volume_id,
-                    volume_subpath=expected.volume_subpath,
-                    mount_path=expected.mount_path,
-                    provider_state="running",
-                    last_verified_at=datetime.now(UTC),
-                )
-            ),
+        prior_binding = await self._get_binding_for_workspace(session_id, request.workspace_id, deadline=deadline)
+        if prior_binding is None:
+            binding_generation = 1
+        elif (
+            prior_binding.sandbox_id == sid
+            and prior_binding.provider_state == "running"
+            and self.is_binding_current(
+                session_id=session_id,
+                workspace_id=request.workspace_id,
+                sandbox_id=sid,
+                generation=prior_binding.generation,
+            )
+        ):
+            binding_generation = prior_binding.generation
+        else:
+            # A stopped/fenced identity must not be reactivated in place: an
+            # older native process may still hold the same generation and can
+            # otherwise be re-armed by a delayed ``running`` read. Legitimate
+            # restart/reuse therefore receives a fresh generation.
+            binding_generation = prior_binding.generation + 1
+        candidate = SandboxBinding(
+            session_id=session_id,
+            sandbox_id=sid,
+            workspace_id=request.workspace_id,
+            volume_id=expected.volume_id,
+            volume_subpath=expected.volume_subpath,
+            mount_path=expected.mount_path,
+            provider_state="running",
+            last_verified_at=datetime.now(UTC),
+            # The atomic store operation below replaces this with the locked
+            # next generation when another provider identity won the race.
+            generation=binding_generation,
+        )
+        atomic_replace = getattr(self._bindings, "replace_with_next_generation", None)
+        # First publication uses the normal insert/upsert path so a failed
+        # binding commit remains observable to the acquisition cleanup owner.
+        # Replacements allocate under the store's row lock, avoiding the
+        # unlocked ``prior.generation + 1`` race.
+        is_replacement = prior_binding is not None and prior_binding.sandbox_id != sid
+        persist = (
+            atomic_replace(candidate)
+            if is_replacement and callable(atomic_replace)
+            else self._bindings.upsert(candidate)
+        )
+        persisted = await _provider_call(
+            persist,
             deadline=deadline,
             operation="Sandbox binding persistence",
             owner=self._provider_tasks,
         )
+        self._observe_binding(persisted)
+        # Carry the committed identity to the acquisition failure handler.  A
+        # pre-acquisition binding may name a different Sandbox/generation
+        # after replacement, and must never be used to clean up this provider
+        # object.
+        if context is not None:
+            context.persisted_binding = persisted
+        binding_generation = persisted.generation
         interpreter = _build_interpreter(
             sandbox,
             loop=asyncio.get_running_loop(),
@@ -1425,9 +1607,11 @@ class DaytonaSessionManager:
             interpreter=interpreter,
             sandbox=sandbox,
             session_id=str(session_id),
+            user_id=str(request.user_id),
             run_id=str(run_id),
             workspace_id=str(request.workspace_id),
             created_sandbox=created_sandbox,
+            binding_generation=binding_generation,
         )
 
     def _start_release_task(self, lease: InterpreterLease) -> asyncio.Task[None]:
@@ -1458,6 +1642,19 @@ class DaytonaSessionManager:
         unpublished = self._unpublished_leases.get(id(lease))
         if unpublished is not None:
             await self._finish_unpublished_lease(unpublished)
+            return
+        if lease.requires_sandbox_deletion and not lease._provider_retired:
+            if lease.session_id is None or lease.workspace_id is None or lease.run_id is None or lease.user_id is None:
+                raise RuntimeError("native sandbox retirement requires complete lease ownership")
+            await self.release_and_quarantine(
+                lease,
+                LeaseRequest(
+                    session_id=UUID(lease.session_id),
+                    workspace_id=UUID(lease.workspace_id),
+                    user_id=UUID(lease.user_id),
+                    run_id=UUID(lease.run_id),
+                ),
+            )
             return
         await self._release_interpreter(lease)
 
@@ -1663,7 +1860,7 @@ class DaytonaSessionManager:
         """Stop an idle Sandbox only after identity and active-lease rechecks."""
         await asyncio.sleep(delay)
         workspace_scope = UUID(workspace_id) if workspace_id is not None else None
-        if get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1681,7 +1878,7 @@ class DaytonaSessionManager:
         if binding is None or binding.sandbox_id != sandbox_id or binding.provider_state != "running":
             return
         sandbox = await self._get_bound_sandbox(sandbox_id)
-        if sandbox is None or get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if sandbox is None or self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
 
         # Keep the provider stop request owned if a new acquire cancels this
@@ -1694,7 +1891,7 @@ class DaytonaSessionManager:
         except asyncio.CancelledError:
             await asyncio.shield(stop_task)
             raise
-        if get_active_lease_registry().holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1708,12 +1905,29 @@ class DaytonaSessionManager:
             )
         if latest is None or latest.sandbox_id != sandbox_id or latest.provider_state != "running":
             return
+        # Stopping is a lifecycle fence. Advance the generation before
+        # publishing the stopped state so an old native process cannot be
+        # re-armed if a delayed durable read reports ``running`` later.
+        self.revoke_binding(
+            session_id=session_id,
+            workspace_id=workspace_scope or latest.workspace_id,
+            sandbox_id=sandbox_id,
+            generation=latest.generation,
+        )
         update = asyncio.ensure_future(
-            self._bindings.upsert(replace(latest, provider_state="stopped", last_verified_at=datetime.now(UTC)))
+            self._bindings.upsert(
+                replace(
+                    latest,
+                    provider_state="stopped",
+                    last_verified_at=datetime.now(UTC),
+                    generation=latest.generation + 1,
+                )
+            )
         )
         _retain_provider_task(update, self._provider_tasks)
         try:
-            await asyncio.shield(update)
+            persisted = await asyncio.shield(update)
+            self._observe_binding(persisted)
         except asyncio.CancelledError:
             # A canceled idle task must not let a late persistence write race
             # a new acquisition for this Session.
@@ -1791,7 +2005,7 @@ class DaytonaSessionManager:
 
         unpublished_settled = await self._retry_unpublished_leases(deadline)
         retry_settled = await self._retry_late_owners(deadline)
-        pending_owner = any(owner.manager is self for owner in _LATE_LEASE_OWNERS.values())
+        pending_owner = bool(self._late_lease_owners or self._late_acquisition_owners)
         return unpublished_settled and retry_settled and not pending_owner
 
     def _retain_late_created_sandbox(self, task: asyncio.Future[Any]) -> None:
@@ -1931,8 +2145,13 @@ class DaytonaSessionManager:
                 mount_path=expected.mount_path,
                 provider_state="running",
                 last_verified_at=datetime.now(UTC),
+                generation=binding.generation + 1,
             )
-            return await self._bindings.upsert(new_binding)
+            atomic_replace = getattr(self._bindings, "replace_with_next_generation", None)
+            persist = atomic_replace(new_binding) if callable(atomic_replace) else self._bindings.upsert(new_binding)
+            persisted = await persist
+            self._observe_binding(persisted)
+            return persisted
         except BaseException:
             if sandbox is not None:
                 with contextlib.suppress(BaseException):
@@ -2041,6 +2260,5 @@ __all__ = [
     "InterpreterLease",
     "LeaseRequest",
     "binding_matches_expected",
-    "get_active_lease_registry",
     "workspace_volume_subpath",
 ]

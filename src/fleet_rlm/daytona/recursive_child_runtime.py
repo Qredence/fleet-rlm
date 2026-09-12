@@ -804,6 +804,7 @@ def build_child_runtime_factory(
     is_authorized: Callable[[], bool] | None = None,
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
     semantic_child_available: bool = True,
+    semantic_child_fallback: bool = False,
 ) -> ChildRuntimeFactory:
     """
     Build a factory for acquiring disposable child-runtime leases for recursive calls.
@@ -818,6 +819,8 @@ def build_child_runtime_factory(
             callers may override it when acquiring a SemanticChild.
         semantic_child_available (bool): Whether the configured runtime includes
             a SemanticChild snapshot contract.
+        semantic_child_fallback (bool): Whether an unavailable SemanticChild
+            falls back to the volume-backed WorkspaceChild profile.
         workspace_id (UUID): Identifier of the workspace owning the runtimes.
         run_id (UUID): Identifier of the root turn run.
         deadline (float): Monotonic acquisition deadline.
@@ -851,7 +854,9 @@ def build_child_runtime_factory(
         if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
             chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
         if chosen_profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and not semantic_child_available:
-            raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
+            if not semantic_child_fallback:
+                raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
+            chosen_profile = DaytonaEnvironmentProfile.WORKSPACE_CHILD
         acquisition_coroutine = _acquire_child_runtime(
             loop=loop,
             dispatcher=dispatcher,

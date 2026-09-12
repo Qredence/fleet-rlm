@@ -1,6 +1,7 @@
 # Description
 
-Please include a summary of the change and which issue is fixed. Please also include relevant motivation and context. List any dependencies that are required for this change.
+Describe the concrete problem and resulting behavior. Include a before/after
+example when useful, and identify any contract or migration impact.
 
 Fixes # (issue)
 
@@ -15,9 +16,14 @@ Please delete options that are not relevant.
 
 ## Checklist
 
-- [ ] Relevant local validation passed (`make test-fast` for backend-only work, `make quality-gate` for shared-contract work)
-- [ ] Pre-commit and pre-push hooks are installed locally (`uv run pre-commit install` and `uv run pre-commit install --hook-type pre-push`)
-- [ ] Documentation updated (README, AGENTS.md, docstrings)
-- [ ] Commit messages follow conventions
-- [ ] PR description clearly explains the change
-- [ ] Link related issues in the PR description
+- [ ] Applicable validation from AGENTS.md passed; exact commands/results appear below
+- [ ] Documentation matches the affected implementation
+- [ ] Generated contracts were regenerated when their source changed
+- [ ] `git diff --check` passed and unrelated changes were excluded
+
+## Validation
+
+List the commands run and outcomes. For documentation-only changes, use
+`make check-docs` and `git diff --check`. For broader code/contract changes,
+follow AGENTS.md. Distinguish deterministic checks from live provider,
+database, security, and release evidence; name any remaining validation gap.

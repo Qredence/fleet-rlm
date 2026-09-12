@@ -123,6 +123,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/sessions/{session_id}/traces/feedback:
+    post:
+      tags:
+      - traces
+      summary: Submit Trace Feedback
+      description: Record human feedback for an execution trace owned by this Session.
+      operationId: submit_trace_feedback
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TraceFeedbackRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceFeedbackResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/sessions:
     post:
       tags:
@@ -1734,6 +1768,53 @@ components:
       required:
       - text
       title: TextUIMessagePart
+    TraceFeedbackRequest:
+      properties:
+        trace_id:
+          type: string
+          maxLength: 256
+          minLength: 1
+          title: Trace Id
+        value:
+          type: boolean
+          title: Value
+        comment:
+          anyOf:
+          - type: string
+            maxLength: 2000
+          - type: 'null'
+          title: Comment
+      additionalProperties: false
+      type: object
+      required:
+      - trace_id
+      - value
+      title: TraceFeedbackRequest
+      description: One human thumbs assessment for an execution trace.
+    TraceFeedbackResponse:
+      properties:
+        trace_id:
+          type: string
+          title: Trace Id
+        name:
+          type: string
+          const: user_feedback
+          title: Name
+          default: user_feedback
+        value:
+          type: boolean
+          title: Value
+        assessment_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Assessment Id
+      type: object
+      required:
+      - trace_id
+      - value
+      title: TraceFeedbackResponse
+      description: Closed public result for a recorded MLflow assessment.
     UIMessageResponse:
       properties:
         id:

@@ -177,6 +177,9 @@ def prepare_labeling(args: argparse.Namespace) -> dict[str, Any]:
     for trace_id in ok_trace_ids:
         mlflow.set_trace_tag(trace_id=trace_id, key=EVAL_TAG, value=EVAL_TAG_VALUE)
 
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
     try:
         dataset = get_dataset(name=args.dataset_name)
     except Exception:
@@ -232,6 +235,9 @@ def align(args: argparse.Namespace) -> dict[str, Any]:
     from mlflow.genai.judges.optimizers import MemAlignOptimizer
     from mlflow.genai.scorers import ScorerSamplingConfig, get_scorer
 
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        flush(terminate=False)
     traces = mlflow.search_traces(
         locations=[experiment_id],
         filter_string=f"tag.{EVAL_TAG} = '{EVAL_TAG_VALUE}'",

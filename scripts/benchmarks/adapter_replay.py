@@ -15,8 +15,8 @@ import dspy
 from dspy.utils.exceptions import AdapterParseError, LMServerError, LMTimeoutError
 
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
-from fleet_rlm.rlm.compat_3_3_1 import FleetJSONAdapter, assert_dspy_version
-from fleet_rlm.rlm.program import DeadlineLMProxy
+from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
+from fleet_rlm.rlm.program import DeadlineLMProxy, FleetJSONAdapter
 
 DATASET = Path(__file__).with_name("runtime_v2_adapter_cases.json")
 SCORERS = ("adapter-outcome/v1", "provider-accounting/v1", "fleet-attempt-ceiling/v1")

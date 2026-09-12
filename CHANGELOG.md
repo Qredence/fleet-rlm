@@ -4,7 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+The entries below retain the sequence of unreleased work, including superseded
+provider experiments. For effective runtime policy, use `config/fleet.toml` and
+the [configuration reference](docs/reference/configuration.md); for migration
+progress and scoped evidence, use the [ADR 006 ledger](docs/decisions/006-implementation-status.md).
+
 ### Changed
+
+- Refreshed repository guidance, architecture, setup, API, migration, and
+  runtime Skill documentation against current implementation. Corrected
+  resident Session reuse, child concurrency, cancellation framing, feedback,
+  retired certification commands, and historical-versus-current evidence.
 
 - **Change:** Collapsed `config/fleet.toml` from five committed profiles to a
   single `daytona-recursive` default — the whole policy now lives in

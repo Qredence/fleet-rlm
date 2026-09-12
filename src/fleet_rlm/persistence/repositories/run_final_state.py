@@ -11,7 +11,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_rlm.artifacts.promotion import PromotedArtifact
@@ -142,6 +142,7 @@ async def _commit_sql_run(
     memory_intents: tuple[MemoryPromotionIntent, ...] = (),
 ) -> CommittedTurnReceipt:
     """Apply the successful SQL commit inside the facade-owned transaction."""
+    await _serialize_sqlite_final_state(db, run)
     row = await db.get(RunRow, run.run_id, with_for_update=True)
     if row is None:
         raise RunNotFoundError("Turn not found")
@@ -213,8 +214,20 @@ def _memory_intent_row_for_commit(run: ClaimedRun, intent: MemoryPromotionIntent
     )
 
 
+async def _serialize_sqlite_final_state(db: AsyncSession, run: ClaimedRun) -> None:
+    """Acquire SQLite's writer lock before reading a mutable final-state row.
+
+    SQLite ignores FOR UPDATE. A no-op write in the facade's transaction keeps
+    commit and settlement from both deciding against the same running state.
+    PostgreSQL continues to use its existing row locks.
+    """
+    if db.get_bind().dialect.name == "sqlite":
+        await db.execute(update(RunRow).where(RunRow.id == run.run_id).values(id=RunRow.id))
+
+
 async def _transition_sql_claim(db: AsyncSession, run: ClaimedRun, command: ClaimCommand) -> FailedRunReceipt | None:
     """Apply one SQL final-state command inside the facade-owned transaction."""
+    await _serialize_sqlite_final_state(db, run)
     row = await db.get(RunRow, run.run_id, with_for_update=True)
     if row is None:
         raise RunNotFoundError("Turn not found")

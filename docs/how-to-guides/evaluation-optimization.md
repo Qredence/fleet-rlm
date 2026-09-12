@@ -47,7 +47,7 @@ detached ephemeral lane and consume exported records in the 3.13 lane:
 
 ```bash
 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py <ingest-static|ingest-traces|show|export|history|tag> ...
 ```
@@ -57,20 +57,28 @@ evaluation on any interpreter.
 
 ## 1. Dataset: expectation-bearing records (`fleet-rlm-quality-v2`)
 
+The maintained static dataset is the five `QUALITY_RECORDS` in
+`scripts/benchmarks/run_rlm_latency.py`. The separate
+`scripts/benchmarks/phase6_cases.json` corpus currently has fixture validation
+only: neither `prepare-evaluation` nor static dataset ingestion loads it.
+Its presence does not establish a runnable Phase 6 campaign. Corpus integration,
+per-case recursion classifications, and matched quality/cost evidence remain
+distinct work in the [ADR 006 ledger](../decisions/006-implementation-status.md).
+
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-static \
   --experiment-id <id> --output .scratch/evals/dataset-static.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-traces \
   --experiment-id <id> --expectations-json .scratch/evals/expectations.json \
   --output .scratch/evals/dataset-traces.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]>=3.15' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py show \
   --experiment-id <id> --output .scratch/evals/dataset-show.json
@@ -192,6 +200,11 @@ the `correctness` / `evidence_coverage` judges:
 - `guidelines` (built-in) and `retrieval_groundedness` (built-in) — LLM-based,
   require the `--judge-model` URI.
 
+`tool_evidence_used` matches complete evidence identifiers in tool output text;
+it rejects missing, empty, or malformed requirements. It does not use trace
+attributes as evidence and does not establish answer correctness or semantic
+support merely because an identifier is present.
+
 Wire them into the quality gate without changing default behavior:
 
 ```bash
@@ -204,6 +217,54 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
 
 `--scorers` is additive; omitting it keeps the current two-judge default, and
 the receipt lists the applied `scorers` by name.
+
+### Rationale-first judge experiment
+
+MLflow 3.16 can ask a judge to generate a rationale before its final
+assessment. Fleet keeps that setting opt-in and isolates the comparison from
+the canonical `correctness` and `evidence_coverage` registrations. Run both
+variants against the same frozen dataset frame in a separate evaluation
+experiment:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
+  --experiment-id <dataset-experiment-id> \
+  --evaluation-experiment-id <isolated-evaluation-experiment-id> \
+  --mlflow-url http://127.0.0.1:5001 \
+  --judge-model <mlflow-supported-judge-uri> \
+  --judge-ab \
+  --output .scratch/evals/judge-ab.json
+```
+
+The command constructs baseline and rationale-first scorers in memory, so it
+does not call canonical judge registration or change shared scorer versions.
+Its bounded receipt records the dataset snapshot, model and normalized judge
+policies, instructions, inference parameters, rationale setting, scorer
+values, latency, and any token/cost measurements MLflow exposes. It reports
+per-judge agreement and bounded disagreements for the same inputs. Accuracy is
+left unset unless independent reference labels are supplied; evaluation
+expectations are not independent labels. User satisfaction feedback from the
+TUI is a separate `user_feedback` assessment and must not be merged into
+correctness or evidence-coverage labels.
+
+Keep `generate_rationale_first=False` for the normal registered judges. After
+an explicit promotion decision, register a new version with
+`ensure_registered(..., generate_rationale_first=True)` and review the
+normalized policy diff, including the rationale setting, before changing any
+active monitoring or evaluation configuration. The A/B command itself never
+promotes a scorer.
+
+### Trace V4 navigation
+
+For a compact operational view in MLflow, include the existing Fleet fields
+`fleet.session_id`, `fleet.trace_phase`, `fleet.run_id`, `fleet.turn_status`,
+`fleet.latency_ms`, `fleet.models`, `fleet.providers`, `fleet.tools`,
+`fleet.total_tokens`, `fleet.cache_read_tokens`, and
+`fleet.cache_creation_tokens`. Keep Trace ID, status, latency, and error state
+in the primary columns, then use the session and phase fields to follow a
+Turn. Local supervised traces expose a one-way preparation-to-execution Span
+Link; Unity Catalog traces retain tag-based correlation through
+`fleet.preparation_trace_id`.
 
 ## Failure and budget guardrails
 
@@ -222,3 +283,20 @@ uv run pytest tests/unit/optimization tests/unit/scripts/test_align_judges.py \
   tests/unit/scripts/test_manage_prompts.py \
   tests/unit/scripts/test_scorers.py -q
 ```
+
+### Isolate related optimization examples
+
+Curated export provenance may include opaque `session_id` and `project_id`
+identifiers. The existing splitter keeps connected Session/project groups in one
+partition, including transitive relationships. It targets 60/20/20 proportions,
+but group isolation and at least five examples per partition take precedence.
+Exports that cannot meet those constraints are rejected; they are never split
+across a shared Session/project to fill a quota. Exports without those identities
+retain the existing record-based seeded partitioning.
+
+Split manifests record the grouping policy and a digest of all validated record
+content, so changing expectations changes the dataset identity even when record
+IDs remain stable. Group identity values and sealed-test content remain absent
+from the public manifest. These mechanics prevent declared-group leakage; they
+do not certify semantic independence of examples whose provenance omits a shared
+source.

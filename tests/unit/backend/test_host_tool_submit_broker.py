@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import json
 import socket
 import subprocess
 import sys
 import time
 from pathlib import Path
-from threading import Event
+from threading import Event, Thread
 from typing import Any
 
 import httpx
@@ -24,6 +26,61 @@ class _RecordingTool:
     def __call__(self, name: str) -> str:
         self.calls.append(((name,), {}))
         return f"loaded:{name}"
+
+
+def test_broker_history_context_and_submit_need_only_standard_library(tmp_path: Path) -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.daytona.broker import BROKER_SERVER_CODE, remote_submit_setup_code
+    from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+    from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+
+    body = b"prepared evidence"
+    attachment = tmp_path / "context.txt"
+    attachment.write_bytes(body)
+    capsule = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                uuid4(), attachment.name, "text/plain", len(body), hashlib.sha256(body).hexdigest(), str(attachment)
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
+    raw = capsule.to_sandbox()
+    source = BROKER_SERVER_CODE
+    for name, value in {
+        "__BROKER_SECRET__": repr("test-secret"),
+        "__BROKER_PORT__": "0",
+        "__MAX_REQUEST_BYTES__": "100000",
+        "__MAX_OUTPUT_CHARS__": "100000",
+        "__CONTEXT_MOUNT_ROOT__": repr(str(tmp_path)),
+        "__CONTEXT_MANIFEST_SHA256__": repr(hashlib.sha256(raw).hexdigest()),
+    }.items():
+        source = source.replace(name, value)
+    broker_path = tmp_path / "broker.py"
+    broker_path.write_text(source)
+    history = CommittedSessionHistory([{"request": "earlier", "answer": "41"}])
+    code = "\n".join(
+        (
+            remote_submit_setup_code([{"name": "answer", "type": "str"}]),
+            history.sandbox_setup(),
+            history.sandbox_assignment("history", repr(history.to_sandbox())),
+            capsule.sandbox_setup(),
+            capsule.sandbox_assignment("attachments", repr(raw)),
+            "assert attachments[0]['data'] == context == 'prepared evidence'",
+            "SUBMIT(answer=str(int(history.messages[0]['answer']) + 1))",
+        )
+    )
+    harness = (
+        "import importlib.util, runpy\n"
+        "assert importlib.util.find_spec('dspy') is None\n"
+        f"broker = runpy.run_path({str(broker_path)!r}, run_name='fleet_probe')\n"
+        f"result = broker['_execute']({{'code': {code!r}}})\n"
+        "assert result.get('error') is None, result\n"
+        "assert result['final'] == {'answer': '42'}, result\n"
+    )
+    result = subprocess.run([sys.executable, "-I", "-S", "-c", harness], capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0, result.stderr
 
 
 def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path) -> None:
@@ -55,7 +112,9 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
     server_path = tmp_path / "broker.py"
     server_path.write_text(source, encoding="utf-8")
     process = subprocess.Popen(
-        [sys.executable, str(server_path)],
+        # The production broker/setup must run without host site-packages,
+        # including DSPy. Only the host owns RLM orchestration.
+        [sys.executable, "-I", "-S", str(server_path)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -79,6 +138,16 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
 
         broker.register_tools({"llm_query_batched": llm_query_batched})
         broker.execute_code(broker.submit_setup_code([{"name": "answer", "type": "str"}]))
+        from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+
+        history = CommittedSessionHistory([{"request": "earlier", "answer": "41"}])
+        restored = broker.execute_code(
+            history.sandbox_setup()
+            + "\n"
+            + history.sandbox_assignment("history", repr(history.to_sandbox()))
+            + "\nassert history.messages == [{'request': 'earlier', 'answer': '41'}]"
+        )
+        assert restored.error is None
         streamed: list[str] = []
         output = broker.execute_code(
             'import time\nprint("one", flush=True)\ntime.sleep(0.05)\nprint("two", flush=True)',
@@ -93,7 +162,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         assert streamed_stats["output_poll_count"] <= 8
 
         first = broker.execute_with_callbacks(
-            run_code=lambda: broker.execute_code("value = 41"),
+            run_code=lambda: broker.execute_code("value = int(history.messages[0]['answer'])"),
             tool_executor=lambda name, args, kwargs: (
                 llm_query_batched(*args, **kwargs) if name == "llm_query_batched" else None
             ),
@@ -282,6 +351,228 @@ def test_http_broker_wrapper_source_and_fulfill_sanitize() -> None:
     assert posted
     assert "sk-secret" not in str(posted[0].get("error", ""))
     assert "/tmp/x" not in str(posted[0].get("error", ""))
+
+
+def test_http_broker_deduplicates_only_explicit_retryable_request() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    class _Sandbox:
+        pass
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    broker._retryable_tool_names = frozenset({"read_value"})
+    posted: list[dict[str, object]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    stats, owner = broker._begin_execution_stats()
+    calls = 0
+
+    def read_value(_name: str, _args: list[object], _kwargs: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        return {"ok": True, "value": "stable"}
+
+    try:
+        item = {
+            "id": "c1",
+            "lease_token": "t1",
+            "tool_name": "read_value",
+            "args": ["notes.txt"],
+            "kwargs": {},
+        }
+        item["request_key"] = hashlib.sha256(
+            json.dumps(
+                {"tool_name": "read_value", "args": item["args"], "kwargs": item["kwargs"]},
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        broker._fulfill(item, read_value)
+        broker._fulfill({**item, "id": "c2", "lease_token": "t2"}, read_value)
+    finally:
+        broker._finish_execution_stats(stats, owner=owner)
+
+    assert calls == 1
+    assert [payload["result"] for payload in posted] == [
+        {"ok": True, "value": "stable"},
+        {"ok": True, "value": "stable"},
+    ]
+    assert broker.last_execution_stats["dedupe_execution_count"] == 1
+    assert broker.last_execution_stats["dedupe_hit_count"] == 1
+
+
+def test_http_broker_concurrent_retryable_duplicates_wait_for_one_execution() -> None:
+    """A retryable read is executed once while a concurrent retry waits."""
+
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    broker._retryable_tool_names = frozenset({"read_value"})
+    posted: list[dict[str, object]] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        posted.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={})
+
+    broker._client = httpx.Client(
+        transport=httpx.MockTransport(_handler),
+        base_url="http://example.test",
+        headers=broker._preview_headers(),
+    )
+    stats, owner = broker._begin_execution_stats()
+    entered = Event()
+    duplicate_claimed = Event()
+    release = Event()
+    calls = 0
+
+    def read_value(_name: str, _args: list[object], _kwargs: dict[str, object]) -> dict[str, object]:
+        nonlocal calls
+        calls += 1
+        entered.set()
+        assert release.wait(2)
+        return {"ok": True}
+
+    canonical = json.dumps(
+        {"tool_name": "read_value", "args": ["same"], "kwargs": {}},
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    key = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    first = {"id": "c1", "lease_token": "t1", "tool_name": "read_value", "args": ["same"], "kwargs": {}}
+    first["request_key"] = key
+    second = {**first, "id": "c2", "lease_token": "t2"}
+
+    claim = broker._claim_dedupe
+
+    def claim_with_probe(value: str):
+        result = claim(value)
+        if not result[2]:
+            duplicate_claimed.set()
+        return result
+
+    broker._claim_dedupe = claim_with_probe  # type: ignore[method-assign]
+    threads = [Thread(target=broker._fulfill, args=(item, read_value), daemon=True) for item in (first, second)]
+    try:
+        threads[0].start()
+        assert entered.wait(1)
+        threads[1].start()
+        assert duplicate_claimed.wait(1)
+        release.set()
+        for thread in threads:
+            thread.join(timeout=2)
+            assert not thread.is_alive()
+    finally:
+        release.set()
+        for thread in threads:
+            thread.join(timeout=2)
+        broker._finish_execution_stats(stats, owner=owner)
+        broker._client.close()
+
+    assert calls == 1
+    assert [payload["result"] for payload in posted] == [{"ok": True}, {"ok": True}]
+    assert broker.last_execution_stats["dedupe_execution_count"] == 1
+    assert broker.last_execution_stats["dedupe_wait_count"] == 1
+    assert broker.last_execution_stats["dedupe_hit_count"] == 1
+
+
+def test_http_broker_rejects_forged_retry_key_for_read_only_request() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    item = {"tool_name": "read_value", "args": ["notes.txt"], "kwargs": {}, "request_key": "a" * 64}
+    assert DaytonaHttpToolBroker._request_key(item, tool_name="read_value") is None
+
+
+def test_http_broker_does_not_emit_retry_key_for_writes() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    source = broker._tool_wrapper_source("write_value", lambda path, content: (path, content), retryable=False)
+
+    assert '"request_key": request_key' in source
+    assert "if False:" in source
+
+
+def _registration_broker() -> Any:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    # Pre-set URL keeps ensure_started() offline for policy-boundary tests.
+    broker._broker_url = "http://example.test"
+    return broker
+
+
+def test_http_broker_registration_defaults_to_no_retryable_tools() -> None:
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    broker.register_tools({"read_workspace_text": read_workspace_text})
+    assert broker._retryable_tool_names == frozenset()
+    assert "if False:" in broker.drain_wrapper_sources()
+
+
+def test_http_broker_registration_accepts_only_read_only_retryable_subset() -> None:
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    def fetch_url(_url: str) -> dict[str, object]:
+        return {}
+
+    broker.register_tools(
+        {"read_workspace_text": read_workspace_text, "fetch_url": fetch_url},
+        retryable_tool_names={"read_workspace_text"},
+    )
+    assert broker._retryable_tool_names == frozenset({"read_workspace_text"})
+    sources = broker.drain_wrapper_sources()
+    assert "if True:" in sources
+    assert "if False:" in sources
+
+
+def test_http_broker_registration_rejects_fetch_url_opt_in() -> None:
+    from fleet_rlm.daytona.broker import DaytonaAdapterError
+
+    broker = _registration_broker()
+
+    def fetch_url(_url: str) -> dict[str, object]:
+        return {}
+
+    with pytest.raises(DaytonaAdapterError, match="read-only broker contract") as exc_info:
+        broker.register_tools({"fetch_url": fetch_url}, retryable_tool_names={"fetch_url"})
+    assert exc_info.value.cause_type == "InvalidToolPolicyError"
+    assert broker._retryable_tool_names == frozenset()
+
+
+def test_http_broker_registration_rejects_unbound_retryable_name() -> None:
+    from fleet_rlm.daytona.broker import DaytonaAdapterError
+
+    broker = _registration_broker()
+
+    def read_workspace_text(_path: str) -> dict[str, object]:
+        return {}
+
+    with pytest.raises(DaytonaAdapterError, match="unbound tool") as exc_info:
+        broker.register_tools({"read_workspace_text": read_workspace_text}, retryable_tool_names={"read_attachment"})
+    assert exc_info.value.cause_type == "InvalidToolPolicyError"
+    assert broker._retryable_tool_names == frozenset()
 
 
 def test_http_broker_uses_isolated_port_for_server_and_wrappers() -> None:
@@ -742,6 +1033,30 @@ def test_silent_native_execution_observes_authority_without_output(monkeypatch: 
             worker.join(timeout=1)
     assert broker.last_execution_stats == settled
     assert broker.stop(strict=True) is True
+
+
+@pytest.mark.parametrize("failure_type", [asyncio.CancelledError, KeyboardInterrupt, SystemExit])
+def test_worker_control_flow_reaches_owner_without_becoming_tool_failure(
+    monkeypatch: pytest.MonkeyPatch, failure_type: type[BaseException]
+) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    monkeypatch.setattr(broker, "ensure_started", lambda: None)
+    monkeypatch.setattr(broker, "_poll_once", lambda *_args, **_kwargs: False)
+    failure = failure_type("worker interrupted")
+
+    def run():
+        raise failure
+
+    with pytest.raises(failure_type) as caught:
+        broker.execute_with_callbacks(run_code=run, tool_executor=lambda *_: None)
+    assert caught.value is failure
+    assert broker.last_execution_stats["drain_poll_count"] == 0
+    assert all(not worker.is_alive() for worker in broker._execution_threads)
+    result = broker.execute_with_callbacks(run_code=lambda: "next invocation", tool_executor=lambda *_: None)
+    assert result.stdout == "next invocation"
+    assert broker.stop(strict=True)
 
 
 def test_execute_with_callbacks_records_per_execution_stats(monkeypatch: pytest.MonkeyPatch) -> None:

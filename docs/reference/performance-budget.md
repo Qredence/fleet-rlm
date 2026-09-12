@@ -11,12 +11,13 @@ Sandbox, interpreter, LM runtimes, admission permit, and cleanup.
 
 ## Current bounded fan-out policy
 
-`recursion_max_parallel_children = 5` is the shipped policy concurrency cap.
+`recursion_max_parallel_children = 4` is the shipped policy concurrency cap;
+`config/fleet.toml` owns the current value.
 The Root selects `rlm_query_batched`; Fleet atomically reserves the shared
 recursive call budget, preserves input ordering, and settles the batch
 all-or-nothing. The P7 lifecycle measurements below were collected with the
 then-current two-worker benchmark setting, so they remain a per-child cost
-basis rather than a five-sibling latency claim. The routing benchmark records
+basis rather than a current four-sibling latency claim. The routing benchmark records
 observed peak sibling concurrency and latency for batch workloads.
 
 ## Measurements
@@ -111,8 +112,18 @@ explicitly available:
 
 ```bash
 uv run python scripts/benchmark_daytona_lifecycle.py --output <receipt.json>
-uv run python scripts/benchmarks/run_rlm_latency.py benchmark   --api-url http://127.0.0.1:8000   --mlflow-url http://127.0.0.1:5001   --experiment-id 1 --variant p7-refactor   --runs 20 --warmups 3 --output <receipt.json>
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
+  --api-url http://127.0.0.1:8000 --mlflow-url http://127.0.0.1:5001 \
+  --experiment-id 1 --variant p7-refactor --runs 20 --warmups 3 \
+  --campaign p7-refactor-20260910 --target daytona-disposable \
+  --max-elapsed-seconds 1800 --max-admissions 23 \
+  --max-sandbox-concurrency 4 --spend-cap 25 --output <receipt.json>
 ```
+
+Provider-backed campaigns fail closed unless the operator supplies the
+bounded campaign and target references plus elapsed-time, admission,
+sandbox-concurrency, and total-spend limits. The target is a non-secret label;
+URLs and credentials remain outside receipts.
 
 The phase breakdown command is a local ignored helper because it joins MLflow
 trace timings to `fleet_runs` timestamps without retaining private payloads.

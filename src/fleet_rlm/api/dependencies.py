@@ -19,7 +19,8 @@ from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.rlm.session_runtime import SessionRLMRegistry
+from fleet_rlm.observability.feedback import TraceFeedbackService
+from fleet_rlm.observability.mlflow import MLflowRuntime
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
@@ -103,11 +104,6 @@ def get_session_catalog(request: Request) -> SessionCatalog:
     return catalog
 
 
-def get_session_runtime_registry(request: Request) -> SessionRLMRegistry | None:
-    """Return the process-local resident runtime registry when composed."""
-    return get_ready_runtime_inventory(request).session_runtime_registry
-
-
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
     """Return a fire-and-forget Session sandbox pre-warm trigger, if composed.
 
@@ -149,6 +145,22 @@ def get_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
+def get_trace_feedback_service(request: Request) -> TraceFeedbackService:
+    """Return the application-owned MLflow feedback service."""
+    service = getattr(request.app.state, "trace_feedback_service", None)
+    if not isinstance(service, TraceFeedbackService):
+        raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable")
+    return service
+
+
+def get_mlflow_runtime(request: Request) -> MLflowRuntime:
+    """Return the application-owned MLflow lifecycle for synchronous SDK work."""
+    runtime = getattr(request.app.state, "mlflow_runtime", None)
+    if not isinstance(runtime, MLflowRuntime):
+        raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable")
+    return runtime
+
+
 def get_skill_catalog(request: Request) -> SkillCatalog:
     catalog = getattr(request.app.state, "skill_catalog", None)
     if not isinstance(catalog, SkillCatalog):
@@ -183,11 +195,12 @@ TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]
 ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
-SessionRuntimeRegistryDep = Annotated[SessionRLMRegistry | None, Depends(get_session_runtime_registry)]
 SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
 RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
 RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
+TraceFeedbackServiceDep = Annotated[TraceFeedbackService, Depends(get_trace_feedback_service)]
+MLflowRuntimeDep = Annotated[MLflowRuntime, Depends(get_mlflow_runtime)]
 SkillCatalogDep = Annotated[SkillCatalog, Depends(get_skill_catalog)]
 ConfigPolicyDep = Annotated[ConfigPolicyService, Depends(get_config_policy)]
 WorkspaceFileServiceDep = Annotated[WorkspaceFileService, Depends(get_workspace_file_service)]
@@ -199,13 +212,14 @@ __all__ = [
     "AttachmentLifecycleDep",
     "ConfigPolicyDep",
     "LocalScopeDep",
+    "MLflowRuntimeDep",
     "RunLifecycleDep",
     "RuntimeInventoryIfReadyDep",
     "SessionCatalogDep",
     "SessionPrewarmDep",
-    "SessionRuntimeRegistryDep",
     "SettingsDep",
     "SkillCatalogDep",
+    "TraceFeedbackServiceDep",
     "TurnRuntimeDep",
     "WorkspaceFileServiceDep",
     "WorkspaceVolumeGatewayDep",
