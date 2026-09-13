@@ -31,7 +31,9 @@ healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
 - [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
 
 The current production path is the retained broker-backed `legacy` runtime.
-Fleet child RLM tools are disabled by default; native `llm_query` remains.
+Fleet child RLM tools follow the selected policy; the shipped
+`daytona-recursive` default currently enables them, while native `llm_query`
+remains available. This operational setting does not certify recursive value.
 Phase 3 complete-MVP and Phase 5–6 operational certification are open. Read
 the status ledger before treating any dated receipt as a current guarantee.
 

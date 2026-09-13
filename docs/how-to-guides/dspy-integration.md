@@ -5,10 +5,11 @@ The broker Root Sandbox may be reused across sequential successful Turns; DSPy's
 private `REPLHistory` and Turn capabilities are fresh for every invocation. The
 Root Model generates iterative Python, while the Sub Model answers `llm_query()`
 and ordered `llm_query_batched()` calls. Fleet child tools
-`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)` remain available
-only to explicit profiles; the committed default disables them. Both model roles
-and every executable capability are host-configured; API clients cannot supply
-models, Signatures, or executable capabilities.
+`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)` are available
+according to the selected policy; the shipped `daytona-recursive` default enables them,
+while comparison profiles can disable them. Both model roles and every
+executable capability are host-configured; API clients cannot supply models,
+Signatures, or executable capabilities.
 
 This guide describes the selectable `legacy` runtime. Native DSPy execution
 does not imply use of ADR 006's experimental native Daytona interpreter.
@@ -26,8 +27,8 @@ work; see the [implementation status](../decisions/006-implementation-status.md)
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
 - `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=capsules)`
-  are recursive primitives exposed only by an explicit recursion-enabled policy.
-  Under that opt-in policy, Root code keeps large input-specific
+  are recursive primitives exposed when the selected policy enables recursion.
+  Under that enabled policy, Root code keeps large input-specific
   data in REPL variables and passes only the smallest sufficient slice to a
   child; the parent retains authority over public output and final `SUBMIT`.
 - A native depth-1 child uses a dedicated, disposable Daytona Sandbox with
@@ -226,15 +227,15 @@ the model never to repeat an identical interpreter action.
 
 ## Recursive harness limits
 
-`[defaults.rlm] recursion_enabled = false` after the 2026-09-12 P4.6
-decision, so the committed Daytona profiles do not expose Fleet child-RLM
+`[defaults.rlm] recursion_enabled = true` in the current operator-selected
+policy, so the shipped `daytona-recursive` profile exposes Fleet child-RLM
 tools by default. Native `llm_query` / `llm_query_batched` remain the semantic
-delegation path. Set `rlm.recursion_enabled = true` on an explicit profile
-(for example `phase4-campaign`) to restore the bounded recursive Tool and
-instruction. When enabled, one native child level is allowed, with four reserved
-child calls per Turn, a 50,000-character delegated prompt bound, eight child
-iterations, twelve child LM calls, 4,000 child output characters, and at most
-four child workers concurrently. A child request beyond
+delegation path. Set `rlm.recursion_enabled = false` on a comparison profile
+(for example `phase4-campaign-a` or `phase4-campaign-b`) to disable the bounded
+recursive Tool and instruction. When enabled, one native child level is allowed,
+with four reserved child calls per Turn, a 50,000-character delegated prompt
+bound, eight child iterations, twelve child LM calls, 4,000 child output
+characters, and at most four child workers concurrently. A child request beyond
 `RLM_NATIVE_CHILD_DEPTH = 1` uses one bounded plain Sub Model query instead of
 creating a grandchild Sandbox.
 

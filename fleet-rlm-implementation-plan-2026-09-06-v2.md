@@ -6,7 +6,8 @@ This document is the **forward implementation plan**. It intentionally does not 
 
 This branch now contains the completed simplification sequence through Phase 4:
 the retained broker is the sole production execution boundary, programs are
-fresh per Run, and Fleet child RLM tools are disabled by default. Recent local
+fresh per Run, and the current operator-selected policy enables Fleet child RLM
+tools in the shipped default. Recent local
 fixes preserve request-specified Sub-LM actions, prevent host setup cells from
 becoming public RLM steps, and realign a reused Root with a replaced durable
 binding. These fixes do not certify Phase 3 complete-MVP or Phase 5–6 operator

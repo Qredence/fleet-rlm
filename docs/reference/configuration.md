@@ -141,8 +141,8 @@ admissions, including retries and adapter repairs; `max_tool_calls` and
 recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
 
-The `[rlm]` recursion settings include `recursion_enabled` (default `false`
-after the 2026-09-12 P4.6 decision) and bound the opt-in native
+The `[rlm]` recursion settings include `recursion_enabled` (currently `true`
+in the operator-selected shipped default) and bound the native
 `rlm_query(capsule=...)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
@@ -153,12 +153,11 @@ The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CH
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. Profiles without an explicit recursion override inherit disabled
-recursive execution from `[defaults.rlm]`; `daytona-recursive` remains the
-selected default profile name. The committed `phase4-campaign` profile is an
-explicit opt-in recursive profile with `rlm.recursion_enabled = true`. Re-enable
-Fleet child RLMs only with an explicit `rlm.recursion_enabled = true` profile
-override. The
+override them. Profiles without an explicit recursion override inherit the
+operator-selected value from `[defaults.rlm]`; `daytona-recursive` remains the
+selected default profile name. The `phase4-campaign-a` and
+`phase4-campaign-b` profiles explicitly disable recursion for comparison, while
+`phase4-campaign` inherits the enabled value. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
