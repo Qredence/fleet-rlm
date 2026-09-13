@@ -28,6 +28,10 @@ class WarmPoolError(ValueError):
     """Raised when a requested pool is unsafe to reconcile."""
 
 
+class WarmPoolUnavailableError(WarmPoolError):
+    """The provider management API is unavailable; organization enablement may be required."""
+
+
 def validate_semantic_child_warm_pool_request(request: Mapping[str, Any] | Any) -> None:
     """Reject provider request drift that would make a pool ineligible.
 
@@ -263,14 +267,22 @@ async def reconcile_warm_pool(
     """
     if not plan.enabled:
         return WarmPoolResult("disabled", None, 0, None)
-    if candidate_sha is not None and not re.fullmatch(r"[0-9a-f]{64}", candidate_sha):
-        raise WarmPoolError("candidate SHA must be a 64-character hexadecimal digest")
+    if candidate_sha is not None and not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", candidate_sha):
+        raise WarmPoolError("candidate SHA must be a full 40- or 64-character hexadecimal Git object ID")
     if apply:
         if campaign is None:
             raise WarmPoolError("a campaign preflight is required for reconciliation")
         campaign.validate()
         _validate_campaign_capacity(plan, campaign)
-    pools = _matching_pools(await client.list(), plan)
+    try:
+        listed = await client.list()
+    except Exception as exc:
+        if provider_status_code(exc) == 404:
+            raise WarmPoolUnavailableError(
+                "warm-pool API unavailable; confirm organization enablement with Daytona"
+            ) from exc
+        raise
+    pools = _matching_pools(listed, plan)
     if len(pools) > 1:
         raise WarmPoolError("multiple matching Daytona warm pools require manual reconciliation")
     existing = pools[0] if pools else None

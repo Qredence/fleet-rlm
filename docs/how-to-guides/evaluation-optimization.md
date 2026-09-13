@@ -9,6 +9,76 @@ no Fleet Turn-path surface: tracing stays fail-soft and bounded by the
 behind `FLEET_LIVE=1` with Databricks auth from the environment
 (`DATABRICKS_HOST`/`DATABRICKS_TOKEN` or databricks-cli).
 
+## Local MLflow operator workflow
+
+The current policy keeps tracing on `http://127.0.0.1:5001`, with full sampling,
+bounded content, and asynchronous fail-soft export. Restart the Fleet API after
+policy/code changes; a settings edit does not reconfigure an active process.
+
+For local evaluation, use the maintained five-case dataset and explicit local
+AI Gateway judge route. `prepare-evaluation` discovers datasets in the selected
+experiment and versions the canonical `correctness` and `evidence_coverage`
+judges when their policy changes. Evaluation resolves the dataset by its ID
+within that experiment, not by a potentially ambiguous server-global name.
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py prepare-evaluation \
+  --mlflow-url http://127.0.0.1:5001 --experiment-id 1 \
+  --judge-model "gateway:/<local-gateway-endpoint>" \
+  --output .scratch/evals/local-prepare.json
+FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py evaluate \
+  --mlflow-url http://127.0.0.1:5001 --experiment-id 1 \
+  --api-url http://127.0.0.1:8000 \
+  --judge-model "gateway:/<local-gateway-endpoint>" \
+  --dry-run --scorers response_present \
+  --output .scratch/evals/local-evaluate.json
+```
+
+Replace the placeholder with a verified local gateway endpoint. Judge
+registration is not proof that a route can execute; probe the registered judges
+before evaluation. These commands use an existing API; use disposable Sessions
+and account for retained Sandbox cleanup when running operational diagnostics.
+
+MLflow 3.16 permits local registration of `make_judge` scorers but rejects
+arbitrary `@scorer` code registration outside Databricks. Keep deterministic
+`response_present` in the repository and pass it to evaluation rather than
+bypassing that restriction. Local evaluation is explicit, not Databricks
+server-side continuous monitoring. Alignment requires independent human labels;
+no aligned-judge claim follows from this setup.
+
+Dataset tags can record source, record count, and snapshot digest through
+`mlflow.genai.datasets.set_dataset_tags`. Use `annotate_traces.py` with an
+explicit local `--mlflow-url` and a selection tag for derived model, tool,
+latency, and token tags. This annotation is post-hoc, not a background service.
+Runtime LM spans export observed `mlflow.chat.tokenUsage`, and MLflow derives
+`mlflow.trace.tokenUsage`; absent optional provider detail blocks must not erase
+reported counts. Missing measurements are not invented as zeros.
+
+### Local operational certification
+
+Run the bounded certificate separately from quality evaluation:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/benchmarks/certify_mlflow.py \
+  --backend local --tracking-uri http://127.0.0.1:5001 \
+  --experiment-name fleet-p54-certification --fault-checks \
+  --output .scratch/evals/local-certification.json
+```
+
+The configured backend receives deterministic synthetic traces and feedback,
+not paid model calls. Sampling ratios zero and one are checked in separate
+processes against persisted traces; this does not hot-reconfigure a live app.
+`--fault-checks` runs the existing SDK/lifecycle tests in a bounded subprocess,
+with explicit per-scenario test identities and source digests. Tests that fail,
+skip, do not execute, or time out cannot count as passed. Fault injection never
+invalidates real credentials or stalls the shared tracking server.
+
+A complete check returns exit zero; incomplete/failed checks retained in a
+receipt return exit two, and execution errors return exit one. Omitting
+`--fault-checks` deliberately leaves those scenarios unexercised. A dirty
+candidate remains promotion-ineligible even if all checks pass. Keep failed
+receipts; use a new output filename for each attempt.
+
 ## Pipeline at a glance
 
 | Step | Script | Receipt schema |

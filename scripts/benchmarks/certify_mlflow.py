@@ -3,8 +3,9 @@
 
 The command is deliberately separate from the normal tracing smoke test.  It
 exercises Fleet's turn trace, DSPy autolog, the deadline LM proxy, feedback,
-privacy projection, and concurrent/repeated lifecycles, then records every
-other requested failure mode as ``unexercised`` or ``blocked``.  A receipt is
+privacy projection, concurrent/repeated lifecycles, and fresh-process sampling.
+With ``--fault-checks`` it runs existing behavior-owned SDK/lifecycle fault
+tests in an isolated subprocess, recording their evidence scope separately.  A receipt is
 write-once and never contains a tracking URI, credential, prompt, or trace
 payload.
 
@@ -21,11 +22,14 @@ import hashlib
 import importlib.metadata
 import json
 import os
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,7 +40,7 @@ import dspy
 from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import load_runtime_settings
-from fleet_rlm.observability.feedback import TraceFeedbackService
+from fleet_rlm.observability.feedback import TraceFeedbackNotFoundError, TraceFeedbackService
 from fleet_rlm.observability.tracing import (
     annotate_trace_io,
     configure_tracing,
@@ -46,12 +50,14 @@ from fleet_rlm.observability.tracing import (
     turn_phase_span,
     turn_trace,
 )
+from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.program import DeadlineLMProxy
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.benchmarks.annotate_traces import _trace_token_usage
 from scripts.benchmarks.campaign import write_receipt_once
 
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
@@ -110,9 +116,11 @@ def _package_versions() -> dict[str, str]:
 def _git_identity() -> dict[str, object]:
     try:
         revision = subprocess.run(
-            ["git", "rev-parse", "HEAD"], capture_output=True, check=True, text=True
+            ["git", "rev-parse", "HEAD"], cwd=_REPO_ROOT, capture_output=True, check=True, text=True
         ).stdout.strip()
-        status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, check=True, text=True)
+        status = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=_REPO_ROOT, capture_output=True, check=True, text=True
+        )
         dirty = bool(status.stdout)
     except (OSError, subprocess.CalledProcessError):
         return {"revision": "unknown", "dirty": True}
@@ -230,8 +238,13 @@ async def _run_trace() -> dict[str, object]:
         error_message="certification deadline exceeded",
     )
 
+    callback = _RLMTraceCallback(root_lm=proxy, sub_lm=object())
+
     async def child(index: int) -> object:
-        with turn_phase_span("certification_child", inputs={"child_index": index}):
+        with (
+            turn_phase_span("certification_child", inputs={"child_index": index}),
+            dspy.context(callbacks=[*dspy.settings.callbacks, callback]),
+        ):
             return await proxy.acall(f"child-{index}")
 
     with turn_trace(session_id, run_id, enabled=True, trace_phase="execution") as handle:
@@ -251,7 +264,7 @@ async def _run_trace() -> dict[str, object]:
         raise CertificationError("MLflow did not return the certification trace")
     payload = _trace_payload(trace)
     span_names = [str(getattr(span, "name", "")) for span in getattr(trace.data, "spans", ())]
-    token_usage = getattr(trace.info, "token_usage", None)
+    token_usage = _trace_token_usage(trace.info)
     linkage = _trace_linkage(
         trace,
         session_id=str(session_id),
@@ -276,14 +289,31 @@ async def _run_trace() -> dict[str, object]:
 
 
 async def _run_concurrent_sessions() -> bool:
-    async def one() -> str | None:
+    import mlflow
+
+    ready = asyncio.Event()
+    entered = 0
+
+    async def one() -> tuple[str, str | None]:
+        nonlocal entered
         session_id = uuid4()
         with turn_trace(session_id, uuid4(), enabled=True, trace_phase="execution") as handle:
+            entered += 1
+            if entered == 2:
+                ready.set()
+            await asyncio.wait_for(ready.wait(), timeout=5)
             annotate_trace_io(request="concurrent", response_text="ok")
-        return handle.trace_id
+        return str(session_id), handle.trace_id
 
     results = await asyncio.gather(one(), one())
-    return bool(results[0] and results[1] and results[0] != results[1])
+    flush_tracing()
+    if not all(trace_id for _, trace_id in results) or results[0][1] == results[1][1]:
+        return False
+    for session_id, trace_id in results:
+        trace = mlflow.get_trace(trace_id, flush=True)
+        if trace is None or trace.info.tags.get("fleet.session_id") != session_id or _trace_status(trace) != "OK":
+            return False
+    return True
 
 
 def _run_repeated_lifespans(settings: Any) -> bool:
@@ -301,8 +331,13 @@ def _run_repeated_lifespans(settings: Any) -> bool:
 def _run_unreachable_backend(settings: Any) -> bool:
     """Verify an unavailable local endpoint fails closed before a Turn span."""
     reset_tracing()
-    unavailable = settings.model_copy(update={"mlflow_tracking_uri": "http://127.0.0.1:59999"})
-    active = configure_tracing(unavailable)
+    # Keep the ephemeral port bound but non-listening: never assume a fixed
+    # operator port is unused or touch an unrelated service.
+    with socket.socket() as reserved:
+        reserved.bind(("127.0.0.1", 0))
+        port = reserved.getsockname()[1]
+        unavailable = settings.model_copy(update={"mlflow_tracking_uri": f"http://127.0.0.1:{port}"})
+        active = configure_tracing(unavailable)
     reset_tracing()
     return not active
 
@@ -310,7 +345,13 @@ def _run_unreachable_backend(settings: Any) -> bool:
 def _feedback(trace_result: dict[str, object], *, content_enabled: bool) -> dict[str, object]:
     session_id = UUID(str(trace_result["session_id"]))
     trace_id = str(trace_result["trace_id"])
-    result = TraceFeedbackService().submit(
+    service = TraceFeedbackService()
+    foreign_session_rejected = False
+    try:
+        service.submit(session_id=uuid4(), trace_id=trace_id, value=True, comment=None, content_enabled=content_enabled)
+    except TraceFeedbackNotFoundError:
+        foreign_session_rejected = True
+    result = service.submit(
         session_id=session_id,
         trace_id=trace_id,
         value=True,
@@ -324,25 +365,190 @@ def _feedback(trace_result: dict[str, object], *, content_enabled: bool) -> dict
     rationale = [str(getattr(item, "rationale", "")) for item in assessments]
     return {
         "accepted": result.value is True,
-        "rationale_present": any(rationale),
+        "rationale_policy_matches": any(rationale) == content_enabled,
+        "foreign_session_rejected": foreign_session_rejected,
         "rationale_redacted": all(_SENTINEL not in item for item in rationale),
     }
+
+
+def _expected_token_usage(usage: object) -> bool:
+    """Two deterministic LM calls must aggregate exactly, without double counting."""
+    expected = {"input_tokens": 6, "output_tokens": 4, "total_tokens": 10}
+    return isinstance(usage, dict) and all(type(usage.get(k)) is int and usage[k] == v for k, v in expected.items())
 
 
 def _scenario(status: str, **details: object) -> dict[str, object]:
     return {"status": status, **details}
 
 
-def _unexercised_scenarios() -> dict[str, dict[str, object]]:
-    return {
-        name: _scenario("unexercised", reason="requires an injected provider/exporter fault lane")
-        for name in (
-            "expired_credentials",
-            "saturated_export_queue",
-            "slow_export",
-            "stalled_flush",
+# Fixed behavior-owned tests, not a second fault-injection implementation.
+_OUTAGE_TESTS = "tests/unit/backend/test_mlflow_export_outage.py"
+_RUNTIME_TESTS = "tests/unit/backend/test_mlflow_runtime.py"
+_LIFESPAN_TESTS = "tests/contracts/backend/test_mlflow_lifespan.py"
+_FEEDBACK_TESTS = "tests/contracts/backend/test_mlflow_feedback_api.py"
+_FAULT_TESTS = {
+    "expired_credentials": [f"{_OUTAGE_TESTS}::test_expired_credentials_record_error_evidence_and_drop_trace"],
+    "saturated_export_queue": [f"{_OUTAGE_TESTS}::test_saturated_queue_drops_traces_without_blocking_the_caller"],
+    "slow_export": [f"{_OUTAGE_TESTS}::test_slow_backend_does_not_block_span_end"],
+    "stalled_flush": [
+        f"{_RUNTIME_TESTS}::test_stalled_flush_is_bounded_retained_and_reobserved",
+        f"{_RUNTIME_TESTS}::test_timed_out_flush_resets_when_background_export_finishes",
+    ],
+    "event_loop_and_cancellation": [
+        f"{_RUNTIME_TESTS}::test_real_export_queue_stall_preserves_event_loop_and_close_cancellation",
+    ],
+    "disabled_and_unavailable_turn": [
+        f"{_LIFESPAN_TESTS}::test_public_turn_succeeds_when_tracing_is_disabled_by_policy",
+        f"{_LIFESPAN_TESTS}::test_public_turn_succeeds_when_tracing_setup_is_unavailable",
+    ],
+    "feedback_authorization": [
+        "tests/unit/backend/test_mlflow_feedback.py::test_submit_rejects_non_execution_traces_as_not_found[preparation]",
+        f"{_FEEDBACK_TESTS}::test_feedback_route_returns_safe_assessment_projection_and_forwards_scope",
+        f"{_FEEDBACK_TESTS}::test_feedback_route_maps_trace_mismatch_and_backend_failure_to_closed_errors",
+        f"{_FEEDBACK_TESTS}::test_feedback_route_maps_closed_mlflow_lifecycle_to_unavailable",
+        f"{_FEEDBACK_TESTS}::test_feedback_route_rejects_invalid_bodies_and_unknown_sessions",
+    ],
+}
+
+
+def _fault_results(root: ET.Element, returncode: int) -> dict[str, dict[str, object]]:
+    """Require execution, no skips, and success for every selected behavior owner."""
+    cases = list(root.iter("testcase"))
+    results = {}
+    for scenario, nodes in _FAULT_TESTS.items():
+        counts = []
+        passed = returncode == 0
+        for node in nodes:
+            path, _, name = node.partition("::")
+            selected = [case for case in cases if case.get("file") == path and (not name or case.get("name") == name)]
+            counts.append(len(selected))
+            passed = (
+                passed
+                and bool(selected)
+                and all(
+                    not any(case.find(tag) is not None for tag in ("failure", "error", "skipped")) for case in selected
+                )
+            )
+        results[scenario] = _scenario(
+            "passed" if passed else "failed",
+            scope="isolated deterministic SDK/lifecycle fault injection; not a live backend outage",
+            tests=nodes,
+            executed=sum(counts),
+            source_sha256={
+                node.partition("::")[0]: _file_digest(_REPO_ROOT / node.partition("::")[0]) for node in nodes
+            },
         )
-    }
+    return results
+
+
+def _run_fault_checks() -> dict[str, dict[str, object]]:
+    """Run the maintained fault tests once in an isolated, deadline-bounded process."""
+    nodes = sorted({node for group in _FAULT_TESTS.values() for node in group})
+    with tempfile.TemporaryDirectory(prefix="fleet-mlflow-faults-") as temporary:
+        report = Path(temporary) / "results.xml"
+        command = [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-o",
+            "addopts=",
+            "-o",
+            "junit_family=xunit1",
+            "--timeout=30",
+            "-q",
+            f"--junitxml={report}",
+            *nodes,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=_REPO_ROOT,
+                env={**os.environ, "FLEET_LIVE": "0", "PYTEST_ADDOPTS": ""},
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=180,
+                check=False,
+            )
+            if not report.exists() or report.stat().st_size > 1_000_000:
+                raise CertificationError("fault test report missing or oversized")
+            return _fault_results(ET.parse(report).getroot(), completed.returncode)
+        except (OSError, subprocess.TimeoutExpired, ET.ParseError, CertificationError) as exc:
+            return {name: _scenario("failed", error_category=type(exc).__name__) for name in _FAULT_TESTS}
+
+
+def _sampling_probe(settings: Any, ratio: int) -> dict[str, object]:
+    """Verify persisted sampling outcomes in a fresh process, never reset a live app."""
+    import mlflow
+
+    settings = settings.model_copy(update={"mlflow_trace_sampling_ratio": float(ratio)})
+    if not configure_tracing(settings):
+        return _scenario("failed", reason="sampling_backend_unavailable")
+    try:
+        session = uuid4()
+        handles = []
+        for _ in range(3):
+            with turn_trace(session, uuid4(), enabled=True, trace_phase="execution") as handle:
+                annotate_trace_io(request="sampling probe", response_text="ok")
+            handles.append(handle.trace_id)
+        flush_tracing()
+        experiment = mlflow.get_experiment_by_name(settings.mlflow_experiment_name)
+        traces = mlflow.search_traces(
+            locations=[experiment.experiment_id],
+            filter_string=f"tag.`fleet.session_id` = '{session}'",
+            return_type="list",
+            max_results=10,
+        )
+        expected = 3 if ratio else 0
+        passed = len(traces) == expected and all(_trace_status(trace) == "OK" for trace in traces)
+        if ratio:
+            passed = passed and set(handles) == {trace.info.trace_id for trace in traces}
+        return _scenario("passed" if passed else "failed", ratio=ratio, attempted=3, persisted=len(traces))
+    finally:
+        flush_tracing()
+        reset_tracing()
+
+
+def _run_sampling_checks(args: argparse.Namespace, settings: Any) -> dict[str, object]:
+    probes = []
+    with tempfile.TemporaryDirectory(prefix="fleet-mlflow-sampling-") as temporary:
+        for ratio in (0, 1):
+            output = Path(temporary) / f"sampling-{ratio}.json"
+            command = [
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--backend",
+                args.backend,
+                "--tracking-uri",
+                settings.mlflow_tracking_uri,
+                "--experiment-name",
+                settings.mlflow_experiment_name,
+                "--sampling-probe",
+                str(ratio),
+                "--output",
+                str(output),
+            ]
+            for option in ("trace_catalog", "trace_schema", "trace_table_prefix", "sql_warehouse_id"):
+                if value := getattr(args, option, None):
+                    command.extend(("--" + option.replace("_", "-"), value))
+            try:
+                completed = subprocess.run(
+                    command,
+                    cwd=_REPO_ROOT,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=90,
+                    check=False,
+                )
+                if completed.returncode != 0 or not output.exists() or output.stat().st_size > 4096:
+                    raise CertificationError("sampling probe did not complete")
+                probes.append(json.loads(output.read_text()))
+            except (OSError, subprocess.TimeoutExpired, ValueError, CertificationError) as exc:
+                probes.append(_scenario("failed", ratio=ratio, error_category=type(exc).__name__))
+    return _scenario(
+        "passed" if all(p.get("status") == "passed" for p in probes) else "failed",
+        scope="fresh-process sampling policies against the selected backend",
+        probes=probes,
+    )
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
@@ -373,9 +579,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         },
         "scenarios": {},
         "settlement": {
-            "exporter_failures_change_turn_settlement": False,
-            "claim_heartbeat_delay_proof": "unexercised",
-            "cancellation_delay_proof": "unexercised",
+            "scope": "Turn and SDK/lifecycle fault tests; not a live database heartbeat proof",
         },
     }
 
@@ -414,14 +618,18 @@ def run(args: argparse.Namespace) -> dict[str, object]:
                 **linkage,
             ),
             "token_aggregation": _scenario(
-                "unknown" if trace_result["token_usage"] is None else "passed",
+                "passed" if _expected_token_usage(trace_result["token_usage"]) else "failed",
                 usage_present=trace_result["token_usage"] is not None,
             ),
             "concurrent_sessions": _scenario("passed" if concurrent else "failed"),
             "repeated_lifespans": _scenario("passed" if repeated else "failed"),
             "unreachable_backend": _scenario("passed" if unreachable else "failed"),
-            "sampling_changes": _scenario("unexercised", reason="requires a separate sampling campaign"),
-            **_unexercised_scenarios(),
+            "sampling_changes": _run_sampling_checks(args, settings),
+            **(
+                _run_fault_checks()
+                if args.fault_checks
+                else {name: _scenario("unexercised", reason="requires --fault-checks") for name in _FAULT_TESTS}
+            ),
         }
         receipt["scenarios"] = scenarios
         receipt["export"] = {
@@ -438,10 +646,16 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "trace_id_present": linkage["trace_id_matches"],
             "span_linkage_checked": linkage["child_spans_linked"],
         }
-        receipt["promotion"] = {
-            "eligible": all(item.get("status") == "passed" for item in scenarios.values()),
-            "reason": "all_required_scenarios_must_pass",
+        passed = all(item.get("status") == "passed" for item in scenarios.values())
+        clean = not cast(dict[str, object], receipt["candidate"])["dirty"]
+        receipt["certification"] = {
+            "passed": passed,
+            "scope": "selected backend export and fresh-process sampling plus isolated SDK/lifecycle fault injection",
         }
+        reason = "clean_candidate" if clean else "dirty_candidate"
+        if not passed:
+            reason = "scenario_failed_or_unexercised"
+        receipt["promotion"] = {"eligible": passed and clean, "reason": reason}
     finally:
         flush_tracing()
         reset_tracing()
@@ -457,6 +671,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--trace-schema")
     parser.add_argument("--trace-table-prefix")
     parser.add_argument("--sql-warehouse-id")
+    parser.add_argument("--fault-checks", action="store_true", help="Run isolated SDK/lifecycle fault tests")
+    parser.add_argument("--sampling-probe", type=int, choices=(0, 1), help=argparse.SUPPRESS)
     parser.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -464,13 +680,21 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.sampling_probe is not None:
+            _require_live()
+            load_dotenv(_REPO_ROOT / ".env", override=False)
+            proof = _sampling_probe(_settings_for_backend(args), args.sampling_probe)
+            _write_once(args.output, proof)
+            return 0 if proof["status"] == "passed" else 2
         receipt = run(args)
         body = json.dumps(receipt, indent=2, sort_keys=True).encode("utf-8")
         digest = hashlib.sha256(body + b"\n").hexdigest()
         receipt["receipt_sha256"] = digest
         _write_once(args.output, receipt)
-        print(json.dumps({"schema": _SCHEMA, "status": "ok", "receipt_sha256": digest}, sort_keys=True))
-        return 0
+        passed = cast(dict[str, object], receipt.get("certification", {})).get("passed") is True
+        status = "passed" if passed else "incomplete"
+        print(json.dumps({"schema": _SCHEMA, "status": status, "receipt_sha256": digest}, sort_keys=True))
+        return 0 if passed else 2
     except Exception as exc:
         print(json.dumps({"schema": _SCHEMA, "status": "failed", "error_category": type(exc).__name__}))
         return 1

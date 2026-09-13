@@ -12,7 +12,13 @@ from pathlib import Path
 
 from fleet_rlm.config.loader import load_runtime_settings, require_live_execution
 from fleet_rlm.daytona.platform import build_daytona_client
-from fleet_rlm.daytona.warm_pool import WarmPoolCampaign, WarmPoolError, WarmPoolPlan, reconcile_warm_pool
+from fleet_rlm.daytona.warm_pool import (
+    WarmPoolCampaign,
+    WarmPoolError,
+    WarmPoolPlan,
+    WarmPoolUnavailableError,
+    reconcile_warm_pool,
+)
 from fleet_rlm.persistence.database import (
     create_async_engine_from_url,
     create_session_factory,
@@ -122,6 +128,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         result = asyncio.run(_run(args))
+    except WarmPoolUnavailableError:
+        print("Daytona warm-pool API is unavailable; confirm organization enablement with support@daytona.io.")
+        return 2
     except Exception:
         print("Daytona warm-pool operation could not be completed safely.")
         return 2

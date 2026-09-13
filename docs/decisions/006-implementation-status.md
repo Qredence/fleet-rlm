@@ -16,6 +16,89 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### P5.3/P5.4 closeout checks (2026-09-13)
+
+- **P5.3 blocked:** the current Daytona warm-pool guide explicitly requires
+  organization enablement through support. The pinned management API returns
+  404 before any mutation. The operator-selected `us`/one policy is preserved;
+  activation and warm eligibility/quota/cleanliness/latency/cost/cleanup proof
+  remain open. The provider boundary now exposes a safe operator action rather
+  than a raw infrastructure failure. No manual pool replacement was built.
+- **P5.4 local verification passed:**
+  `.scratch/p53-p54-closeout/mlflow-full-r2.json` reports 18/18 scenarios passed
+  against local MLflow in a dedicated certification experiment. It combines
+  live export/privacy/feedback/concurrent-Session checks, fresh-process
+  persisted sampling checks, and existing deterministic SDK/lifecycle fault
+  tests. Injected faults are labeled as such, not claimed as live-server
+  outages or production database-heartbeat certification.
+- The deterministic certificate now exercises the Fleet LM callback, requires
+  exact 6 input / 4 output / 10 total tokens, and checks fetched trace metadata.
+  Its two Session scopes genuinely overlap; feedback from a foreign Session
+  is rejected. Zero-sampling persists zero traces and full-sampling persists
+  all three attempted traces. Missing, skipped, failed, or timed-out fault tests
+  cannot pass through receipt assembly.
+- No second observability lifecycle owner was added. SDK fault injection lives
+  in the existing behavior-owning tests; the certificate only runs those tests
+  and checks their machine-readable outcomes. The main command returns a
+  nonzero status for incomplete evidence.
+- Evidence is from the modified working tree based on `b527b9150`, not an
+  immutable release candidate. `certification.passed=true` is separate from
+  `promotion.eligible=false` (`dirty_candidate`). P6.1 retains the clean-candidate
+  requirement; the earlier quality evaluation's evidence-coverage miss is not
+  relabeled passing.
+- Full `make check` passed (79.24% backend coverage, 543 TUI tests), as did focused
+  certificate/fault/lifecycle/warm-pool regressions. No commits or pushes were
+  made for this closeout.
+
+### Operator recursion and local MLflow setup (2026-09-13)
+
+The operator explicitly requested recursion enabled and a size-one SemanticChild
+warm pool in `us`, retaining local MLflow. `config/fleet.toml` now expresses that
+policy. This supersedes the operational default-disable choice, **not** the
+historical Phase 4 failed retain gates. Existing processes require restart to
+load the new policy; the verification used a fresh disposable FastAPI process.
+
+Evidence under `.scratch/operator-warm-mlflow/` is from an uncommitted working
+candidate based on `b527b9150`; it is diagnostic evidence, not clean-candidate
+certification:
+
+- Warm-pool reconciliation exposed a local validator that accepted only
+  64-character digests despite receiving 40-character Git object IDs. Both full
+  Git formats are now accepted, with invalid lengths rejected before provider
+  access. After that fix the pinned provider warm-pool listing endpoint returns
+  404. **No provider pool or warm hit is verified.** No pool mutation occurred
+  after that listing failure; no alternate provisioning path was substituted.
+- Observed gateway usage contains nullable optional token-detail blocks. The
+  callback now omits absent fields before validation rather than discarding all
+  valid counts. A live DSPy callback/export probe records both standard LM-span
+  usage and MLflow's trace aggregate (`token-export.json`).
+- Created the five-case local entity-store dataset and registered the canonical
+  correctness/evidence judges against a probe-verified local gateway route.
+  The first route timed out and was not reported passing. Existing unrelated
+  scorer registrations were retained. Deterministic `response_present` remains
+  source-managed: MLflow rejects local arbitrary-code scorer registration.
+- Fixed evaluation dataset lookup to use the selected experiment and dataset
+  ID, since server-global name lookup was ambiguous. The three-case FastAPI
+  evaluation completed in run `9c5ec8d09b664ee6957a2fcbbafb06cc`: correctness
+  3/3, evidence coverage 2/3, response present 3/3. **The quality gate remains
+  incomplete.** The extra evaluation warmup is not a fourth scored case.
+- Four execution traces in the run window have observed token aggregates,
+  valid parentage and Session linkage (`mlflow-verification.json`). Dataset
+  provenance/snapshot tags, evaluation scope tags, and derived model/tool/
+  latency/token trace tags were persisted. Run-window association is not a
+  per-row backend-trace linkage claim. Annotation is not continuous monitoring.
+- Disposable API process and Volume cleanup succeeded. Read-only provider
+  inventory found no remaining Sandboxes matching the four evaluation Session
+  labels (`cleanup-verification.json`). Lifecycle telemetry was not retained
+  before the disposable service removed its work directory; inventory evidence
+  is reported separately rather than manufacturing a lifecycle receipt.
+- Optional prompt-registry registration returned `RestException`; the failed
+  receipt is retained. Prompt registration, human-aligned judges, continuous
+  monitoring, and warm-hit certification are not claimed complete.
+
+`make check` passed with 79.23% backend coverage and 543 TUI tests; generated
+profile/API checks and focused token, dataset, and warm-pool regressions passed.
+
 ### Phase 5 closeout execution (2026-09-12, candidate `02af9a300`)
 
 Full authorization was granted (paid provider/model, database, deployment).

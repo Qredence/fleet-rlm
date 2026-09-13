@@ -1542,3 +1542,27 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
     assert prediction.trajectory[0]["code"] == action1
     assert "found:test-key" in prediction.trajectory[0]["output"]
     assert prediction.trajectory[1]["code"] == action2
+
+
+def test_lm_telemetry_preserves_counts_with_null_optional_usage_details() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry, _mlflow_token_usage
+
+    outputs = ["42"]
+    lm = SimpleNamespace(
+        history=[
+            {
+                "outputs": outputs,
+                "usage": {
+                    "prompt_tokens": 38,
+                    "completion_tokens": 43,
+                    "total_tokens": 81,
+                    "completion_tokens_details": None,
+                    "prompt_tokens_details": {"cached_tokens": 0},
+                },
+            }
+        ]
+    )
+    usage = _latest_lm_telemetry(lm, 0, outputs)
+    assert _mlflow_token_usage(usage) == {"input_tokens": 38, "output_tokens": 43, "total_tokens": 81}

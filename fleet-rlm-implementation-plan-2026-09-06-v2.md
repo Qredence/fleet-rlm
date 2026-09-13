@@ -805,7 +805,16 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 # Phase 5 - Operational certification without feature growth
 
-**Status: substantially complete (2026-09-12, candidate `02af9a300`).**
+**Status: operational closeout in progress (2026-09-13).** P5.4 local-backend
+verification now passes all 18 scenarios, including injected fault/lifecycle
+checks and fresh-process sampling. P5.3 activation remains blocked: Daytona
+requires organization-level warm-pool enablement and the configured management
+endpoint returns 404. The operator selected recursion on and warm capacity
+size one in `us`; this is an operational override, not new Phase 4 value proof.
+Latest evidence comes from an uncommitted working candidate and is explicitly
+not promotion-eligible. See the updated P5.3/P5.4 entries below.
+
+**Status (earlier): substantially complete (2026-09-12, candidate `02af9a300`).**
 Aggregate snapshot certification, exclusive-database contention/query plans,
 configured-loopback MLflow (partial), bounded FastAPI smoke with trace linkage,
 snapshot promotion with doctor pass, and cold-path evidence are sealed.
@@ -893,10 +902,21 @@ local gate nor successful external dependency probes convert it into a pass.
 
 ## P5.3 - Keep warm pools off the critical path
 
+**Status: blocked on provider enablement (2026-09-13).** The operator explicitly
+overrode the original disabled policy with size one in `us` and recursion on.
+The pinned SDK's `GET /warm-pools` returns 404. Current
+[Daytona documentation](https://www.daytona.io/docs/en/warm-pools/)
+requires organization enablement via `support@daytona.io`; confirm that
+prerequisite before retrying reconciliation. No provider pool or warm hit is
+verified, and no substitute capacity implementation was added. After enablement,
+the eligibility/cleanliness/quota/latency/cost/cleanup canary remains required.
+Receipts: `.scratch/p53-p54-closeout/warm-api-preflight.json` and
+`warm-provider-prerequisite.json` in the same directory.
+
 **Rationale:** Warm-pool code is optional infrastructure and should not drive runtime architecture.
 
 **Implement:**
-- retain `warm_pool_enabled=false` / size zero by default;
+- original plan: disabled/zero by default; current operator override is enabled/one, with activation still gated;
 - do not expand warm-pool ownership/reconciliation features before Phase 4 proves recurring child demand;
 - if recursion value is low, consider deleting child warm-pool support entirely;
 - if value is high, run one explicit canary for eligibility, clean-instance behavior, quota, latency benefit, and cost.
@@ -906,6 +926,23 @@ local gate nor successful external dependency probes convert it into a pass.
 **Done when:** capacity complexity exists only for demonstrated demand.
 
 ## P5.4 - Simplify and certify MLflow
+
+**Status: local-backend verification complete (2026-09-13); clean promotion
+candidate still required.** `scripts/benchmarks/certify_mlflow.py --fault-checks`
+passes all 18 checks against the selected loopback backend in the isolated
+`fleet-p54-certification` experiment. Receipt:
+`.scratch/p53-p54-closeout/mlflow-full-r2.json`.
+
+Live checks cover export, exact token aggregation, privacy, feedback ownership,
+overlapping Sessions, repeated setup, an unavailable endpoint, and persisted
+sampling outcomes in fresh processes. Expired credentials, queue saturation,
+slow export, bounded retained flush, event-loop/cancellation behavior, and
+HTTP feedback/lifecycle contracts are isolated deterministic fault injections
+against the pinned SDK and Fleet owners, not induced outages of the running
+backend. The receipt reports those scopes separately and has
+`certification.passed=true`, `promotion.eligible=false` (`dirty_candidate`).
+P6.1 must reproduce required gates on the clean candidate. This is not a live
+DB-heartbeat, managed-MLflow, aligned-judge, or agent-quality certification.
 
 **Rationale:** Observability should be optional and small enough that execution remains understandable without it.
 

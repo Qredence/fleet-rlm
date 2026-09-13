@@ -235,3 +235,28 @@ def test_export_failure_keeps_span_content_out_of_logs(monkeypatch, caplog):
         manager.pop_trace(otel.context.trace_id)
         provider.shutdown()
     assert "sentinel-private-question" not in evidence
+
+
+@pytest.mark.usefixtures("async_export_env")
+def test_slow_backend_does_not_block_span_end(monkeypatch):
+    """Hold the real SDK exporter at its backend boundary until the caller returns."""
+    entered, release = threading.Event(), threading.Event()
+
+    class SlowClient(_FailingClient):
+        def log_spans(self, *_args: Any, **_kwargs: Any) -> None:
+            entered.set()
+            assert release.wait(5)
+
+        start_trace = log_spans
+        _upload_trace_data = log_spans
+
+    exporter = _outage_exporter(monkeypatch, ConnectionError("unused"))
+    monkeypatch.setattr(exporter, "_client", SlowClient(ConnectionError("unused")))
+    try:
+        elapsed = _end_registered_trace_through(exporter)
+        assert entered.wait(1)
+        assert elapsed < 1.0
+        assert not release.is_set()
+    finally:
+        release.set()
+        exporter._async_queue.flush(terminate=True)
