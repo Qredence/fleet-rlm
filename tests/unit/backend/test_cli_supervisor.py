@@ -593,14 +593,14 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
 
     backend_command, backend_options = popen_calls[0]
     assert database_calls == [tmp_path]
-    assert backend_command[-6:] == [
-        "fleet_rlm.main:app",
+    assert backend_command[-5:] == [
         "--host",
         "127.0.0.1",
         "--port",
         "8123",
         "--reload",
     ]
+    assert backend_command[:3] == [supervisor.sys.executable, "-m", "fleet_rlm.cli.server"]
     assert backend_options["start_new_session"] is True
     assert "FLEET_CONFIG_PROFILE" not in backend_options["env"]  # type: ignore[index]
     assert "FLEET_RUN_ENVIRONMENT" not in backend_options["env"]  # type: ignore[index]

@@ -226,6 +226,7 @@ def test_fleet_runtime_command_selects_environment_and_supervises_pi_tui(
             "reload": False,
             "run_environment": expected_environment,
             "tui_args": ("--session", "session-id"),
+            "allow_non_loopback_bind": True,
         }
     ]
 
@@ -247,7 +248,15 @@ def test_fleet_web_explicit_profile_uses_profile_aware_launcher(monkeypatch: pyt
 
     fleet_main(["web", "--profile", "phase4-campaign", "--port", "8124"])
 
-    assert calls == [{"host": "127.0.0.1", "port": 8124, "reload": False, "profile": "phase4-campaign"}]
+    assert calls == [
+        {
+            "host": "127.0.0.1",
+            "port": 8124,
+            "reload": False,
+            "profile": "phase4-campaign",
+            "allow_non_loopback": False,
+        }
+    ]
 
 
 def test_profile_aware_server_loads_settings_and_builds_app_before_binding(
@@ -290,9 +299,7 @@ def test_profile_reload_rejection_happens_before_uvicorn_import(monkeypatch: pyt
 
 
 def test_explicit_profile_and_reload_fail_before_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.cli import server
-
-    monkeypatch.setattr(server, "serve_api", lambda **_kwargs: pytest.fail("launcher must not run"))
+    monkeypatch.setitem(sys.modules, "uvicorn", None)
 
     with pytest.raises(SystemExit) as error:
         fleet_main(["web", "--profile", "phase4-campaign", "--reload"])
@@ -314,6 +321,7 @@ def test_fleet_cli_forwards_explicit_profile_to_supervisor(monkeypatch: pytest.M
             "run_environment": "daytona",
             "tui_args": (),
             "profile": "phase4-campaign",
+            "allow_non_loopback_bind": False,
         }
     ]
 

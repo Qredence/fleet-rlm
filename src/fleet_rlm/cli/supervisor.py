@@ -20,6 +20,8 @@ from pathlib import Path
 from types import FrameType
 from typing import TYPE_CHECKING, cast
 
+from fleet_rlm.cli.bind_safety import UnsafeBindError
+from fleet_rlm.cli.server import ProfileReloadError, validate_serve_launch
 from fleet_rlm.config.loader import active_profile, load_runtime_settings
 from fleet_rlm.persistence.database import ensure_database_compatible
 
@@ -429,10 +431,18 @@ def supervise(
     profile: str | None = None,
     tui_args: Sequence[str] = (),
     repo_root: Path | None = None,
+    allow_non_loopback_bind: bool = False,
 ) -> None:
     """Run the selected backend and repository pi-tui client together."""
-    if profile is not None and reload:
-        raise SupervisorError("--reload cannot be combined with an explicit --profile")
+    try:
+        validate_serve_launch(
+            host=host,
+            reload=reload,
+            profile=profile,
+            allow_non_loopback=allow_non_loopback_bind,
+        )
+    except (ProfileReloadError, UnsafeBindError) as exc:
+        raise SupervisorError(str(exc)) from exc
     root = repo_root or Path(__file__).resolve().parents[3]
     workspace, pnpm = _validate_prerequisites(root)
     _require_available_port(host, port)
@@ -448,33 +458,21 @@ def supervise(
     log_path = logs / f"backend-{timestamp}.log"
     latest_log_path = logs / "latest.log"
     api_url = _api_url(host, port)
-    if profile is None:
-        backend_command = [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "fleet_rlm.main:app",
-            "--host",
-            host,
-            "--port",
-            str(port),
-        ]
-        if reload:
-            backend_command.append("--reload")
-    else:
-        backend_command = [
-            sys.executable,
-            "-m",
-            "fleet_rlm.cli.server",
-            "--host",
-            host,
-            "--port",
-            str(port),
-            "--profile",
-            profile,
-        ]
-        if reload:
-            backend_command.append("--reload")
+    backend_command = [
+        sys.executable,
+        "-m",
+        "fleet_rlm.cli.server",
+        "--host",
+        host,
+        "--port",
+        str(port),
+    ]
+    if reload:
+        backend_command.append("--reload")
+    if profile is not None:
+        backend_command.extend(["--profile", profile])
+    if allow_non_loopback_bind:
+        backend_command.append("--allow-non-loopback-bind")
     backend_env = dict(os.environ)
     # The backend resolves the committed TOML policy itself; do not pin an
     # ambient profile override into the child process environment.
