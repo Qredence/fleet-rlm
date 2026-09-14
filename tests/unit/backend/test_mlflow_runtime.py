@@ -441,3 +441,48 @@ async def test_concurrent_close_has_one_flush_and_reset() -> None:
         release.set()
         await second
     assert calls == ["flush", "reset"]
+
+
+@pytest.mark.asyncio
+async def test_real_export_queue_stall_preserves_event_loop_and_close_cancellation(monkeypatch) -> None:
+    """A blocked SDK queue does not consume the event loop or lose drain ownership."""
+    from mlflow.tracing.export.async_export_queue import AsyncTraceExportQueue, Task
+
+    monkeypatch.setenv("MLFLOW_ASYNC_TRACE_LOGGING_MAX_WORKERS", "1")
+    monkeypatch.setenv("MLFLOW_ASYNC_TRACE_LOGGING_MAX_QUEUE_SIZE", "4")
+    queue = AsyncTraceExportQueue()
+    entered, release, reset_done = Event(), Event(), Event()
+
+    def blocked_export() -> None:
+        entered.set()
+        release.wait(5)
+
+    runtime = MLflowRuntime(
+        _settings(mlflow_trace_shutdown_seconds=0.02),
+        _configure=lambda _: True,
+        _flush=lambda: queue.flush(terminate=True),
+        _reset=reset_done.set,
+    )
+    await runtime.start()
+    queue.put(Task(handler=blocked_export, args=()))
+    close_task = None
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        close_task = asyncio.create_task(runtime.close())
+        # A loop heartbeat must progress while the SDK drain remains blocked.
+        heartbeat = asyncio.Event()
+        asyncio.get_running_loop().call_soon(heartbeat.set)
+        await asyncio.wait_for(heartbeat.wait(), timeout=0.5)
+        close_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(close_task, timeout=0.5)
+        await asyncio.wait_for(runtime.close(), timeout=0.5)
+        assert runtime.flush_pending
+        assert not reset_done.is_set()
+    finally:
+        release.set()
+        if close_task is not None:
+            await asyncio.gather(close_task, return_exceptions=True)
+        await runtime.close()
+        assert await asyncio.to_thread(reset_done.wait, 2)
+    assert not runtime.flush_pending

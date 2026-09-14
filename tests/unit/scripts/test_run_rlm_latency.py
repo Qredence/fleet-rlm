@@ -726,3 +726,79 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
     assert aggregate["sample_count"] == 1
     assert aggregate["error_rate"] == 1.0
     assert aggregate["adapter_parse_error_count"] == 1
+
+
+def test_quality_dataset_is_scoped_to_selected_experiment() -> None:
+    from types import SimpleNamespace
+
+    from scripts.benchmarks.run_rlm_latency import DATASET_NAME, _quality_dataset
+
+    calls = []
+    selected = SimpleNamespace(dataset_id="selected", name=DATASET_NAME)
+    datasets = SimpleNamespace(
+        search_datasets=lambda ids, **kwargs: calls.append((ids, kwargs)) or [selected],
+        get_dataset=lambda **kwargs: calls.append(kwargs) or selected,
+    )
+    assert _quality_dataset(datasets, "http://127.0.0.1:5001", "1") is selected
+    assert calls == [(["1"], {"filter_string": f"name = '{DATASET_NAME}'"}), {"dataset_id": "selected"}]
+
+
+def test_quality_dataset_scopes_databricks_lookup_to_selected_experiment() -> None:
+    from types import SimpleNamespace
+
+    from scripts.benchmarks.run_rlm_latency import _evaluation_dataset_name, _quality_dataset
+
+    calls = []
+    selected = SimpleNamespace(dataset_id="selected", name=_evaluation_dataset_name("databricks"))
+    datasets = SimpleNamespace(
+        search_datasets=lambda ids, **kwargs: calls.append((ids, kwargs)) or [selected],
+        get_dataset=lambda **kwargs: calls.append(kwargs) or selected,
+    )
+    assert _quality_dataset(datasets, "databricks", "experiment-1") is selected
+    assert calls == [(["experiment-1"], {}), {"dataset_id": "selected"}]
+
+
+@pytest.mark.parametrize("count", [0, 2])
+def test_quality_dataset_rejects_missing_or_ambiguous_matches(count: int) -> None:
+    from types import SimpleNamespace
+
+    from scripts.benchmarks.run_rlm_latency import DATASET_NAME, BenchmarkError, _quality_dataset
+
+    datasets = SimpleNamespace(
+        search_datasets=lambda _ids, **_kwargs: [SimpleNamespace(name=DATASET_NAME)] * count,
+    )
+    with pytest.raises(BenchmarkError, match="expected one quality dataset"):
+        _quality_dataset(datasets, "http://127.0.0.1:5001", "1")
+
+
+@pytest.mark.parametrize("count", [1, 2])
+def test_prepare_evaluation_searches_all_ages_and_rejects_duplicates(monkeypatch, count):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import mlflow
+    from mlflow.genai import datasets
+
+    from scripts.benchmarks import run_rlm_latency as benchmark
+
+    selected = SimpleNamespace(dataset_id="old-dataset", name=benchmark.DATASET_NAME, to_df=lambda: [1])
+
+    def search(ids, **kwargs):
+        assert ids == ["1"]
+        # An explicit name filter overrides MLflow's implicit seven-day window.
+        assert kwargs == {"filter_string": f"name = '{benchmark.DATASET_NAME}'"}
+        return [selected] * count
+
+    create = Mock(side_effect=AssertionError("must reuse the old dataset"))
+    monkeypatch.setattr(mlflow, "set_tracking_uri", lambda _: None)
+    monkeypatch.setattr(mlflow, "set_experiment", lambda **_: None)
+    monkeypatch.setattr(datasets, "search_datasets", search)
+    monkeypatch.setattr(datasets, "create_dataset", create)
+    monkeypatch.setattr(benchmark, "ensure_registered", lambda *_, **__: None)
+    args = SimpleNamespace(mlflow_url="http://127.0.0.1:5001", experiment_id="1", judge_model="gateway:/test")
+    if count == 2:
+        with pytest.raises(benchmark.BenchmarkError, match="multiple quality datasets"):
+            benchmark.prepare_evaluation(args)
+    else:
+        assert benchmark.prepare_evaluation(args)["dataset_id"] == "old-dataset"
+    create.assert_not_called()

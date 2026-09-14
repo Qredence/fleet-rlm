@@ -420,3 +420,39 @@ async def test_explicit_adoption_can_reactivate_retired_exact_pool() -> None:
     assert store.ownership is not None
     assert store.ownership.status == "owned"
     assert store.ownership.candidate_sha == "b" * 64
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("length", [40, 64])
+async def test_check_accepts_full_git_object_ids(length):
+    plan = WarmPoolPlan.from_settings(_settings(daytona_warm_pool_enabled=True, daytona_warm_pool_size=1))
+    result = await reconcile_warm_pool(Client(), plan, candidate_sha="a" * length)
+    assert result.action == "create"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidate", ["a" * 39, "a" * 41, "a" * 63, "a" * 65, "g" * 40])
+async def test_check_rejects_invalid_git_object_ids_before_provider_access(candidate):
+    client = Client()
+    plan = WarmPoolPlan.from_settings(_settings(daytona_warm_pool_enabled=True, daytona_warm_pool_size=1))
+    with pytest.raises(WarmPoolError, match="candidate SHA"):
+        await reconcile_warm_pool(client, plan, candidate_sha=candidate)
+    assert client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_unavailable_warm_pool_api_fails_before_mutation():
+    from fleet_rlm.daytona.warm_pool import WarmPoolUnavailableError
+
+    class UnavailableClient(Client):
+        async def list(self):
+            error = RuntimeError("private provider diagnostic")
+            error.status_code = 404
+            raise error
+
+    client = UnavailableClient()
+    plan = WarmPoolPlan.from_settings(_settings(daytona_warm_pool_enabled=True, daytona_warm_pool_size=1))
+    with pytest.raises(WarmPoolUnavailableError, match="confirm organization enablement") as caught:
+        await reconcile_warm_pool(client, plan, apply=True, campaign=_campaign(), candidate_sha="a" * 40)
+    assert client.calls == []
+    assert "private provider diagnostic" not in str(caught.value)

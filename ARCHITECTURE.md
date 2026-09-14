@@ -25,9 +25,11 @@ Native Daytona interpreter cutover is not on the production path: context
 deletion does not contain detached process-session children, and the native
 worker/lease branch has been removed. Turn preparation and the RLM runner
 accept only retained broker execution. Fleet child RLM tools (`rlm_query` /
-`rlm_query_batched`) are opt-in: `[defaults.rlm] recursion_enabled = false`
-in the shipped policy. Native `llm_query` remains the semantic
-delegation path. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
+`rlm_query_batched`) remain policy-controlled: the operator-selected shipped
+policy currently enables recursion. Native `llm_query` remains available for
+semantic delegation. This operational choice does not supersede the historical
+Phase 4 failed retain gates. Clean SemanticChild warm capacity is configured
+separately; enabling its policy does not provision a provider pool. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
 owns dated evidence and remaining gates; this page describes current ownership.
 
 ## System model

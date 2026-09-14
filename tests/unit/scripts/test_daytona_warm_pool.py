@@ -57,3 +57,17 @@ async def test_disabled_check_returns_without_live_gate(monkeypatch: pytest.Monk
 
     assert result["action"] == "disabled"
     assert result["desired_size"] == 0
+
+
+def test_unavailable_pool_api_has_safe_operator_action(monkeypatch, capsys):
+    from fleet_rlm.daytona.warm_pool import WarmPoolUnavailableError
+
+    async def unavailable(_args):
+        raise WarmPoolUnavailableError("private backend diagnostic")
+
+    monkeypatch.setattr(daytona_warm_pool, "_run", unavailable)
+    assert daytona_warm_pool.main(["check"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "support@daytona.io" in captured.err
+    assert "private backend diagnostic" not in captured.err

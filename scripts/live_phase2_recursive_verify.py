@@ -32,8 +32,8 @@ _CANDIDATE_PATHS = (
 )
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _EVIDENCE_ROOT = _REPO_ROOT / ".scratch" / "fleet-rlm-recursive-runtime" / "evidence"
-_LIVE_ROOT_MODEL = "databricks-deepseek-v4-flash-0731"
-_LIVE_SUB_MODEL = "databricks-deepseek-v4-flash-0731"
+_LIVE_ROOT_MODEL = "databricks-deepseek-v4-1-flash"
+_LIVE_SUB_MODEL = "databricks-deepseek-v4-1-flash"
 _FAILURE_CATEGORIES = frozenset(
     {
         "precondition_failed",
@@ -47,7 +47,7 @@ _FAILURE_PHASES = frozenset({"policy", "candidate", "scenario", "receipt", "rece
 _REQUIRED_ASSERTIONS = frozenset(
     {
         "dedicated_child_sandbox",
-        "same_volume_sibling_scope",
+        "child_isolation_scope",
         "root_marker_absent_in_child",
         "root_continuity",
         "child_typed_submit",

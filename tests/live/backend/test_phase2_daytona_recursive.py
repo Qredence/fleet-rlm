@@ -33,8 +33,8 @@ _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
 
 
@@ -112,6 +112,7 @@ class _ProofLedger:
 class _ChildEvidence:
     created: int = 0
     same_volume_sibling_scope: bool = False
+    volumeless_semantic_isolation: bool = False
     cleanup_succeeded: bool = False
     child_duration_ms: int = 0
     started_at: float | None = None
@@ -134,6 +135,8 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "phase2-fleet.toml"
+    # Keep this canary tied to the shipped recursive profile while using a
+    # copied policy so its database and snapshot overrides stay isolated.
     copied_policy.write_text(
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
@@ -194,6 +197,13 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         expected_scope = f"recursive/{kwargs['workspace_id']}/{kwargs['run_id']}/{kwargs['call_index']}"
         evidence.same_volume_sibling_scope = (
             lease.volume_subpath == expected_scope and lease.volume_id == kwargs["volume_id"]
+        )
+        # P2.7 lean SemanticChild sandboxes are Volume-less by contract: no
+        # volume mount means no sibling scope to share. Isolation by absence
+        # is the expected scope for that profile, not a scope violation.
+        evidence.volumeless_semantic_isolation = lease.volume_id in (None, "") and lease.volume_subpath in (
+            None,
+            "",
         )
         close = lease._close
 
@@ -357,7 +367,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
             assert ledger.calls == 1
             assert child_evidence.created == 1
-            assert child_evidence.same_volume_sibling_scope
+            assert child_evidence.same_volume_sibling_scope or child_evidence.volumeless_semantic_isolation
             assert child_evidence.cleanup_succeeded
             pending_receipt = {
                 "schema": _RECEIPT_SCHEMA,
@@ -367,7 +377,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                 },
                 "assertions": {
                     "dedicated_child_sandbox": True,
-                    "same_volume_sibling_scope": True,
+                    "child_isolation_scope": True,
                     "root_marker_absent_in_child": ledger.root_marker_absent_in_child,
                     "root_continuity": ledger.root_continuity,
                     "child_typed_submit": completion["termination_mode"] == "typed_submit",

@@ -16,6 +16,210 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### P5.3/P5.4 closeout checks (2026-09-13)
+
+- **P5.3 blocked:** the current Daytona warm-pool guide explicitly requires
+  organization enablement through support. The pinned management API returns
+  404 before any mutation. The operator-selected `us`/one policy is preserved;
+  activation and warm eligibility/quota/cleanliness/latency/cost/cleanup proof
+  remain open. The provider boundary now exposes a safe operator action rather
+  than a raw infrastructure failure. No manual pool replacement was built.
+- **P5.4 local verification passed:**
+  `.scratch/p53-p54-closeout/mlflow-full-r2.json` reports 18/18 scenarios passed
+  against local MLflow in a dedicated certification experiment. It combines
+  live export/privacy/feedback/concurrent-Session checks, fresh-process
+  persisted sampling checks, and existing deterministic SDK/lifecycle fault
+  tests. Injected faults are labeled as such, not claimed as live-server
+  outages or production database-heartbeat certification.
+- The deterministic certificate now exercises the Fleet LM callback, requires
+  exact 6 input / 4 output / 10 total tokens, and checks fetched trace metadata.
+  Its two Session scopes genuinely overlap; feedback from a foreign Session
+  is rejected. Zero-sampling persists zero traces and full-sampling persists
+  all three attempted traces. Missing, skipped, failed, or timed-out fault tests
+  cannot pass through receipt assembly.
+- No second observability lifecycle owner was added. SDK fault injection lives
+  in the existing behavior-owning tests; the certificate only runs those tests
+  and checks their machine-readable outcomes. The main command returns a
+  nonzero status for incomplete evidence.
+- Evidence is from the modified working tree based on `b527b9150`, not an
+  immutable release candidate. `certification.passed=true` is separate from
+  `promotion.eligible=false` (`dirty_candidate`). P6.1 retains the clean-candidate
+  requirement; the earlier quality evaluation's evidence-coverage miss is not
+  relabeled passing.
+- Full `make check` passed (79.24% backend coverage, 543 TUI tests), as did focused
+  certificate/fault/lifecycle/warm-pool regressions. No commits or pushes were
+  made for this closeout.
+
+### Operator recursion and local MLflow setup (2026-09-13)
+
+The operator explicitly requested recursion enabled and a size-one SemanticChild
+warm pool in `us`, retaining local MLflow. `config/fleet.toml` now expresses that
+policy. This supersedes the operational default-disable choice, **not** the
+historical Phase 4 failed retain gates. Existing processes require restart to
+load the new policy; the verification used a fresh disposable FastAPI process.
+
+Evidence under `.scratch/operator-warm-mlflow/` is from an uncommitted working
+candidate based on `b527b9150`; it is diagnostic evidence, not clean-candidate
+certification:
+
+- Warm-pool reconciliation exposed a local validator that accepted only
+  64-character digests despite receiving 40-character Git object IDs. Both full
+  Git formats are now accepted, with invalid lengths rejected before provider
+  access. After that fix the pinned provider warm-pool listing endpoint returns
+  404. **No provider pool or warm hit is verified.** No pool mutation occurred
+  after that listing failure; no alternate provisioning path was substituted.
+- Observed gateway usage contains nullable optional token-detail blocks. The
+  callback now omits absent fields before validation rather than discarding all
+  valid counts. A live DSPy callback/export probe records both standard LM-span
+  usage and MLflow's trace aggregate (`token-export.json`).
+- Created the five-case local entity-store dataset and registered the canonical
+  correctness/evidence judges against a probe-verified local gateway route.
+  The first route timed out and was not reported passing. Existing unrelated
+  scorer registrations were retained. Deterministic `response_present` remains
+  source-managed: MLflow rejects local arbitrary-code scorer registration.
+- Fixed evaluation dataset lookup to use the selected experiment and dataset
+  ID, since server-global name lookup was ambiguous. The three-case FastAPI
+  evaluation completed in run `9c5ec8d09b664ee6957a2fcbbafb06cc`: correctness
+  3/3, evidence coverage 2/3, response present 3/3. **The quality gate remains
+  incomplete.** The extra evaluation warmup is not a fourth scored case.
+- Four execution traces in the run window have observed token aggregates,
+  valid parentage and Session linkage (`mlflow-verification.json`). Dataset
+  provenance/snapshot tags, evaluation scope tags, and derived model/tool/
+  latency/token trace tags were persisted. Run-window association is not a
+  per-row backend-trace linkage claim. Annotation is not continuous monitoring.
+- Disposable API process and Volume cleanup succeeded. Read-only provider
+  inventory found no remaining Sandboxes matching the four evaluation Session
+  labels (`cleanup-verification.json`). Lifecycle telemetry was not retained
+  before the disposable service removed its work directory; inventory evidence
+  is reported separately rather than manufacturing a lifecycle receipt.
+- Optional prompt-registry registration returned `RestException`; the failed
+  receipt is retained. Prompt registration, human-aligned judges, continuous
+  monitoring, and warm-hit certification are not claimed complete.
+
+`make check` passed with 79.23% backend coverage and 543 TUI tests; generated
+profile/API checks and focused token, dataset, and warm-pool regressions passed.
+
+### Phase 5 closeout execution (2026-09-12, candidate `02af9a300`)
+
+Full authorization was granted (paid provider/model, database, deployment).
+Candidate `02af9a300c5819699fe342f1ed4869808ead0184` on
+`chore/phase5-operational-certification`; worktree clean for every sealed receipt.
+`.env` snapshot references (ignored, deployment-local) were promoted
+`fleet-rlm-python313-v7/v2` -> `fleet-rlm-python313-v10/v5` after the aggregate
+passed; `fleet doctor daytona` passes on the promoted references.
+
+- P5.1 aggregate P2.7: `.fleet-evidence/receipts/adr006/p27-clean-02af9a300.json`
+  passes all five assertions (Session/child probes, host-tool/RLM stream,
+  SemanticChild recursive RLM, disposable cleanup). Required two reconciliations:
+  an explicit recursion opt-in overlay for the Phase 2 canary (production stays
+  disabled), and volume-less SemanticChild isolation scope replacing the
+  scoped-sibling assertion for that profile.
+- P5.2 Neon exclusive branch: 6/6 contention scenarios plus 5/5 query plans
+  (4 synthetic samples, explicit) pass
+  (`.fleet-evidence/receipts/adr006/phase5-neon-postgres-final-s4.json`); managed
+  Lakebase preflight passes read-only. Default 64-sample plans time out on Neon;
+  small-sample topology evidence is recorded explicitly, not as a load proof.
+  Migration rehearsal: the tool fails safe on legacy dev SQLite (July schema,
+  lineage verification); no receipt. No production cutover import is required:
+  managed Lakebase is the live store. Deterministic import-logic coverage stays
+  in `tests/unit/scripts/test_migrate_sqlite_to_postgres.py`.
+- P5.3: warm pools remain disabled; cold-path Turns and cleanups proven.
+- P5.4: configured loopback MLflow passes exercised scenarios; token aggregation
+  unknown and fault/sampling lanes unexercised (receipt ineligible by design).
+  Managed Databricks MLflow export is not certified. Live Turn traces resolve OK
+  with valid parent linkage (14-17 spans).
+- P5.5: MLflow/campaign write-once persistence consolidated with deterministic
+  failure-safety coverage.
+- Incidental production fix: blob-write storage failures returned 400
+  `attachment_invalid`; they now return 503 `attachment_unavailable`, with
+  contract coverage. The Phase 1 canary retries upload 3x for transient local
+  hiccups; persistent failure still fails.
+- Flakiness observed and retried honestly: one smoke Turn failed then passed on
+  retry; aggregate lanes failed fast twice (upload 400 before the retry landed)
+  then passed twice. Every paid attempt confirmed disposable cleanup; actual
+  model/Daytona spend is cents against the US$50 cap (reservations, not spend,
+  accounted US$48+ per campaign envelope).
+- Unchanged: complete-MVP quality failures, production latency/error/cost
+  tolerances, release/rollback rehearsal (Phase 6).
+
+### Phase 5 bounded API/MLflow execution (2026-09-12)
+
+Operator approved a certification branch/commit and paid provider/model work
+within US$50, four hours including a 15-minute cleanup reserve, one root trial
+and at most five concurrent Sandboxes. Candidate
+`962f4a62ff0d589a15685882deb592ae7d438e7f` on
+`chore/phase5-operational-certification` was clean throughout execution. No
+push, deployment, managed database mutation, or snapshot promotion ran.
+
+The write-once index is
+`.scratch/phase5-certification-962f4a62f/evidence-index.json`; it hashes the
+bounded receipts in the same directory:
+- `snapshot-probes.json`: immutable Session v10 and SemanticChild v5 passed
+  provider image checks and runtime probes; both disposable Sandboxes were
+  confirmed deleted. Configured v7/v2 references remain unchanged.
+- `mlflow-configured.json`: the actual configured loopback backend passed
+  activation, DSPy/proxy export, root/child linkage, sanitization, feedback,
+  concurrent Session, repeated-lifespan and unavailable-backend checks. Receipt
+  eligibility remains false: token aggregation is unknown and sampling,
+  credential, saturation, slow-export and stalled-flush scenarios are not
+  exercised by this command. This is not managed MLflow evidence.
+- `api-smoke.json` and `api-lifecycle.json`: one control Turn used the existing
+  disposable FastAPI service/client helpers with `phase4-campaign-b`, unchanged
+  committed Root/Sub model identities, eight provider attempts, no retries,
+  disabled recursion and disabled warm capacity. The public HTTP/UI-v1 SSE
+  path completed with the expected answer. One Sandbox used 51 observed seconds;
+  Sandbox, owned Volume and service-process cleanup were confirmed. The
+  bounded-profile control is not default-budget or matched-quality evidence.
+- `api-mlflow-linkage.json`: SSE trace
+  `tr-8c176e0063551985246dd0f58ba168a9` was retrieved from configured MLflow with
+  state OK, 15 spans, one root, valid parent linkage and Session identity.
+  `tool.llm_query`, `RLM.sub_lm`, settlement, commit and cleanup spans were
+  present. Numeric SSE usage was present, but standard MLflow token-usage
+  attributes were absent; aggregation remains an actionable evidence gap.
+
+The campaign conservatively charged US$48 of reservations (US$3 for snapshot
+probes, US$45 for the single API admission). This is **not actual spend**.
+The existing V4 Flash rate card estimates the API smoke at about US$0.0074,
+excluding probes; the V4.1 price mapping and invoices were not independently
+verified. No further paid admission was made or planned from this receipt.
+
+The aggregate P2.7 verifier was not run: its recursive test requires an enabled
+`daytona-recursive` policy, now disabled by default. Do not turn recursion on in
+production to satisfy it; reconcile that caller with explicit opt-in separately.
+Phase 5 remains incomplete: aggregate snapshot policy, deployment identities,
+managed DB topology, complete MLflow evidence and production tolerances are open.
+The older complete-MVP quality failures are unchanged.
+
+### Phase 5 local preparation (2026-09-12)
+
+Operator requested implementation of the Phase 4/5 continuation and authorized
+paid provider/model runs. No paid run has been admitted in this slice: campaign
+limits and candidate identity remain to be agreed. Commit, database mutation,
+deployment, and promotion authorization remain separate.
+
+On checkout `deec5ca68` with pre-existing uncommitted changes preserved:
+- Reconciled the forward Phase 4 summary with the separate original/overlay
+  evidence; removed superseded pre-campaign notes, not retained receipts.
+- Parameterized the existing Root tool-surface contract for recursion disabled
+  and enabled. Disabled recursion supplies no Fleet child tools.
+- Consolidated MLflow certification/campaign write-once JSON persistence in
+  `scripts/benchmarks/campaign.py`. Canonical bytes, private file permissions,
+  no overwrite, byte limits, invalid numeric values, interrupted writes and
+  descriptor cleanup have deterministic regression coverage. PostgreSQL's
+  pre-execution output reservation remains separate; no authorization or
+  provider lifecycle was moved into shared helpers.
+- Focused script/recursive policy lane passed 45 cases; the broader recursion,
+  MLflow privacy/export/lifecycle, cold-capacity and PostgreSQL receipt suites
+  passed 273 cases (overlapping lanes, not additive coverage).
+- `make check` passed on this dirty local tree: 79.22% backend coverage,
+  543 TUI tests, generated contracts, type/lint/format and boundary/doc checks.
+
+This is local preparation, not P5.1–P5.5 certification or a clean candidate
+receipt. Configured MLflow export/fault gaps, resolved snapshot deployment
+identities, deployed database evidence, and a retained campaign through the
+simplified entry point remain open. Warm capacity and default recursion remain
+disabled. Existing complete-MVP quality failures are unchanged.
+
 ### Documentation and local runtime follow-up (2026-09-12)
 
 The current branch documents the completed simplification state: retained
@@ -26,6 +230,68 @@ and discard a stale resident Root before reattaching to a replaced durable
 binding. They have focused deterministic coverage only. They do not alter the
 failed complete-MVP result, certify the configured Root model, or start Phase 5
 or Phase 6.
+
+### Phase 3 bounded candidate qualification closeout (2026-09-12)
+
+The deterministic Phase 3 contract checks and full local gate passed. The final
+operator-authorized clean candidate used Root/Sub
+`databricks-deepseek-v4-pro-0813` at
+`e27d67100e6cd899442b45ac35cb7f523c163087` under the
+`daytona-recursive` profile (`fleet-rlm-python313-v7` session snapshot and
+`fleet-rlm-python313-child-v2` child snapshot). Receipt:
+`.scratch/live-receipts/mvp-complete-deepseek-v4-pro-0813.json`.
+
+The durability lane passed, but the complete FastAPI/DSPy/Daytona MVP lane
+returned `proof_failed`; the receipt records the exact pair, candidate SHA,
+profile, snapshots, 900-second lane limit, 60-second subprocess grace, and
+two-lane scope. Earlier v4.1 and v4 flash candidate failures remain preserved
+separately. Phase 3 remains **uncertified**. Local MLflow 3.16.0 and the
+loopback FastAPI service were started and health-checked for the operator run,
+but service availability does not override the failed MVP assertions. The
+later, explicitly authorized policy promotion set both default roles in
+`config/fleet.toml` to `databricks-deepseek-v4-1-flash` through Chat
+Completions; it is not certification evidence. Phase 5 remains not started.
+
+An explicitly authorized diagnostic run on clean candidate
+`706c53f906cd70ba78fc081ce75dc74f3eb5667c` isolated the complete-MVP failure
+to Root workflow compliance, not provider transport: it replaced the required
+`ROOT`/`ALPHA`/`BETA`/`GAMMA` semantic prompts with arithmetic prompts. The
+semantic verifier rejected the altered results before the required workspace
+append could execute. The bounded receipt is
+`.scratch/live-receipts/deepseek-v4-1-chat-diagnostic-20260912.json`; Phase 3
+remains uncertified.
+
+The subsequently selected GLM alternative was ready and returned an exact
+Chat-Completions preflight response, but the one clean-candidate qualification
+also failed its complete MVP lane. Candidate
+`7015b80aeecde87ee135150559c59b7018f9f422`, Root/Sub
+`databricks-glm-5-3-flash`, receipt
+`.scratch/live-receipts/mvp-complete-glm-5-3-flash-chat-profile-218237876678801.json`.
+The durability lane passed; no retry or default-policy change followed. Phase 3
+remains uncertified.
+
+### Phase 3 gate retirement (2026-09-12)
+
+The exact-code complete-MVP lane is retired as a Phase 3 gate. It measured
+model obedience to a synthetic, literal three-cell program rather than Fleet
+runtime correctness, and repeated provider attempts showed it to be an
+unsuitable release blocker. Its failed receipts remain historical diagnostics;
+they are not relabelled as passes. Phase 3 is **complete** on the retained
+deterministic FastAPI/DSPy/Daytona contracts plus live attachment/artifact
+durability, binding, replacement, and cleanup evidence. Future semantic model
+evaluation is a separately scoped product-quality activity.
+
+The single authorized profile-exception rerun used Databricks profile
+`218237876678801` with Root/Sub `databricks-deepseek-v4-1-flash` on clean
+candidate `b12574fee3d5e7409f3725d3a3ab5f9fbbb332c0`. Receipt:
+`.scratch/live-receipts/mvp-complete-deepseek-v4-1-flash-profile-218237876678801.json`.
+The endpoint and local MLflow/FastAPI health checks passed; the durability
+lane passed, but the complete MVP lane returned `proof_failed`. The receipt
+records the v2 schema, exact pair, `daytona-recursive` profile, both snapshots,
+900-second lane timeout, 60-second subprocess grace, and two-lane scope. This
+was the final authorized attempt: no retry, assertion relaxation, prompt
+overlay, or default promotion occurred. Phase 3 remains **uncertified** and
+Phase 5 remains not started.
 
 ### Phase 4 exit (2026-09-12)
 

@@ -270,7 +270,7 @@ describe("FleetApiClient", () => {
                     path: "llm.root.model",
                     group: "Root LLM",
                     label: "Model id",
-                    value: "databricks-deepseek-v4-flash-0731",
+                    value: "databricks-deepseek-v4-1-flash",
                     editor: "text",
                     choices: [],
                     environment_overridden: false,
@@ -314,7 +314,7 @@ describe("FleetApiClient", () => {
     const fields = Object.fromEntries(
       (daytonaScope?.fields ?? []).map((field) => [field.path, field.value]),
     );
-    expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-flash-0731");
+    expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-1-flash");
     expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");
     expect(fields["llm.root.base_url_env"]).toBe("FLEET_LLM_BASE_URL");
     await client.updateSettings({

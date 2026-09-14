@@ -16,7 +16,7 @@ Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubuserconten
 2. Code runs in a sandboxed interpreter. Broker Root Sandbox Python state may
    persist across sequential clean Turns while that Sandbox remains healthy.
 3. Built-ins include `llm_query(prompt)`, `llm_query_batched(prompts)`, and `SUBMIT(...)`.
-4. Fleet adds `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=[...])` for bounded iterative child-RLM subproblems only when the selected profile sets `rlm.recursion_enabled = true`. Each capsule is a mapping with at least a `task` string plus optional selected-input references. The committed default disables those Fleet child tools; use native `llm_query` / `llm_query_batched` instead.
+4. Fleet adds `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=[...])` for bounded iterative child-RLM subproblems when the selected policy sets `rlm.recursion_enabled = true`. Each capsule is a mapping with at least a `task` string plus optional selected-input references. The shipped `daytona-recursive` policy currently enables those Fleet child tools; comparison profiles can disable them explicitly. Use native `llm_query` / `llm_query_batched` when the selected policy disables Fleet recursion.
 5. Host Tools (Fleet) are additional callables registered for the Turn.
 6. `SUBMIT(...)` ends the RLM loop with typed Signature outputs.
 7. If the loop ends without SUBMIT, DSPy may extract outputs from the trajectory.

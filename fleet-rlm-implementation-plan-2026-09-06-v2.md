@@ -6,7 +6,8 @@ This document is the **forward implementation plan**. It intentionally does not 
 
 This branch now contains the completed simplification sequence through Phase 4:
 the retained broker is the sole production execution boundary, programs are
-fresh per Run, and Fleet child RLM tools are disabled by default. Recent local
+fresh per Run, and the current operator-selected policy enables Fleet child RLM
+tools in the shipped default. Recent local
 fixes preserve request-specified Sub-LM actions, prevent host setup cells from
 becoming public RLM steps, and realign a reused Root with a replaced durable
 binding. These fixes do not certify Phase 3 complete-MVP or Phase 5–6 operator
@@ -532,13 +533,25 @@ one execution implementation, fewer resident/global owners.
 
 # Phase 3 - Test-suite consolidation
 
-**Status: consolidation implemented; affected live certification incomplete
-(2026-09-10).** P3.1–P3.4 and P3.6 are implemented, and the deterministic full
-gate passed. P3.5 preserves the existing live entry points and narrow matrix;
-its affected live run has three failing cases (two MVP cases and the failed-run
-memory-discard case). Phase 3 is not marked complete. The ownership inventory,
-scenario reconciliation, exact candidate SHA, passing receipts, and remaining
-certification failures are recorded in `docs/testing/phase3-consolidation-ledger.md`.
+**Status: complete (2026-09-12).** P3.1–P3.4 and P3.6 are implemented, and the
+deterministic full gate passed. P3.5 preserves the existing live entry points
+and narrow matrix. The final bounded operator qualification used the explicit
+Root/Sub pair `databricks-deepseek-v4-1-flash` on clean candidate
+`b12574fee3d5e7409f3725d3a3ab5f9fbbb332c0`, with the newly authenticated
+Databricks profile `218237876678801` as the single authorized profile
+exception. The durability lane passed, but the complete-MVP lane failed
+without weakened assertions. Its receipt is
+`.scratch/live-receipts/mvp-complete-deepseek-v4-1-flash-profile-218237876678801.json`.
+Earlier v4-pro, v4-flash, and Sonnet candidates remain retained as separate
+bounded failures. The exact-code MVP lane was retired as a synthetic
+model-obedience diagnostic rather than a Phase 3 release gate, so Phase 3 is
+complete under the retained deterministic and durability evidence. Following explicit operator
+authorization, the committed Root/Sub default was subsequently promoted to
+`databricks-deepseek-v4-1-flash` through the existing Chat Completions transport;
+that policy change is not certification evidence. Phase 5 remains out of scope.
+The ownership inventory,
+scenario reconciliation, exact candidate SHAs, and certification outcomes are
+recorded in `docs/testing/phase3-consolidation-ledger.md`.
 
 The goal is **not** to concatenate hundreds of tests into a few giant files. The goal is to organize tests around stable behavior contracts and remove repeated setup/assertions for internals that no longer exist.
 
@@ -670,151 +683,24 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
-**Status: complete (2026-09-12) — disable.** P4.1–P4.4 remain the simplified capsule path. The 144-trial P4.5 continuation receipt is `.scratch/benchmark-reports/phase4-ablation-20260912-continue.json` (108 retained rows + 36 remaining admissions, including retry of the HTTP 400 control). Mechanical `phase4_decision` is `incomplete` solely because 14 completed frozen-baseline C rows lack call-shape usage. Retain gates independently fail: paired bootstrap CI lower bound is 0.0 (point 0.167). Suitable verified successes: D 4 / A 0 / B 1 / C 1 of 18. P4.6 therefore disables Fleet child RLM tools by default (`recursion_enabled = false`); native `llm_query` stays. Recursion remains available on explicit profiles such as `phase4-campaign`.
+**Status: complete (2026-09-12) — disable.** P4.1–P4.4 provide one
+byte-bounded capsule contract, accessed/cited evidence, one application-loop
+scheduler, and two Root-only Fleet tools. P4.6 disables those tools by default;
+native `llm_query` / `llm_query_batched` remain available. Explicit profiles
+may still opt in; no new recursive architecture or paid ablation is required.
 
-> **Historical context:** the detailed working notes below preserve pre-campaign
-> design and partial-receipt context. They are not current status. The status
-> above, P4.5/P4.6 headings, and the ADR 006 ledger are authoritative for the
-> completed campaign, default recursion policy, and remaining certification
-> gates.
+The 144-admission continuation receipt remains mechanically `incomplete` because
+14 frozen-baseline C rows lacked call-shape telemetry. ADR006 records a separate
+trace overlay closing those gaps with decision `disable`. Retention independently
+fails its positive paired-confidence-bound requirement (lower bound 0.0).
+Keep the original receipt immutable; the overlay is additional evidence, not a
+replacement. The trace sample did not demonstrate child use or depth-1 need, so
+this decision does not establish that recursion cannot help on untested
+long-context workloads.
 
-The comparison baseline is `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`. The current local slice
-renames capsule allocation to bytes, replaces the duplicate capsule result type
-with typed `ChildOutcome`/`ChildUsage`, records child-local LM usage, and stops
-echoing unread authorization references as evidence. Selected Session/Project
-text reads have a bounded access ledger; inline delivery is separate from reads.
-Selected Artifact UUIDs now resolve through the existing Turn-bound
-ArtifactReader, with authorization/integrity checks and a pre-fetch byte limit.
-Actual delivered read bytes are included in child input accounting. Child citation claims now use
-canonical bracketed reference/fragment identifiers and are validated against
-actual access/delivery before an answer is returned. Required citations cannot
-be silently omitted; `cited_evidence` is separate from access and is not a claim
-of semantic verification.
-
-The recursive scheduler now uses the application loop, one semaphore, and owned
-blocking native child execution, without private child loops or a recursive
-batch thread pool. Root worker execution remains unchanged. The local slice
-passed `make check` (79.0% coverage; 543 TUI tests); subsequent ownership
-refinements passed the focused RLM/routing/campaign tests. Live scheduler parity
-has not been exercised: the existing recursive verifier requires a clean,
-committed candidate. Local checkpoint commits are now operator-authorized;
-publication and deployment remain outside the approved scope.
-
-P4.4 is locally complete: Root exposes exactly the two typed capsule tools and
-the active routing evaluator no longer presents a depth-fallback route. P4.5
-now has a sealed 12-case corpus, balanced 144-trial schedule, four immutable
-arm specifications (including the frozen `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead`
-baseline), public-rate reservations, content-safe receipts, and task-clustered
-bootstrap/retention logic. The explicit `phase4-campaign` profile constrains
-the root to six iterations/eight LM calls and children to four/four. No paid
-campaign has been launched. P4.5 live evidence and P4.6's resulting
-retention/deletion/default decision therefore remain open; no recursion default
-has changed.
-
-P4.4 migration is complete locally: Root registration exposes only
-`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)`, both returning
-typed outcomes. The batch returns ordered ordinary partial failures, and capsule
-children receive no Fleet recursion tool. Unused capsule/read-only tool
-constructors and properties are removed. Recursive Session snapshot construction,
-immutable history-copy wrappers, nested executors, prompt-only batch execution,
-and Fleet depth fallback have also been deleted. Capsule children use native
-semantic calls under the child budget. Deterministic callers and contract
-fixtures and credentialed live caller signatures are migrated; executing those
-live callers and the full completion audit remain open. The deletion revision passed `make check` after a batch deadline
-race was fixed by rechecking parent authority/deadline before return. Later
-live-caller and citation changes passed a fresh full `make check`. The subsequent
-Artifact wiring passed focused Root-to-child tests for successful scoped reads,
-missing/malformed references, and authority revocation during a read. Its full
-`make check` also passed (79.0% coverage; 543 TUI tests). No live evidence has
-been collected for these revisions.
-Earlier `make check` receipts above do not certify this later migration.
-
-The Phase 4 adapter boundary is explicit: arms C and D submit their isolated
-Session/attachment Turns through the FastAPI ASGI application and consume the
-public SSE stream, so lifecycle, authority, selected-input delivery, Daytona
-creation/deletion, and cleanup measurements come from the same transport used
-by Fleet. Arms A and B remain intentionally direct DSPy ablations; they do not
-claim to certify the FastAPI production path.
-
-The API-first campaign slice is now implemented locally. `serve-api`,
-`fleet web`, and the supervised `fleet cli` accept an explicit `--profile` and load
-that profile before resource initialization; explicit profile selection is
-rejected with `--reload`. The campaign driver supervises disposable candidate
-and frozen-baseline FastAPI services, waits for `/health` and `/health/ready`,
-uses one Session per trial, parses only the public UI-v1 SSE chunks, and joins
-process groups before cleanup. A credential-free fake service exercises the
-same HTTP/SSE client and lifecycle observer. The local protocol receipt at
-`.scratch/benchmark-reports/phase4-api-dry-run-20260910-v8.json` contains all
-144 scheduled attempts (12 cases × 3 repeats × 4 balanced rotations), but it is
-fixture transport evidence only and is not provider value proof.
-
-For the operator-approved API-first exploratory slice, use the ordinary
-committed profile (no `--profile`) and keep the candidate FastAPI service on
-loopback. `--partial-live` starts only the disposable frozen-baseline C service
-and routes C/D through the public attachment, Session, Turn, and UI-v1 SSE
-contract; A/B remain direct DSPy ablations. It admits exactly ten sealed rows
-(A3/B3/C2/D2 from `p4-suitable-01`) in three balanced rotations, retains the
-candidate-created Session/attachment records, and treats spend/optional D
-telemetry as explicitly non-gating observations. The resulting receipt is an
-exploratory partial sample and must remain `incomplete`; it cannot close P4.5,
-P4.6, or the Phase 4 exit.
-
-```bash
-FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
-  --partial-live --candidate-url http://127.0.0.1:8000 \
-  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
-```
-
-The 2026-09-10 exploratory execution is retained at
-`.scratch/benchmark-reports/phase4-api-partial-20260910.json`. It attempted
-all ten scheduled rows (A3/B3/C2/D2) across `ABCD`, `BCDA`, and `CDAB`; three
-A trials completed, seven rows failed or lacked required observations, no row
-was a verified success, and the mechanical result is `incomplete`. The frozen
-C service was verified at `9b526f50f0aeec37ca399bc8ef19ec8a95d3bead` and its
-process cleanup completed. C recorded baseline timeout/cleanup loss, B's
-native-RLM rows were ordinary malformed-result failures, and D used the
-already-running ordinary candidate so its lifecycle telemetry and spend were
-unknown by design. The two D Sessions and attachment-backed Turns were kept
-in the candidate database and labeled `phase4-D-p4-suitable-01-r1` and
-`phase4-D-p4-suitable-01-r2`. This receipt is failed exploratory evidence,
-not P4.5 value proof; P4.5, P4.6, and the Phase 4 exit remain open.
-
-The immutable prior receipt at
-`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` remains failed,
-incomplete, and superseded. Its top-level observed spend is unknown, so the
-full 144-trial live driver refuses to treat it as zero when applying the
-cumulative US$50 cap. The ten-row exploratory path above intentionally does
-not use that cap as an admission gate; it records unknown spend explicitly and
-does not qualify as value evidence. Consequently P4.5 live evidence, the
-mechanical P4.6 decision, and the Phase 4 exit remain open; no live
-certification or recursive-default change is claimed.
-
-The follow-up failure-accounting slice keeps single-capsule measurements and
-successful access identifiers even when execution fails, without treating those
-accesses as a valid answer. Ownership cancellation remains fatal, and an
-unsettled worker cannot be converted into an ordinary partial result. The
-redundant executor constructed for each capsule has been removed; selected
-access and usage are invocation-local without a copied Session snapshot.
-
-Pricing preflight verified the official Databricks base-region conversion of
-US$0.07/DBU in the [pricing page's published data](https://www.databricks.com/en-pricing-assets/page-data/product/pricing/foundation-model-serving/page-data.json).
-At the listed V4 Flash rates
-of 2 input / 4 output DBU per million tokens, that is US$0.14 input / US$0.28
-output per million tokens in base regions. Regional applicability and complete
-worst-case admission bounds remain required before paid work; these figures
-alone are not a certified campaign cost bound.
-
-The agreed pilot is 12 tasks (six multi-document/data, three conflicting or
-incomplete-evidence, three simple controls), three repeats, four arms: at most
-144 runs, US$50 total model/Daytona spend, four hours including a 15-minute
-cleanup reserve, standard public pricing, one root trial and at most five
-Sandboxes concurrently. Retention requires at least +10 percentage points
-verified success on suitable tasks over the better non-recursive arm, a positive
-paired task-clustered 95% confidence-interval lower bound, and at most 2x cost per
-success and 2x p95 latency. Controls must not regress; safety failures are fatal.
-Ordinary cleaned-up sibling failures will become ordered typed partial results.
-An inconclusive outcome disables recursion by default; an incomplete campaign
-must remain explicitly incomplete rather than being called value proof.
+The [ADR006 Phase 4 exit](docs/decisions/006-implementation-status.md#phase-4-exit-2026-09-12)
+owns receipt identities, sample limitations, and the retained value-proof memo.
+Superseded pre-campaign notes are removed from this forward plan.
 
 ## P4.1 - Normalize the capsule/result contract
 
@@ -920,7 +806,70 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 # Phase 5 - Operational certification without feature growth
 
-**Status: not started.** Do not begin Phase 5 until explicitly requested. P2.7 snapshot probes, a 2026-09-12 Lakebase preflight, and a local MLflow receipt are not Phase 5 closeout.
+**Status: operational closeout in progress (2026-09-13).** P5.4 local-backend
+verification now passes all 18 scenarios, including injected fault/lifecycle
+checks and fresh-process sampling. P5.3 activation remains blocked: Daytona
+requires organization-level warm-pool enablement and the configured management
+endpoint returns 404. The operator selected recursion on and warm capacity
+size one in `us`; this is an operational override, not new Phase 4 value proof.
+Latest evidence comes from an uncommitted working candidate and is explicitly
+not promotion-eligible. See the updated P5.3/P5.4 entries below.
+
+**Status (earlier): substantially complete (2026-09-12, candidate `02af9a300`).**
+Aggregate snapshot certification, exclusive-database contention/query plans,
+configured-loopback MLflow (partial), bounded FastAPI smoke with trace linkage,
+snapshot promotion with doctor pass, and cold-path evidence are sealed.
+Migration rehearsal fails safe on legacy dev rows with no production cutover
+required; managed MLflow export and production tolerances remain open and
+belong to release/Phase 6 gates. The [ADR006 closeout entry](docs/decisions/006-implementation-status.md#phase-5-closeout-execution-2026-09-12-candidate-02af9a300)
+records exact scope. Previous wording retained below for continuity.
+
+**Status (earlier): in progress; bounded live evidence collected (2026-09-12).**
+The operator-authorized clean candidate `962f4a62f` passed v10/v5 image/runtime
+probes and one bounded non-recursive FastAPI control with MLflow linkage.
+Configured-loopback MLflow export passed its exercised scenarios, but token
+aggregation and fault/sampling evidence remain incomplete. Configured snapshots
+remain v7/v2; deployment and managed DB gates are open. The aggregate recursive
+snapshot canary also needs explicit opt-in policy reconciliation. None of these
+narrow receipts closes Phase 5 or changes complete-MVP quality evidence.
+
+The [ADR006 bounded execution entry](docs/decisions/006-implementation-status.md#phase-5-bounded-apimlflow-execution-2026-09-12)
+records exact scope and the hashed receipt index. The authorized limits were
+US$50, four hours including cleanup, one root trial and at most five concurrent
+Sandboxes. US$48 was conservatively charged as reservations, not actual spend;
+no further paid admission is planned from that receipt. Database mutations,
+deployment changes and promotion remain separately gated.
+
+### Execution order and remaining operator inputs
+
+1. Reconcile Phase 4 evidence and protect disabled/default versus opt-in tools.
+2. Consolidate demonstrated receipt boilerplate in existing campaign helpers;
+   retain scenario-specific execution and authorization boundaries.
+3. Run deterministic recursion, cold-capacity, tracing/privacy/lifecycle and
+   certification-script suites. Fix demonstrated defects, not architecture.
+4. Select a clean candidate with lock/config/profile/model identity, immutable
+   image manifests, database head and backend destination identity. Record
+   public latency/error/cost tolerances separately from optimization targets.
+5. Run bounded snapshot and configured-backend lanes with sealed receipts.
+   Inventory deployed DB heads read-only; contention tests require an exclusive
+   representative target. Migration requires an approved maintenance window.
+6. Review same-candidate evidence and run the full deterministic gate. Mark only
+   proven substeps complete; release promotion and rollback remain Phase 6.
+
+Before live admission, agree spend, elapsed/cleanup limits, Sandbox concurrency,
+provider target and selected profile. Never infer unknown spend as zero. Do not
+rerun the completed Phase 4 ablation as an operational certification gate.
+
+| Substep | Existing owner / entry point | Required remaining evidence |
+| --- | --- | --- |
+| P5.1 | `scripts/daytona_snapshot.py`, `scripts/live_p27_snapshot_verify.py` | Resolved deployment references → immutable manifest digest → runtime/cleanup receipt; separately authorized configuration update |
+| P5.2 | `scripts/lakebase_preflight.py`, `scripts/benchmarks/certify_postgres.py` | Deployed heads plus exclusive representative contention/query-plan receipt; migration rehearsal only if needed |
+| P5.3 | Existing composition and Daytona capacity suites | Disabled pool creates no capacity; cold execution and cleanup remain functional; no warm canary |
+| P5.4 | Existing observability owner and `scripts/benchmarks/certify_mlflow.py` | Fault/privacy/lifecycle evidence plus actual configured export; unexercised scenarios remain open |
+| P5.5 | `scripts/benchmarks/campaign.py` and current entry points | Shared receipt tests and one retained live campaign through the simplified path |
+
+The complete-MVP model-quality failure remains separate and visible. Neither a
+local gate nor successful external dependency probes convert it into a pass.
 
 ## P5.1 - Reconcile immutable snapshot and configuration identities
 
@@ -954,10 +903,21 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 ## P5.3 - Keep warm pools off the critical path
 
+**Status: blocked on provider enablement (2026-09-13).** The operator explicitly
+overrode the original disabled policy with size one in `us` and recursion on.
+The pinned SDK's `GET /warm-pools` returns 404. Current
+[Daytona documentation](https://www.daytona.io/docs/en/warm-pools/)
+requires organization enablement via `support@daytona.io`; confirm that
+prerequisite before retrying reconciliation. No provider pool or warm hit is
+verified, and no substitute capacity implementation was added. After enablement,
+the eligibility/cleanliness/quota/latency/cost/cleanup canary remains required.
+Receipts: `.scratch/p53-p54-closeout/warm-api-preflight.json` and
+`warm-provider-prerequisite.json` in the same directory.
+
 **Rationale:** Warm-pool code is optional infrastructure and should not drive runtime architecture.
 
 **Implement:**
-- retain `warm_pool_enabled=false` / size zero by default;
+- original plan: disabled/zero by default; current operator override is enabled/one, with activation still gated;
 - do not expand warm-pool ownership/reconciliation features before Phase 4 proves recurring child demand;
 - if recursion value is low, consider deleting child warm-pool support entirely;
 - if value is high, run one explicit canary for eligibility, clean-instance behavior, quota, latency benefit, and cost.
@@ -967,6 +927,23 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 **Done when:** capacity complexity exists only for demonstrated demand.
 
 ## P5.4 - Simplify and certify MLflow
+
+**Status: local-backend verification complete (2026-09-13); clean promotion
+candidate still required.** `scripts/benchmarks/certify_mlflow.py --fault-checks`
+passes all 18 checks against the selected loopback backend in the isolated
+`fleet-p54-certification` experiment. Receipt:
+`.scratch/p53-p54-closeout/mlflow-full-r2.json`.
+
+Live checks cover export, exact token aggregation, privacy, feedback ownership,
+overlapping Sessions, repeated setup, an unavailable endpoint, and persisted
+sampling outcomes in fresh processes. Expired credentials, queue saturation,
+slow export, bounded retained flush, event-loop/cancellation behavior, and
+HTTP feedback/lifecycle contracts are isolated deterministic fault injections
+against the pinned SDK and Fleet owners, not induced outages of the running
+backend. The receipt reports those scopes separately and has
+`certification.passed=true`, `promotion.eligible=false` (`dirty_candidate`).
+P6.1 must reproduce required gates on the clean candidate. This is not a live
+DB-heartbeat, managed-MLflow, aligned-judge, or agent-quality certification.
 
 **Rationale:** Observability should be optional and small enough that execution remains understandable without it.
 

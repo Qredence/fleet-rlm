@@ -33,7 +33,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert "secret" not in str(field).lower()
 
     model = _field(service.read(), "daytona-recursive", "llm.root.model")
-    assert model["value"] == "databricks-deepseek-v4-flash-0731"
+    assert model["value"] == "databricks-deepseek-v4-1-flash"
     assert model["editor"] == "text"
 
     root_timeout = _field(service.read(), "daytona-recursive", "llm.root.timeout_seconds")
