@@ -81,6 +81,43 @@ def test_human_export_requires_complete_opaque_review_and_marks_alignment():
     assert result["split"]["seed"] == 42
 
 
+def test_human_export_rejects_duplicate_or_changed_source_rows():
+    snapshot, review = _inputs()
+    human_review = {
+        "schema": curation.HUMAN_REVIEW_SCHEMA,
+        "reviewer": "human",
+        "reviewer_id": "reviewer-20260914",
+        "source_snapshot_sha256": snapshot["snapshot_sha256"],
+        "records": [
+            {
+                **record,
+                "review_status": "human_approved",
+            }
+            for record in review["records"]
+        ],
+    }
+
+    duplicate_snapshot = deepcopy(snapshot)
+    duplicate_snapshot["records"].append(deepcopy(duplicate_snapshot["records"][0]))
+    duplicate_snapshot["snapshot_sha256"] = curation.digest(
+        {key: value for key, value in duplicate_snapshot.items() if key != "snapshot_sha256"}
+    )
+    duplicate_review = deepcopy(human_review)
+    duplicate_review["source_snapshot_sha256"] = duplicate_snapshot["snapshot_sha256"]
+    with pytest.raises(ValueError, match="duplicate source identities"):
+        curation.build_human_aligned_export(duplicate_snapshot, duplicate_review)
+
+    changed_snapshot = deepcopy(snapshot)
+    changed_snapshot["records"][0]["query"] = "A different query."
+    changed_snapshot["snapshot_sha256"] = curation.digest(
+        {key: value for key, value in changed_snapshot.items() if key != "snapshot_sha256"}
+    )
+    changed_review = deepcopy(human_review)
+    changed_review["source_snapshot_sha256"] = changed_snapshot["snapshot_sha256"]
+    with pytest.raises(ValueError, match="source query identity"):
+        curation.build_human_aligned_export(changed_snapshot, changed_review)
+
+
 @pytest.mark.parametrize("mutation", ["schema", "reviewer", "reviewer_id", "missing", "pending"])
 def test_human_export_rejects_untrusted_or_incomplete_review(mutation):
     snapshot, review = _inputs()

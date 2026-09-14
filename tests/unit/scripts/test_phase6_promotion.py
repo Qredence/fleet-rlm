@@ -560,6 +560,40 @@ def test_blocked_promotion_decision_seals_missing_evidence_without_fabrication(b
     assert promotion.validate_promotion_decision(decision) == decision
 
 
+def test_blocked_promotion_decision_requires_pair_for_controller_preflight(bundle_pair):
+    baseline, candidate = bundle_pair
+    _rehearsal, controller_receipts = _controller_rehearsal(baseline, candidate)
+    now = datetime.now(UTC)
+    observation = _observation(baseline, candidate, now)
+    observation["database_compatibility_sha256"] = controller_receipts[-1].database_compatibility_sha256
+    preflight = promotion.authorize_switch_preflight(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        observation=observation,
+        controller_receipt=controller_receipts[-1],
+        now=now,
+    )
+    blockers = [
+        "campaign_complete",
+        "cost_within_tolerance",
+        "database_compatibility",
+        "deletion_inventory",
+        "latency_within_tolerance",
+        "quality_noninferior",
+        "quiescent",
+        "rollback_rehearsal",
+        "strict_daytona",
+        "trusted_scorer",
+    ]
+    with pytest.raises(promotion.PromotionBundleError, match="requires a rollback pair"):
+        promotion.build_blocked_promotion_decision(
+            baseline_bundle=baseline,
+            candidate_bundle=candidate,
+            blockers=blockers,
+            switch_preflight=preflight,
+        )
+
+
 def test_blocked_promotion_decision_rejects_inexact_blocker_list(bundle_pair):
     baseline, candidate = bundle_pair
     with pytest.raises(promotion.PromotionBundleError, match="blockers do not match"):

@@ -86,8 +86,26 @@ def capture_record(trace: Any) -> dict[str, Any]:
 
 
 def _unique_source_rows(snapshot: dict[str, Any]) -> dict[str, Any]:
-    sources = {row["record_id"]: row for row in snapshot["records"]}
-    if len(sources) != len(snapshot["records"]):
+    raw_records = snapshot.get("records")
+    if not isinstance(raw_records, list):
+        raise ValueError("curation source records are invalid")
+    sources: dict[str, dict[str, Any]] = {}
+    for row in raw_records:
+        if not isinstance(row, dict):
+            raise ValueError("curation source records must be objects")
+        record_id = row.get("record_id")
+        if not isinstance(record_id, str) or not record_id:
+            raise ValueError("source record identity is invalid")
+        if record_id in sources:
+            raise ValueError("duplicate source identities")
+        query = row.get("query")
+        query_sha256 = row.get("source_query_sha256")
+        if not isinstance(query, str) or not query:
+            raise ValueError("source query is invalid")
+        if not isinstance(query_sha256, str) or digest(query) != query_sha256:
+            raise ValueError("source query identity is invalid")
+        sources[record_id] = row
+    if len(sources) != len(raw_records):
         raise ValueError("duplicate source identities")
     return sources
 
@@ -203,7 +221,10 @@ def build_human_aligned_export(snapshot: dict[str, Any], review: dict[str, Any])
             raise ValueError("human review references an unknown source record")
         if record_id in {row["record_id"] for row in records}:
             raise ValueError("duplicate human review record")
-        if approved.get("source_query_sha256") != source["source_query_sha256"]:
+        if (
+            approved.get("source_query_sha256") != source["source_query_sha256"]
+            or digest(source["query"]) != source["source_query_sha256"]
+        ):
             raise ValueError("reviewed query identity changed")
         if source["source_query_sha256"] in seen_queries:
             raise ValueError("duplicate tasks cannot inflate the curated dataset")
