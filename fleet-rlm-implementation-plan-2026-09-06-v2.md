@@ -1003,8 +1003,9 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
 - [ ] **P6.1b — Promotion decision:** validate sealed same-bundle gate evidence;
   reject missing, failed, partial, scripted-only, or mismatched evidence. Enforce
   matched quality and latency/cost tolerances (maximum 10% regression).
-  The matched-measurement reader is implemented and tested; authoritative
-  same-bundle campaign producers and the complete promotion decision remain open.
+  The measurement/campaign/deletion/rehearsal readers and fail-closed decision
+  builder are implemented and tested; clean-SHA provenance, trusted live
+  campaign production, and the complete eligible decision remain open.
 - [ ] **P6.1c — Clean candidate certification:** retain complete local gate
   output and exact exit codes, then seal required live evidence on a clean SHA.
   Deterministic checks pass locally; this modified worktree is not a clean-SHA
@@ -1012,9 +1013,10 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
 - [ ] **P6.2a — Rollback preflight:** distinguish bundle/schema identity from
   proven database compatibility; reject a switch with active Runs, workers,
   unclosed admissions, or unconfirmed cleanup.
-  Identity-only and recent-observation validators are implemented and tested.
-  The maintenance controller must still hold an actual admission fence and
-  verify compatibility evidence; offline observation is not switch authority.
+  Identity-only and recent-observation validators plus the maintenance-window
+  ordering/controller are implemented and tested. A real shared-fence adapter,
+  compatibility evidence, and live switch are still required; offline
+  observation is not switch authority.
 - [ ] **P6.2b — Controlled rehearsal:** preserve baseline release/config/images;
   prove baseline → candidate → baseline → candidate with durable Session,
   workspace, Artifact, and new-Turn assertions. No database snapshot rewind.
@@ -1022,11 +1024,12 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
   selector. Configuration rejection and fresh per-Run tests cover this change.
 - [x] **P6.3b — Receipt compatibility:** version changed benchmark receipt
   contracts and keep archived sealed receipts readable without promoting them.
-- [x] **P6.3c — Ownership inventory:** remove only proven unused migration
-  internals; retain broker generation, fencing, cleanup, and Run-local guards.
-  Lifecycle-affecting deletion follows the rollback gate.
-  Removed the unused compatibility-fingerprint helper block; active broker
-  ownership, fencing, cleanup, and tool-progress fingerprints remain intact.
+- [ ] **P6.3c — Ownership inventory and final deletion:** remove only proven
+  unused migration internals after the live rehearsal; retain broker generation,
+  fencing, cleanup, and Run-local guards. The inventory contract supports an
+  explicit no-op and protects historical readers and compatibility parsers.
+  The unused compatibility-fingerprint helper block was removed earlier; no
+  further deletion is claimed before rehearsal evidence.
 - [x] **P6.4a — Curated input draft:** inspect local MLflow, review at least 25
   examples and expectations, and seal grouped 60/20/20 splits (seed 42).
   `.scratch/phase6-curation-20260914/export-v2.json` contains 25 agent-reviewed
@@ -1039,7 +1042,9 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
   non-promotable. The selected boundary is host-polled authenticated broker
   mediation with Daytona `network_block_all=true`, no temporary tunnel or
   outbound gateway allow-list. The v2 proof contract and policy wiring are
-  implemented; live transport/egress/cleanup proof remains open. No bypass of
+  implemented, and the opt-in live proof is sealed at
+  `.fleet-evidence/receipts/phase6/strict-gepa-proof/`; trusted scorer,
+  capability coverage, and complete campaign evidence remain open. No bypass of
   the existing production block.
 - [ ] **P6.4c — Stable-program optimization:** run within remaining budget,
   evaluate held-out data, and verify immutable instructions in a fresh Run.

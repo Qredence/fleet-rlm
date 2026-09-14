@@ -31,16 +31,35 @@ classification must be completed before claiming a Phase 6 quality campaign.
   and Run-local progress fingerprints remain owning runtime behavior. Historical
   benchmark/campaign receipts remain readable under explicit v2/v3 schemas; no
   sealed artifact is rewritten.
+- P6.1b now has write-once quality-measurement, campaign, rollback-rehearsal,
+  deletion-inventory, and promotion-decision contracts. They remain readers and
+  receipt builders: no campaign or decision is promotion evidence until its
+  producer provenance, clean candidate, compatibility, rehearsal, and live
+  quality gates are sealed together.
+- P6.2a now has a maintenance-window controller whose adapter must be backed by
+  the shared admission/Run fence. It retains the fence on any failed switch and
+  rehearses exactly baseline → candidate → baseline → candidate. No deployed
+  adapter or live rollback rehearsal is claimed here.
 - P6.4a contains a local-MLflow-only, agent-reviewed draft at
   `.scratch/phase6-curation-20260914/export-v2.json`: 25 records, grouped
   15/5/5 seed-42 splits with Session/project/task-family isolation. The draft
   is not human alignment or promotion evidence.
 - For P6.4b, the selected strict evaluator boundary is host-polled authenticated
   retained-broker mediation with Daytona `network_block_all=true`, no volume,
-  and no temporary tunnel or outbound gateway allow-list. Receipt schema v2 and
-  policy wiring require transport-authentication plus essential-service,
-  raw-socket, and DNS egress-denial outcomes. Production GEPA remains
-  fail-closed until a live proof and trusted scoring campaign exist.
+  and no temporary tunnel or outbound gateway allow-list. The opt-in live proof
+  passed on 2026-09-14 and was sealed as
+  `.fleet-evidence/receipts/phase6/strict-gepa-proof/strict-daytona-proof.json`
+  (`proof_id=5f83848d1726c2d0d754a520bc0bd9d8ce8981db172d8c00bae12a43f5845e0e`,
+  policy `9ba9e62239a17121d66d28ea801afbf43ee91b889deaa42c29aff69bf029f431`).
+  The receipt covers transport authentication, valid/invalid capability access,
+  direct/essential/raw-socket/DNS egress denial, credential absence, cleanup,
+  and deletion. Production GEPA remains fail-closed until human-aligned
+  capability coverage, trusted scoring, and a complete held-out campaign exist.
+- P6.3 final deletion remains intentionally open: the inventory contract records
+  an explicit no-op until a passing live rehearsal proves any migration-only
+  path unreachable. Retained broker execution, generation/fencing, cleanup
+  ownership, progress fingerprints, historical readers, and compatibility
+  parsers remain protected.
 - Warm capacity remains deferred by operator instruction for the 0.7.8
   continuation; no configured warm policy was changed by this work.
 

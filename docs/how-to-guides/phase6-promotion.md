@@ -73,8 +73,11 @@ those separately in the ADR 006 evidence ledger.
 
 Image, dataset, and scorer hashes are supplied identity claims, not validation
 of the referenced evidence. A self-hash detects modification, not authenticity.
-There is no complete promotion decision or service-switch command yet. Do not
-interpret successful `prepare` or `validate-rollback-pair` as a passed gate.
+The repository now has write-once campaign, rehearsal, deletion-inventory, and
+promotion-decision readers. They remain evidence contracts, not deployment
+authority: a decision is eligible only when every gate is backed by validated
+live receipts. Do not interpret successful `prepare` or `validate-rollback-pair`
+as a passed gate.
 
 ## Offline preflight and measurement comparison
 
@@ -108,6 +111,69 @@ These are measurement-reader contracts, not new live campaign producers.
 Dataset coverage and trustworthy live provenance still need independent
 validation; a passing comparison always reports `promotion_eligible: false`.
 
+Host-produced rows can be sealed without rewriting unknown values:
+
+```bash
+uv run python scripts/phase6_promotion.py seal-measurements \
+  --bundle-sha256 <bundle-sha256> --samples samples.json \
+  --output .fleet-evidence/receipts/phase6/measurements.json
+```
+
+`samples.json` must contain a `samples` list with matched case/repetition rows
+and explicit finite `cost_usd` values. This command seals observations; it does
+not claim that a model or scorer actually ran.
+
+## Trusted GEPA and live strict proof
+
+The host-owned `TrustedGEPAFeedbackMetric` in
+`src/fleet_rlm/optimization/metric.py` returns DSPy
+`Prediction(score=..., feedback=...)`. It rejects unbounded or sensitive
+feedback, keeps qualitative-only expectations unscorable, and never uses an
+observed answer as ground truth. `run_authoritative_gepa` in
+`src/fleet_rlm/optimization/gepa_runner.py` requires a validated
+`fleet.strict-daytona-proof/v2` receipt, distinct task/reflection models,
+`auto=None`, one explicit `max_metric_calls` budget (the 8+24-round budget),
+`track_stats=True`, held-out evaluation, and a fresh-process instruction reload.
+It persists only bounded GEPA statistics and hashes, not candidate traces or raw
+task content.
+
+The opt-in production-boundary proof is:
+
+```bash
+FLEET_LIVE=1 RUN_LIVE_DAYTONA_STRICT_PROOF=1 \
+  FLEET_STRICT_DAYTONA_PROOF_ROOT="$PWD/.fleet-evidence/receipts/phase6" \
+  uv run pytest tests/live/backend/test_strict_gepa_daytona_proof.py -x -q
+```
+
+It uses the host-polled authenticated retained broker with Daytona
+`network_block_all=true`, no volume, no public gateway/tunnel, no outbound
+allow-list, and zero provider auto-delete interval. A skipped, incomplete, or
+failed run writes no proof. The resulting receipt is an evaluator admission
+precondition, not a quality or promotion result.
+
+## Fenced maintenance and deletion inventory
+
+`src/fleet_rlm/optimization/maintenance.py` defines the adapter seam for the
+real shared admission fence. The controller closes admissions, settles/fences
+Runs and workers, confirms cleanup, re-reads quiescence while holding the fence,
+switches the complete bundle atomically, verifies durable continuity and stage
+health, then releases the fence. A failure keeps the fence held. A deployment
+composition must provide the real cross-process adapter; the controller does
+not substitute an in-process lock.
+
+After the exact baseline → candidate → baseline → candidate rehearsal, seal an
+explicit deletion inventory. If no migration-only path is proven safe, use an
+empty candidate list; the receipt records a deliberate `no-op` and retains
+broker execution, generation/fencing, cleanup ownership, progress fingerprints,
+historical readers, and compatibility parsers.
+
+```bash
+uv run python scripts/phase6_promotion.py seal-deletion-inventory \
+  --rehearsal-sha256 <rehearsal-sha256> --candidates candidates.json \
+  --checks deterministic-checks.json \
+  --output .fleet-evidence/receipts/phase6/deletion-inventory.json
+```
+
 ## Curated local MLflow input
 
 Use `scripts/benchmarks/curate_mlflow.py capture --trace-id ID --output SOURCE`
@@ -140,6 +206,12 @@ to campaign reporting. A structurally valid draft remains non-promotable until
 trusted scoring, capability coverage, strict evaluator proof, and held-out
 evaluation pass. Do not silently remove authorization or infrastructure controls
 to make an old task executable under the new runtime.
+
+For a human-aligned artifact, use `export-human` with
+`fleet.phase6-curation-review/v2`, an opaque reviewer ID, and an explicit
+approved/corrected decision for every source record. The agent-reviewed export
+remains a draft and stays non-promotable; observed model answers are never
+ground truth.
 
 Warm capacity is deferred for the current 0.7.8 continuation by operator
 instruction; this neither changes configured policy nor certifies a warm pool.

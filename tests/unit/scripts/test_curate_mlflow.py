@@ -57,6 +57,54 @@ def test_export_is_grouped_sealed_and_explicitly_not_human_ground_truth():
     assert result["export_sha256"] == curation.digest({k: v for k, v in result.items() if k != "export_sha256"})
 
 
+def test_human_export_requires_complete_opaque_review_and_marks_alignment():
+    snapshot, review = _inputs()
+    human_review = {
+        "schema": curation.HUMAN_REVIEW_SCHEMA,
+        "reviewer": "human",
+        "reviewer_id": "reviewer-20260914",
+        "source_snapshot_sha256": snapshot["snapshot_sha256"],
+        "records": [
+            {
+                **record,
+                "review_status": "human_corrected" if index == 0 else "human_approved",
+            }
+            for index, record in enumerate(review["records"])
+        ],
+    }
+    result = curation.build_human_aligned_export(snapshot, human_review)
+
+    assert result["curation"]["expectation_origin"] == "human-aligned"
+    assert result["curation"]["reviewer_id"] == "reviewer-20260914"
+    assert result["curation"]["promotion_eligible"] is False
+    assert len(result["records"]) == 25
+    assert result["split"]["seed"] == 42
+
+
+@pytest.mark.parametrize("mutation", ["schema", "reviewer", "reviewer_id", "missing", "pending"])
+def test_human_export_rejects_untrusted_or_incomplete_review(mutation):
+    snapshot, review = _inputs()
+    human_review = {
+        "schema": curation.HUMAN_REVIEW_SCHEMA,
+        "reviewer": "human",
+        "reviewer_id": "reviewer-20260914",
+        "source_snapshot_sha256": snapshot["snapshot_sha256"],
+        "records": [dict(record, review_status="human_approved") for record in review["records"]],
+    }
+    if mutation == "schema":
+        human_review["schema"] = "fleet.phase6-curation-review/v1"
+    elif mutation == "reviewer":
+        human_review["reviewer"] = "agent"
+    elif mutation == "reviewer_id":
+        human_review["reviewer_id"] = "reviewer/private"
+    elif mutation == "missing":
+        human_review["records"] = human_review["records"][:-1]
+    else:
+        human_review["records"][0]["review_status"] = "pending"
+    with pytest.raises(ValueError):
+        curation.build_human_aligned_export(snapshot, human_review)
+
+
 @pytest.mark.parametrize(
     "mutation", ["query", "seal", "review-seal", "reviewer", "unreviewed", "context", "criteria", "duplicate"]
 )

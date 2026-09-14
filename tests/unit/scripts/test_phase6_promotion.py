@@ -14,6 +14,7 @@ import pytest
 
 from scripts import phase6_promotion as promotion
 from scripts.validate_release import build_artifact_manifest
+from tests.unit.optimization.test_evidence import _block_all_receipt
 
 
 def _measurements(bundle, *, score=1.0, seconds=10.0, cost=1.0):
@@ -50,6 +51,262 @@ def test_quality_tolerance_boundary_is_not_promotion_authority(bundle_pair):
     )
     assert result["comparison_passed"] is True
     assert result["promotion_eligible"] is False
+
+
+def test_quality_measurement_builder_seals_only_complete_repeated_rows(bundle_pair):
+    baseline, _candidate = bundle_pair
+    receipt = promotion.build_quality_measurements(
+        bundle_sha256=baseline["bundle_sha256"],
+        samples=[
+            {"case_id": "case-1", "repetition": 0, "score": 1, "seconds": 2, "cost_usd": 0.1},
+            {"case_id": "case-1", "repetition": 1, "score": 1, "seconds": 2, "cost_usd": 0.1},
+        ],
+    )
+    assert receipt["execution_mode"] == "live"
+    assert receipt["complete"] is True
+    assert (
+        receipt["receipt_sha256"]
+        == hashlib.sha256(
+            promotion._canonical_bytes({key: value for key, value in receipt.items() if key != "receipt_sha256"})
+        ).hexdigest()
+    )
+    with pytest.raises(promotion.PromotionBundleError):
+        promotion.build_quality_measurements(
+            bundle_sha256=baseline["bundle_sha256"],
+            samples=[{"case_id": "case-1", "repetition": 0, "score": 1, "seconds": 2, "cost_usd": 0.1}],
+        )
+
+
+def _rehearsal_stages(baseline, candidate):
+    stage_rows = []
+    for index, (name, bundle) in enumerate(
+        (
+            ("baseline", baseline),
+            ("candidate", candidate),
+            ("baseline", baseline),
+            ("candidate", candidate),
+        )
+    ):
+        digest = hashlib.sha256(f"{name}-{index}".encode()).hexdigest()
+        stage_rows.append(
+            {
+                "stage": name,
+                "bundle_sha256": bundle["bundle_sha256"],
+                "observed_at": f"2026-09-14T12:0{index}:00+00:00",
+                "session_history_sha256": digest,
+                "workspace_sha256": hashlib.sha256(f"workspace-{index}".encode()).hexdigest(),
+                "artifacts_sha256": hashlib.sha256(f"artifact-{index}".encode()).hexdigest(),
+                "new_turn_sha256": hashlib.sha256(f"turn-{index}".encode()).hexdigest(),
+                "provider_cleanup_confirmed": True,
+                "durable_continuity": True,
+            }
+        )
+    return stage_rows
+
+
+def test_campaign_binds_live_measurements_and_all_external_identities(bundle_pair):
+    baseline, candidate = bundle_pair
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate, seconds=11, cost=1.1),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id="f" * 64,
+        capability_coverage_sha256="c" * 64,
+    )
+
+    assert campaign["schema"] == promotion.CAMPAIGN_SCHEMA
+    assert campaign["comparison_passed"] is True
+    assert campaign["repetitions"] == [0, 1]
+    assert (
+        promotion.validate_quality_campaign(campaign, baseline_bundle=baseline, candidate_bundle=candidate) == campaign
+    )
+
+
+@pytest.mark.parametrize("mutation", ["split", "proof", "measurement", "incomplete"])
+def test_campaign_rejects_untrusted_or_incomplete_envelopes(bundle_pair, mutation):
+    baseline, candidate = bundle_pair
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id="f" * 64,
+        capability_coverage_sha256="c" * 64,
+    )
+    if mutation == "split":
+        campaign["split"] = "train"
+    elif mutation == "proof":
+        campaign["strict_proof_id"] = "0" * 64
+    elif mutation == "measurement":
+        campaign["measurement_receipts"]["candidate"] = "0" * 64
+    else:
+        campaign["complete"] = False
+    with pytest.raises(promotion.PromotionBundleError):
+        promotion.validate_quality_campaign(campaign, baseline_bundle=baseline, candidate_bundle=candidate)
+
+
+def test_rehearsal_requires_exact_baseline_candidate_sequence(bundle_pair):
+    baseline, candidate = bundle_pair
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    assert rehearsal["rehearsal_passed"] is True
+    assert rehearsal["switch_eligible"] is True
+    assert (
+        promotion.validate_rollback_rehearsal(rehearsal, baseline_bundle=baseline, candidate_bundle=candidate)
+        == rehearsal
+    )
+    broken = deepcopy(rehearsal)
+    broken["stages"][2]["bundle_sha256"] = candidate["bundle_sha256"]
+    with pytest.raises(promotion.PromotionBundleError):
+        promotion.validate_rollback_rehearsal(broken, baseline_bundle=baseline, candidate_bundle=candidate)
+
+
+def test_promotion_decision_is_true_only_when_every_gate_is_proven(bundle_pair):
+    baseline, candidate = bundle_pair
+    now = datetime.now(UTC)
+    observation = _observation(baseline, candidate, now)
+    preflight = promotion.validate_switch_observation(baseline, candidate, observation, now=now)
+    strict_proof = _block_all_receipt().public_payload()
+    strict_proof_id = strict_proof["proof_id"]
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate, seconds=11, cost=1.1),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id=strict_proof_id,
+        capability_coverage_sha256="c" * 64,
+    )
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    deletion_inventory = promotion.build_deletion_inventory(
+        rehearsal_sha256=rehearsal["rehearsal_sha256"],
+        candidates=[
+            {
+                "path": "src/fleet_rlm/daytona/broker.py",
+                "status": "retained",
+                "rehearsal_covered": True,
+                "owner": "retained_broker_execution",
+            }
+        ],
+        checks={
+            "import_search": True,
+            "dependency_boundaries": True,
+            "deterministic_suite": True,
+            "security_checks": True,
+            "release_checks": True,
+            "artifacts_rebuilt": True,
+        },
+    )
+    pair = promotion.validate_rollback_pair(baseline, candidate)
+    decision = promotion.build_promotion_decision(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        rollback_pair=pair,
+        switch_preflight=preflight,
+        campaign=campaign,
+        rehearsal=rehearsal,
+        strict_proof_id=strict_proof_id,
+        strict_proof_receipt=strict_proof,
+        deletion_inventory=deletion_inventory,
+        clean_candidate_verified=True,
+        trusted_scorer_verified=True,
+        database_compatibility_verified=True,
+    )
+    assert decision["promotion_eligible"] is True
+    assert decision["blockers"] == []
+    assert promotion.validate_promotion_decision(decision) == decision
+
+    blocked = deepcopy(decision)
+    blocked["gates"]["database_compatibility"] = False
+    blocked["blockers"] = ["database_compatibility"]
+    blocked["promotion_eligible"] = False
+    blocked["decision_sha256"] = hashlib.sha256(
+        promotion._canonical_bytes({key: value for key, value in blocked.items() if key != "decision_sha256"})
+    ).hexdigest()
+    assert promotion.validate_promotion_decision(blocked)["promotion_eligible"] is False
+
+
+def test_promotion_decision_blocks_without_validated_strict_proof_or_deletion_inventory(bundle_pair):
+    baseline, candidate = bundle_pair
+    now = datetime.now(UTC)
+    preflight = promotion.validate_switch_observation(
+        baseline, candidate, _observation(baseline, candidate, now), now=now
+    )
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id="f" * 64,
+        capability_coverage_sha256="c" * 64,
+    )
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    decision = promotion.build_promotion_decision(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        rollback_pair=promotion.validate_rollback_pair(baseline, candidate),
+        switch_preflight=preflight,
+        campaign=campaign,
+        rehearsal=rehearsal,
+        strict_proof_id="f" * 64,
+        clean_candidate_verified=True,
+        trusted_scorer_verified=True,
+        database_compatibility_verified=True,
+    )
+    assert decision["promotion_eligible"] is False
+    assert decision["blockers"] == ["deletion_inventory", "strict_daytona"]
+    assert promotion.validate_promotion_decision(decision) == decision
+
+
+def test_deletion_inventory_records_explicit_noop_and_preserves_safety_owners(bundle_pair):
+    baseline, candidate = bundle_pair
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    inventory = promotion.build_deletion_inventory(
+        rehearsal_sha256=rehearsal["rehearsal_sha256"],
+        candidates=[],
+        checks={
+            "import_search": True,
+            "dependency_boundaries": True,
+            "deterministic_suite": True,
+            "security_checks": True,
+            "release_checks": True,
+            "artifacts_rebuilt": True,
+        },
+    )
+    assert inventory["result"] == "no-op"
+    assert "retained_broker_execution" in inventory["retained_safety_owners"]
+    assert promotion.validate_deletion_inventory(inventory, rehearsal_sha256=rehearsal["rehearsal_sha256"]) == inventory
 
 
 @pytest.mark.parametrize("change", [{"score": 0.9}, {"seconds": 11.01}, {"cost": 1.101}])

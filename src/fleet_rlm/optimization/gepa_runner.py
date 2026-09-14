@@ -12,14 +12,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import dspy
+
 from fleet_rlm.optimization.dataset import OptimizationDatasetError, load_export, split_records
-from fleet_rlm.optimization.evidence import EvidenceStore
+from fleet_rlm.optimization.evidence import EvidenceStore, ValidatedStrictDaytonaProof
+from fleet_rlm.optimization.metric import TrustedGEPAFeedbackMetric
 from fleet_rlm.optimization.mlflow_observability import development_gepa_trace
 from fleet_rlm.rlm.program import FleetRLMSignature, LMTier, build_lm_for_tier
 
@@ -40,10 +45,253 @@ _DEVELOPMENT_REFLECTION_PROMPT_TEMPLATE = (
     "Your task is to write a new instruction for the assistant.\n\n"
     "Provide the new instructions within ``` blocks."
 )
+_PRODUCTION_SCHEMA = "fleet.phase6-gepa-campaign/v1"
+_SHA256 = set("0123456789abcdef")
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 
 
 class OptimizationPreflightError(RuntimeError):
     """A safe optimization run cannot begin."""
+
+
+def run_authoritative_gepa(
+    *,
+    student: dspy.Module,
+    trainset: Sequence[Any],
+    selection_set: Sequence[Any],
+    held_out_set: Sequence[Any],
+    metric: TrustedGEPAFeedbackMetric,
+    task_lm: dspy.LM,
+    reflection_lm: dspy.LM,
+    task_model_id: str,
+    reflection_model_id: str,
+    strict_proof: ValidatedStrictDaytonaProof,
+    dataset_sha256: str,
+    scorer_sha256: str,
+    capability_coverage_sha256: str,
+    capability_coverage_verified: bool,
+    seed: int,
+    max_metric_calls: int,
+    evidence_root: Path,
+    run_id: str,
+    held_out_evaluator: Any,
+    fresh_process_reload: Any,
+) -> dict[str, Any]:
+    """Run DSPy's production GEPA contract behind the validated strict proof.
+
+    The caller supplies a host-owned student/evaluator composition.  Candidate
+    execution and judging never move into this module's receipt writer.  The
+    function intentionally requires train, selection, and held-out inputs,
+    uses exactly one explicit ``max_metric_calls`` budget, tracks DSPy
+    ``detailed_results``, and requires a caller-provided fresh-process reload
+    check before returning a campaign receipt.
+    """
+    _require_live()
+    if not isinstance(student, dspy.Module):
+        raise OptimizationPreflightError("production GEPA requires a DSPy Module student")
+    if not isinstance(metric, TrustedGEPAFeedbackMetric):
+        raise OptimizationPreflightError("production GEPA requires the trusted host metric")
+    if not isinstance(strict_proof, ValidatedStrictDaytonaProof) or strict_proof.receipt.schema != (
+        "fleet.strict-daytona-proof/v2"
+    ):
+        raise OptimizationPreflightError("production GEPA requires a validated block-all Daytona proof")
+    for name, value in (
+        ("task_model_id", task_model_id),
+        ("reflection_model_id", reflection_model_id),
+    ):
+        if not isinstance(value, str) or not _MODEL_ID.fullmatch(value):
+            raise OptimizationPreflightError(f"{name} is not a safe model identity")
+    if task_model_id == reflection_model_id:
+        raise OptimizationPreflightError("task and reflection models must be distinct")
+    if not _is_sha256(dataset_sha256) or not _is_sha256(scorer_sha256):
+        raise OptimizationPreflightError("dataset and scorer identities must be SHA-256 digests")
+    if not _is_sha256(capability_coverage_sha256):
+        raise OptimizationPreflightError("capability coverage identity must be a SHA-256 digest")
+    if capability_coverage_verified is not True:
+        raise OptimizationPreflightError("production GEPA requires explicit strict-evaluator capability coverage")
+    if type(seed) is not int or seed < 0:
+        raise OptimizationPreflightError("production GEPA seed must be a nonnegative integer")
+    if (
+        not isinstance(trainset, Sequence)
+        or not isinstance(selection_set, Sequence)
+        or not isinstance(held_out_set, Sequence)
+    ):
+        raise OptimizationPreflightError("production GEPA requires concrete train, selection, and held-out splits")
+    if min(len(trainset), len(selection_set), len(held_out_set)) < 5:
+        raise OptimizationPreflightError("production GEPA requires at least five records per split")
+    expected_budget = CandidateRoundBudget().evaluator_calls(selection_records=len(selection_set))["total"]
+    if type(max_metric_calls) is not int or max_metric_calls != expected_budget:
+        raise OptimizationPreflightError(
+            f"production GEPA max_metric_calls must equal the bounded 8+24-round budget ({expected_budget})"
+        )
+    if not callable(held_out_evaluator) or not callable(fresh_process_reload):
+        raise OptimizationPreflightError("held-out evaluation and fresh-process reload callbacks are required")
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", run_id):
+        raise OptimizationPreflightError("production GEPA run_id is not a safe identifier")
+
+    store = EvidenceStore(evidence_root, run_id)
+    manifest = {
+        "schema": _PRODUCTION_SCHEMA,
+        "state": "running",
+        "promotion_eligible": False,
+        "production_authorized": True,
+        "dataset_sha256": dataset_sha256,
+        "scorer_sha256": scorer_sha256,
+        "capability_coverage_sha256": capability_coverage_sha256,
+        "capability_coverage_verified": True,
+        "strict_proof_id": strict_proof.proof_id,
+        "task_model_id": task_model_id,
+        "reflection_model_id": reflection_model_id,
+        "seed": seed,
+        "max_metric_calls": max_metric_calls,
+        "track_stats": True,
+        "detailed_results": True,
+        "split_counts": {
+            "train": len(trainset),
+            "selection": len(selection_set),
+            "held_out": len(held_out_set),
+        },
+    }
+    store.initialize(manifest)
+    try:
+        optimizer = dspy.GEPA(
+            metric=metric,
+            auto=None,
+            max_metric_calls=max_metric_calls,
+            reflection_lm=reflection_lm,
+            track_stats=True,
+            track_best_outputs=True,
+            use_merge=False,
+            seed=seed,
+            log_dir=str(store.root / "gepa"),
+        )
+        with dspy.context(lm=task_lm, track_usage=True):
+            optimized = optimizer.compile(
+                student,
+                trainset=list(trainset),
+                valset=list(selection_set),
+            )
+        detailed = _bounded_detailed_results(getattr(optimized, "detailed_results", None))
+        instruction_sha256 = _instruction_sha256(optimized)
+        reloaded_sha256 = fresh_process_reload(instruction_sha256)
+        if not isinstance(reloaded_sha256, str) or reloaded_sha256 != instruction_sha256:
+            raise OptimizationPreflightError("fresh-process instruction reload changed the candidate identity")
+        held_out = _bounded_held_out_result(held_out_evaluator(optimized, tuple(held_out_set)))
+        unsigned = {
+            "schema": _PRODUCTION_SCHEMA,
+            "state": "completed",
+            "promotion_eligible": False,
+            "production_authorized": True,
+            "dataset_sha256": dataset_sha256,
+            "scorer_sha256": scorer_sha256,
+            "capability_coverage_sha256": capability_coverage_sha256,
+            "capability_coverage_verified": True,
+            "strict_proof_id": strict_proof.proof_id,
+            "task_model_id": task_model_id,
+            "reflection_model_id": reflection_model_id,
+            "seed": seed,
+            "max_metric_calls": max_metric_calls,
+            "budget_rounds": {"exploration": 8, "continuation": 24},
+            "track_stats": True,
+            "detailed_results": detailed,
+            "instruction_sha256": instruction_sha256,
+            "fresh_process_reload_sha256": reloaded_sha256,
+            "held_out": held_out,
+        }
+        receipt = {**unsigned, "campaign_sha256": _canonical_digest(unsigned)}
+        store.write_json("production-result.json", receipt)
+        return {**receipt, "evidence_dir": str(store.root)}
+    except OptimizationPreflightError:
+        store.write_json(
+            "production-result.json",
+            {"schema": _PRODUCTION_SCHEMA, "state": "failed", "promotion_eligible": False},
+        )
+        raise
+    except Exception as exc:
+        store.write_json(
+            "production-result.json",
+            {"schema": _PRODUCTION_SCHEMA, "state": "failed", "promotion_eligible": False},
+        )
+        raise OptimizationPreflightError("authoritative GEPA campaign failed") from exc
+
+
+def _is_sha256(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(char in _SHA256 for char in value)
+
+
+def _canonical_digest(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _bounded_detailed_results(value: Any) -> dict[str, Any]:
+    """Persist GEPA statistics without candidate text, traces, or user content."""
+    to_dict = getattr(value, "to_dict", None)
+    if not callable(to_dict):
+        raise OptimizationPreflightError("DSPy GEPA did not return detailed_results")
+    raw = to_dict()
+    if not isinstance(raw, Mapping):
+        raise OptimizationPreflightError("DSPy GEPA detailed_results are malformed")
+    scores = raw.get("val_aggregate_scores")
+    if (
+        not isinstance(scores, list)
+        or not scores
+        or len(scores) > 4096
+        or any(
+            not isinstance(score, (int, float))
+            or isinstance(score, bool)
+            or not math.isfinite(float(score))
+            or not 0 <= float(score) <= 1
+            for score in scores
+        )
+    ):
+        raise OptimizationPreflightError("DSPy GEPA detailed scores are malformed")
+    return {
+        "candidate_count": len(raw.get("candidates", [])) if isinstance(raw.get("candidates"), list) else 0,
+        "val_aggregate_scores": [float(score) for score in scores],
+        "total_metric_calls": raw.get("total_metric_calls"),
+        "num_full_val_evals": raw.get("num_full_val_evals"),
+        "best_idx": raw.get("best_idx"),
+        "details_sha256": _canonical_digest(
+            {
+                "val_aggregate_scores": [float(score) for score in scores],
+                "total_metric_calls": raw.get("total_metric_calls"),
+                "num_full_val_evals": raw.get("num_full_val_evals"),
+            }
+        ),
+    }
+
+
+def _instruction_sha256(program: Any) -> str:
+    predictors = getattr(program, "named_predictors", None)
+    if not callable(predictors):
+        raise OptimizationPreflightError("optimized program cannot expose named instructions")
+    instructions: dict[str, str] = {}
+    for name, predictor in predictors():
+        text = getattr(getattr(predictor, "signature", None), "instructions", None)
+        if not isinstance(name, str) or not isinstance(text, str) or not text.strip():
+            raise OptimizationPreflightError("optimized program contains an invalid instruction")
+        instructions[name] = text
+    if not instructions:
+        raise OptimizationPreflightError("optimized program contains no instructions")
+    return _canonical_digest(instructions)
+
+
+def _bounded_held_out_result(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise OptimizationPreflightError("held-out evaluator must return a mapping")
+    required = {"complete", "quality", "p95_seconds", "cost_usd"}
+    if set(value) != required or value["complete"] is not True:
+        raise OptimizationPreflightError("held-out evaluation is incomplete")
+    result = {"complete": True}
+    for field in ("quality", "p95_seconds", "cost_usd"):
+        number = value[field]
+        if type(number) not in (int, float) or isinstance(number, bool) or not math.isfinite(float(number)):
+            raise OptimizationPreflightError("held-out metrics must be finite numbers")
+        if number < 0 or (field == "quality" and number > 1):
+            raise OptimizationPreflightError("held-out metric is outside its bounded range")
+        result[field] = float(number)
+    return result
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,5 +624,6 @@ __all__ = [
     "initialize_preflight_evidence",
     "preflight",
     "require_live_execution_capability",
+    "run_authoritative_gepa",
     "run_development_smoke",
 ]
