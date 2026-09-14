@@ -68,7 +68,7 @@ def load_receipt(path: Path) -> dict[str, Any]:
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
     if not isinstance(recorded_digest, str) or recorded_digest != digest(body):
         raise CampaignRecordError("benchmark receipt digest does not match its sealed contents")
-    for field in ("source_revision", "runtime_variant"):
+    for field in ("source_revision", "execution_architecture"):
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise CampaignRecordError(f"benchmark receipt field {field} is missing")
     if type(receipt.get("source_dirty")) is not bool:
@@ -185,7 +185,7 @@ def _adapter_metrics(receipt: Mapping[str, Any]) -> tuple[dict[str, float], tupl
 
 def _campaign_params(receipt: Mapping[str, Any]) -> dict[str, str]:
     params: dict[str, str] = {}
-    for key in ("runtime_variant", "dataset_digest", "scorer_digest", "repetitions"):
+    for key in ("execution_architecture", "dataset_digest", "scorer_digest", "repetitions"):
         if key in receipt:
             params[f"fleet.campaign.{key}"] = _bounded_param(key, receipt[key])
     identities = receipt.get("identities")

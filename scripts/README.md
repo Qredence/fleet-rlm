@@ -2,9 +2,9 @@
 
 Run commands from the repository root with `uv run python`. `--help` is safe
 inspection, not authorization for a credentialed operation. Current runtime
-policy comes from `config/fleet.toml`: the selectable path is broker-backed
-`legacy`, and Fleet child RLM tools are disabled unless an explicit profile
-enables them. A receipt proves only its recorded candidate and topology.
+policy comes from `config/fleet.toml`: Fleet uses retained broker execution and
+child RLM tools follow the selected profile policy. A receipt proves only its
+recorded candidate and topology.
 
 ## Deterministic generation and repository checks
 
@@ -39,6 +39,7 @@ hand.
 | `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
 | `deployment_observability.py` | Inspect release observability inputs. |
 | `circleci_trigger_release.py` | Trigger and await the release workflow. |
+| `phase6_promotion.py` | Seal a clean promotion bundle or validate a database-compatible rollback pair. |
 
 These commands may contact providers or mutate external state. Invoke them only
 with the required explicit operator authorization and their documented policy,

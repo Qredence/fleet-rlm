@@ -879,8 +879,8 @@ implementation and evidence requirements are satisfied.
   database/Alembic prerequisite; that is a separate unresolved live gate.
 - Phase 5: generation-aware Session ownership, Session prewarm, disposable child
   leases and fenced cleanup remain the provider seams. Native RLM/context/binding
-  mechanics remain feasibility-only; `runtime.variant` exposes only `legacy`
-  until containment and continuity are certified. Live cutover, stop/start
+  mechanics remain feasibility-only. The retired `runtime.variant` selector no
+  longer exposes an architecture choice. Live cutover, stop/start
   continuity, SDK I/O parity and resident/broker subtraction remain pending.
 - Phase 6: `SubproblemCapsule` is a frozen, closed Pydantic model with deterministic
   JSON bytes, bounded fragments/references/output allocation, authorized-path
@@ -912,18 +912,18 @@ It is not the 2026-09-10 simplification plan's Phase 0–6 sequence.
 - [x] Phase 1.1 Daytona 0.210.0 integration, typed error/resource-race handling, benchmark comparison axes, and MLflow privacy/lifecycle mechanics are implemented and locally tested.
 - [x] Native-interpreter adapter/replay mechanics were implemented, then removed with P2.4; broker execution is the sole in-tree code-execution implementation. The 2026-09-08 native receipt remains a containment no-go.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
-- [x] Fresh per-Run RLM/program construction is production behavior on `legacy`; the native worker/lease branch is gone.
+- [x] Fresh per-Run RLM/program construction is production behavior on retained broker execution; the native worker/lease branch is gone.
 - [x] Bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered typed sibling outcomes, and exactly two Root recursive tools (`rlm_query`, `rlm_query_batched`) are implemented.
 - [x] Repository-wide local validation passed on earlier candidates (`make check`, coverage floor, generated-contract checks, TUI tests). Re-run the current checkout before treating those counts as fresh.
 
 ### Certification still open
 
 - [x] PostgreSQL certification: the corrected exclusive campaign passed six contention scenarios and retained projected plans in `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json` (Alembic `019fe0010001`, PostgreSQL `170011`). The disposable target was removed after sealing. Deployed Lakebase closeout is Phase 5 and is not started.
-- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so `legacy` and the broker remain required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
+- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so retained broker execution remains required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
 - [x] Native interpreter production startup is withdrawn: P2.4 removed the in-tree native execution path. Broker remains the sole code-execution implementation.
 - [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled. Phase 5 owns any later canary.
 - [ ] Complete MLflow exporter fault-injection, token-aggregation, and configured-backend certification. Phase 3 complete-MVP live quality remains failed. P4.5 matched ablation is retained separately and does not close MLflow certification.
-- [ ] Phase 5 snapshot promotion, Phase 6 clean SHA / rollback rehearsal / GEPA. Not started.
+- [ ] Phase 5 snapshot promotion and Phase 6 live clean-SHA, rollback-rehearsal, and GEPA gates. Local Phase 6 preparation removes the retired selector and adds a write-once promotion-bundle and rollback-pair contract; it is not live promotion evidence.
 
 ## Evidence and next tasks
 

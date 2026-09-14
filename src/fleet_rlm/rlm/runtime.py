@@ -281,11 +281,6 @@ class ExecutionRuntime:
     # Directly constructed test/in-process contexts opt into the reserve via
     # preparation; the public TOML default is applied by the live composition.
     wrap_up_seconds: float = 0.0
-    runtime_variant: Literal["legacy"] = "legacy"
-
-    def __post_init__(self) -> None:
-        if self.runtime_variant != "legacy":
-            raise ValueError("only retained broker execution is supported")
 
 
 @dataclass(frozen=True, slots=True)

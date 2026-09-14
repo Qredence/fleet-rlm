@@ -895,5 +895,4 @@ def build_run_preparation(
         capabilities=_LiveCapabilityPreparer(
             settings, skill_catalog, volume_paths=resources.volume_paths, artifact_reader=artifact_reader
         ),
-        runtime_variant=settings.runtime_variant,
     )

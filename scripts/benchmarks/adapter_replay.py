@@ -219,7 +219,7 @@ def run_adapter_comparison(*, repetitions: int = 5) -> dict[str, Any]:
         {
             "schema": "fleet.runtime-adapter-comparison/v2",
             "scope": "scripted-adapter-protocol-only",
-            "runtime_variant": "legacy",
+            "execution_architecture": "retained-broker",
             "dspy_version": dspy.__version__,
             "repetitions": repetitions,
             "dataset_digest": digest(dataset),

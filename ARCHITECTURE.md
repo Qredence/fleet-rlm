@@ -12,8 +12,8 @@ Canonical Run Environment set: `daytona`.
 
 ## Current runtime and migration target
 
-`runtime.variant = "legacy"` is the only selectable architecture. It uses native
-DSPy RLM with Fleet's broker-backed interpreter. Production execution builds a
+Fleet uses retained broker execution with native DSPy RLM and Fleet's
+broker-backed interpreter. Production execution builds a
 fresh DSPy program, direct Tool bindings, callbacks, and worker executor for
 each Run. Sequential successful Turns may reuse the broker Root Sandbox;
 invocation history, authority, budgets, and bindings remain Turn-local.

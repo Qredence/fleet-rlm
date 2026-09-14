@@ -755,7 +755,6 @@ class TurnRuntime:
             trace_phase="execution",
             preparation_trace_id=getattr(prepared, "preparation_trace_id", None),
             preparation_span_id=getattr(prepared, "preparation_span_id", None),
-            runtime_variant=getattr(getattr(prepared.execution, "execution", None), "runtime_variant", None),
             program_fingerprint=str(getattr(prepared, "program_fingerprint", "") or "") or None,
             image_identity=getattr(prepared, "image_identity", None),
         ) as handle:

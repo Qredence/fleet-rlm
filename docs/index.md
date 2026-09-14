@@ -4,9 +4,9 @@ Fleet RLM has one Python backend under `src/fleet_rlm/` and one maintained
 development client under `tools/fleet-tui/`. It exposes a compact Session-first
 FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 
-The current selectable runtime is `legacy`: native DSPy RLM on the retained
-broker interpreter, with a fresh program per Run. Sequential Turns may reuse a
-healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
+Fleet uses native DSPy RLM on the retained broker interpreter, with a fresh
+program per Run. Sequential Turns may reuse a healthy Root Sandbox. Native
+Daytona interpreter cutover is not selected.
 
 ## Start here
 
@@ -20,17 +20,18 @@ healthy Root Sandbox. Native Daytona interpreter cutover is not selected.
 8. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
 9. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 10. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
+11. [Phase 6 promotion and rollback](how-to-guides/phase6-promotion.md)
 
 ## Current runtime and active migration
 
 - [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md) — current legacy behavior.
 - [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
-- [Runtime variant (ADR 005)](decisions/005-runtime-variant.md) — selectable policy contract.
+- [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md) — historical migration contract.
 - [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — proposed architecture and gates.
 - [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and remaining work.
 - [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
 
-The current production path is the retained broker-backed `legacy` runtime.
+The current production path is retained broker-backed execution.
 Fleet child RLM tools follow the selected policy; the shipped
 `daytona-recursive` default currently enables them, while native `llm_query`
 remains available. This operational setting does not certify recursive value.
