@@ -173,3 +173,44 @@ def test_unknown_adapter_failure_logs_cause_class_only(caplog: pytest.LogCapture
     assert "message=UnexpectedSDKError" in caplog.text
     assert "never-log-this" not in caplog.text
     assert "/Users/zach" not in caplog.text
+
+
+class _FakePostHog:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def capture(self, *, event: str, properties: dict, **_) -> None:
+        self.events.append((event, properties))
+
+
+@pytest.mark.parametrize(
+    ("cause", "cause_type", "category"),
+    [
+        (
+            ProviderRequestError("provider failed", cause_type="ProviderResponseError", status_code=503),
+            "provider_5xx",
+            "5xx",
+        ),
+        (RuntimeError("infrastructure failure"), "unknown", "none"),
+    ],
+)
+def test_open_failure_capture_differentiates_the_cause(
+    monkeypatch: pytest.MonkeyPatch, cause: BaseException, cause_type: str, category: str
+) -> None:
+    # Distinct causes flatten to the same public "Turn is unavailable" message, so
+    # the capture must carry cause_type and provider_status_category to tell a
+    # provider failure apart from an infrastructure failure.
+    from fleet_rlm.api.routes import turns as turns_route
+
+    fake = _FakePostHog()
+    monkeypatch.setattr(turns_route, "get_client", lambda: fake)
+
+    _assert_streamed_failure(_post(_client(cause)), "Turn is unavailable")
+
+    failures = [properties for event, properties in fake.events if event == "turn_failed"]
+    assert len(failures) == 1
+    properties = failures[0]
+    assert properties["failure_phase"] == "open"
+    assert properties["failure_message"] == "Turn is unavailable"
+    assert properties["cause_type"] == cause_type
+    assert properties["provider_status_category"] == category

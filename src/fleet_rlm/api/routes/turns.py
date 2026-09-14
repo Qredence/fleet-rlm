@@ -27,8 +27,9 @@ from fleet_rlm.chat.run_lifecycle import (
     RunNotFoundError,
 )
 from fleet_rlm.chat.turn_runtime import OpenedTurnStream
-from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.observability.diagnostics import FailureDiagnostic, normalize_turn_failure
 from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.rlm.events import RunCompleted
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
@@ -59,8 +60,7 @@ def _correlation_id(request: Request) -> str:
     return str(uuid4())
 
 
-def _log_preparation_unavailable(correlation_id: str, exc: BaseException) -> None:
-    diagnostic = normalize_turn_failure(exc)
+def _log_preparation_unavailable(correlation_id: str, diagnostic: FailureDiagnostic) -> None:
     logger.warning(
         "turn_preparation_failure correlation_id=%s cause_type=%s provider_status_category=%s message=%s",
         correlation_id,
@@ -187,8 +187,9 @@ async def create_turn(
         message = _open_failure_message(exc)
         if message is None:
             raise
+        diagnostic = normalize_turn_failure(exc)
         if message == "Turn is unavailable":
-            _log_preparation_unavailable(_correlation_id(request), exc)
+            _log_preparation_unavailable(_correlation_id(request), diagnostic)
         if ph is not None:
             ph.capture(
                 distinct_id=get_distinct_id(),
@@ -198,6 +199,8 @@ async def create_turn(
                     "session_id": str(session_id),
                     "failure_phase": "open",
                     "failure_message": message,
+                    "cause_type": diagnostic.cause_type,
+                    "provider_status_category": diagnostic.provider_status_category,
                 },
             )
         for chunk in _open_failure_frames(message):
@@ -220,16 +223,32 @@ async def create_turn(
         )
 
     projector = AISDKUIProjector()
+    completed = False
     try:
         assert owner is not None
         async for event in owner:
+            # Only a RunCompleted terminal marks success; RunFailed, RunTimedOut,
+            # and RunCancelled project error/abort chunks and end the loop too.
+            if isinstance(event.detail, RunCompleted):
+                completed = True
             for chunk in projector.project(event):
                 yield ServerSentEvent(data=chunk)
+        if completed and ph is not None:
+            ph.capture(
+                distinct_id=get_distinct_id(),
+                event="turn_completed",
+                properties={
+                    "workspace_id": str(identity.workspace_id),
+                    "session_id": str(session_id),
+                    "skill_count": skill_count,
+                },
+            )
         yield ServerSentEvent(raw_data="[DONE]")
     except (asyncio.CancelledError, GeneratorExit):
         # Client disconnect is not a turn failure; never capture it.
         raise
     except BaseException as exc:
+        diagnostic = normalize_turn_failure(exc)
         if ph is not None:
             ph.capture(
                 distinct_id=get_distinct_id(),
@@ -238,7 +257,9 @@ async def create_turn(
                     "workspace_id": str(identity.workspace_id),
                     "session_id": str(session_id),
                     "failure_phase": "stream",
-                    "failure_message": normalize_turn_failure(exc).message,
+                    "failure_message": diagnostic.message,
+                    "cause_type": diagnostic.cause_type,
+                    "provider_status_category": diagnostic.provider_status_category,
                 },
             )
         raise
