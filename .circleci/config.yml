@@ -169,7 +169,7 @@ jobs:
           no_output_timeout: 10m
           command: |
             mkdir -p test-results
-            circleci run testsuite "pytest-unit"
+            circleci testsuite run "pytest-unit"
       - store_test_results:
           path: test-results
       - store_artifacts:
@@ -302,7 +302,7 @@ jobs:
           no_output_timeout: 15m
           command: |
             mkdir -p test-results
-            circleci run testsuite "pytest-compat"
+            circleci testsuite run "pytest-compat"
       - store_test_results:
           path: test-results
       - store_artifacts:

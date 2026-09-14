@@ -1,9 +1,11 @@
 # Table of contents
 
 Current guides, active migration records, and historical baselines are grouped
-in [Documentation Home](index.md). The retained broker-backed `legacy` runtime
-is current; Fleet child RLM tools are opt-in. A dated decision or passing receipt
-is scoped to its recorded revision and is not current production certification.
+in [Documentation Home](index.md). Retained broker-backed execution is the sole
+supported runtime; Fleet child RLM tools follow the selected policy and are
+enabled in the shipped `daytona-recursive` default. A dated decision or passing
+receipt is scoped to its recorded revision and is not current production
+certification.
 
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
@@ -22,7 +24,8 @@ is scoped to its recorded revision and is not current production certification.
   * [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 * [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md)
 * [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md)
-* [Runtime variant (ADR 005)](decisions/005-runtime-variant.md)
+* [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md)
+* [Phase 6 promotion and rollback](how-to-guides/phase6-promotion.md)
 * [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
 * [ADR 006 implementation status](decisions/006-implementation-status.md)
 * [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)

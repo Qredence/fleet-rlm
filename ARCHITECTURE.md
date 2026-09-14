@@ -12,8 +12,8 @@ Canonical Run Environment set: `daytona`.
 
 ## Current runtime and migration target
 
-`runtime.variant = "legacy"` is the only selectable architecture. It uses native
-DSPy RLM with Fleet's broker-backed interpreter. Production execution builds a
+Fleet uses retained broker execution with native DSPy RLM and Fleet's
+broker-backed interpreter. Production execution builds a
 fresh DSPy program, direct Tool bindings, callbacks, and worker executor for
 each Run. Sequential successful Turns may reuse the broker Root Sandbox;
 invocation history, authority, budgets, and bindings remain Turn-local.
@@ -25,9 +25,11 @@ Native Daytona interpreter cutover is not on the production path: context
 deletion does not contain detached process-session children, and the native
 worker/lease branch has been removed. Turn preparation and the RLM runner
 accept only retained broker execution. Fleet child RLM tools (`rlm_query` /
-`rlm_query_batched`) are opt-in: `[defaults.rlm] recursion_enabled = false`
-in the shipped policy. Native `llm_query` remains the semantic
-delegation path. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
+`rlm_query_batched`) remain policy-controlled: the operator-selected shipped
+policy currently enables recursion. Native `llm_query` remains available for
+semantic delegation. This operational choice does not supersede the historical
+Phase 4 failed retain gates. Clean SemanticChild warm capacity is configured
+separately; enabling its policy does not provision a provider pool. The [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
 owns dated evidence and remaining gates; this page describes current ownership.
 
 ## System model
@@ -161,6 +163,19 @@ receive fresh isolated Sandboxes and child-scoped Volume paths. Cleanup is
 owned, deadline-bounded, and re-observed; no detached provider work may mutate
 Fleet state after settlement.
 
+### Optimization evaluator boundary
+
+`src/fleet_rlm/optimization/` owns the read-only curation, immutable identity,
+and strict-evaluator policy contracts; it does not become a second production
+execution path. Production GEPA is fail-closed until a live proof receipt and
+trusted quality campaign authorize it. The selected strict evaluator policy
+uses the host-polled, authenticated retained broker and creates a disposable
+Daytona sandbox with `network_block_all=true`, no volume, and no outbound
+gateway allow-list. A v2 proof must separately establish transport
+authentication, essential-service/raw-socket/DNS egress denial, broker
+cleanup, and sandbox deletion. Development canaries, temporary tunnels, local
+MLflow drafts, and scripted comparisons are non-authoritative.
+
 ### Workspace and persistence
 
 `src/fleet_rlm/sessions/`, `workspace/`, `attachments/`, `artifacts/`, and
@@ -262,13 +277,13 @@ remain transport-neutral until the API SSE adapter projects them.
 
 ## DSPy RLM contract
 
-The historical migration target uses a fresh InterpreterContext per Turn and distinguishes
-Volume-less SemanticChild from restricted-data WorkspaceChild. See
-[ADR 004](docs/decisions/004-turn-interpreter-context.md). These are target
-contracts; the Phase 1 decision retains broker execution and existing Session
-reuse while resident-state subtraction remains open. Native execution is not
-a pending selectable alternative. [ADR 005](docs/decisions/005-runtime-variant.md)
-defines the single execution-architecture selector.
+The retained broker is the sole execution boundary. Each Run receives a fresh
+DSPy program, interpreter bindings, and Turn capabilities; a healthy broker Root
+Sandbox may be reused only across sequential successful Turns. Recursive child
+inputs are capsule-bound and depth-limited by the selected policy. The native
+Daytona interpreter cutover described in [ADR 004](docs/decisions/004-turn-interpreter-context.md)
+is not a production path, and [ADR 005](docs/decisions/005-runtime-variant.md)
+records the retired architecture selector.
 
 Fleet uses the repository-pinned DSPy implementation as the behavioral source
 of truth. A native RLM invocation receives the declared request, committed

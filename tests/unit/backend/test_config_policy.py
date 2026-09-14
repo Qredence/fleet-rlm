@@ -33,7 +33,7 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert "secret" not in str(field).lower()
 
     model = _field(service.read(), "daytona-recursive", "llm.root.model")
-    assert model["value"] == "databricks-deepseek-v4-flash-0731"
+    assert model["value"] == "databricks-deepseek-v4-1-flash"
     assert model["editor"] == "text"
 
     root_timeout = _field(service.read(), "daytona-recursive", "llm.root.timeout_seconds")
@@ -79,11 +79,9 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
     assert _field(after, "daytona-recursive", "rlm.max_iters")["value"] == 21
 
 
-def test_variant_editor_exposes_only_the_certified_runtime(tmp_path: Path) -> None:
+def test_policy_rejects_removed_runtime_variant(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     snapshot = service.read()
-    field = _field(snapshot, "defaults", "runtime.variant")
-    assert field["choices"] == ["legacy"]
     before = policy.read_bytes()
     with pytest.raises(FleetConfigurationError):
         service.update(scope="defaults", path="runtime.variant", value="native-turn-scoped", revision=snapshot.revision)

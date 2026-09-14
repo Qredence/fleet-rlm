@@ -46,16 +46,11 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     )
 
 
-def test_runtime_variant_default_is_explicit_and_stable() -> None:
+def test_runtime_policy_has_no_execution_architecture_selector() -> None:
     document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
-    assert document["defaults"]["runtime"]["variant"] == "legacy"
-    assert Settings().runtime_variant == "legacy"
-
-
-@pytest.mark.parametrize("variant", ["native", "native-turn-scoped", "capsule", "", "unknown"])
-def test_unimplemented_runtime_variants_are_rejected(variant: str) -> None:
-    with pytest.raises(ValidationError):
-        Settings(runtime_variant=variant)
+    assert "variant" not in document["defaults"]["runtime"]
+    with pytest.raises(FleetConfigurationError, match="runtime_variant"):
+        Settings(runtime_variant="legacy")
 
 
 def test_committed_policy_declares_databricks_model_roles() -> None:
@@ -75,7 +70,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
-            "model": "databricks-deepseek-v4-flash-0731",
+            "model": "databricks-deepseek-v4-1-flash",
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
@@ -84,7 +79,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "cache": False,
         },
         "sub": {
-            "model": "databricks-deepseek-v4-flash-0731",
+            "model": "databricks-deepseek-v4-1-flash",
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
@@ -111,7 +106,7 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_single_provider_retry
 
 
 # Every committed profile routes Root and Sub through the Databricks endpoint.
-_DATABRICKS_MODEL = "databricks-deepseek-v4-flash-0731"
+_DATABRICKS_MODEL = "databricks-deepseek-v4-1-flash"
 _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
@@ -181,8 +176,8 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "databricks-deepseek-v4-flash-0731"
-    assert settings.sub_model == "databricks-deepseek-v4-flash-0731"
+    assert settings.root_model == "databricks-deepseek-v4-1-flash"
+    assert settings.sub_model == "databricks-deepseek-v4-1-flash"
     # The endpoint has no reasoning-effort policy override; it
     # stays unset instead of being forwarded with a default.
     assert settings.root_llm_reasoning_effort is None
@@ -280,11 +275,14 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_committed_policy_disables_recursive_child_execution() -> None:
+def test_committed_policy_enables_operator_selected_recursion_and_warm_pool() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert document["defaults"]["rlm"]["recursion_enabled"] is False
+    assert document["defaults"]["rlm"]["recursion_enabled"] is True
+    assert document["defaults"]["daytona"]["warm_pool_enabled"] is True
+    assert document["defaults"]["daytona"]["warm_pool_size"] == 1
+    assert document["defaults"]["daytona"]["warm_pool_region"] == "us"
     # The committed default profile is the [defaults] policy itself: the table
     # stays empty because the schema requires at least one profile.
     assert document["profiles"]["daytona-recursive"] == {}

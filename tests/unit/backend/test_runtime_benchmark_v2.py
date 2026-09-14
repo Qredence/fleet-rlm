@@ -36,7 +36,7 @@ def test_scripted_benchmark_executes_repeated_turns_and_checks_durability():
     clean = _clean_receipt(receipt)
     assert receipt["passed"]
     assert len(receipt["samples"]) == 6
-    assert receipt["runtime_variant"] == "legacy"
+    assert receipt["execution_architecture"] == "retained-broker"
     assert receipt["live_semantic_gate"] == "not_exercised"
     assert receipt["semantic_scorer_ids"] == ["semantic-keywords/v1"]
     assert all(sample["semantic_scores"]["semantic-keywords/v1"] for sample in receipt["samples"])
@@ -47,6 +47,20 @@ def test_semantic_keyword_scorer_normalizes_text_without_provider_calls():
     assert semantic_keywords_score("Résumé:\n  TOKYO 東京", ["résumé", "東京"])
     assert not semantic_keywords_score("summary only", ["résumé"])
     assert not semantic_keywords_score("hello", [])
+
+
+def test_historical_receipt_validates_unchanged_but_cannot_mix_schema_generations():
+    current = _clean_receipt(run(repetitions=2))
+    historical = deepcopy(current)
+    historical.pop("receipt_digest")
+    historical["schema"] = runtime_v2.LEGACY_SCHEMA
+    historical.pop("execution_architecture")
+    historical["runtime_variant"] = "legacy"
+    historical = seal(historical)
+    original = deepcopy(historical)
+    validate(historical)
+    assert historical == original
+    assert not compare(historical, current)["passed"]
 
 
 def test_benchmark_rejects_single_sample():
@@ -72,13 +86,14 @@ def test_comparison_rejects_resealed_false_summary():
         validate(seal(receipt))
 
 
-def test_comparison_rejects_runtime_variant_drift_and_dirty_provenance():
+def test_comparison_rejects_architecture_tampering_and_dirty_provenance():
     receipt = _clean_receipt(run(repetitions=2))
 
     changed = deepcopy(receipt)
     changed.pop("receipt_digest")
-    changed["runtime_variant"] = "native"
-    assert not compare(receipt, seal(changed))["passed"]
+    changed["execution_architecture"] = "native"
+    with pytest.raises(ValueError, match="execution architecture"):
+        compare(receipt, seal(changed))
 
     changed = deepcopy(receipt)
     changed.pop("receipt_digest")
@@ -99,7 +114,6 @@ def test_benchmark_rejects_missing_semantic_scorer_evidence():
 @pytest.mark.parametrize(
     "axis,key,value",
     [
-        ("runtime", "runtime_variant", "native-turn-scoped"),
         ("daytona-sdk", "daytona_sdk", "0.207.0"),
         ("snapshot", "snapshots", ["analysis-v2"]),
     ],
@@ -108,7 +122,7 @@ def test_comparison_allows_only_the_explicit_axis(axis, key, value):
     baseline = _clean_receipt(run(repetitions=2))
     candidate = deepcopy(baseline)
     candidate.pop("receipt_digest")
-    target = candidate if axis == "runtime" else candidate["identities"]
+    target = candidate["identities"]
     target[key] = value
     assert not compare(baseline, seal(candidate))["passed"]
     assert compare(baseline, seal(candidate), axis=axis)["passed"]

@@ -111,19 +111,3 @@ async def test_sequential_runs_use_fresh_programs_and_committed_history() -> Non
     assert len(factory.programs) == 2
     assert factory.histories == [first_history, second_history]
     await runner.aclose()
-
-
-@pytest.mark.parametrize("variant", ["native-turn-scoped", "native", "unknown"])
-def test_execution_context_rejects_unselected_runtime(variant: str) -> None:
-    from dataclasses import replace
-
-    context = _context(
-        session_id=uuid4(),
-        workspace_id=uuid4(),
-        run_id=uuid4(),
-        interpreter=_Interpreter(),
-        request="request",
-        history=dspy.History(messages=[]),
-    )
-    with pytest.raises(ValueError, match="only retained broker execution"):
-        replace(context.execution, runtime_variant=variant)

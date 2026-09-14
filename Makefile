@@ -1,4 +1,5 @@
 PYTHON_SOURCES = src tests scripts migrations
+RELEASE_SOURCE_DATE_EPOCH ?= $(shell git -C "$(CURDIR)" show -s --format=%ct HEAD 2>/dev/null || echo 0)
 # Release/install matrix tests are intentionally opt-in: they create multiple
 # virtual environments and are covered by the dedicated package gate.
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
@@ -233,7 +234,8 @@ stream-sync:
 
 build:
 	rm -rf dist build
-	uv build
+	SOURCE_DATE_EPOCH=$(RELEASE_SOURCE_DATE_EPOCH) uv build
+	uv run python scripts/normalize_release_artifacts.py --dist-dir dist --epoch $(RELEASE_SOURCE_DATE_EPOCH)
 
 build-release: build
 	uv run python scripts/validate_release.py wheel

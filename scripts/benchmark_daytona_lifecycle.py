@@ -43,7 +43,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_mount_spec,
 )
 
-RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v1"
+RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v2"
 WARMUP_CYCLES = 3
 MEASURED_CYCLES = 20
 PER_TURN_P95_SECONDS = 10.0
@@ -233,7 +233,7 @@ async def run_benchmark(settings: Any) -> dict[str, object]:
     Run warmup and measured lifecycle cycles and produce a bounded benchmark receipt.
 
     Parameters:
-        settings (Any): Benchmark configuration, including the runtime variant and Daytona settings.
+        settings (Any): Benchmark configuration, including Daytona client, sandbox, and volume settings.
 
     Returns:
         dict[str, object]: Receipt containing cycle results, timing summaries, threshold
@@ -277,7 +277,7 @@ async def run_benchmark(settings: Any) -> dict[str, object]:
         decision = benchmark_decision(p95_seconds=p95, deleted=deleted, measured=len(measured))
         return {
             "schema": RECEIPT_SCHEMA,
-            "runtime_variant": settings.runtime_variant,
+            "execution_architecture": "retained-broker",
             "started_at": started_at,
             "finished_at": datetime.now(UTC).isoformat(),
             "versions": _versions(),

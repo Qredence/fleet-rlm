@@ -1,11 +1,13 @@
 # ADR 006: Native Turn-scoped runtime, recursive delegation, and MLflow evidence
 
-Status: proposed; native feasibility mechanics are available, while policy selection, cutover, and live evidence gates remain open.
+Status: proposed target and evidence record; retained-broker execution is the
+current supported boundary, while live evidence gates remain open.
 
 Read implementation and dated results in the [status ledger](006-implementation-status.md).
-Normative statements below describe the target architecture, not proof that
-each phase is complete. The selectable `legacy` runtime remains the current
-product contract until the cutover gates pass.
+Normative statements below describe target and evidence contracts, not proof that
+each phase is complete. The current product contract is retained-broker
+execution; the native Daytona interpreter target is not selected until its
+containment and continuity gates pass.
 
 Date: 2026-09-06.
 
@@ -18,11 +20,12 @@ lane.
 
 Related decisions: [ADR 004](004-turn-interpreter-context.md) establishes fresh
 Turn interpreter contexts and child data authority;
-[ADR 005](005-runtime-variant.md) establishes one runtime selector. This ADR
+[ADR 005](005-runtime-variant.md) records the retired runtime selector. This ADR
 complements those decisions with dependency targets, native execution adoption,
 recursive evaluation, and MLflow ownership. The
-[Session runtime ADR](ADR-session-scoped-rlm-state.md) continues to describe the
-selected legacy implementation until the production cutover passes its gates.
+[Session runtime ADR](ADR-session-scoped-rlm-state.md) is retained as a
+historical state decision; the current implementation and remaining gates are
+owned by the [ADR 006 status ledger](006-implementation-status.md).
 
 ## Context
 
@@ -33,8 +36,8 @@ async bridge, scripted benchmarks, SQL claim/settlement contracts, and MLflow
 tracing and quality tooling. These components must be certified and simplified
 in place, not rebuilt under new names.
 
-At the source baseline, Daytona is pinned to `0.207.0` and `runtime.variant`
-selects `legacy`. Resident RLM registries, compatibility fingerprints, broker
+At the source baseline, Daytona is pinned to `0.207.0`. Resident RLM registries,
+compatibility fingerprints, broker
 execution, and automatic Session-context copying into recursive children remain.
 Implementation presence is not live certification: scripted lifecycle results
 cannot prove provider quality, remote process termination, or PostgreSQL
@@ -60,10 +63,9 @@ and MLflow as an evidence system rather than an execution controller.
   tracking backend, and the bounded trace/assessment lifecycle.
 - Keep model choices, budgets, environment profiles, and endpoints in resolved
   `config/fleet.toml` policy. Secrets come only from configured references.
-- Preserve one `runtime.variant`. Keep `legacy` as the only selectable value
-  until native containment and durable-continuity evidence pass. Native
-  feasibility remains an explicit injected verification seam; do not create
-  orthogonal runtime/interpreter/recursion switches.
+- Keep one supported broker execution path. Native feasibility remains an
+explicit injected verification seam; do not create runtime/interpreter/recursion
+switches.
 
 ### 2. Durable state and execution ownership
 

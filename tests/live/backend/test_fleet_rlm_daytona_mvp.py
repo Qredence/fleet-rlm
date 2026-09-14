@@ -51,7 +51,7 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 _CONTRACT_ID = "fleet.live-daytona-mvp"
 _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
-_RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v1"
+_RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v2"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 
 

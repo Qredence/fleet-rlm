@@ -1,6 +1,11 @@
 # ADR: Session-scoped RLM state
 
-**Status:** implemented by the selectable `legacy` runtime. The former P53/P35-E certification commands are retired; use the current [testing strategy](../how-to-guides/testing-strategy.md) and [ADR 006 status ledger](006-implementation-status.md) for validation and migration evidence.
+**Status:** historical Session-state decision. Its durable History and healthy
+broker-Sandbox semantics remain compatible with the current implementation; the
+retired architecture selector and current certification gates are owned by ADR
+006. The former P53/P35-E certification commands are retired; use the current
+[testing strategy](../how-to-guides/testing-strategy.md) and [ADR 006 status
+ledger](006-implementation-status.md) for validation and migration evidence.
 **Decision date:** 2026-08-11
 
 Fleet will make committed Session conversation the durable authority and will pass
@@ -14,9 +19,11 @@ records this change.
 
 ## Decision
 
-Migration note: [ADR 004](004-turn-interpreter-context.md) supersedes cross-Turn
-interpreter globals as the target architecture. The behavior below describes the
-selectable legacy implementation until the gated production cutover.
+Migration note: [ADR 004](004-turn-interpreter-context.md) records a native
+interpreter target that is not selected for production because provider
+containment did not pass. The behavior below describes the historical resident
+state contract; current execution uses fresh per-Run programs on the retained
+broker and may reuse only a healthy broker Root Sandbox.
 
 Fleet distinguishes these four state classes:
 

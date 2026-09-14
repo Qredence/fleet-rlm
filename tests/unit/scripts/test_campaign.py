@@ -133,3 +133,59 @@ def test_campaign_cost_and_time_caps_reject_before_admission() -> None:
     with pytest.raises(CampaignAdmissionError, match="time reserve"):
         budget.reserve(upper_bound_usd=0.1, now=890, max_trial_seconds=30)
     assert budget.receipt()["admissions"] == 0
+
+
+def test_receipt_writer_preserves_canonical_bytes_permissions_and_prior_evidence(tmp_path):
+    import hashlib
+    import json
+    import stat
+
+    from scripts.benchmarks.campaign import write_receipt_once
+
+    path = tmp_path / "receipts" / "result.json"
+    payload = {"status": "incomplete", "admissions": 0}
+    expected = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
+    assert write_receipt_once(path, payload) == hashlib.sha256(expected).hexdigest()
+    assert path.read_bytes() == expected
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        write_receipt_once(path, {"status": "passed"})
+    assert path.read_bytes() == expected
+
+
+@pytest.mark.parametrize("payload,limit", [({"status": "large"}, 1), ({"cost": math.nan}, None)])
+def test_receipt_writer_rejects_invalid_or_oversized_payload_before_creation(tmp_path, payload, limit):
+    from scripts.benchmarks.campaign import write_receipt_once
+
+    path = tmp_path / "result.json"
+    with pytest.raises(ValueError):
+        write_receipt_once(path, payload, max_bytes=limit)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("stage", ["fdopen", "fsync"])
+def test_receipt_writer_removes_partial_file_and_closes_descriptor(tmp_path, monkeypatch, stage):
+    import os
+
+    from scripts.benchmarks import campaign
+
+    path = tmp_path / "result.json"
+    descriptors = []
+    real_open = os.open
+
+    def recording_open(*args, **kwargs):
+        descriptor = real_open(*args, **kwargs)
+        descriptors.append(descriptor)
+        return descriptor
+
+    def fail(*_args, **_kwargs):
+        raise OSError("injected write failure")
+
+    monkeypatch.setattr(campaign.os, "open", recording_open)
+    monkeypatch.setattr(campaign.os, stage, fail)
+    with pytest.raises(OSError, match="injected write failure"):
+        campaign.write_receipt_once(path, {"status": "incomplete"})
+    assert not path.exists()
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])

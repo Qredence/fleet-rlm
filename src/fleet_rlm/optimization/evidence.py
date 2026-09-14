@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 _STRICT_PROOF_SCHEMA = "fleet.strict-daytona-proof/v1"
+_BLOCK_ALL_PROOF_SCHEMA = "fleet.strict-daytona-proof/v2"
 _STRICT_PROOF_PATH = "strict-daytona-proof.json"
 _DEVELOPMENT_CANARY_SCHEMA = "fleet.daytona-development-canary/v1"
 _DEVELOPMENT_CANARY_PATH = "daytona-development-canary.json"
@@ -39,6 +40,12 @@ _REQUIRED_OUTCOMES = frozenset(
         "sandbox_deleted",
     }
 )
+_BLOCK_ALL_OUTCOMES = _REQUIRED_OUTCOMES | {
+    "transport_authentication",
+    "essential_service_egress_denied",
+    "raw_socket_egress_denied",
+    "dns_egress_denied",
+}
 _FORBIDDEN_KEY_PARTS = frozenset(
     {
         "candidate",
@@ -67,6 +74,36 @@ class EvidenceError(RuntimeError):
 
 class StrictDaytonaProofError(EvidenceError):
     """A strict Daytona receipt is malformed, unsafe, or insufficient."""
+
+
+@dataclass(frozen=True, slots=True)
+class StrictDaytonaPolicyBinding:
+    """The exact evaluator policy a strict proof is allowed to authorize.
+
+    A validated proof is useful only when its policy, snapshot, network mode,
+    and lifecycle controls match the run that is about to execute.  Keeping
+    this binding explicit prevents callers from treating any block-all receipt
+    as interchangeable with the authoritative evaluator policy.
+    """
+
+    policy_id: str
+    snapshot: str
+    gateway_domains: tuple[str, ...]
+    auto_stop_interval_seconds: int
+    auto_delete_interval_seconds: int
+    network_block_all: bool = True
+
+    def __post_init__(self) -> None:
+        if not _safe_identifier(self.policy_id) or not isinstance(self.snapshot, str) or not self.snapshot.strip():
+            raise StrictDaytonaProofError("strict evaluator policy binding is invalid")
+        if tuple(sorted(set(self.gateway_domains))) != self.gateway_domains:
+            raise StrictDaytonaProofError("strict evaluator gateway domains are not normalized")
+        for field_name in ("auto_stop_interval_seconds", "auto_delete_interval_seconds"):
+            value = getattr(self, field_name)
+            if type(value) is not int or value < 0:
+                raise StrictDaytonaProofError("strict evaluator lifecycle binding is invalid")
+        if type(self.network_block_all) is not bool:
+            raise StrictDaytonaProofError("strict evaluator network binding is invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,6 +194,7 @@ class ValidatedStrictDaytonaProof:
         gateway_domains: tuple[str, ...],
         auto_stop_interval_seconds: int,
         auto_delete_interval_seconds: int,
+        network_block_all: bool = False,
     ) -> None:
         """Reject use of proof outside the exact policy it live-tested."""
         receipt = self.receipt
@@ -166,6 +204,7 @@ class ValidatedStrictDaytonaProof:
             or receipt.gateway_domains != gateway_domains
             or receipt.controls["auto_stop_seconds"] != auto_stop_interval_seconds
             or receipt.controls["auto_delete_seconds"] != auto_delete_interval_seconds
+            or (receipt.schema == _BLOCK_ALL_PROOF_SCHEMA) != network_block_all
         ):
             raise StrictDaytonaProofError("strict Daytona proof does not match evaluator policy")
 
@@ -176,24 +215,34 @@ def validate_strict_daytona_proof(receipt: StrictDaytonaProofReceipt) -> Validat
         raise StrictDaytonaProofError("strict Daytona proof must use the versioned receipt type")
     payload = receipt.canonical_payload()
     _reject_sensitive_payload(payload)
-    if receipt.schema != _STRICT_PROOF_SCHEMA:
+    if receipt.schema not in {_STRICT_PROOF_SCHEMA, _BLOCK_ALL_PROOF_SCHEMA}:
         raise StrictDaytonaProofError("unsupported strict Daytona proof schema")
     if not _safe_identifier(receipt.policy_id) or not isinstance(receipt.snapshot, str) or not receipt.snapshot.strip():
         raise StrictDaytonaProofError("strict Daytona proof policy binding is invalid")
-    if tuple(sorted(set(receipt.gateway_domains))) != receipt.gateway_domains or not receipt.gateway_domains:
+    block_all = receipt.schema == _BLOCK_ALL_PROOF_SCHEMA
+    if block_all:
+        if receipt.gateway_domains != ():
+            raise StrictDaytonaProofError("block-all proof cannot allow outbound gateway domains")
+    elif tuple(sorted(set(receipt.gateway_domains))) != receipt.gateway_domains or not receipt.gateway_domains:
         raise StrictDaytonaProofError("strict Daytona proof gateway domains must be normalized")
-    if set(receipt.controls) != _REQUIRED_CONTROLS:
+    required_controls = (
+        (_REQUIRED_CONTROLS - {"domain_allow_list_requested"}) | {"network_block_all_requested"}
+        if block_all
+        else _REQUIRED_CONTROLS
+    )
+    if set(receipt.controls) != required_controls:
         raise StrictDaytonaProofError("strict Daytona proof controls are incomplete")
     controls = receipt.controls
-    if any(controls[key] is not True for key in _REQUIRED_CONTROLS if key.endswith("_requested")):
+    if any(controls[key] is not True for key in required_controls if key.endswith("_requested")):
         raise StrictDaytonaProofError("strict Daytona proof did not request all mandatory controls")
     if not _valid_ephemeral_lifecycle_controls(controls):
         raise StrictDaytonaProofError("strict Daytona proof lifecycle controls are invalid")
-    if set(receipt.outcomes) != _REQUIRED_OUTCOMES | {"approved_gateway_egress"}:
+    required_outcomes = _BLOCK_ALL_OUTCOMES if block_all else _REQUIRED_OUTCOMES | {"approved_gateway_egress"}
+    if set(receipt.outcomes) != required_outcomes:
         raise StrictDaytonaProofError("strict Daytona proof outcomes are incomplete")
-    if any(receipt.outcomes[key] != "passed" for key in _REQUIRED_OUTCOMES):
+    if any(receipt.outcomes[key] != "passed" for key in (_BLOCK_ALL_OUTCOMES if block_all else _REQUIRED_OUTCOMES)):
         raise StrictDaytonaProofError("strict Daytona proof has a failed mandatory outcome")
-    if receipt.outcomes["approved_gateway_egress"] != "passed":
+    if not block_all and receipt.outcomes["approved_gateway_egress"] != "passed":
         raise StrictDaytonaProofError("strict Daytona proof gateway outcome did not pass")
     return ValidatedStrictDaytonaProof(receipt, _VALIDATED_PROOF_ISSUER)
 
@@ -331,6 +380,7 @@ __all__ = [
     "DevelopmentDaytonaCanaryReport",
     "EvidenceError",
     "EvidenceStore",
+    "StrictDaytonaPolicyBinding",
     "StrictDaytonaProofError",
     "StrictDaytonaProofReceipt",
     "ValidatedStrictDaytonaProof",

@@ -7,7 +7,7 @@ through private symbol names:
   reservation produced by either recursive Tool reports depth 1; no public
   options or settings surface accepts a recursion depth.
 - VAL-REC-005: the Root native RLM receives exactly the approved recursive
-  pair; a child receives only ``rlm_query`` and a batch attempt from a child
+  pair; a child receives no Fleet recursive tools and a batch attempt from a child
   fails without reserving calls or allocating a Sandbox.
 - VAL-REC-023: Root and native child are both exact native ``dspy.RLM``
   instances invoked with the positional caller-owned interpreter, each
@@ -270,7 +270,10 @@ def test_val_rec_005_child_batch_attempt_fails_without_reservation_or_allocation
     assert all(lease.state.value == "CLOSED" for lease in factory.leases)
 
 
-def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_public_composition() -> None:
+@pytest.mark.parametrize("enabled", [False, True])
+def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_public_composition(
+    enabled: bool,
+) -> None:
     """VAL-REC-005: the Root native RLM composed through the public Runner
     receives the approved recursive Tools, including the strict capsule path,
     by their public names."""
@@ -288,7 +291,7 @@ def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_
         root=root,
         sub=sub,
         factory=_RecordingFactory(),
-        recursive_options=RecursiveRLMOptions(enabled=True),
+        recursive_options=RecursiveRLMOptions(enabled=enabled),
         root_options=RLMOptions(max_iters=2, max_llm_calls=2),
         runner_factory=CapturingFactory(),  # type: ignore[arg-type]
     )
@@ -300,11 +303,8 @@ def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_
 
     asyncio.run(drive())
 
-    tool_names = [str(tool.name) for tool in captured.get("tools", ())]
-    assert tool_names == [
-        "rlm_query",
-        "rlm_query_batched",
-    ]
+    tool_names = [str(tool.name) for tool in (captured.get("tools") or ())]
+    assert tool_names == (["rlm_query", "rlm_query_batched"] if enabled else [])
 
 
 @pytest.mark.asyncio
