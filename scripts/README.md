@@ -16,6 +16,7 @@ recorded candidate and topology.
 | `generate_profile_matrix.py` | Generate or check the TOML-derived profile matrix. |
 | `check_codebase_tree.py` | Enforce canonical import and route boundaries. |
 | `check_dependency_boundaries.py` | Check domain dependency directions. |
+| `import_walk.py` | Shared AST import walker for boundary checkers. |
 | `check_docs_quality.py` | Check active documentation links and structure. |
 | `check_agents_md_freshness.py` | Check agent-guide reachability. |
 | `check_harness_engineering.py` | Check repository harness conventions. |
@@ -40,6 +41,8 @@ hand.
 | `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
 | `deployment_observability.py` | Inspect release observability inputs. |
 | `circleci_trigger_release.py` | Trigger and await the release workflow. |
+| `phase6_authority.py` | In-process Phase 6 issuance seals and gate-authorization primitives. |
+| `phase6_identity.py` | Phase 6 digest helpers and inspection-only validators. |
 | `phase6_promotion.py` | Seal bundle identities, check rollback observations, compare matched quality measurements, or record a fail-closed blocked decision; never switch or authorize promotion. |
 | `benchmarks/curate_mlflow.py` | Read selected local MLflow root requests and seal explicit agent-reviewed expectations with grouped splits; never run optimization. |
 

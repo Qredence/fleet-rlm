@@ -36,6 +36,49 @@ def test_harness_rejects_nested_agent_guides(tmp_path: Path) -> None:
     assert checker.errors[0].detail == "unexpected nested AGENTS.md; only the TUI guide is allowed"
 
 
+def test_harness_default_skips_root_agents_line_budget(tmp_path: Path) -> None:
+    over_budget = "\n".join(f"line {index}" for index in range(200))
+    _write(tmp_path / "AGENTS.md", over_budget)
+    checker = HarnessChecker(tmp_path, check_script_help=False)
+
+    checker.run()
+
+    assert not any(error.path == "AGENTS.md" and "budget" in error.detail for error in checker.errors)
+
+
+def test_harness_default_skips_docs_index_link_check(tmp_path: Path) -> None:
+    _write(tmp_path / "docs/index.md", "# docs\n")
+    checker = HarnessChecker(tmp_path, check_script_help=False)
+
+    checker.run()
+
+    assert not any(error.path == "docs/index.md" for error in checker.errors)
+
+
+def test_harness_editorial_enforces_docs_index_link_check(tmp_path: Path) -> None:
+    _write(tmp_path / "docs/index.md", "# docs\n")
+    _write(tmp_path / "docs/SUMMARY.md", "# summary\n")
+    checker = HarnessChecker(tmp_path, check_script_help=False, editorial=True)
+
+    checker._check_docs_index_links()
+
+    index_errors = [error for error in checker.errors if error.path == "docs/index.md"]
+    assert len(index_errors) == 1
+    assert index_errors[0].detail == "does not link ../ARCHITECTURE.md"
+
+
+def test_harness_editorial_enforces_root_agents_line_budget(tmp_path: Path) -> None:
+    over_budget = "\n".join(f"line {index}" for index in range(200))
+    _write(tmp_path / "AGENTS.md", over_budget)
+    checker = HarnessChecker(tmp_path, check_script_help=False, editorial=True)
+
+    checker._check_root_agents_budget()
+
+    assert len(checker.errors) == 1
+    assert checker.errors[0].path == "AGENTS.md"
+    assert "budget" in checker.errors[0].detail
+
+
 def test_harness_rejects_untracked_nested_agent_guides_in_a_git_checkout(tmp_path: Path) -> None:
     _write(tmp_path / "AGENTS.md")
     _write(tmp_path / "ARCHITECTURE.md")

@@ -9,7 +9,6 @@ provider/domain edges cannot regress silently.
 from __future__ import annotations
 
 import argparse
-import ast
 import re
 import sys
 from collections.abc import Iterable, Sequence
@@ -17,6 +16,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.import_walk import iter_imports, matches
+
 _SOURCE_ROOT_NAME = "src"
 _PACKAGE_NAME = "fleet_rlm"
 _ALLOWED_STORAGE_TRANSPORT = "fleet_rlm.daytona.workspace_agent.client"
@@ -43,62 +47,6 @@ class BoundaryViolation:
     def render(self) -> str:
         """Render a stable, source-oriented diagnostic for CLI and CI output."""
         return f"{self.path}:{self.line}: {self.rule}: {self.target}"
-
-
-def _module_name(path: Path, source_root: Path) -> tuple[str, ...]:
-    """Return the package module parts for a source file."""
-    return path.relative_to(source_root).with_suffix("").parts
-
-
-def _resolve_from_import(
-    node: ast.ImportFrom,
-    *,
-    path: Path,
-    source_root: Path,
-) -> Iterable[str]:
-    """Yield absolute module names represented by an ``ImportFrom`` node.
-
-    Relative imports are resolved against the source file's package.  Both
-    the imported base and alias are yielded so ``from fleet_rlm import chat``
-    is checked just like ``import fleet_rlm.chat``.
-    """
-    module_parts = _module_name(path, source_root)
-    package_parts = module_parts[:-1]
-    if node.level:
-        anchor_length = max(0, len(package_parts) - (node.level - 1))
-        base_parts = list(package_parts[:anchor_length])
-        if node.module:
-            base_parts.extend(node.module.split("."))
-    else:
-        base_parts = node.module.split(".") if node.module else []
-
-    if not base_parts:
-        return
-    base = ".".join(base_parts)
-    yield base
-    for alias in node.names:
-        if alias.name != "*":
-            yield f"{base}.{alias.name}"
-
-
-def _imports(path: Path, source_root: Path) -> Iterable[tuple[int, str]]:
-    """Yield line-numbered absolute imports, including local imports."""
-    source = path.read_text(encoding="utf-8")
-    tree = ast.parse(source, filename=str(path))
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                yield node.lineno, alias.name
-        elif isinstance(node, ast.ImportFrom):
-            for imported in _resolve_from_import(node, path=path, source_root=source_root):
-                yield node.lineno, imported
-
-
-def _matches(imported: str, target: str) -> bool:
-    """Match a module prefix, including the intentional trailing-underscore rule."""
-    if target.endswith("_"):
-        return imported.startswith(target)
-    return imported == target or imported.startswith(f"{target}.")
 
 
 def _relative_path(path: Path, root: Path) -> str:
@@ -159,7 +107,7 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
 
 def _is_storage_transport_exception(relative: Path, imported: str) -> bool:
     """Whether a storage import is the one permitted Daytona transport edge."""
-    return relative.as_posix() == "workspace/storage.py" and _matches(imported, _ALLOWED_STORAGE_TRANSPORT)
+    return relative.as_posix() == "workspace/storage.py" and matches(imported, _ALLOWED_STORAGE_TRANSPORT)
 
 
 def _content_violations(path: Path, root: Path) -> Iterable[BoundaryViolation]:
@@ -197,7 +145,7 @@ def check_dependency_boundaries(root: Path = ROOT) -> tuple[BoundaryViolation, .
         import_rules = _forbidden_imports(relative)
         if import_rules:
             try:
-                imports = tuple(_imports(path, source_root))
+                imports = tuple(iter_imports(path, source_root=source_root))
             except (OSError, SyntaxError) as exc:
                 violations.append(
                     BoundaryViolation(
@@ -213,7 +161,7 @@ def check_dependency_boundaries(root: Path = ROOT) -> tuple[BoundaryViolation, .
                 for rule, target in import_rules:
                     if target == "fleet_rlm.daytona" and _is_storage_transport_exception(relative, imported):
                         continue
-                    if _matches(imported, target):
+                    if matches(imported, target):
                         key = (line_number, rule, target)
                         if key not in seen:
                             seen.add(key)
