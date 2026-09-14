@@ -16,6 +16,34 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Phase 6 implementation continuation (2026-09-14)
+
+- P6.1 now has a v2 write-once bundle reader that verifies a clean HEAD,
+  tracked wheel source bytes, artifact manifest, merged non-secret policy,
+  lockfile, image manifest/probe identities, database head, dataset digest, and
+  scorer digest. It remains an identity receipt, not promotion authority.
+- P6.2 now has identity-only rollback-pair validation plus a bounded,
+  recent-observation preflight. The latter rejects stale/future observations,
+  open admissions, active work, pending cleanup, and unconfirmed provider
+  cleanup, but it does not acquire the fence or claim database compatibility.
+- P6.3 removes the retired single-value runtime selector and the unused
+  compatibility-fingerprint helper block. Broker generation, fencing, cleanup,
+  and Run-local progress fingerprints remain owning runtime behavior. Historical
+  benchmark/campaign receipts remain readable under explicit v2/v3 schemas; no
+  sealed artifact is rewritten.
+- P6.4a contains a local-MLflow-only, agent-reviewed draft at
+  `.scratch/phase6-curation-20260914/export-v2.json`: 25 records, grouped
+  15/5/5 seed-42 splits with Session/project/task-family isolation. The draft
+  is not human alignment or promotion evidence.
+- For P6.4b, the selected strict evaluator boundary is host-polled authenticated
+  retained-broker mediation with Daytona `network_block_all=true`, no volume,
+  and no temporary tunnel or outbound gateway allow-list. Receipt schema v2 and
+  policy wiring require transport-authentication plus essential-service,
+  raw-socket, and DNS egress-denial outcomes. Production GEPA remains
+  fail-closed until a live proof and trusted scoring campaign exist.
+- Warm capacity remains deferred by operator instruction for the 0.7.8
+  continuation; no configured warm policy was changed by this work.
+
 ### P5.3/P5.4 closeout checks (2026-09-13)
 
 - **P5.3 blocked:** the current Daytona warm-pool guide explicitly requires

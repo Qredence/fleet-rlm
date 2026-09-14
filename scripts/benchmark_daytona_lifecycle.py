@@ -43,7 +43,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_mount_spec,
 )
 
-RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v1"
+RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v2"
 WARMUP_CYCLES = 3
 MEASURED_CYCLES = 20
 PER_TURN_P95_SECONDS = 10.0

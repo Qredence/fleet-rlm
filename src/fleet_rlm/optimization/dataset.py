@@ -31,6 +31,7 @@ _FORBIDDEN_FIELD_MARKERS = frozenset(
 )
 _FORBIDDEN_VALUE_MARKERS = (".fleet_rlm", "/users/", "/home/", "/var/", "sqlite:", "postgresql:")
 _RECORD_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_GROUP_FIELDS = ("session_id", "project_id", "task_family")
 
 
 class OptimizationDatasetError(ValueError):
@@ -76,7 +77,7 @@ def validate_records(records: Sequence[Mapping[str, Any]]) -> list[OptimizationR
         redaction_version = provenance.get("redaction_version")
         if not isinstance(redaction_version, str) or not redaction_version:
             raise OptimizationDatasetError(f"record {record_id}: provenance.redaction_version is required")
-        for field in ("session_id", "project_id"):
+        for field in _GROUP_FIELDS:
             if field in provenance and (
                 not isinstance(provenance[field], str) or not _RECORD_ID_PATTERN.fullmatch(provenance[field])
             ):
@@ -106,14 +107,14 @@ def validate_records(records: Sequence[Mapping[str, Any]]) -> list[OptimizationR
 def split_records(records: Sequence[OptimizationRecord], *, seed: int) -> DatasetSplit:
     """Create stable 60/20/20 targets without separating related examples.
 
-    Session/project provenance defines connected groups. Group sizes may make
+    Session/project/task-family provenance defines connected groups. Group sizes may make
     exact proportions impossible; isolation and five examples per split take
     precedence. Ungrouped exports retain their historical seeded split.
     """
     if len(records) < MINIMUM_RECORDS:
         raise OptimizationDatasetError(f"at least {MINIMUM_RECORDS} valid records are required")
     canonical = sorted(records, key=lambda record: record.record_id)
-    if any(record.provenance.get(key) for record in canonical for key in ("session_id", "project_id")):
+    if any(record.provenance.get(key) for record in canonical for key in _GROUP_FIELDS):
         return _split_related_records(canonical, seed=seed)
     shuffled = list(canonical)
     random.Random(seed).shuffle(shuffled)
@@ -143,7 +144,7 @@ def _split_related_records(records: Sequence[OptimizationRecord], *, seed: int) 
 
     identities: dict[tuple[str, str], int] = {}
     for index, record in enumerate(records):
-        for field in ("session_id", "project_id"):
+        for field in _GROUP_FIELDS:
             identity = record.provenance.get(field)
             if identity:
                 previous = identities.setdefault((field, identity), index)
@@ -180,7 +181,9 @@ def _split_related_records(records: Sequence[OptimizationRecord], *, seed: int) 
         selection=tuple(ordered[counts[first] : counts[second]]),
         sealed_test=tuple(ordered[counts[second] :]),
         seed=seed,
-        grouping="session-project",
+        grouping="session-project-family"
+        if any(record.provenance.get("task_family") for record in records)
+        else "session-project",
     )
 
 

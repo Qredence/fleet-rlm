@@ -97,10 +97,52 @@ async def test_factory_creates_no_volume_ephemeral_gateway_only_sandbox() -> Non
     ]
 
 
+@pytest.mark.asyncio
+async def test_factory_creates_no_volume_ephemeral_block_all_sandbox() -> None:
+    platform = _Platform()
+    policy = OptimizationSandboxPolicy(
+        snapshot="fleet-test-v1",
+        gateway_domains=(),
+        network_block_all=True,
+        auto_stop_interval_seconds=60,
+    )
+    factory = DisposableOptimizationSandboxFactory(
+        platform=platform,
+        sandbox_spec=DaytonaSandboxSpec("fleet-test-v1"),
+    )
+
+    await factory.create(
+        policy=policy,
+        run_id="run-1",
+        candidate_sha256="a" * 64,
+        record_id="record-1",
+    )
+
+    assert platform.creates == [
+        {
+            "labels": {
+                "fleet-purpose": "optimization-evaluator",
+                "fleet-policy": policy.policy_id[:24],
+                "fleet-run": "run-1",
+                "fleet-candidate": "a" * 64,
+                "fleet-record": "record-1",
+            },
+            "with_volume": False,
+            "ephemeral": True,
+            "network_block_all": True,
+            "auto_stop_interval": 60,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
         ({"gateway_domains": ()}, "gateway"),
+        (
+            {"gateway_domains": ("gateway.example.test",), "network_block_all": True},
+            "block-all",
+        ),
         ({"gateway_domains": ("https://gateway.example.test",)}, "bare DNS"),
         ({"gateway_domains": ("gateway.example.test",), "gateway_cidrs": ("10.0.0.0/8",)}, "domain allow-list"),
         (

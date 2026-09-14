@@ -984,7 +984,69 @@ Also separate promotion gates:
 
 # Phase 6 - Promotion, rollback, and final deletion
 
-**Status: not started.** Phase 6 follows Phase 5.
+**Status: implementation in progress (2026-09-14).** The local API was switched
+to 0.7.8, but a version health check is not full Phase 6 certification. Warm
+capacity is deferred by operator instruction and is not a promotion gate for
+this continuation; its configured policy is not changed implicitly.
+
+### Execution task list
+
+Checked tasks require implementation and observed validation. Live gates remain
+unchecked until receipts prove them; no historical receipt is silently rebound
+to a new SHA. Retain broker execution and enabled recursion. The previously
+agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
+15-minute cleanup reserve; account for earlier attempts before new admission.
+
+- [x] **P6.1a — Candidate identity:** verify release artifact bytes against their
+  manifest, strict SHA/digest types, selected policy, image manifest identities,
+  and stable clean source before and after capture. Reuse existing receipt I/O.
+- [ ] **P6.1b — Promotion decision:** validate sealed same-bundle gate evidence;
+  reject missing, failed, partial, scripted-only, or mismatched evidence. Enforce
+  matched quality and latency/cost tolerances (maximum 10% regression).
+  The matched-measurement reader is implemented and tested; authoritative
+  same-bundle campaign producers and the complete promotion decision remain open.
+- [ ] **P6.1c — Clean candidate certification:** retain complete local gate
+  output and exact exit codes, then seal required live evidence on a clean SHA.
+  Deterministic checks pass locally; this modified worktree is not a clean-SHA
+  live certificate.
+- [ ] **P6.2a — Rollback preflight:** distinguish bundle/schema identity from
+  proven database compatibility; reject a switch with active Runs, workers,
+  unclosed admissions, or unconfirmed cleanup.
+  Identity-only and recent-observation validators are implemented and tested.
+  The maintenance controller must still hold an actual admission fence and
+  verify compatibility evidence; offline observation is not switch authority.
+- [ ] **P6.2b — Controlled rehearsal:** preserve baseline release/config/images;
+  prove baseline → candidate → baseline → candidate with durable Session,
+  workspace, Artifact, and new-Turn assertions. No database snapshot rewind.
+- [x] **P6.3a — Selector removal:** `a5d32152c` removes the single-value runtime
+  selector. Configuration rejection and fresh per-Run tests cover this change.
+- [x] **P6.3b — Receipt compatibility:** version changed benchmark receipt
+  contracts and keep archived sealed receipts readable without promoting them.
+- [x] **P6.3c — Ownership inventory:** remove only proven unused migration
+  internals; retain broker generation, fencing, cleanup, and Run-local guards.
+  Lifecycle-affecting deletion follows the rollback gate.
+  Removed the unused compatibility-fingerprint helper block; active broker
+  ownership, fencing, cleanup, and tool-progress fingerprints remain intact.
+- [x] **P6.4a — Curated input draft:** inspect local MLflow, review at least 25
+  examples and expectations, and seal grouped 60/20/20 splits (seed 42).
+  `.scratch/phase6-curation-20260914/export-v2.json` contains 25 agent-reviewed
+  historical local tasks (including six benchmark tasks), split 15/5/5 with
+  Session and task-family isolation. Three truncated requests and five generic
+  smoke requests were excluded. Seven cases need isolated host capabilities;
+  trusted scoring and evaluator capability coverage remain P6.4b prerequisites.
+- [ ] **P6.4b — Production evaluator:** prove strict Daytona policy and trusted
+  evaluation; keep safety/infrastructure immutable and synthetic smoke
+  non-promotable. The selected boundary is host-polled authenticated broker
+  mediation with Daytona `network_block_all=true`, no temporary tunnel or
+  outbound gateway allow-list. The v2 proof contract and policy wiring are
+  implemented; live transport/egress/cleanup proof remains open. No bypass of
+  the existing production block.
+- [ ] **P6.4c — Stable-program optimization:** run within remaining budget,
+  evaluate held-out data, and verify immutable instructions in a fresh Run.
+- [x] **P6.5 — Documentation and closeout:** synchronize architecture, operator
+  commands, this task list and ADR ledger; publish exact checks and open gates.
+  The current receipts are recorded outside tracked source under
+  `.scratch/phase6-*-final-20260914.log`; live gates remain explicitly open.
 
 ## P6.1 - Build one clean promotion candidate
 

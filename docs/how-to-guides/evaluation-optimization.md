@@ -79,6 +79,21 @@ receipt return exit two, and execution errors return exit one. Omitting
 candidate remains promotion-ineligible even if all checks pass. Keep failed
 receipts; use a new output filename for each attempt.
 
+## Strict GEPA evaluator network boundary
+
+Production GEPA remains fail-closed until a live strict evaluator proof is
+sealed. The selected boundary does not depend on a temporary tunnel or an
+unowned public hostname: the host polls Fleet's authenticated retained broker,
+and the disposable Daytona evaluator sandbox is created with
+`network_block_all=true`, no gateway domain/CIDR allow-list, no volume, and an
+ephemeral lifecycle. Host-owned LM and Tool mediation therefore stays outside
+the sandbox's outbound network boundary. A production proof must use the
+`fleet.strict-daytona-proof/v2` receipt and pass transport authentication,
+essential-service, raw-socket, and DNS egress-denial probes in addition to the
+existing broker, cleanup, and deletion checks. The development canary and any
+temporary tunnel remain non-authoritative. This policy selection is not itself
+live proof and does not authorize GEPA execution.
+
 ## Pipeline at a glance
 
 | Step | Script | Receipt schema |

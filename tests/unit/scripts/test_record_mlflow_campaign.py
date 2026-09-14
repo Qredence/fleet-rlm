@@ -88,6 +88,21 @@ def _adapter_receipt() -> dict[str, Any]:
     )
 
 
+@pytest.mark.parametrize("schema", ["fleet.runtime-benchmark/v2", "fleet.runtime-adapter-comparison/v2"])
+def test_historical_receipts_remain_readable_without_resealing(tmp_path, schema):
+    receipt = _runtime_receipt()
+    receipt.pop("receipt_digest")
+    receipt["schema"] = schema
+    receipt.pop("execution_architecture")
+    receipt["runtime_variant"] = "legacy"
+    receipt = seal(receipt)
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(receipt))
+    original = path.read_bytes()
+    assert load_receipt(path) == receipt
+    assert path.read_bytes() == original
+
+
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     calls = SimpleNamespace(params=[], metrics=[], tags={}, artifacts=[], terminated=[])
 

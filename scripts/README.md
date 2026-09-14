@@ -39,7 +39,8 @@ hand.
 | `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
 | `deployment_observability.py` | Inspect release observability inputs. |
 | `circleci_trigger_release.py` | Trigger and await the release workflow. |
-| `phase6_promotion.py` | Seal a clean promotion bundle or validate a database-compatible rollback pair. |
+| `phase6_promotion.py` | Seal bundle identities, check rollback observations, or compare matched quality measurements; never switch or authorize promotion. |
+| `benchmarks/curate_mlflow.py` | Read selected local MLflow root requests and seal explicit agent-reviewed expectations with grouped splits; never run optimization. |
 
 These commands may contact providers or mutate external state. Invoke them only
 with the required explicit operator authorization and their documented policy,

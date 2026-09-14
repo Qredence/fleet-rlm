@@ -217,7 +217,7 @@ def run_adapter_comparison(*, repetitions: int = 5) -> dict[str, Any]:
     )
     return seal(
         {
-            "schema": "fleet.runtime-adapter-comparison/v2",
+            "schema": "fleet.runtime-adapter-comparison/v3",
             "scope": "scripted-adapter-protocol-only",
             "execution_architecture": "retained-broker",
             "dspy_version": dspy.__version__,

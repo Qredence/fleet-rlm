@@ -302,8 +302,8 @@ def run_development_smoke(
 def require_live_execution_capability() -> None:
     """Fail closed for production candidate execution."""
     raise OptimizationPreflightError(
-        "production GEPA execution is blocked: it requires a stable production gateway, "
-        "a production strict Daytona proof, trusted judges, and sealed evidence"
+        "production GEPA execution is blocked: it requires a live strict Daytona proof "
+        "for the host-polled broker boundary, trusted judges, and sealed evidence"
     )
 
 

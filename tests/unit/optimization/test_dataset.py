@@ -95,6 +95,20 @@ def test_single_project_cannot_leak_into_held_out_split():
         split_records(validate_records(raw), seed=7)
 
 
+def test_task_families_cannot_leak_across_different_sessions_and_projects():
+    raw = [_record(index) for index in range(30)]
+    for index, record in enumerate(raw):
+        record["provenance"].update(
+            session_id=f"session-{index}", project_id=f"project-{index}", task_family=f"family-{index // 5}"
+        )
+    split = split_records(validate_records(raw), seed=42)
+    assert split.grouping == "session-project-family"
+    assignments = {}
+    for partition, group in enumerate((split.train, split.selection, split.sealed_test)):
+        for record in group:
+            assert assignments.setdefault(record.provenance["task_family"], partition) == partition
+
+
 def test_dataset_manifest_digest_changes_when_expected_answer_changes():
     raw = [_record(index) for index in range(25)]
     before = split_records(validate_records(raw), seed=7).public_manifest["dataset_sha256"]

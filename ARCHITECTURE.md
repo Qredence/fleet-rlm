@@ -163,6 +163,19 @@ receive fresh isolated Sandboxes and child-scoped Volume paths. Cleanup is
 owned, deadline-bounded, and re-observed; no detached provider work may mutate
 Fleet state after settlement.
 
+### Optimization evaluator boundary
+
+`src/fleet_rlm/optimization/` owns the read-only curation, immutable identity,
+and strict-evaluator policy contracts; it does not become a second production
+execution path. Production GEPA is fail-closed until a live proof receipt and
+trusted quality campaign authorize it. The selected strict evaluator policy
+uses the host-polled, authenticated retained broker and creates a disposable
+Daytona sandbox with `network_block_all=true`, no volume, and no outbound
+gateway allow-list. A v2 proof must separately establish transport
+authentication, essential-service/raw-socket/DNS egress denial, broker
+cleanup, and sandbox deletion. Development canaries, temporary tunnels, local
+MLflow drafts, and scripted comparisons are non-authoritative.
+
 ### Workspace and persistence
 
 `src/fleet_rlm/sessions/`, `workspace/`, `attachments/`, `artifacts/`, and

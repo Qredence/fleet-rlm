@@ -24,7 +24,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-SCHEMA = "fleet.runtime-benchmark/v2"
+SCHEMA = "fleet.runtime-benchmark/v3"
+LEGACY_SCHEMA = "fleet.runtime-benchmark/v2"
 DATASET = Path(__file__).with_name("runtime_v2_scenarios.json")
 SCORERS = ("stream-terminal/v1", "echo-answer/v1", "durable-turn-pair/v1")
 SEMANTIC_SCORERS = ("semantic-keywords/v1",)
@@ -104,9 +105,12 @@ def validate(receipt: dict[str, Any]) -> None:
         ValueError: If the receipt is malformed or internally inconsistent.
     """
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
-    if receipt.get("schema") != SCHEMA or receipt.get("receipt_digest") != digest(body):
+    if receipt.get("schema") not in {SCHEMA, LEGACY_SCHEMA} or receipt.get("receipt_digest") != digest(body):
         raise ValueError("invalid benchmark schema or receipt digest")
-    if receipt.get("execution_architecture") != "retained-broker":
+    if receipt.get("schema") == LEGACY_SCHEMA and "runtime_variant" in receipt:
+        if type(receipt["runtime_variant"]) is not str or not receipt["runtime_variant"]:
+            raise ValueError("historical runtime variant is missing")
+    elif receipt.get("execution_architecture") != "retained-broker":
         raise ValueError("benchmark execution architecture is invalid")
     if type(receipt.get("source_dirty")) is not bool:
         raise ValueError("benchmark source_dirty provenance is invalid")
@@ -294,6 +298,7 @@ def compare(
     compatible = all(
         baseline[key] == candidate[key]
         for key in (
+            "schema",
             "dataset_digest",
             "scorer_digest",
             "execution_mode",
@@ -302,6 +307,7 @@ def compare(
         )
     )
     compatible = compatible and baseline_ids == candidate_ids and axis_evidence
+    compatible = compatible and baseline.get("runtime_variant") == candidate.get("runtime_variant")
     gates = {
         "comparable": compatible,
         "source_clean": not baseline["source_dirty"] and not candidate["source_dirty"],

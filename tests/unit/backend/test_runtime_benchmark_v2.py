@@ -49,6 +49,20 @@ def test_semantic_keyword_scorer_normalizes_text_without_provider_calls():
     assert not semantic_keywords_score("hello", [])
 
 
+def test_historical_receipt_validates_unchanged_but_cannot_mix_schema_generations():
+    current = _clean_receipt(run(repetitions=2))
+    historical = deepcopy(current)
+    historical.pop("receipt_digest")
+    historical["schema"] = runtime_v2.LEGACY_SCHEMA
+    historical.pop("execution_architecture")
+    historical["runtime_variant"] = "legacy"
+    historical = seal(historical)
+    original = deepcopy(historical)
+    validate(historical)
+    assert historical == original
+    assert not compare(historical, current)["passed"]
+
+
 def test_benchmark_rejects_single_sample():
     with pytest.raises(ValueError, match="two repetitions"):
         run(repetitions=1)
