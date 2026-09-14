@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -509,6 +510,55 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
         ("resources", False, None),
         ("gateway", False, None),
     ]
+
+
+@pytest.mark.asyncio
+async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -> None:
+    """Unsettled preparation must keep the bridge fenced for deferred disposal."""
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            return False
+
+    class Resources:
+        session_manager = object()
+
+        async def adispose(self) -> None:
+            raise AssertionError("resources must not dispose while preparation is unsettled")
+
+    class Gateway:
+        async def close(self) -> None:
+            raise AssertionError("gateway must not close while preparation is unsettled")
+
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    inventory = RuntimeInventory(
+        run_preparation=Preparation(),
+        run_environment_resources=Resources(),
+        workspace_volume_gateway=Gateway(),
+        bridge_dispatcher=dispatcher,
+    )
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.runtime_inventory = inventory
+    app.state.composition_ready = True
+
+    await composition.dispose_daytona_composition(app)
+
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+    assert dispatcher.service_loop() is asyncio.get_running_loop()
+    assert composition._COMPOSITION_DISPOSAL_TASKS or composition._COMPOSITION_DISPOSAL_MONITORS
+
+    # Settle deferred ownership so later tests do not inherit fenced tasks.
+    pending = list(composition._COMPOSITION_DISPOSAL_TASKS)
+    for task in pending:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, BaseException):
+            await task
+    composition._COMPOSITION_DISPOSAL_TASKS.clear()
+    dispatcher.clear_loop(asyncio.get_running_loop())
 
 
 @pytest.mark.asyncio

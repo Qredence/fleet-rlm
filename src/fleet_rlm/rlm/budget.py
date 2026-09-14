@@ -304,6 +304,9 @@ class AdapterBudget:
         self.max_parse_retries = max_parse_retries
         self.max_finalization_attempts = max_finalization_attempts
         self._finalization_used = 0
+        self._wrap_up_entered = False
+        self._wrap_up_rejection_reason: str | None = None
+        self._wrap_up_remaining_ms: int | None = None
         self._lock = Lock()
 
     def remaining(self) -> float | None:
@@ -373,6 +376,30 @@ class AdapterBudget:
             if can_finalize:
                 self.turn.reclassify_finalization()
             self._finalization_used += 1
+
+    def enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
+        """Record the first wrap-up transition and any bounded rejection reason."""
+        with self._lock:
+            if not self._wrap_up_entered:
+                self._wrap_up_entered = True
+                self._wrap_up_remaining_ms = max(0, round(remaining * 1000))
+            if rejection_reason is not None:
+                self._wrap_up_rejection_reason = rejection_reason
+
+    def set_wrap_up_rejection(self, reason: str) -> None:
+        """Update the wrap-up rejection reason after an already-entered reserve."""
+        with self._lock:
+            self._wrap_up_rejection_reason = reason
+
+    def wrap_up_summary(self) -> dict[str, object]:
+        """Return bounded engineering metadata for the current wrap-up reserve."""
+        with self._lock:
+            return {
+                "wrap_up_entered": self._wrap_up_entered,
+                "wrap_up_attempts": self._finalization_used,
+                "wrap_up_rejection_reason": self._wrap_up_rejection_reason,
+                "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
+            }
 
     def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:
         """

@@ -209,13 +209,14 @@ async def test_release_and_quarantine_retains_admission_when_fence_fails() -> No
         await mgr.release_and_quarantine(lease, request)
     assert lease.closed
     assert mgr.has_pending_ownership
-    assert mgr._unpublished_leases
+    assert mgr._late_owners
+    assert any(owner.unpublished for owner in mgr._late_owners.values())
 
     # A later owner can retry the same request/lease; no new admission slot is
     # made available until provider quarantine and callback finalization pass.
     await mgr.release(lease)
     assert not mgr.has_pending_ownership
-    assert not mgr._unpublished_leases
+    assert not mgr._late_owners
 
 
 @pytest.mark.asyncio
@@ -812,7 +813,7 @@ async def test_shutdown_reports_unscheduled_foreign_loop_acquisition_pending(mon
     # A provider loop that has stopped cannot service cleanup on this loop.
     acquisition = foreign_loop.create_task(asyncio.sleep(0))
     permit = await manager._admission.acquire(deadline=asyncio.get_running_loop().time() + 2)
-    monkeypatch.setattr(manager, "_schedule_late_acquisition_owner", lambda _owner: True)
+    monkeypatch.setattr(manager, "_schedule_late_owner", lambda _owner: True)
     try:
         manager._adopt_late_acquisition(acquisition, permit, _request(), uuid4())
         assert manager.has_pending_ownership

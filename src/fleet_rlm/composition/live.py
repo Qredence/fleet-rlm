@@ -766,39 +766,29 @@ async def install_daytona_composition(
 
 async def dispose_daytona_composition(app: FastAPI) -> None:
     """Dispose Daytona resources while preserving ownership and cleanup order."""
+    from fleet_rlm.composition.inventory import close_inventory_services
+
     inventory = clear_runtime_inventory(app)
     if inventory is None:
         return
     errors: list[BaseException] = []
-    phase_failed = object()
 
     async def phase(awaitable: Any) -> Any:
         try:
             return await awaitable
         except BaseException as exc:
             errors.append(exc)
-            return phase_failed
+            return None
 
     # Stop accepting detached work first, but never let one cleanup hook skip
     # runtime fencing or provider retirement.
     await phase(_cancel_orphan_cleanup(getattr(inventory, "orphan_cleanup_task", None)))
     await phase(_cancel_orphan_cleanup(getattr(inventory, "memory_outbox_task", None)))
+    service_close = await close_inventory_services(inventory, drain_seconds=30)
+    errors.extend(service_close.errors)
     cleanup = getattr(inventory, "run_cleanup_supervisor", None)
-    if cleanup is not None:
-        await phase(cleanup.shutdown(drain_seconds=30))
-    runner = getattr(inventory, "runner", None)
-    close_runner = getattr(runner, "aclose", None)
-    if callable(close_runner):
-        await phase(close_runner(drain_seconds=30))
 
-    deferred_settled = not errors
-
-    preparation = getattr(inventory, "run_preparation", None)
-    close_preparation = getattr(preparation, "aclose", None)
-    if callable(close_preparation):
-        result = await phase(close_preparation())
-        if result is phase_failed or result is False:
-            deferred_settled = False
+    deferred_settled = not service_close.errors and service_close.preparation_settled
 
     cleanup_pending = bool(getattr(cleanup, "active_jobs", 0)) if cleanup is not None else False
     ownership_pending = not deferred_settled or cleanup_pending

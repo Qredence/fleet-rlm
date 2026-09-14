@@ -260,7 +260,71 @@ async def no_provider_recovery_fence(_session_id: UUID) -> None:
     """Declare that deterministic compositions have no provider state to fence."""
 
 
+@dataclass(frozen=True, slots=True)
+class CloseServicesResult:
+    """Outcome of the shared cleanup → runner → preparation close prefix.
+
+    Live disposal uses ``preparation_settled`` and any recorded errors to decide
+    whether provider resources may be torn down immediately or must remain
+    retained for deferred ownership. Testing lifespans only need the errors.
+    """
+
+    errors: tuple[BaseException, ...] = ()
+    preparation_settled: bool = True
+
+    @property
+    def first_error(self) -> BaseException | None:
+        return self.errors[0] if self.errors else None
+
+
+async def close_inventory_services(
+    inventory: RuntimeInventory | None,
+    *,
+    drain_seconds: float = 30.0,
+) -> CloseServicesResult:
+    """Close cleanup supervisor, runner, then preparation in that order.
+
+    This is the shared prefix for local and live lifespan disposal. Live-only
+    retain gates, component teardown, and bridge fencing stay outside this
+    helper so unsettled ownership cannot be released by the testing path.
+    """
+    if inventory is None:
+        return CloseServicesResult()
+
+    errors: list[BaseException] = []
+    preparation_settled = True
+
+    cleanup = getattr(inventory, "run_cleanup_supervisor", None)
+    if cleanup is not None:
+        try:
+            await cleanup.shutdown(drain_seconds=drain_seconds)
+        except BaseException as exc:
+            errors.append(exc)
+
+    runner = getattr(inventory, "runner", None)
+    close_runner = getattr(runner, "aclose", None)
+    if callable(close_runner):
+        try:
+            await close_runner(drain_seconds=drain_seconds)
+        except BaseException as exc:
+            errors.append(exc)
+
+    preparation = getattr(inventory, "run_preparation", None)
+    close_preparation = getattr(preparation, "aclose", None)
+    if callable(close_preparation):
+        try:
+            result = await close_preparation()
+            if result is False:
+                preparation_settled = False
+        except BaseException as exc:
+            preparation_settled = False
+            errors.append(exc)
+
+    return CloseServicesResult(errors=tuple(errors), preparation_settled=preparation_settled)
+
+
 __all__ = [
+    "CloseServicesResult",
     "CompositionError",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
@@ -269,6 +333,7 @@ __all__ = [
     "RuntimeSessionManager",
     "SettlingRunStateStore",
     "clear_runtime_inventory",
+    "close_inventory_services",
     "get_runtime_inventory",
     "install_runtime_inventory",
     "no_provider_recovery_fence",

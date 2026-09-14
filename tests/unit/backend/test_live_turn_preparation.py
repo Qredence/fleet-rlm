@@ -94,16 +94,18 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         released = False
         sandbox_id = f"sandbox-{tmp_path}"
 
-        async def acquire(self, _request, *, deadline):
+        async def acquire(self, _request, *, deadline, force_new=False):
             """
             Provide a mock sandbox acquisition result for a valid future deadline.
 
             Parameters:
                 deadline (float): Monotonic time by which acquisition must complete.
+                force_new (bool): Unused; accepted for DaytonaRuntime compatibility.
 
             Returns:
                 SimpleNamespace: A mock acquisition result containing the sandbox, interpreter, and volume identifiers.
             """
+            del force_new
             assert deadline > asyncio.get_running_loop().time()
             return SimpleNamespace(
                 sandbox_id=self.sandbox_id,
@@ -143,6 +145,9 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         daytona_admission=DaytonaAdmission(max_active_leases=2),
         volume_config=SimpleNamespace(mount_path=str(volume_root)),
     )
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
+
+    resources.runtime = DaytonaRuntime(resources)
     if with_skill_catalog:
         from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
@@ -390,7 +395,8 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     from fleet_rlm.daytona.admission import DaytonaAdmissionTimeoutError
 
     class SessionManager:
-        async def acquire(self, _request, *, deadline):
+        async def acquire(self, _request, *, deadline, force_new=False):
+            del force_new
             assert deadline > asyncio.get_running_loop().time()
             raise DaytonaAdmissionTimeoutError("provider secret should not escape")
 
@@ -401,8 +407,12 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
         settings=settings,
         volume_paths=volume_paths_from_settings(settings),
         session_manager=SessionManager(),
+        platform=SimpleNamespace(get=AsyncMock(return_value=object())),
         models=RLMModelBundle(object(), object()),
     )
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
+
+    resources.runtime = DaytonaRuntime(resources)
 
     class Attachments:
         async def prepare_run(self, *_args):
@@ -440,12 +450,19 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
     from fleet_rlm.chat.preparation import RunPreparationTimeoutError
     from fleet_rlm.composition.daytona_run_preparation import _DaytonaEnvironmentProvider
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
 
     entered = threading.Event()
     release_lookup = threading.Event()
+    lookups = 0
 
     class Platform:
         async def get(self, _sandbox_id):
+            nonlocal lookups
+            lookups += 1
+            if lookups == 1:
+                # Runtime root acquisition lookup settles before preparation.
+                return object()
             entered.set()
             assert await asyncio.to_thread(release_lookup.wait, 5)
             return object()
@@ -453,8 +470,8 @@ async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mod
     class SessionManager:
         released = 0
 
-        async def acquire(self, _request, *, deadline):
-            del deadline
+        async def acquire(self, _request, *, deadline, force_new=False):
+            del deadline, force_new
             return SimpleNamespace(sandbox_id="sandbox", interpreter=object())
 
         async def release(self, _lease) -> None:
@@ -466,6 +483,7 @@ async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mod
         platform=Platform(),
         track_sandbox=lambda _sandbox_id: None,
     )
+    resources.runtime = DaytonaRuntime(resources)
 
     async def not_cancelled() -> bool:
         return False

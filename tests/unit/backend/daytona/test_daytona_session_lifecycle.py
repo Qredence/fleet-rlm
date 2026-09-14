@@ -113,6 +113,7 @@ def _provider(monkeypatch: pytest.MonkeyPatch):
         daytona_admission=DaytonaAdmission(max_active_leases=2),
         track_sandbox=lambda _sandbox_id: None,
     )
+    resources.runtime = DaytonaRuntime(resources)
     return _DaytonaEnvironmentProvider(cast(Any, resources), settings), manager, platform
 
 
@@ -127,27 +128,26 @@ async def test_root_lease_reuses_workspace_session_but_rebuilds_turn_sinks(monke
 
     assert len(manager.acquired) == 1
     assert manager.force_new_calls == [False]
-    assert len(platform.lookups) == 2
+    # Runtime lookup plus preparation lookup for each Turn that reuses one root.
+    assert len(platform.lookups) == 3
     assert first.interpreter is second.interpreter
     assert first.attachment_sink is not second.attachment_sink
     assert first.artifact_sink is not second.artifact_sink
-    assert first.resident_release is not None
+    assert first.resident_release is None
     assert second.resident_release is None
+    assert len(provider.resources.runtime.roots) == 1
 
-    # A reused Turn's release is deliberately per-Turn no-op. The resident
-    # callback remains the sole owner of the shared provider lease.
     await second.release()
     assert manager.released == []
-    await first.resident_release()  # type: ignore[misc]
-    await first.resident_release()  # type: ignore[misc]
+    await provider.resources.runtime.close_root_session(workspace_id, session_id)
     assert manager.released == [manager.acquired[0]]
     assert provider._resident_root_leases == {}
+    assert provider.resources.runtime.roots == ()
 
 
 @pytest.mark.asyncio
 async def test_tainted_root_forces_new_sandbox_and_preserves_volume(monkeypatch: pytest.MonkeyPatch) -> None:
     provider, manager, _platform = _provider(monkeypatch)
-    provider.resources.runtime = DaytonaRuntime(provider.resources)
     session_id = uuid4()
     workspace_id = uuid4()
     first = await provider.acquire(_turn(session_id=session_id, workspace_id=workspace_id), deadline=float("inf"))
@@ -204,6 +204,7 @@ async def test_same_attachment_id_rotates_run_scoped_manifest_root(monkeypatch: 
     assert manager.released == [manager.acquired[0]]
     assert first.interpreter is not second.interpreter
     await provider.aclose()
+    await provider.resources.runtime.aclose()
     assert manager.released == [manager.acquired[0], manager.acquired[1]]
 
 
@@ -226,8 +227,11 @@ async def test_context_selector_change_rotates_provider_root_before_reuse(monkey
     assert manager.force_new_calls == [False, True]
     assert manager.released == [manager.acquired[0]]
     assert first.interpreter is not second.interpreter
-    assert len(platform.lookups) == 2
+    # Each root generation performs a runtime lookup; each Turn also looks up
+    # during preparation.
+    assert len(platform.lookups) == 4
     await provider.aclose()
+    await provider.resources.runtime.aclose()
     assert manager.released == [manager.acquired[0], manager.acquired[1]]
 
 
@@ -246,13 +250,19 @@ async def test_reused_provider_failure_quarantines_root(monkeypatch: pytest.Monk
     assert manager.released == [manager.acquired[0]]
     assert manager.quarantined == [manager.acquired[0]]
     assert provider._resident_root_leases == {}
+    assert provider.resources.runtime.roots == ()
 
 
 @pytest.mark.asyncio
+async def test_acquire_root_fails_closed_without_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider, _manager, _platform = _provider(monkeypatch)
+    del provider.resources.runtime
+    with pytest.raises(RuntimeError, match="Daytona runtime is required to acquire a provider root"):
+        await provider.acquire(_turn(), deadline=float("inf"))
+
+
 @pytest.mark.asyncio
 async def test_resident_root_close_survives_caller_cancellation() -> None:
-    import asyncio
-
     lease = object()
     entered = asyncio.Event()
     release = asyncio.Event()
@@ -284,13 +294,17 @@ async def test_resident_root_close_survives_caller_cancellation() -> None:
 
 @pytest.mark.asyncio
 async def test_cancelled_lookup_returns_promptly_and_retains_root_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
-    import asyncio
-
     provider, manager, platform = _provider(monkeypatch)
     lookup_started = asyncio.Event()
     release_lookup = asyncio.Event()
+    lookups = 0
 
     async def slow_get(_sandbox_id: str) -> object:
+        nonlocal lookups
+        lookups += 1
+        if lookups == 1:
+            # Runtime acquisition lookup completes so the root can publish.
+            return object()
         lookup_started.set()
         await release_lookup.wait()
         return object()
@@ -317,8 +331,6 @@ async def test_cancelled_lookup_returns_promptly_and_retains_root_cleanup(monkey
 
 
 @pytest.mark.asyncio
-@pytest.mark.asyncio
-@pytest.mark.asyncio
 async def test_root_lease_key_includes_workspace_and_session(monkeypatch: pytest.MonkeyPatch) -> None:
     provider, manager, _platform = _provider(monkeypatch)
     first_turn = _turn()
@@ -330,8 +342,10 @@ async def test_root_lease_key_includes_workspace_and_session(monkeypatch: pytest
     await provider.acquire(third_turn, deadline=float("inf"))
 
     assert len(manager.acquired) == 3
-    assert len(provider._resident_root_leases) == 3
+    assert len(provider.resources.runtime.roots) == 3
+    assert provider._resident_root_leases == {}
     await provider.aclose()
+    await provider.resources.runtime.aclose()
     assert len(manager.released) == 3
 
 

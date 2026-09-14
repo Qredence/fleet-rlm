@@ -62,32 +62,12 @@ async def _local_db_lifespan(
         yield
     finally:
         detached = clear_runtime_inventory(app)
+        from fleet_rlm.composition.inventory import close_inventory_services
+
         shutdown_error: BaseException | None = None
-
-        cleanup = getattr(detached, "run_cleanup_supervisor", None)
-        if cleanup is not None:
-            try:
-                await cleanup.shutdown(drain_seconds=30)
-            except BaseException as exc:
-                shutdown_error = exc
-
-        runner = getattr(detached, "runner", None)
-        close_runner = getattr(runner, "aclose", None)
-        if callable(close_runner):
-            try:
-                await close_runner(drain_seconds=30)
-            except BaseException as exc:
-                if shutdown_error is None:
-                    shutdown_error = exc
-
-        preparation = getattr(detached, "run_preparation", None)
-        close_preparation = getattr(preparation, "aclose", None)
-        if callable(close_preparation):
-            try:
-                await close_preparation()
-            except BaseException as exc:
-                if shutdown_error is None:
-                    shutdown_error = exc
+        service_close = await close_inventory_services(detached, drain_seconds=30)
+        if service_close.first_error is not None:
+            shutdown_error = service_close.first_error
 
         if detached is not None:
             try:
