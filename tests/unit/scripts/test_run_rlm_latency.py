@@ -743,6 +743,21 @@ def test_quality_dataset_is_scoped_to_selected_experiment() -> None:
     assert calls == [(["1"], {"filter_string": f"name = '{DATASET_NAME}'"}), {"dataset_id": "selected"}]
 
 
+def test_quality_dataset_scopes_databricks_lookup_to_selected_experiment() -> None:
+    from types import SimpleNamespace
+
+    from scripts.benchmarks.run_rlm_latency import _evaluation_dataset_name, _quality_dataset
+
+    calls = []
+    selected = SimpleNamespace(dataset_id="selected", name=_evaluation_dataset_name("databricks"))
+    datasets = SimpleNamespace(
+        search_datasets=lambda ids, **kwargs: calls.append((ids, kwargs)) or [selected],
+        get_dataset=lambda **kwargs: calls.append(kwargs) or selected,
+    )
+    assert _quality_dataset(datasets, "databricks", "experiment-1") is selected
+    assert calls == [(["experiment-1"], {}), {"dataset_id": "selected"}]
+
+
 @pytest.mark.parametrize("count", [0, 2])
 def test_quality_dataset_rejects_missing_or_ambiguous_matches(count: int) -> None:
     from types import SimpleNamespace

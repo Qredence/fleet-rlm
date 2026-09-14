@@ -439,7 +439,19 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
 
     monkeypatch.setattr(verifier.subprocess, "run", run_once)
 
-    assert verifier.main(["--output", str(output), "--timeout-seconds", "840"]) == 0
+    assert (
+        verifier.main(
+            [
+                "--output",
+                str(output),
+                "--timeout-seconds",
+                "840",
+                "--session-snapshot",
+                " fleet-session-v1 ",
+            ]
+        )
+        == 0
+    )
     lane_calls = [call for call in calls if call[0][1:3] == ["run", "pytest"]]
     assert [call[0] for call in lane_calls] == [
         verifier.lane_command("attachment_artifact_durability", 840),
@@ -453,6 +465,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
     assert "FLEET_SUB_MODEL" not in child_env
     assert child_env[verifier._LIVE_ROOT_MODEL_ENV] == "candidate-root"
     assert child_env[verifier._LIVE_SUB_MODEL_ENV] == "candidate-sub"
+    assert child_env[verifier.P27_SESSION_SNAPSHOT_ENV] == "fleet-session-v1"
     assert timeout == 900
     assert removed == [worktree]
     receipt = json.loads(output.read_text(encoding="utf-8"))
@@ -463,6 +476,7 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         "lane_timeout_seconds": 840,
         "subprocess_grace_seconds": 60,
     }
+    assert receipt["qualification"]["snapshots"]["session"] == "fleet-session-v1"
     assert receipt["lanes"]["attachment_artifact_durability"]["order"] == 1
     assert receipt["lanes"]["fastapi_dspy_daytona_mvp"]["order"] == 2
     assert receipt["external_promotion"] == {
@@ -471,6 +485,23 @@ def test_main_invokes_pytest_once_and_accepts_valid_receipt(
         "human_approval": "pending",
     }
     assert not list(tmp_path.glob(".receipt.json.*.tmp"))
+
+
+@pytest.mark.parametrize("timeout_seconds", [0, 86_401])
+def test_main_rejects_timeout_outside_qualification_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    timeout_seconds: int,
+) -> None:
+    output = tmp_path / "receipt.json"
+    monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
+    monkeypatch.setattr(verifier, "_load_repo_env", lambda: pytest.fail("invalid timeout must fail first"))
+
+    assert (
+        verifier.main(["--output", str(output), "--timeout-seconds", str(timeout_seconds)])
+        == verifier.EXIT_PRECONDITION
+    )
+    assert not output.exists()
 
 
 @pytest.mark.parametrize(

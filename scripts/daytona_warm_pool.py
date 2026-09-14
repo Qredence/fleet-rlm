@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import subprocess
+import sys
 from collections.abc import Sequence
 from dataclasses import asdict
 from pathlib import Path
@@ -129,7 +130,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         result = asyncio.run(_run(args))
     except WarmPoolUnavailableError:
-        print("Daytona warm-pool API is unavailable; confirm organization enablement with support@daytona.io.")
+        print(
+            "Daytona warm-pool API is unavailable; confirm organization enablement with support@daytona.io.",
+            file=sys.stderr,
+        )
         return 2
     except Exception:
         print("Daytona warm-pool operation could not be completed safely.")

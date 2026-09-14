@@ -15,12 +15,15 @@ scoped in the ledger.
 
 ### Changed
 
-- Closed the bounded MLflow and warm-pool operational checks while preserving
-  nullable provider telemetry and experiment ownership boundaries.
+- Recorded the bounded MLflow operational checks while preserving nullable
+  provider telemetry and experiment ownership boundaries; the warm-pool check
+  remains blocked by provider endpoint availability, with no pool mutation or
+  warm-hit certification claimed.
 - Hardened attachment storage error classification and bounded canary upload
   retries, including volume-less SemanticChild isolation handling.
-- Reconciled live canary policy with the shipped recursion defaults and kept
-  opt-in recursion isolated to certification profiles.
+- Reconciled live canary policy with the shipped recursion defaults: the
+  `daytona-recursive` default enables recursion, while comparison profiles
+  remain independently configurable.
 - Marked PostgreSQL query-plan certification cases async and refreshed Phase 5
   evidence and configuration guidance.
 

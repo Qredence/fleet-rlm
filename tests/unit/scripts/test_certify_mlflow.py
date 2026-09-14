@@ -208,3 +208,16 @@ def test_git_identity_uses_source_repository_from_other_directory(certification,
     monkeypatch.setattr(certification.subprocess, "run", git)
     assert certification._git_identity() == {"revision": "a" * 40, "dirty": dirty}
     assert calls == [["git", "rev-parse", "HEAD"], ["git", "status", "--porcelain"]]
+
+
+@pytest.mark.parametrize(
+    ("initial", "final", "stable"),
+    [
+        ({"revision": "a", "dirty": False}, {"revision": "a", "dirty": False}, True),
+        ({"revision": "a", "dirty": False}, {"revision": "b", "dirty": False}, False),
+        ({"revision": "a", "dirty": True}, {"revision": "a", "dirty": False}, False),
+        ({"revision": "a", "dirty": False}, {"revision": "a", "dirty": True}, False),
+    ],
+)
+def test_candidate_stability_requires_same_clean_revision(certification, initial, final, stable) -> None:
+    assert certification._candidate_is_stable(initial, final) is stable

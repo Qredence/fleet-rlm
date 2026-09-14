@@ -135,13 +135,12 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "phase2-fleet.toml"
+    # Keep this canary tied to the shipped recursive profile while using a
+    # copied policy so its database and snapshot overrides stay isolated.
     copied_policy.write_text(
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1)
-        # Explicit opt-in for this canary only: production keeps
-        # [defaults.rlm] recursion_enabled = false (P4.6).
-        .replace("recursion_enabled = false", "recursion_enabled = true", 1),
+        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1),
         encoding="utf-8",
     )
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)

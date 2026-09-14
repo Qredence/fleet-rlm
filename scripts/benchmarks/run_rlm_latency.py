@@ -1416,15 +1416,13 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _quality_dataset(datasets: Any, tracking_url: str, experiment_id: str) -> Any:
-    """Resolve local datasets within their owning experiment, never by global name."""
+    """Resolve a quality dataset within its owning experiment, never by global name."""
     name = _evaluation_dataset_name(tracking_url)
-    if tracking_url == "databricks":
-        return datasets.get_dataset(name=name)
-    matches = [
-        item
-        for item in datasets.search_datasets([experiment_id], filter_string=f"name = '{DATASET_NAME}'")
-        if item.name == name
-    ]
+    # Databricks does not support MLflow's entity-store name filter, but its
+    # experiment-scoped search still prevents selecting a same-named dataset
+    # from another experiment.
+    search_options = {} if tracking_url == "databricks" else {"filter_string": f"name = '{DATASET_NAME}'"}
+    matches = [item for item in datasets.search_datasets([experiment_id], **search_options) if item.name == name]
     if len(matches) != 1:
         raise BenchmarkError("expected one quality dataset in the selected experiment; run prepare-evaluation")
     return datasets.get_dataset(dataset_id=matches[0].dataset_id)

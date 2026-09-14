@@ -127,6 +127,15 @@ def _git_identity() -> dict[str, object]:
     return {"revision": revision[:64], "dirty": dirty}
 
 
+def _candidate_is_stable(initial: Mapping[str, object], final: Mapping[str, object]) -> bool:
+    """Return whether the source tree stayed clean at the recorded revision."""
+    return bool(
+        initial.get("revision") == final.get("revision")
+        and initial.get("dirty") is False
+        and final.get("dirty") is False
+    )
+
+
 def _file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -647,15 +656,22 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             "span_linkage_checked": linkage["child_spans_linked"],
         }
         passed = all(item.get("status") == "passed" for item in scenarios.values())
-        clean = not cast(dict[str, object], receipt["candidate"])["dirty"]
+        candidate = cast(dict[str, object], receipt["candidate"])
+        final_candidate = _git_identity()
+        candidate_stable = _candidate_is_stable(candidate, final_candidate)
         receipt["certification"] = {
             "passed": passed,
             "scope": "selected backend export and fresh-process sampling plus isolated SDK/lifecycle fault injection",
         }
-        reason = "clean_candidate" if clean else "dirty_candidate"
         if not passed:
             reason = "scenario_failed_or_unexercised"
-        receipt["promotion"] = {"eligible": passed and clean, "reason": reason}
+        elif candidate.get("revision") != final_candidate.get("revision"):
+            reason = "candidate_changed_during_run"
+        elif not candidate_stable:
+            reason = "dirty_candidate"
+        else:
+            reason = "clean_candidate"
+        receipt["promotion"] = {"eligible": passed and candidate_stable, "reason": reason}
     finally:
         flush_tracing()
         reset_tracing()

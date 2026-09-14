@@ -759,7 +759,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
     started_at = _utc_now()
-    if args.timeout_seconds <= 0 or not _path_is_allowed(output):
+    if not 1 <= args.timeout_seconds <= 86_400 or not _path_is_allowed(output):
         print("Live proof precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
     _load_repo_env()
@@ -814,9 +814,11 @@ def main(argv: list[str] | None = None) -> int:
     child_env.pop("FLEET_SUB_MODEL", None)
     child_env[_LIVE_ROOT_MODEL_ENV] = models["root"]
     child_env[_LIVE_SUB_MODEL_ENV] = models["sub"]
+    normalized_session_snapshot: str | None = None
     if args.session_snapshot is not None:
         try:
-            child_env[P27_SESSION_SNAPSHOT_ENV] = validate_snapshot_name(args.session_snapshot)
+            normalized_session_snapshot = validate_snapshot_name(args.session_snapshot)
+            child_env[P27_SESSION_SNAPSHOT_ENV] = normalized_session_snapshot
         except ValueError:
             _write_failure(
                 output, category="precondition_failed", phase="snapshot", started_at=started_at, sha=sha, branch=branch
@@ -826,7 +828,7 @@ def main(argv: list[str] | None = None) -> int:
     qualification = _qualification_metadata(
         settings,
         contract,
-        session_snapshot_override=args.session_snapshot,
+        session_snapshot_override=normalized_session_snapshot,
         timeout_seconds=args.timeout_seconds,
     )
     worktree: Path | None = None

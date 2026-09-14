@@ -373,12 +373,14 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
             # The canary proves the Session/stream contract, not local blob
             # write latency: tolerate a transient local-storage hiccup with a
             # bounded retry. A persistent failure still fails the canary.
-            for _attempt in range(3):
+            for attempt in range(3):
                 uploaded = client.post(
                     "/api/attachments",
                     files={"attachment": ("phase1.txt", _ATTACHMENT_CONTENT.encode(), "text/plain")},
                 )
                 if uploaded.status_code == 201:
+                    break
+                if not 500 <= uploaded.status_code < 600 or attempt == 2:
                     break
                 time.sleep(2.0)
             assert uploaded is not None and uploaded.status_code == 201

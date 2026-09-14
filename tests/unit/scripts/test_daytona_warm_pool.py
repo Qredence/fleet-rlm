@@ -67,6 +67,7 @@ def test_unavailable_pool_api_has_safe_operator_action(monkeypatch, capsys):
 
     monkeypatch.setattr(daytona_warm_pool, "_run", unavailable)
     assert daytona_warm_pool.main(["check"]) == 2
-    output = capsys.readouterr().out
-    assert "support@daytona.io" in output
-    assert "private backend diagnostic" not in output
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "support@daytona.io" in captured.err
+    assert "private backend diagnostic" not in captured.err
