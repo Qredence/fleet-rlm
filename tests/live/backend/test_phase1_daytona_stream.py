@@ -32,8 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-flash-0731")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-flash-0731")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
 _APPROVED_MODELS = frozenset(
     name
     for base in {
@@ -369,11 +369,21 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
             created = client.post("/api/sessions", json={"title": "Phase 1 Daytona stream canary"})
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
-            uploaded = client.post(
-                "/api/attachments",
-                files={"attachment": ("phase1.txt", _ATTACHMENT_CONTENT.encode(), "text/plain")},
-            )
-            assert uploaded.status_code == 201
+            uploaded = None
+            # The canary proves the Session/stream contract, not local blob
+            # write latency: tolerate a transient local-storage hiccup with a
+            # bounded retry. A persistent failure still fails the canary.
+            for attempt in range(3):
+                uploaded = client.post(
+                    "/api/attachments",
+                    files={"attachment": ("phase1.txt", _ATTACHMENT_CONTENT.encode(), "text/plain")},
+                )
+                if uploaded.status_code == 201:
+                    break
+                if not 500 <= uploaded.status_code < 600 or attempt == 2:
+                    break
+                time.sleep(2.0)
+            assert uploaded is not None and uploaded.status_code == 201
             attachment_id = uploaded.json()["id"]
             response = client.post(
                 f"/api/sessions/{session_id}/turns",

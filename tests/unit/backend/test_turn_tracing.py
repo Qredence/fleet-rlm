@@ -267,7 +267,6 @@ def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.Mo
         uuid4(),
         enabled=True,
         trace_phase="execution",
-        runtime_variant="native-turn-scoped",
         program_fingerprint="program-digest",
         image_identity="image-digest",
     ):
@@ -276,12 +275,10 @@ def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.Mo
     assert (
         tagged[0]["tags"].items()
         >= {
-            "fleet.runtime_variant": "native-turn-scoped",
             "fleet.program_fingerprint": "program-digest",
             "fleet.image_identity": "image-digest",
         }.items()
     )
-    assert tagged[0]["metadata"]["fleet.runtime_variant"] == "native-turn-scoped"
 
 
 def test_execution_trace_rejects_unbounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:

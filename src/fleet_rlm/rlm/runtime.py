@@ -1,8 +1,8 @@
 """Native DSPy RLM execution runner, worker lifecycle, and execution context.
 
 This module is the P46.4 runtime entry point. It consolidates execution context,
-worker thread scheduling, integrity guards, program fingerprinting, and
-`RLMRunner` stream execution over the Session RLM registry.
+worker thread scheduling, integrity guards, and fresh per-Run
+`RLMRunner` stream execution.
 """
 
 from __future__ import annotations
@@ -278,11 +278,6 @@ class ExecutionRuntime:
     # Directly constructed test/in-process contexts opt into the reserve via
     # preparation; the public TOML default is applied by the live composition.
     wrap_up_seconds: float = 0.0
-    runtime_variant: Literal["legacy"] = "legacy"
-
-    def __post_init__(self) -> None:
-        if self.runtime_variant != "legacy":
-            raise ValueError("only retained broker execution is supported")
 
 
 @dataclass(frozen=True, slots=True)
@@ -667,7 +662,7 @@ def _run_private_event_loop(
 
 
 # ---------------------------------------------------------------------------
-# RLM Runner & Fingerprint Resolution
+# RLM Runner
 # ---------------------------------------------------------------------------
 
 

@@ -22,7 +22,7 @@ def _runtime_receipt() -> dict[str, Any]:
     return seal(
         {
             "schema": RUNTIME_SCHEMA,
-            "runtime_variant": "legacy",
+            "execution_architecture": "retained-broker",
             "execution_mode": "scripted",
             "repetitions": 2,
             "source_revision": "0" * 40,
@@ -63,7 +63,7 @@ def _adapter_receipt() -> dict[str, Any]:
         {
             "schema": ADAPTER_SCHEMA,
             "scope": "scripted-adapter-protocol-only",
-            "runtime_variant": "legacy",
+            "execution_architecture": "retained-broker",
             "dspy_version": "3.3.1",
             "repetitions": 2,
             "dataset_digest": "c" * 64,
@@ -86,6 +86,21 @@ def _adapter_receipt() -> dict[str, Any]:
             "passed": False,
         }
     )
+
+
+@pytest.mark.parametrize("schema", ["fleet.runtime-benchmark/v2", "fleet.runtime-adapter-comparison/v2"])
+def test_historical_receipts_remain_readable_without_resealing(tmp_path, schema):
+    receipt = _runtime_receipt()
+    receipt.pop("receipt_digest")
+    receipt["schema"] = schema
+    receipt.pop("execution_architecture")
+    receipt["runtime_variant"] = "legacy"
+    receipt = seal(receipt)
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(receipt))
+    original = path.read_bytes()
+    assert load_receipt(path) == receipt
+    assert path.read_bytes() == original
 
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
@@ -192,7 +207,7 @@ def test_record_creates_run_with_identity_metrics_and_evidence_tags(tmp_path, mo
     assert result["promotion_eligible"] is False
     assert result["metrics_unknown"] == []
     assert calls.terminated == [("campaign-run-1", "FINISHED")]
-    # Configuration identity: source revision, runtime variant, dependency identities.
+    # Configuration identity: source revision, broker architecture, dependency identities.
     tags = calls.tags
     assert tags["fleet.campaign.purpose"] == "runtime-baseline"
     assert tags["fleet.campaign.source_revision"] == "0" * 40
@@ -200,7 +215,7 @@ def test_record_creates_run_with_identity_metrics_and_evidence_tags(tmp_path, mo
     assert tags["fleet.campaign.semantic_gate"] == "not_exercised"
     assert tags["fleet.campaign.metrics_unknown"] == "none"
     params = {key: value for _, key, value in calls.params}
-    assert params["fleet.campaign.runtime_variant"] == "legacy"
+    assert params["fleet.campaign.execution_architecture"] == "retained-broker"
     assert params["fleet.campaign.identity.dspy"] == "3.3.1"
     assert params["fleet.campaign.identity.mlflow"] == "3.16.0"
     # Full-run measurements: failures stay in the denominator and are not zeroed out.

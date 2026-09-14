@@ -69,7 +69,7 @@ workspace reads, verification, and writes; do not infer host or mounted paths
 from a tool-relative path. Sandbox-local file I/O alone does not prove that a
 durable Workspace operation succeeded.
 
-REPL variables are not durable. The selected legacy runtime may retain them
+REPL variables are not durable. The retained broker runtime may retain them
 across sequential clean Turns, but rotation or replacement can lose them.
 Authorized clients can retrieve
 committed Artifact bytes through the Artifact content API, but host storage

@@ -31,10 +31,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from scripts.benchmarks.campaign import write_receipt_once
+
 RECEIPT_SCHEMA = "fleet.benchmark-mlflow-campaign/v1"
-RUNTIME_SCHEMA = "fleet.runtime-benchmark/v2"
-ADAPTER_SCHEMA = "fleet.runtime-adapter-comparison/v2"
-SUPPORTED_RECEIPT_SCHEMAS = frozenset({RUNTIME_SCHEMA, ADAPTER_SCHEMA})
+RUNTIME_SCHEMA = "fleet.runtime-benchmark/v3"
+ADAPTER_SCHEMA = "fleet.runtime-adapter-comparison/v3"
+_HISTORICAL_SCHEMAS = frozenset({"fleet.runtime-benchmark/v2", "fleet.runtime-adapter-comparison/v2"})
+SUPPORTED_RECEIPT_SCHEMAS = frozenset({RUNTIME_SCHEMA, ADAPTER_SCHEMA}) | _HISTORICAL_SCHEMAS
 DEFAULT_ARTIFACT_PATH = "fleet-benchmark-campaign"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _MAX_PARAM_CHARS = 500
@@ -66,7 +69,12 @@ def load_receipt(path: Path) -> dict[str, Any]:
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
     if not isinstance(recorded_digest, str) or recorded_digest != digest(body):
         raise CampaignRecordError("benchmark receipt digest does not match its sealed contents")
-    for field in ("source_revision", "runtime_variant"):
+    architecture_field = (
+        "runtime_variant"
+        if receipt["schema"] in _HISTORICAL_SCHEMAS and "runtime_variant" in receipt
+        else "execution_architecture"
+    )
+    for field in ("source_revision", architecture_field):
         if not isinstance(receipt.get(field), str) or not receipt[field]:
             raise CampaignRecordError(f"benchmark receipt field {field} is missing")
     if type(receipt.get("source_dirty")) is not bool:
@@ -183,7 +191,7 @@ def _adapter_metrics(receipt: Mapping[str, Any]) -> tuple[dict[str, float], tupl
 
 def _campaign_params(receipt: Mapping[str, Any]) -> dict[str, str]:
     params: dict[str, str] = {}
-    for key in ("runtime_variant", "dataset_digest", "scorer_digest", "repetitions"):
+    for key in ("runtime_variant", "execution_architecture", "dataset_digest", "scorer_digest", "repetitions"):
         if key in receipt:
             params[f"fleet.campaign.{key}"] = _bounded_param(key, receipt[key])
     identities = receipt.get("identities")
@@ -210,7 +218,7 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
     client = MlflowClient()
     tags = _campaign_tags(receipt, purpose=purpose)
     params = _campaign_params(receipt)
-    if receipt["schema"] == RUNTIME_SCHEMA:
+    if receipt["schema"] in {RUNTIME_SCHEMA, "fleet.runtime-benchmark/v2"}:
         metrics, unknown = _runtime_metrics(receipt)
     else:
         metrics, unknown = _adapter_metrics(receipt)
@@ -251,27 +259,10 @@ def record(args: argparse.Namespace) -> dict[str, Any]:
 
 def _write_once(path: Path, payload: Mapping[str, object]) -> None:
     """Write one operator result receipt without replacing a sealed result."""
-    import os
-
-    path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        write_receipt_once(path, payload)
     except FileExistsError as exc:
         raise CampaignRecordError("campaign result receipt already exists") from exc
-    wrapped = False
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            wrapped = True
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
-        if not wrapped:
-            with suppress(OSError):
-                os.close(descriptor)
-        path.unlink(missing_ok=True)
-        raise
 
 
 def build_parser() -> argparse.ArgumentParser:

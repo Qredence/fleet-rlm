@@ -640,7 +640,10 @@ def _latest_lm_telemetry(
         if not isinstance(usage, Mapping) or not usage:
             continue
         with contextlib.suppress(ValueError):
-            sanitized = _safe_usage_entry(usage, path="lm_usage", filter_unknown=True)
+            # OpenAI-compatible gateways may emit null optional detail blocks.
+            # Their absence must not discard the independent observed counts.
+            observed = {key: value for key, value in usage.items() if value is not None}
+            sanitized = _safe_usage_entry(observed, path="lm_usage", filter_unknown=True)
             if sanitized:
                 return cast(dict[str, JsonValue], sanitized)
     return {}

@@ -1,4 +1,4 @@
-"""Execute repeated deterministic legacy Runs and compare sealed migration receipts.
+"""Execute repeated deterministic broker Runs and compare sealed receipts.
 
 This lane exercises the production HTTP/Turn lifecycle with private scripted
 execution adapters. It proves lifecycle parity, not provider quality or Daytona
@@ -24,12 +24,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-SCHEMA = "fleet.runtime-benchmark/v2"
+SCHEMA = "fleet.runtime-benchmark/v3"
+LEGACY_SCHEMA = "fleet.runtime-benchmark/v2"
 DATASET = Path(__file__).with_name("runtime_v2_scenarios.json")
 SCORERS = ("stream-terminal/v1", "echo-answer/v1", "durable-turn-pair/v1")
 SEMANTIC_SCORERS = ("semantic-keywords/v1",)
-ComparisonAxis = Literal["none", "runtime", "daytona-sdk", "snapshot"]
-COMPARISON_AXES = ("none", "runtime", "daytona-sdk", "snapshot")
+ComparisonAxis = Literal["none", "daytona-sdk", "snapshot"]
+COMPARISON_AXES = ("none", "daytona-sdk", "snapshot")
 
 
 def digest(value: Any) -> str:
@@ -104,10 +105,13 @@ def validate(receipt: dict[str, Any]) -> None:
         ValueError: If the receipt is malformed or internally inconsistent.
     """
     body = {key: value for key, value in receipt.items() if key != "receipt_digest"}
-    if receipt.get("schema") != SCHEMA or receipt.get("receipt_digest") != digest(body):
+    if receipt.get("schema") not in {SCHEMA, LEGACY_SCHEMA} or receipt.get("receipt_digest") != digest(body):
         raise ValueError("invalid benchmark schema or receipt digest")
-    if type(receipt.get("runtime_variant")) is not str or not receipt["runtime_variant"]:
-        raise ValueError("benchmark runtime variant is missing")
+    if receipt.get("schema") == LEGACY_SCHEMA and "runtime_variant" in receipt:
+        if type(receipt["runtime_variant"]) is not str or not receipt["runtime_variant"]:
+            raise ValueError("historical runtime variant is missing")
+    elif receipt.get("execution_architecture") != "retained-broker":
+        raise ValueError("benchmark execution architecture is invalid")
     if type(receipt.get("source_dirty")) is not bool:
         raise ValueError("benchmark source_dirty provenance is invalid")
     if type(receipt.get("source_revision")) is not str or not receipt["source_revision"]:
@@ -220,7 +224,7 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
     receipt = seal(
         {
             "schema": SCHEMA,
-            "runtime_variant": settings.runtime_variant,
+            "execution_architecture": "retained-broker",
             "execution_mode": "scripted",
             "repetitions": repetitions,
             "source_revision": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
@@ -291,11 +295,10 @@ def compare(
         )
         baseline_ids.pop(identity_key, None)
         candidate_ids.pop(identity_key, None)
-    elif axis == "runtime":
-        axis_evidence = baseline["runtime_variant"] != candidate["runtime_variant"]
     compatible = all(
         baseline[key] == candidate[key]
         for key in (
+            "schema",
             "dataset_digest",
             "scorer_digest",
             "execution_mode",
@@ -304,8 +307,7 @@ def compare(
         )
     )
     compatible = compatible and baseline_ids == candidate_ids and axis_evidence
-    if axis != "runtime":
-        compatible = compatible and baseline["runtime_variant"] == candidate["runtime_variant"]
+    compatible = compatible and baseline.get("runtime_variant") == candidate.get("runtime_variant")
     gates = {
         "comparable": compatible,
         "source_clean": not baseline["source_dirty"] and not candidate["source_dirty"],

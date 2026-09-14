@@ -29,7 +29,7 @@ This guide owns repository workflow and validation selection.
 - Process-scoped LMs are immutable templates; isolate mutable deadlines, retries, adapters, and callbacks per Turn.
 - Turn ownership/deadlines bound LM, Tool, interpreter, and recursive work through settlement; detached work must not mutate settled state.
 - Recursive delegation depth is distinct from native RLM iteration count.
-- Retained broker execution is the production path; native semantic queries remain available. Fleet child RLM tools require explicit profile opt-in.
+- Retained broker execution is the production path; native semantic queries remain available. Fleet child RLM tools follow the selected runtime policy: the shipped operator-selected default currently enables recursion, while comparison profiles may disable it. This setting does not establish recursive value or certification.
 - Consult the [ADR 006 ledger](docs/decisions/006-implementation-status.md) before claiming cutover, containment, recursive value, or live certification.
 - Daytona SDK integration stays in `src/fleet_rlm/daytona/`; internal Runtime Events remain transport-neutral.
 - Clients consume backend contracts. State transitions, persistence, settlement, and cleanup use their owning services; Alembic owns live schema evolution.

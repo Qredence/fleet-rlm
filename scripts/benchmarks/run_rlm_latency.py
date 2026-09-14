@@ -1396,7 +1396,14 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     mlflow.set_tracking_uri(args.mlflow_url)
     mlflow.set_experiment(experiment_id=args.experiment_id)
     dataset_name = _evaluation_dataset_name(args.mlflow_url)
-    existing = [item for item in datasets.search_datasets([args.experiment_id]) if item.name == dataset_name]
+    # Local MLflow otherwise implicitly excludes datasets older than seven days.
+    # Databricks does not support the entity-store search filter.
+    search_options = {} if args.mlflow_url == "databricks" else {"filter_string": f"name = '{DATASET_NAME}'"}
+    existing = [
+        item for item in datasets.search_datasets([args.experiment_id], **search_options) if item.name == dataset_name
+    ]
+    if len(existing) > 1:
+        raise BenchmarkError("multiple quality datasets in the selected experiment require reconciliation")
     if existing:
         dataset = existing[0]
     else:
@@ -1406,6 +1413,19 @@ def prepare_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     for name in JUDGE_NAMES:
         ensure_registered(name, args.judge_model, experiment_id=args.experiment_id)
     return {"dataset_id": dataset.dataset_id, "dataset_name": dataset.name, "records": len(dataset.to_df())}
+
+
+def _quality_dataset(datasets: Any, tracking_url: str, experiment_id: str) -> Any:
+    """Resolve a quality dataset within its owning experiment, never by global name."""
+    name = _evaluation_dataset_name(tracking_url)
+    # Databricks does not support MLflow's entity-store name filter, but its
+    # experiment-scoped search still prevents selecting a same-named dataset
+    # from another experiment.
+    search_options = {} if tracking_url == "databricks" else {"filter_string": f"name = '{DATASET_NAME}'"}
+    matches = [item for item in datasets.search_datasets([experiment_id], **search_options) if item.name == name]
+    if len(matches) != 1:
+        raise BenchmarkError("expected one quality dataset in the selected experiment; run prepare-evaluation")
+    return datasets.get_dataset(dataset_id=matches[0].dataset_id)
 
 
 def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
@@ -1441,7 +1461,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             )
     mlflow.set_experiment(experiment_id=evaluation_experiment_id)
     dataset_name = _evaluation_dataset_name(args.mlflow_url)
-    dataset = datasets.get_dataset(name=dataset_name)
+    dataset = _quality_dataset(datasets, args.mlflow_url, args.experiment_id)
     frame = dataset.to_df().head(3) if args.dry_run else dataset.to_df()
 
     def predict_fn(query: str) -> str:

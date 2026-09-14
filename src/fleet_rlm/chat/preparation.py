@@ -6,7 +6,7 @@ import asyncio
 import math
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 import dspy
@@ -315,7 +315,6 @@ class DefaultRunPreparer:
         recursive_options: RecursiveRLMOptions | None = None,
         wrap_up_seconds: float = 300.0,
         budget_limits: BudgetLimits | None = None,
-        runtime_variant: Literal["legacy"] = "legacy",
     ) -> None:
         self._models = models
         self._options = options
@@ -325,9 +324,6 @@ class DefaultRunPreparer:
         self._recursive_options = recursive_options or RecursiveRLMOptions()
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._budget_limits = budget_limits or BudgetLimits()
-        if runtime_variant != "legacy":
-            raise ValueError("only retained broker execution is supported")
-        self._runtime_variant: Literal["legacy"] = runtime_variant
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         """
@@ -533,7 +529,6 @@ class DefaultRunPreparer:
                 wrap_up_seconds=self._wrap_up_seconds,
                 environment_release=environment_release,
                 async_bridge=environment.async_bridge,
-                runtime_variant=self._runtime_variant,
             ),
             capabilities=capabilities,
             delegation=DelegationPolicy(

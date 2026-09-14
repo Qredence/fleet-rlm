@@ -25,7 +25,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 ## Current state
 
 - **Dependency baseline** — `pyproject.toml` pins DSPy 3.3.1, Daytona 0.210.0, and MLflow 3.16.0; the optional `optimize` extra pins GEPA 0.1.4. The exact-version guard (`CERTIFIED_DSPY_VERSION`) rejects DSPy drift. Dependency checks and historical receipts do not certify a new source revision.
-- **Runtime migration** — `runtime.variant = "legacy"` is the only selectable architecture. ADR 006's native interpreter and capsule mechanics are experimental; remote process containment and production cutover remain gated. See the [implementation status](docs/decisions/006-implementation-status.md).
+- **Runtime boundary** — retained broker execution is the sole supported architecture. The shipped `daytona-recursive` profile enables bounded child RLM tools, while comparison profiles may disable recursion; neither setting is a provider, quality, or capacity certification. See the [implementation status](docs/decisions/006-implementation-status.md).
 - **Turn orchestration** — `TurnCoordinator` is the sole owner of the claim → cleanup path with atomic turn commit; the stream vocabulary is the closed v1 Runtime Event set (freeze suites in `tests/freeze/`).
 - **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/recursive_child_runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
 - **Tools** — Explicit Session Workspace (7 tools) and Project (6 tools) hosts; cross-sandbox Workspace Memory append coordination is unsupported by design.

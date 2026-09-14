@@ -178,7 +178,6 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "mlflow_experiment_id",
         "mlflow_llm_model",
         "mlflow_llm_provider",
-        "runtime_variant",
         "program_fingerprint",
         "image_identity",
         "settlement_status",
@@ -1246,7 +1245,6 @@ def turn_trace(
     trace_phase: TracePhase | None = None,
     preparation_trace_id: str | None = None,
     preparation_span_id: str | None = None,
-    runtime_variant: str | None = None,
     program_fingerprint: str | None = None,
     image_identity: str | None = None,
 ) -> Iterator[TraceHandle]:
@@ -1264,7 +1262,6 @@ def turn_trace(
             with an execution trace.
         preparation_span_id (str | None): Optional preparation span identifier used for a local
             cross-trace Span Link. This is internal-only and is never exposed by the handle.
-        runtime_variant: Optional bounded runtime identity for an execution trace.
         program_fingerprint: Optional opaque program digest for an execution trace.
         image_identity: Optional opaque immutable image identity for an execution trace.
 
@@ -1352,7 +1349,6 @@ def turn_trace(
             metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id
         if trace_phase == "execution":
             for key, value in (
-                ("fleet.runtime_variant", runtime_variant),
                 ("fleet.program_fingerprint", program_fingerprint),
                 ("fleet.image_identity", image_identity),
             ):

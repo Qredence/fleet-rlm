@@ -7,7 +7,6 @@ default_profile = "daytona-recursive"
 name = "fleet-rlm"
 
 [defaults.runtime]
-variant = "legacy"
 environment = "daytona"
 live_enabled = true
 turn_timeout_seconds = 1800
@@ -19,7 +18,7 @@ stale_after_seconds = 60
 # endpoint. Keep the deliberately bounded 16,384-token role limit; Fleet's
 # character-level output caps independently bound retained output.
 [defaults.llm.root]
-model = "databricks-deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-1-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
@@ -28,7 +27,7 @@ num_retries = 1
 cache = false
 
 [defaults.llm.sub]
-model = "databricks-deepseek-v4-flash-0731"
+model = "databricks-deepseek-v4-1-flash"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
@@ -37,10 +36,9 @@ temperature = 0
 num_retries = 1
 cache = false
 
-# Recursive child RLMs are opt-in. P4.6 (2026-09-12) disabled them by default
-# after the 144-trial ablation failed the retain gates. Native llm_query
-# remains the semantic delegation path. Depth is a fixed execution invariant
-# (not a policy knob) when an explicit profile re-enables recursion.
+# Operator-selected recursive execution. This operational opt-in does not
+# supersede the Phase 4 failed retain gates or establish recursive value.
+# Native llm_query remains available; recursive depth stays a fixed invariant.
 [defaults.rlm]
 max_iters = 12
 max_llm_calls = 32
@@ -52,7 +50,7 @@ max_execution_output_bytes = 2000000
 execution_timeout_s = 300
 wrap_up_seconds = 300
 finalization_attempts = 2
-recursion_enabled = false
+recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
@@ -76,10 +74,10 @@ child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 org_id_env = "FLEET_DAYTONA_ORG_ID"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
-warm_pool_enabled = false
-warm_pool_size = 0
-# Set only when an operator has chosen the provider target for an explicit capacity campaign.
-warm_pool_region = ""
+warm_pool_enabled = true
+warm_pool_size = 1
+# Explicit operator-selected clean SemanticChild capacity; reconciled separately.
+warm_pool_region = "us"
 
 [defaults.logging]
 level = "INFO"
@@ -106,9 +104,8 @@ project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
 # The local/disposable profile inherits the complete default policy: native
-# DSPy RLM with llm_query only, DSPy verbose host logging, local MLflow tracing,
-# and the Root/Sub model pair above. Fleet child RLMs stay available when an
-# explicit profile sets rlm.recursion_enabled. The managed profile below
+# DSPy RLM with native and recursive tools, local MLflow tracing, and the
+# Root/Sub model pair above. The managed profile below
 # overrides only the production database contract.
 [profiles.daytona-recursive]
 

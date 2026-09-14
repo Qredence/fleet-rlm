@@ -15,6 +15,7 @@ from tests.support.query_scenarios import repository_query_plan
 __all__ = ["postgres_claim_store"]
 
 
+@pytest.mark.asyncio
 @pytest.mark.parametrize("operation", ["sessions", "history", "replay", "recovery", "outbox"])
 async def test_postgres_repository_query_plan(postgres_claim_store, record_testsuite_property, operation):
     await repository_query_plan(postgres_claim_store, record_testsuite_property, operation)

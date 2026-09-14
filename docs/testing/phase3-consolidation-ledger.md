@@ -413,3 +413,86 @@ current failures block full Phase 3 certification. Provider/workflow diagnosis
 and any production fix are separate from test-suite consolidation. No retries
 were used to replace these failing receipts, and no model, policy, snapshot, or
 runtime promotion was performed. Unaffected MLflow/campaign lanes were not rerun.
+
+### Bounded candidate qualification closeout — 2026-09-12
+
+The deterministic contract lanes remained green. With explicit operator
+authorization, bounded live qualification was attempted against clean detached
+candidates; the verifier ran the durability lane first and then the complete
+FastAPI/DSPy/Daytona MVP lane. No prompt overlay or assertion relaxation was
+introduced.
+
+| Root/Sub candidate | Clean candidate SHA | Profile / snapshots | Receipt | Result |
+| --- | --- | --- | --- | --- |
+| `databricks-deepseek-v4-pro-0813` / same | `e27d67100e6cd899442b45ac35cb7f523c163087` | `daytona-recursive` / `fleet-rlm-python313-v7`, `fleet-rlm-python313-child-v2` | `.scratch/live-receipts/mvp-complete-deepseek-v4-pro-0813.json` | Durability PASS; complete MVP `proof_failed` |
+
+The final receipt records the explicit pair, candidate SHA, profile, snapshots,
+900-second lane limit, 60-second subprocess grace, and two-lane verifier scope.
+Earlier operator-selected `databricks-deepseek-v4-1-flash` and
+`databricks-deepseek-v4-flash-0731` attempts, plus the initial Sonnet attempt,
+are retained under `.scratch/live-receipts/` as bounded failures and do not
+change the result. Local MLflow 3.16.0 (`127.0.0.1:5001`) and the FastAPI
+OpenAPI service (`127.0.0.1:8000`) were started and health-checked separately;
+their availability does not turn the failed MVP lane into a pass. Phase 3
+therefore remains uncertified. The qualification did not itself promote a
+default model; any later policy promotion must be recorded separately.
+
+### Explicit Databricks profile exception rerun — 2026-09-12
+
+The single authorized requalification rerun used Databricks profile
+`218237876678801` with Root/Sub `databricks-deepseek-v4-1-flash` on clean
+candidate `b12574fee3d5e7409f3725d3a3ab5f9fbbb332c0`. The endpoint was
+`READY`/`NOT_UPDATING`; local MLflow 3.16.0 and FastAPI OpenAPI health checks
+also passed before execution.
+
+Receipt: `.scratch/live-receipts/mvp-complete-deepseek-v4-1-flash-profile-218237876678801.json`.
+It records schema v2, the exact model pair, `daytona-recursive`, session
+snapshot `fleet-rlm-python313-v7`, child snapshot `fleet-rlm-python313-child-v2`,
+the 900-second lane limit, 60-second subprocess grace, and two-lane scope.
+The durability lane passed, but the complete FastAPI/DSPy/Daytona MVP lane
+returned `proof_failed`. This was the final authorized attempt; no retry,
+assertion relaxation, prompt overlay, or model/default promotion occurred.
+Phase 3 remains uncertified and Phase 5 remains out of scope.
+
+### Default model policy promotion — 2026-09-12
+
+Following explicit operator authorization, the committed Root and Sub policy was
+set to `databricks-deepseek-v4-1-flash` through the existing Databricks Unity AI
+Gateway Chat Completions transport. This changes the configured default pair only;
+it does not alter the strict MVP contract or convert either failed qualification
+receipt into Phase 3 certification.
+
+### DeepSeek Chat diagnostic execution — 2026-09-12
+
+An additionally authorized diagnostic execution on clean candidate
+`706c53f906cd70ba78fc081ce75dc74f3eb5667c` confirmed that the failure is not
+the Databricks Chat Completions transport. Root generated the required
+three-cell shape, but replaced the specified `ROOT`/`ALPHA`/`BETA`/`GAMMA`
+semantic prompts with its own arithmetic prompts. The semantic verifier then
+rejected the results before the workspace append could execute, and the first
+Turn ended with the public failure that a required workspace update was not
+completed. Receipt:
+`.scratch/live-receipts/deepseek-v4-1-chat-diagnostic-20260912.json`.
+The default policy remains promoted, while Phase 3 remains uncertified because
+the strict scenario was not satisfied.
+
+### GLM 5.3 Flash qualification — 2026-09-12
+
+The selected alternative was preflighted as `READY`/`NOT_UPDATING`; its Unity AI
+Gateway Chat Completions request returned exactly `ROOT`. The one authorized
+two-lane qualification then used Root/Sub `databricks-glm-5-3-flash` on clean
+candidate `7015b80aeecde87ee135150559c59b7018f9f422`. The durability lane
+passed, but the complete FastAPI/DSPy/Daytona MVP lane returned `proof_failed`.
+Receipt: `.scratch/live-receipts/mvp-complete-glm-5-3-flash-chat-profile-218237876678801.json`.
+No retry or default-policy change followed; Phase 3 remains uncertified.
+
+### Exact-code MVP gate retired — 2026-09-12
+
+Operator decision: retire `test_complete_daytona_mvp_through_fastapi` and its
+two-lane verifier path as a Phase 3 certification requirement. The test remains
+historical diagnostic coverage, but no longer blocks Phase 3 because it measures
+literal model-program obedience rather than runtime safety or durable product
+behavior. Failed receipts are retained unchanged. Phase 3 is complete under the
+remaining deterministic contracts and live durability/replacement/cleanup
+evidence; future semantic model evaluation requires a separate product-quality
+charter.
