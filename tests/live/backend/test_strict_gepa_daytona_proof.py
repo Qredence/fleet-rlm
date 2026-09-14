@@ -263,18 +263,18 @@ async def test_strict_gepa_daytona_block_all_proof(tmp_path: Path) -> None:
                 await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
                 outcomes["interpreter_cleanup"] = True
                 outcomes["broker_cleanup"] = True
-            except BaseException as exc:
+            except Exception as exc:
                 cleanup_error = exc
         try:
             curated.consume()
-        except BaseException as exc:
+        except Exception as exc:
             cleanup_error = cleanup_error or exc
         if sandbox is not None:
             try:
                 await asyncio.shield(factory.delete(sandbox))
                 await _deleted(platform, sandbox_id)
                 outcomes["sandbox_deleted"] = True
-            except BaseException as exc:
+            except Exception as exc:
                 cleanup_error = cleanup_error or exc
         if cleanup_error is not None:
             if primary_error is None:
