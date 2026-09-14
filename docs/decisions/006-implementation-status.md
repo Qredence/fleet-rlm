@@ -16,6 +16,89 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Current implementation authority (2026-09-14)
+
+The current 0.7.8 policy is the checked-in `config/fleet.toml`: the selected
+`daytona-recursive` profile enables the bounded recursive child path, while the
+comparison profiles disable it. The historical Phase 4 matched-campaign
+recommendation to disable recursion remains retained evidence and is not a
+silent configuration override. Warm-pool settings are operator-selected but
+provider activation and capacity evidence are explicitly deferred; warm
+capacity is outside the 0.7.8 promotion gate.
+
+The overall implementation audit maps Phases 1–4 to completed source/test
+contracts, and maps the remaining release work to these open certification
+boundaries: deployed snapshot identity, managed PostgreSQL compatibility,
+configured MLflow certification, human-aligned quality data, trusted GEPA
+campaign provenance, fenced rollback rehearsal, and proof-backed migration
+deletion. A clean candidate is merge-ready only when those boundaries have
+candidate-SHA-bound receipts; otherwise the write-once promotion decision stays
+blocked with the exact missing evidence.
+
+### Overall implementation audit ledger (2026-09-14)
+
+This compact ledger reconciles the plan checkboxes with current owners and
+evidence. A receipt marked “identity only” binds bytes or schema but does not
+certify an external system. Historical receipts remain readable and are never
+rebound to the current candidate.
+
+| Plan scope | Implementation owner and local validation | Current evidence | Candidate binding | Live status and deletion eligibility |
+| --- | --- | --- | --- | --- |
+| Phases 1–2 — persistence, provider boundary, and lifecycle ownership | `src/fleet_rlm/persistence/`, `src/fleet_rlm/daytona/`, `src/fleet_rlm/chat/`; deterministic suites, tree and dependency checks | Historical PostgreSQL/Daytona receipts under `.fleet-evidence/receipts/adr006/` | No; receipts predate the current candidate | Deployed database and provider continuity remain open; no deletion is eligible |
+| Phase 3 — broker settlement, containment, and public contracts | `src/fleet_rlm/rlm/`, `src/fleet_rlm/daytona/broker.py`, `src/fleet_rlm/chat/`; `make check` and containment regressions | Native-containment no-go and broker/lifecycle receipts remain historical | No; the current policy intentionally retains broker execution | Native cutover is not selected; safety owners remain protected |
+| Phase 4 — snapshots, profiles, recursion, and optional capacity | `src/fleet_rlm/config/`, `src/fleet_rlm/daytona/`, `src/fleet_rlm/rlm/recursion.py`; snapshot/profile suites | Current bundle carries image manifest/probe identities; provider snapshot verification is not re-run here | Identity only; live proof is still required for the exact candidate | Warm capacity is explicitly deferred; no capacity or migration deletion is eligible |
+| Phase 5 — snapshot promotion, managed PostgreSQL, and MLflow | Existing snapshot, database, and observability owners; focused P5 suites | Local/disposable receipts are retained with their recorded revisions | No current candidate-bound live receipt | Managed deployment and configured MLflow prerequisites are unavailable; deletion blocked |
+| P6.1/P6.3 — reproducible bundle, rollback identity, and deletion contract | `scripts/phase6_promotion.py`, `scripts/normalize_release_artifacts.py`; focused tests plus release checks | Current clean baseline/candidate bundles and identity-only rollback pair under `.scratch/phase6-final-*` | Yes for bundle bytes and revisions; pair is explicitly not switch authority | Reproducibility passed locally; compatibility, rehearsal, and deletion proof remain open |
+| P6.2/P6.4 — fenced switch, strict evaluator, human review, and GEPA | `src/fleet_rlm/optimization/{maintenance,evidence,metric,gepa_runner}.py` and `scripts/benchmarks/curate_mlflow.py`; focused contract suites | Strict boundary receipt is same-day but not candidate-bound; blocked decision is under `.fleet-evidence/receipts/phase6/` | Blocked; no live receipt is silently rebound | Human review, trusted campaign, fenced rehearsal, and deletion inventory are required before any deletion |
+| P6.5 — documentation and closeout | ADR/status, architecture, operator guide, plan, and generated checks | `make check-docs`, `make check`, and release/security checks pass locally | Documentation is rebuilt into the next candidate | Merge-ready review branch only; no merge or production switch is authorized |
+
+### Phase 6 implementation continuation (2026-09-14)
+
+- P6.1 now has a v2 write-once bundle reader that verifies a clean HEAD,
+  tracked wheel source bytes, artifact manifest, merged non-secret policy,
+  lockfile, image manifest/probe identities, database head, dataset digest, and
+  scorer digest. It remains an identity receipt, not promotion authority.
+- P6.2 now has identity-only rollback-pair validation plus a bounded,
+  recent-observation preflight. The latter rejects stale/future observations,
+  open admissions, active work, pending cleanup, and unconfirmed provider
+  cleanup, but it does not acquire the fence or claim database compatibility.
+- P6.3 removes the retired single-value runtime selector and the unused
+  compatibility-fingerprint helper block. Broker generation, fencing, cleanup,
+  and Run-local progress fingerprints remain owning runtime behavior. Historical
+  benchmark/campaign receipts remain readable under explicit v2/v3 schemas; no
+  sealed artifact is rewritten.
+- P6.1b now has write-once quality-measurement, campaign, rollback-rehearsal,
+  deletion-inventory, and promotion-decision contracts. They remain readers and
+  receipt builders: no campaign or decision is promotion evidence until its
+  producer provenance, clean candidate, compatibility, rehearsal, and live
+  quality gates are sealed together.
+- P6.2a now has a maintenance-window controller whose adapter must be backed by
+  the shared admission/Run fence. It retains the fence on any failed switch and
+  rehearses exactly baseline → candidate → baseline → candidate. No deployed
+  adapter or live rollback rehearsal is claimed here.
+- P6.4a contains a local-MLflow-only, agent-reviewed draft at
+  `.scratch/phase6-curation-20260914/export-v2.json`: 25 records, grouped
+  15/5/5 seed-42 splits with Session/project/task-family isolation. The draft
+  is not human alignment or promotion evidence.
+- For P6.4b, the selected strict evaluator boundary is host-polled authenticated
+  retained-broker mediation with Daytona `network_block_all=true`, no volume,
+  and no temporary tunnel or outbound gateway allow-list. The opt-in live proof
+  passed on 2026-09-14 and was sealed as
+  `.fleet-evidence/receipts/phase6/strict-gepa-proof/strict-daytona-proof.json`
+  (`proof_id=5f83848d1726c2d0d754a520bc0bd9d8ce8981db172d8c00bae12a43f5845e0e`,
+  policy `9ba9e62239a17121d66d28ea801afbf43ee91b889deaa42c29aff69bf029f431`).
+  The receipt covers transport authentication, valid/invalid capability access,
+  direct/essential/raw-socket/DNS egress denial, credential absence, cleanup,
+  and deletion. Production GEPA remains fail-closed until human-aligned
+  capability coverage, trusted scoring, and a complete held-out campaign exist.
+- P6.3 final deletion remains intentionally open: the inventory contract records
+  an explicit no-op until a passing live rehearsal proves any migration-only
+  path unreachable. Retained broker execution, generation/fencing, cleanup
+  ownership, progress fingerprints, historical readers, and compatibility
+  parsers remain protected.
+- Warm capacity remains deferred by operator instruction for the 0.7.8
+  continuation; no configured warm policy was changed by this work.
+
 ### P5.3/P5.4 closeout checks (2026-09-13)
 
 - **P5.3 blocked:** the current Daytona warm-pool guide explicitly requires
@@ -879,8 +962,8 @@ implementation and evidence requirements are satisfied.
   database/Alembic prerequisite; that is a separate unresolved live gate.
 - Phase 5: generation-aware Session ownership, Session prewarm, disposable child
   leases and fenced cleanup remain the provider seams. Native RLM/context/binding
-  mechanics remain feasibility-only; `runtime.variant` exposes only `legacy`
-  until containment and continuity are certified. Live cutover, stop/start
+  mechanics remain feasibility-only. The retired `runtime.variant` selector no
+  longer exposes an architecture choice. Live cutover, stop/start
   continuity, SDK I/O parity and resident/broker subtraction remain pending.
 - Phase 6: `SubproblemCapsule` is a frozen, closed Pydantic model with deterministic
   JSON bytes, bounded fragments/references/output allocation, authorized-path
@@ -912,18 +995,18 @@ It is not the 2026-09-10 simplification plan's Phase 0–6 sequence.
 - [x] Phase 1.1 Daytona 0.210.0 integration, typed error/resource-race handling, benchmark comparison axes, and MLflow privacy/lifecycle mechanics are implemented and locally tested.
 - [x] Native-interpreter adapter/replay mechanics were implemented, then removed with P2.4; broker execution is the sole in-tree code-execution implementation. The 2026-09-08 native receipt remains a containment no-go.
 - [x] Phase 4 Session/SemanticChild/WorkspaceChild manifests, profile contracts, operator plan/check/create/verify commands, and immutable snapshot receipts are retained.
-- [x] Fresh per-Run RLM/program construction is production behavior on `legacy`; the native worker/lease branch is gone.
+- [x] Fresh per-Run RLM/program construction is production behavior on retained broker execution; the native worker/lease branch is gone.
 - [x] Bounded capsules, selected-input/path validation, depth-one scheduling, shared reservations, ordered typed sibling outcomes, and exactly two Root recursive tools (`rlm_query`, `rlm_query_batched`) are implemented.
 - [x] Repository-wide local validation passed on earlier candidates (`make check`, coverage floor, generated-contract checks, TUI tests). Re-run the current checkout before treating those counts as fresh.
 
 ### Certification still open
 
 - [x] PostgreSQL certification: the corrected exclusive campaign passed six contention scenarios and retained projected plans in `.fleet-evidence/receipts/adr006/postgres-contention-fleet_rlm_cert_5049b32b8ba0.json` (Alembic `019fe0010001`, PostgreSQL `170011`). The disposable target was removed after sealing. Deployed Lakebase closeout is Phase 5 and is not started.
-- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so `legacy` and the broker remain required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
+- [ ] Live SDK/API-key, Volume, remote process containment, and stop/start or replacement continuity. The corrected Phase 3 receipt `.fleet-evidence/receipts/adr006/phase3-native-20260908T184525.json` still records a detached subprocess surviving context deletion; it is a provider-level native-production no-go, so retained broker execution remains required. The durable Volume continuity receipt `.fleet-evidence/receipts/adr006/durable-continuity-20260908T1900.json` proves artifact readability/checksum across replacement, but does not prove native process containment.
 - [x] Native interpreter production startup is withdrawn: P2.4 removed the in-tree native execution path. Broker remains the sole code-execution implementation.
 - [ ] Warm-pool eligibility, quota, clean-instance, lifecycle, demand, and cost evidence; paid capacity remains disabled. Phase 5 owns any later canary.
 - [ ] Complete MLflow exporter fault-injection, token-aggregation, and configured-backend certification. Phase 3 complete-MVP live quality remains failed. P4.5 matched ablation is retained separately and does not close MLflow certification.
-- [ ] Phase 5 snapshot promotion, Phase 6 clean SHA / rollback rehearsal / GEPA. Not started.
+- [ ] Phase 5 snapshot promotion and Phase 6 live clean-SHA, rollback-rehearsal, and GEPA gates. Local Phase 6 preparation removes the retired selector and adds a write-once promotion-bundle and rollback-pair contract; it is not live promotion evidence.
 
 ## Evidence and next tasks
 

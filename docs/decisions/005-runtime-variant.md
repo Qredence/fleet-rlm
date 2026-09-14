@@ -1,23 +1,18 @@
-# ADR 005: One execution-architecture selector
+# ADR 005: Retired execution-architecture selector
 
-Status: implemented for the legacy runtime.
+Status: superseded by Phase 6 consolidation.
 
-`runtime.variant` is the sole migration selector. Its default and only supported
-value is `legacy`. `runtime.environment` identifies the provider environment
-(`daytona`), not an alternate execution architecture. `runtime.live_enabled`
-controls operator admission, not architecture selection.
+This ADR records the temporary migration selector that was removed after Fleet
+consolidated on retained broker execution. `runtime.environment` identifies the
+provider environment (`daytona`), while `runtime.live_enabled` controls operator
+admission. Neither selects an execution architecture.
 
-Settings validation rejects unsupported variants before runtime composition.
-The schema-derived settings editor exposes only implemented choices. Native and
-capsule are not selectable until their owning implementation and validation gates
-land. Unknown legacy selector keys remain rejected by the policy schema.
+Settings and the schema-derived editor no longer expose `runtime.variant`.
+Policies containing that key are rejected before composition, avoiding a silent
+fallback during promotion or rollback.
 
-Omitted variant values resolve to `legacy` for existing policy compatibility;
-the committed policy names it explicitly. Tests pin both defaults and editor
-rejection without writes. Lifecycle benchmark receipts record `runtime_variant`.
-Future benchmark formats must carry the same identity for comparisons.
-
-Native DSPy RLM already runs inside `legacy`; the rejected `native` selector
-refers to the execution-architecture migration, not adoption of DSPy itself.
-The [ADR 006 ledger](006-implementation-status.md) tracks the experimental
-adapter and the independent production gates.
+Historical receipts may retain `runtime_variant` as an identity field. New
+receipts bind exact code, lock, profile, images, database head, and quality
+identities through the Phase 6 promotion-bundle contract. The
+[ADR 006 ledger](006-implementation-status.md) records live cutover and
+rollback evidence separately.

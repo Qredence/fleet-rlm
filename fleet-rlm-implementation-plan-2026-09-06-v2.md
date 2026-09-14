@@ -72,7 +72,7 @@ These rules apply to every phase below.
 8. **Use parameterized scenario tables for equivalent cases.** Avoid near-duplicate test functions that differ only by state/error/status values.
 9. **Keep live/certification evidence separate from deterministic unit tests.** A unit fake must not duplicate a provider campaign, and a provider campaign must not become the ordinary test suite.
 10. **No new agent framework layer.** Do not add Flex, ReActV2, another `dspy.Module` wrapper, grandchildren, or another orchestration loop during this migration.
-11. **Warm capacity is optional optimization.** It stays disabled until recursive demand and quality/cost evidence justify it.
+11. **Warm capacity is optional optimization.** Its provider activation and capacity evidence remain deferred until recursive demand and quality/cost evidence justify it; the configured policy is not itself a promotion gate.
 12. **The plan stays short and reports completion.** When a task is completed, mark its heading/status as **complete** in this plan with a concise dated outcome, then update the ADR006 status ledger with the supporting evidence. Remove obsolete implementation detail instead of turning this file into another receipt archive.
 
 ## 3. What is already strong and should not be redesigned
@@ -683,11 +683,13 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
-**Status: complete (2026-09-12) — disable.** P4.1–P4.4 provide one
+**Status: complete (2026-09-12) — policy-controlled.** P4.1–P4.4 provide one
 byte-bounded capsule contract, accessed/cited evidence, one application-loop
-scheduler, and two Root-only Fleet tools. P4.6 disables those tools by default;
-native `llm_query` / `llm_query_batched` remain available. Explicit profiles
-may still opt in; no new recursive architecture or paid ablation is required.
+scheduler, and two Root-only Fleet tools. The current operator-selected
+`daytona-recursive` policy enables those tools; comparison profiles disable
+them explicitly, and native `llm_query` / `llm_query_batched` remain available.
+The historical matched campaign's disable recommendation remains evidence, not
+a silent override of the current 0.7.8 policy.
 
 The 144-admission continuation receipt remains mechanically `incomplete` because
 14 frozen-baseline C rows lacked call-shape telemetry. ADR006 records a separate
@@ -788,7 +790,12 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 ## P4.6 - Delete recursive infrastructure that does not justify itself — complete (2026-09-12)
 
-**Status: complete — disable by default.** `[defaults.rlm] recursion_enabled = false`. Default Root instructions omit Fleet `rlm_query` tools. Recursive executor and tools still exist for explicit opt-in profiles. Recursion code is not deleted in this step so `phase4-campaign` can still run; P6.3 may remove unused machinery after cutover.
+**Status: complete — retain one policy-controlled path.** The shipped
+`daytona-recursive` profile sets `recursion_enabled = true`; comparison profiles
+remain explicitly disabled. The recursive executor and tools remain one bounded
+implementation, not a second runtime architecture. Recursion code is not
+deleted in this step so `phase4-campaign` can still run; P6.3 may remove unused
+machinery after cutover.
 
 **Rationale:** Recursion is not sacred. The simplest successful RLM should win.
 
@@ -800,7 +807,10 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 **Done when:** Fleet pays the code/runtime complexity cost of recursive children only when evidence supports it.
 
-**Phase 4 exit:** Fleet child RLMs are intentionally absent from the default architecture. Native `llm_query` / `llm_query_batched` remain. Opt-in recursion is an explicit profile override, not a production default.
+**Phase 4 exit:** Fleet child RLMs are policy-controlled rather than a required
+architecture. Native `llm_query` / `llm_query_batched` remain. The current
+operator-selected default enables the bounded child path; comparison profiles
+can disable it, and the historical value-proof limitations remain visible.
 
 ---
 
@@ -984,7 +994,82 @@ Also separate promotion gates:
 
 # Phase 6 - Promotion, rollback, and final deletion
 
-**Status: not started.** Phase 6 follows Phase 5.
+**Status: implementation in progress (2026-09-14).** The local API was switched
+to 0.7.8, but a version health check is not full Phase 6 certification. Warm
+capacity is deferred by operator instruction and is not a promotion gate for
+this continuation; its configured policy is not changed implicitly.
+
+### Execution task list
+
+Checked tasks require implementation and observed validation. Live gates remain
+unchecked until receipts prove them; no historical receipt is silently rebound
+to a new SHA. Retain broker execution and enabled recursion. The previously
+agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
+15-minute cleanup reserve; account for earlier attempts before new admission.
+
+- [x] **P6.1a — Candidate identity:** verify release artifact bytes against their
+  manifest, strict SHA/digest types, selected policy, image manifest identities,
+  and stable clean source before and after capture. Reuse existing receipt I/O.
+- [ ] **P6.1b — Promotion decision:** validate sealed same-bundle gate evidence;
+  reject missing, failed, partial, scripted-only, or mismatched evidence. Enforce
+  matched quality and latency/cost tolerances (maximum 10% regression).
+  The measurement/campaign/deletion/rehearsal readers and fail-closed decision
+  builder are implemented and tested; clean-SHA provenance, trusted live
+  campaign production, and the complete eligible decision remain open.
+- [ ] **P6.1c — Clean candidate certification:** retain complete local gate
+  output and exact exit codes, then seal required live evidence on a clean SHA.
+  Deterministic checks pass locally; this modified worktree is not a clean-SHA
+  live certificate.
+- [ ] **P6.2a — Rollback preflight:** distinguish bundle/schema identity from
+  proven database compatibility; reject a switch with active Runs, workers,
+  unclosed admissions, or unconfirmed cleanup.
+  Identity-only and recent-observation validators plus the maintenance-window
+  ordering/controller are implemented and tested. A real shared-fence adapter,
+  compatibility evidence, and live switch are still required; offline
+  observation is not switch authority.
+- [ ] **P6.2b — Controlled rehearsal:** preserve baseline release/config/images;
+  prove baseline → candidate → baseline → candidate with durable Session,
+  workspace, Artifact, and new-Turn assertions. No database snapshot rewind.
+- [x] **P6.3a — Selector removal:** `a5d32152c` removes the single-value runtime
+  selector. Configuration rejection and fresh per-Run tests cover this change.
+- [x] **P6.3b — Receipt compatibility:** version changed benchmark receipt
+  contracts and keep archived sealed receipts readable without promoting them.
+- [ ] **P6.3c — Ownership inventory and final deletion:** remove only proven
+  unused migration internals after the live rehearsal; retain broker generation,
+  fencing, cleanup, and Run-local guards. The inventory contract supports an
+  explicit no-op and protects historical readers and compatibility parsers.
+  The unused compatibility-fingerprint helper block was removed earlier; no
+  further deletion is claimed before rehearsal evidence.
+- [x] **P6.4a-draft — Curated input draft:** inspect local MLflow, review at least
+  25 examples and expectations, and seal grouped 60/20/20 splits (seed 42).
+  `.scratch/phase6-curation-20260914/export-v2.json` contains 25 agent-reviewed
+  historical local tasks (including six benchmark tasks), split 15/5/5 with
+  Session and task-family isolation. This is a non-promotable draft only.
+- [ ] **P6.4a-human — Human-aligned review:** produce a v2 review with an opaque
+  reviewer identity and an explicit approved/corrected decision for every row in
+  the sealed source snapshot. The current source snapshot has 33 captured rows
+  while the draft reviews 25; excluded or unsupported rows must be re-reviewed
+  or recaptured, never silently dropped. Seven cases need isolated host
+  capabilities; trusted scoring and evaluator capability coverage remain P6.4b
+  prerequisites.
+- [ ] **P6.4b — Production evaluator:** prove strict Daytona policy and trusted
+  evaluation; keep safety/infrastructure immutable and synthetic smoke
+  non-promotable. The selected boundary is host-polled authenticated broker
+  mediation with Daytona `network_block_all=true`, no temporary tunnel or
+  outbound gateway allow-list. The v2 proof contract and policy wiring are
+  implemented, and the opt-in live proof is sealed at
+  `.fleet-evidence/receipts/phase6/strict-gepa-proof/`; trusted scorer,
+  capability coverage, and complete campaign evidence remain open. No bypass of
+  the existing production block.
+- [ ] **P6.4c — Stable-program optimization:** run within remaining budget,
+  evaluate held-out data, and verify immutable instructions in a fresh Run.
+- [x] **P6.5 — Documentation and closeout:** synchronize architecture, operator
+  commands, this task list and ADR ledger; publish exact checks and open gates.
+  Clean candidate/baseline bundles and the identity-only rollback pair are
+  recorded outside tracked source under `.scratch/phase6-bundles/`; the live
+  strict proof is under `.fleet-evidence/receipts/phase6/`. Quality campaign,
+  database compatibility, rollback rehearsal, and final deletion gates remain
+  explicitly open.
 
 ## P6.1 - Build one clean promotion candidate
 
@@ -1127,7 +1212,7 @@ ADR006 is complete only when all of the following are true:
 - [ ] test files are organized around behavior contracts rather than migration tasks/internals;
 - [ ] tests for deleted internals are deleted while safety/lifecycle/public-contract coverage remains;
 - [ ] managed PostgreSQL, selected Daytona snapshot/runtime, and configured MLflow gates have honest retained evidence;
-- [ ] warm capacity is either evidence-backed or disabled/removed;
+- [ ] warm capacity is evidence-backed or deliberately disabled/removed (deferred for the 0.7.8 continuation and excluded from its promotion gate);
 - [ ] one clean candidate has passed public-contract, containment, settlement, quality, operational, and rollback gates;
 - [ ] obsolete runtime flags, registries, fingerprints, schedulers, broker/native compatibility branches, and migration docs are removed;
 - [ ] `ARCHITECTURE.md` and source-layout documentation describe only the supported end state.

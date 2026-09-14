@@ -51,6 +51,35 @@ def _receipt(**changes: object) -> StrictDaytonaProofReceipt:
     return StrictDaytonaProofReceipt(**cast(Any, values))
 
 
+def _block_all_receipt(**changes: object) -> StrictDaytonaProofReceipt:
+    outcomes = dict(_receipt().outcomes)
+    outcomes.pop("approved_gateway_egress")
+    outcomes.update(
+        {
+            "transport_authentication": "passed",
+            "essential_service_egress_denied": "passed",
+            "raw_socket_egress_denied": "passed",
+            "dns_egress_denied": "passed",
+        }
+    )
+    values: dict[str, object] = {
+        "policy_id": "b" * 64,
+        "snapshot": "fleet-safe-v1",
+        "gateway_domains": (),
+        "controls": {
+            "no_volume_requested": True,
+            "ephemeral_requested": True,
+            "network_block_all_requested": True,
+            "auto_stop_seconds": 300,
+            "auto_delete_seconds": 0,
+        },
+        "outcomes": outcomes,
+        "schema": "fleet.strict-daytona-proof/v2",
+    }
+    values.update(changes)
+    return StrictDaytonaProofReceipt(**cast(Any, values))
+
+
 def test_validated_receipt_has_stable_non_secret_proof_id() -> None:
     first = validate_strict_daytona_proof(_receipt())
     second = validate_strict_daytona_proof(_receipt())
@@ -58,6 +87,28 @@ def test_validated_receipt_has_stable_non_secret_proof_id() -> None:
     assert first.proof_id == second.proof_id
     assert len(first.proof_id) == 64
     assert first.receipt.public_payload()["proof_id"] == first.proof_id
+
+
+def test_block_all_receipt_requires_egress_denial_probes_and_matches_only_block_all_policy() -> None:
+    proof = validate_strict_daytona_proof(_block_all_receipt())
+
+    proof.require_matches(
+        policy_id="b" * 64,
+        snapshot="fleet-safe-v1",
+        gateway_domains=(),
+        auto_stop_interval_seconds=300,
+        auto_delete_interval_seconds=0,
+        network_block_all=True,
+    )
+    with pytest.raises(StrictDaytonaProofError, match="does not match"):
+        proof.require_matches(
+            policy_id="b" * 64,
+            snapshot="fleet-safe-v1",
+            gateway_domains=(),
+            auto_stop_interval_seconds=300,
+            auto_delete_interval_seconds=0,
+            network_block_all=False,
+        )
 
 
 @pytest.mark.parametrize(

@@ -12,7 +12,6 @@ import subprocess
 import sys
 import tomllib
 import zipfile
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -137,7 +136,6 @@ def build_artifact_manifest(dist_dir: Path, version: str | None = None) -> dict[
     artifact_version = _artifact_version_from_name(wheels[0].name)
     manifest: dict[str, Any] = {
         "schema": ARTIFACT_MANIFEST_SCHEMA,
-        "generated_at": datetime.now(UTC).isoformat(),
         "version": artifact_version,
         "artifacts": sorted(artifacts, key=lambda item: str(item["filename"])),
     }

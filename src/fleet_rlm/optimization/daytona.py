@@ -113,6 +113,9 @@ class OptimizationSandboxPolicy:
     # Daytona ignores this setting for ephemeral sandboxes.  Pin its effective
     # value instead of sending a contradictory provider request.
     auto_delete_interval_seconds: int = 0
+    # Retained broker mediation is host-polled through authenticated previews;
+    # the sandbox does not need an outbound gateway for host-owned LM/Tool work.
+    network_block_all: bool = False
 
     def __post_init__(self) -> None:
         """
@@ -124,7 +127,11 @@ class OptimizationSandboxPolicy:
         """
         if not self.snapshot.strip():
             raise OptimizationSandboxPolicyError("trusted optimization snapshot is required")
-        if not self.gateway_domains:
+        if type(self.network_block_all) is not bool:
+            raise OptimizationSandboxPolicyError("network_block_all must be boolean")
+        if self.network_block_all and (self.gateway_domains or self.gateway_cidrs):
+            raise OptimizationSandboxPolicyError("block-all mode cannot include outbound allow lists")
+        if not self.gateway_domains and not self.network_block_all:
             raise OptimizationSandboxPolicyError("at least one approved gateway domain is required")
         normalized_domains = tuple(sorted({domain.strip().lower() for domain in self.gateway_domains}))
         if any(not _DOMAIN.fullmatch(domain) for domain in normalized_domains):
@@ -145,13 +152,18 @@ class OptimizationSandboxPolicy:
         """Return a stable non-secret identifier for evidence and labels."""
         import json
 
+        identity = {
+            "snapshot": self.snapshot,
+            "domains": self.gateway_domains,
+            "stop": self.auto_stop_interval_seconds,
+            "delete": self.auto_delete_interval_seconds,
+        }
+        # Preserve historical allow-list policy IDs; a block-all proof is a
+        # distinct policy and can never be inferred from a v1 gateway receipt.
+        if self.network_block_all:
+            identity["network_block_all"] = True
         encoded = json.dumps(
-            {
-                "snapshot": self.snapshot,
-                "domains": self.gateway_domains,
-                "stop": self.auto_stop_interval_seconds,
-                "delete": self.auto_delete_interval_seconds,
-            },
+            identity,
             sort_keys=True,
             separators=(",", ":"),
         ).encode()
@@ -193,12 +205,17 @@ class DisposableOptimizationSandboxFactory:
             "fleet-candidate": _label_value(candidate_sha256),
             "fleet-record": _label_value(record_id),
         }
+        network: dict[str, Any] = (
+            {"network_block_all": True}
+            if policy.network_block_all
+            else {"domain_allow_list": ",".join(policy.gateway_domains)}
+        )
         return await self._platform.create(
             labels=labels,
             with_volume=False,
             ephemeral=True,
-            domain_allow_list=",".join(policy.gateway_domains),
             auto_stop_interval=policy.auto_stop_interval_seconds,
+            **network,
         )
 
     async def delete(self, sandbox: Any) -> None:
@@ -332,6 +349,7 @@ class StrictDaytonaEvaluationLifecycle:
             gateway_domains=policy.gateway_domains,
             auto_stop_interval_seconds=policy.auto_stop_interval_seconds,
             auto_delete_interval_seconds=policy.auto_delete_interval_seconds,
+            network_block_all=policy.network_block_all,
         )
         self._models = models
         self._options = options

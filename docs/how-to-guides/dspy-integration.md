@@ -11,10 +11,11 @@ while comparison profiles can disable them. Both model roles and every
 executable capability are host-configured; API clients cannot supply models,
 Signatures, or executable capabilities.
 
-This guide describes the selectable `legacy` runtime. Native DSPy execution
-does not imply use of ADR 006's experimental native Daytona interpreter.
-Fresh per-Run contexts and capsule-only child inputs remain gated migration
-work; see the [implementation status](../decisions/006-implementation-status.md).
+This guide describes the current retained-broker runtime. Native DSPy execution
+does not select the removed native Daytona interpreter path. Fresh per-Run
+programs, capsule-only child inputs, and the bounded recursive policy are the
+checked-in implementation; provider, quality, and capacity certification remain
+separate gates in the [implementation status](../decisions/006-implementation-status.md).
 
 ## Execution contract
 
