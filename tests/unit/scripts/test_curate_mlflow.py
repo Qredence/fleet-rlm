@@ -105,6 +105,23 @@ def test_human_export_rejects_untrusted_or_incomplete_review(mutation):
         curation.build_human_aligned_export(snapshot, human_review)
 
 
+def test_human_export_rejects_duplicate_source_identities():
+    snapshot, review = _inputs()
+    snapshot["records"].append(deepcopy(snapshot["records"][0]))
+    snapshot["snapshot_sha256"] = curation.digest(
+        {key: value for key, value in snapshot.items() if key != "snapshot_sha256"}
+    )
+    human_review = {
+        "schema": curation.HUMAN_REVIEW_SCHEMA,
+        "reviewer": "human",
+        "reviewer_id": "reviewer-20260914",
+        "source_snapshot_sha256": snapshot["snapshot_sha256"],
+        "records": [dict(record, review_status="human_approved") for record in review["records"]],
+    }
+    with pytest.raises(ValueError, match="duplicate source identities"):
+        curation.build_human_aligned_export(snapshot, human_review)
+
+
 @pytest.mark.parametrize(
     "mutation", ["query", "seal", "review-seal", "reviewer", "unreviewed", "context", "criteria", "duplicate"]
 )

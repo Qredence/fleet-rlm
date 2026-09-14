@@ -41,6 +41,10 @@ def _replace(path: Path, writer) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _canonical_tar_mode(member: tarfile.TarInfo) -> int:
+    return 0o755 if member.isdir() else 0o644
+
+
 def _zip_datetime(epoch: int) -> tuple[int, int, int, int, int, int]:
     current = datetime.fromtimestamp(epoch, UTC)
     year = max(1980, min(current.year, 2107))
@@ -79,7 +83,7 @@ def _normalize_sdist(path: Path, epoch: int) -> None:
         ):
             for original, data in sorted(entries, key=lambda item: item[0].name):
                 member = tarfile.TarInfo(original.name)
-                member.mode = original.mode
+                member.mode = _canonical_tar_mode(original)
                 member.type = original.type
                 member.linkname = original.linkname
                 member.size = len(data) if data is not None else 0

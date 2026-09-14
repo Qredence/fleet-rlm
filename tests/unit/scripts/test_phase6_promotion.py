@@ -570,6 +570,41 @@ def test_blocked_promotion_decision_rejects_inexact_blocker_list(bundle_pair):
         )
 
 
+def test_blocked_promotion_decision_rejects_controller_preflight_without_rollback_pair(bundle_pair):
+    baseline, candidate = bundle_pair
+    now = datetime.now(UTC)
+    _, controller_receipts = _controller_rehearsal(baseline, candidate)
+    observation = _observation(baseline, candidate, now)
+    observation["database_compatibility_sha256"] = controller_receipts[-1].database_compatibility_sha256
+    preflight = promotion.authorize_switch_preflight(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        observation=observation,
+        controller_receipt=controller_receipts[-1],
+        now=now,
+    )
+    blockers = [
+        "campaign_complete",
+        "cost_within_tolerance",
+        "database_compatibility",
+        "deletion_inventory",
+        "latency_within_tolerance",
+        "quality_noninferior",
+        "quiescent",
+        "rollback_rehearsal",
+        "strict_daytona",
+        "trusted_scorer",
+    ]
+    with pytest.raises(promotion.PromotionBundleError, match="switch preflight requires a rollback pair"):
+        promotion.build_blocked_promotion_decision(
+            baseline_bundle=baseline,
+            candidate_bundle=candidate,
+            blockers=blockers,
+            switch_preflight=preflight,
+            clean_candidate_verified=True,
+        )
+
+
 def test_deletion_inventory_records_explicit_noop_and_preserves_safety_owners(bundle_pair):
     baseline, candidate = bundle_pair
     rehearsal = promotion.build_rollback_rehearsal(

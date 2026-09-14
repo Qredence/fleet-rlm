@@ -175,8 +175,12 @@ def _gate_is_authorized(
     )
 
 
-def _controller_preflight_is_authorized(value: object, pair: Mapping[str, Any]) -> bool:
-    if not _is_issued(value, "controller-switch-preflight") or not isinstance(value, dict):
+def _controller_preflight_is_authorized(value: object, pair: Mapping[str, Any] | None) -> bool:
+    if (
+        not isinstance(pair, Mapping)
+        or not _is_issued(value, "controller-switch-preflight")
+        or not isinstance(value, dict)
+    ):
         return False
     try:
         transition_sha256 = _require_digest(value.get("controller_transition_sha256"), "controller_transition_sha256")
@@ -1615,6 +1619,8 @@ def build_blocked_promotion_decision(
             or switch_preflight.get("preflight_passed") is not True
         ):
             raise PromotionBundleError("blocked decision switch preflight is not bound to the pair")
+        if pair is None:
+            raise PromotionBundleError("blocked decision switch preflight requires a rollback pair")
         switch_digest = _require_digest(switch_preflight.get("observation_sha256"), "observation_sha256")
         quiescent = _controller_preflight_is_authorized(switch_preflight, pair)
 

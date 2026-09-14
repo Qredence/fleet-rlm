@@ -85,6 +85,13 @@ def capture_record(trace: Any) -> dict[str, Any]:
     return record
 
 
+def _unique_source_rows(snapshot: dict[str, Any]) -> dict[str, Any]:
+    sources = {row["record_id"]: row for row in snapshot["records"]}
+    if len(sources) != len(snapshot["records"]):
+        raise ValueError("duplicate source identities")
+    return sources
+
+
 def build_export(snapshot: dict[str, Any], review: dict[str, Any]) -> dict[str, Any]:
     """Match reviewed expectations to exact source queries and seal a split."""
     from fleet_rlm.optimization.dataset import EXPORT_SCHEMA, load_export, split_records
@@ -96,9 +103,7 @@ def build_export(snapshot: dict[str, Any], review: dict[str, Any]) -> dict[str, 
         raise ValueError("explicit agent review is required")
     if review.get("source_snapshot_sha256") != snapshot["snapshot_sha256"]:
         raise ValueError("review does not match source snapshot")
-    sources = {row["record_id"]: row for row in snapshot["records"]}
-    if len(sources) != len(snapshot["records"]):
-        raise ValueError("duplicate source identities")
+    sources = _unique_source_rows(snapshot)
     records = []
     seen_queries = set()
     for approved in review["records"]:
@@ -183,7 +188,7 @@ def build_human_aligned_export(snapshot: dict[str, Any], review: dict[str, Any])
         raise ValueError("human review requires a bounded opaque reviewer_id")
     if review.get("source_snapshot_sha256") != snapshot["snapshot_sha256"]:
         raise ValueError("review does not match source snapshot")
-    source_rows = {row["record_id"]: row for row in snapshot["records"]}
+    source_rows = _unique_source_rows(snapshot)
     reviewed_rows = review.get("records")
     if not isinstance(reviewed_rows, list) or len(reviewed_rows) != len(source_rows):
         raise ValueError("human review must cover every captured source record")
