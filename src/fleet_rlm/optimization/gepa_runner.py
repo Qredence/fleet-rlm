@@ -1,11 +1,11 @@
-"""CLI orchestration contracts for the safe GEPA-only baseline.
+"""CLI orchestration contracts for development and authoritative GEPA runs.
 
-Production optimization remains fail-closed.  The only executable path in this
-module is an opt-in development smoke run: official ``gepa`` optimization
-reflects on a synthetic, deterministic evaluator and produces a non-promotable
-candidate artifact.  The sole budget contract is the official bounded
-metric-call budget; its documented bounded overshoot is accepted by mission
-decision.  No USD reflection-cost cap exists anywhere in Fleet.
+The development smoke path is synthetic and always non-promotable. The
+authoritative path is separately preflighted, requires a validated strict
+Daytona proof and trusted host scorer, and persists only bounded provenance.
+Both paths use the official bounded metric-call budget; neither is deployment
+authority, and production optimization remains fail-closed until every gate is
+sealed together.
 """
 
 from __future__ import annotations
@@ -342,7 +342,7 @@ def preflight(*, export_path: Path, split_seed: int) -> dict[str, Any]:
         "gepa_evaluator_call_budget": budget,
         "engine": "gepa",
         "release_blocked": True,
-        "blocker": "production strict Daytona evaluator policy is not yet authorized",
+        "blocker": "production GEPA prerequisites are not yet sealed",
     }
 
 
