@@ -233,7 +233,7 @@ async def run_benchmark(settings: Any) -> dict[str, object]:
     Run warmup and measured lifecycle cycles and produce a bounded benchmark receipt.
 
     Parameters:
-        settings (Any): Benchmark configuration, including the runtime variant and Daytona settings.
+        settings (Any): Benchmark configuration, including Daytona client, sandbox, and volume settings.
 
     Returns:
         dict[str, object]: Receipt containing cycle results, timing summaries, threshold

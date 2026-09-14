@@ -101,6 +101,7 @@ class QuiescenceObservation:
 
     @property
     def observation_sha256(self) -> str:
+        """Return a deterministic digest of the quiescence fields."""
         return _digest(
             {
                 "admissions_closed": self.admissions_closed,
@@ -131,6 +132,7 @@ class ContinuityObservation:
             raise MaintenanceWindowError("continuity booleans are invalid")
 
     def require_passed(self) -> None:
+        """Reject continuity evidence unless cleanup and durability are confirmed."""
         if self.provider_cleanup_confirmed is not True or self.durable_continuity is not True:
             raise MaintenanceWindowError("durable continuity or provider cleanup is not confirmed")
 
@@ -153,6 +155,7 @@ class TransitionReceipt:
         _require_sha256(self.after_observation_sha256, "after_observation_sha256")
 
     def public_payload(self) -> dict[str, Any]:
+        """Return the non-secret transition fields with an integrity digest."""
         unsigned = {
             "stage": self.stage,
             "bundle_sha256": self.bundle_sha256,
@@ -178,6 +181,7 @@ class MaintenanceWindowController:
 
     @property
     def fence_held(self) -> bool:
+        """Return whether the controller currently retains the admission fence."""
         return self._fence_token is not None
 
     async def switch(
@@ -187,7 +191,11 @@ class MaintenanceWindowController:
         bundle_sha256: str,
         database_compatibility_sha256: str,
     ) -> TransitionReceipt:
-        """Perform close → settle → cleanup → re-read → switch → verify → release."""
+        """Perform close → settle → cleanup → re-read → switch → verify → release.
+
+        A failure at any step raises :class:`MaintenanceWindowError` and leaves
+        the admission fence held for :meth:`release_after_recovery`.
+        """
         if stage not in {"baseline", "candidate"}:
             raise MaintenanceWindowError("transition stage is invalid")
         _require_sha256(bundle_sha256, "bundle_sha256")

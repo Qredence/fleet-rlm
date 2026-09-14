@@ -87,7 +87,11 @@ class TrustedGEPAFeedbackMetric:
         pred_name: str | None = None,
         pred_trace: Any = None,
     ) -> dspy.Prediction:
-        """Return bounded score plus feedback for aggregate or predictor scoring."""
+        """Return bounded score plus feedback for aggregate or predictor scoring.
+
+        Scorer failures become ``failure_score`` with feedback that exposes only
+        the exception type.
+        """
         try:
             result = self.scorer(
                 gold,

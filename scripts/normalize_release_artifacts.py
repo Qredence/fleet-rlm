@@ -110,7 +110,12 @@ class _BytesReader:
 
 
 def normalize_release_artifacts(dist_dir: Path, epoch: str | int | None = None) -> tuple[Path, Path]:
-    """Normalize the single wheel and sdist in ``dist_dir`` in place."""
+    """Rewrite the single wheel and sdist in ``dist_dir`` with deterministic metadata.
+
+    Both archives are replaced in place and their paths are returned. An
+    invalid epoch or an archive inventory other than exactly one of each raises
+    :class:`ArtifactNormalizationError`.
+    """
     wheels = sorted(dist_dir.glob("fleet_rlm-*.whl"))
     sdists = sorted(dist_dir.glob("fleet_rlm-*.tar.gz"))
     if len(wheels) != 1 or len(sdists) != 1:

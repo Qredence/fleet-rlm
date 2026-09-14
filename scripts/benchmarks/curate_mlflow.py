@@ -28,12 +28,14 @@ _SAFE_REVIEWER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def digest(value: Any) -> str:
+    """Return a canonical SHA-256 digest for a JSON-serializable value."""
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
 
 
 def read_json(path: Path) -> dict[str, Any]:
+    """Read a size-bounded JSON object from ``path``."""
     with path.open("rb") as handle:
         raw = handle.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
@@ -45,7 +47,11 @@ def read_json(path: Path) -> dict[str, Any]:
 
 
 def capture_record(trace: Any) -> dict[str, Any]:
-    """Extract only a complete root request and opaque grouping provenance."""
+    """Extract a complete root request and opaque grouping provenance.
+
+    Reject traces without a unique Fleet root, a complete sanitizer-approved
+    request, or Session grouping metadata.
+    """
     from fleet_rlm.rlm.result import sanitize_trace_text
 
     roots = [span for span in trace.data.spans if span.parent_id is None]
