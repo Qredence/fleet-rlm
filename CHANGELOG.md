@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.8] - 2026-09-14
+
+This release carries the Phase 5 operational-certification follow-up from
+`chore/phase5-operational-certification`. It records bounded MLflow and
+warm-pool checks, hardens attachment and Daytona canary handling, reconciles
+snapshot and lease policy, and updates the ADR 006 evidence ledger. Managed
+provider, database, and production certification gates remain explicitly
+scoped in the ledger.
+
+### Changed
+
+- Closed the bounded MLflow and warm-pool operational checks while preserving
+  nullable provider telemetry and experiment ownership boundaries.
+- Hardened attachment storage error classification and bounded canary upload
+  retries, including volume-less SemanticChild isolation handling.
+- Reconciled live canary policy with the shipped recursion defaults and kept
+  opt-in recursion isolated to certification profiles.
+- Marked PostgreSQL query-plan certification cases async and refreshed Phase 5
+  evidence and configuration guidance.
+
 ## [0.7.7] - 2026-09-12
 
 This release carries the `fix/adr006-runtime-continuation` work: ADR 006 runtime
