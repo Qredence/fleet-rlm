@@ -163,7 +163,10 @@ def run_authoritative_gepa(
             track_best_outputs=True,
             use_merge=False,
             seed=seed,
-            log_dir=str(store.root / "gepa"),
+            # GEPA logs can contain candidate outputs and reflection context.
+            # Keep that transient state out of the persisted, non-content
+            # evidence directory; only the bounded summary below is sealed.
+            log_dir=None,
         )
         with dspy.context(lm=task_lm, track_usage=True):
             optimized = optimizer.compile(
@@ -246,20 +249,34 @@ def _bounded_detailed_results(value: Any) -> dict[str, Any]:
         )
     ):
         raise OptimizationPreflightError("DSPy GEPA detailed scores are malformed")
+    candidates = raw.get("candidates")
+    if not isinstance(candidates, list) or len(candidates) > 4096:
+        raise OptimizationPreflightError("DSPy GEPA candidate statistics are malformed")
+    total_metric_calls = _bounded_optional_int(raw.get("total_metric_calls"), "total_metric_calls", 1_000_000)
+    num_full_val_evals = _bounded_optional_int(raw.get("num_full_val_evals"), "num_full_val_evals", 100_000)
+    best_idx = _bounded_optional_int(raw.get("best_idx"), "best_idx", len(scores) - 1)
     return {
-        "candidate_count": len(raw.get("candidates", [])) if isinstance(raw.get("candidates"), list) else 0,
+        "candidate_count": len(candidates),
         "val_aggregate_scores": [float(score) for score in scores],
-        "total_metric_calls": raw.get("total_metric_calls"),
-        "num_full_val_evals": raw.get("num_full_val_evals"),
-        "best_idx": raw.get("best_idx"),
+        "total_metric_calls": total_metric_calls,
+        "num_full_val_evals": num_full_val_evals,
+        "best_idx": best_idx,
         "details_sha256": _canonical_digest(
             {
                 "val_aggregate_scores": [float(score) for score in scores],
-                "total_metric_calls": raw.get("total_metric_calls"),
-                "num_full_val_evals": raw.get("num_full_val_evals"),
+                "total_metric_calls": total_metric_calls,
+                "num_full_val_evals": num_full_val_evals,
             }
         ),
     }
+
+
+def _bounded_optional_int(value: Any, field: str, upper_bound: int) -> int | None:
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value <= upper_bound:
+        raise OptimizationPreflightError(f"DSPy GEPA {field} is malformed")
+    return value
 
 
 def _instruction_sha256(program: Any) -> str:
