@@ -22,9 +22,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(os.environ.get("FLEET_PHASE6_ROOT", Path(__file__).resolve().parents[1])).resolve()
+# The bundle may be built from an immutable baseline worktree that predates
+# the current release-validator contract. Keep the validator and receipt
+# readers anchored to the script checkout while redirecting Git/config/source
+# identity lookups through ``FLEET_PHASE6_ROOT``.
+SOURCE_ROOT = Path(__file__).resolve().parents[1]
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
+ROOT = Path(os.environ.get("FLEET_PHASE6_ROOT", SOURCE_ROOT)).resolve()
 if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+    sys.path.insert(1, str(ROOT))
 
 from fleet_rlm.optimization.evidence import (
     StrictDaytonaProofError,
@@ -167,10 +174,33 @@ def _policy_digest(path: Path, profile: str) -> str:
     # The loader validates policy without resolving credentials or contacting
     # providers. Hash only the selected, merged policy, never resolved secrets.
     from fleet_rlm.config.loader import _deep_merge, load_profile_environment_contracts
+    from fleet_rlm.config.settings import FleetConfigurationError
 
-    if profile not in {item.name for item in load_profile_environment_contracts(path)}:
-        raise PromotionBundleError("selected profile is absent from policy")
     document = tomllib.loads(path.read_text(encoding="utf-8"))
+    try:
+        contracts = load_profile_environment_contracts(path)
+    except FleetConfigurationError as exc:
+        # v0.7.8 is the rollback baseline and predates retirement of the
+        # architecture selector. Normalize that one known migration key for
+        # the resolved-policy identity; every other validation failure remains
+        # fatal rather than being silently repaired.
+        if re.fullmatch(r"unknown configuration key\(s\) at [^:]+: variant", str(exc)) is None:
+            raise PromotionBundleError("selected policy cannot be validated") from exc
+        for section_name in ("defaults", "profiles"):
+            section = document.get(section_name)
+            if not isinstance(section, dict):
+                continue
+            tables = [section, *[value for value in section.values() if isinstance(value, dict)]]
+            for table in tables:
+                runtime = table.get("runtime") if isinstance(table, dict) else None
+                if isinstance(runtime, dict):
+                    runtime.pop("variant", None)
+        contracts = ()
+    if contracts and profile not in {item.name for item in contracts}:
+        raise PromotionBundleError("selected profile is absent from policy")
+    profiles = document.get("profiles")
+    if not isinstance(profiles, dict) or profile not in profiles:
+        raise PromotionBundleError("selected profile is absent from policy")
     merged = _deep_merge(document["defaults"], document["profiles"][profile])
     return hashlib.sha256(_canonical_bytes(merged)).hexdigest()
 
