@@ -75,7 +75,11 @@ Turn. Do not restore an older database snapshot over newer user data.
 
 The receipt validates identity only. It does not authorize provider activity,
 warm-pool creation, service restart, package publication, or promotion. Record
-those separately in the ADR 006 evidence ledger.
+those separately in the ADR 006 evidence ledger. Persisted JSON is an archival
+inspection format: it intentionally drops the in-process issuance marker used
+by the promotion builder. A JSON copy of a preflight, campaign, rehearsal,
+deletion inventory, or strict proof therefore keeps its gate false until the
+owning validator/controller is composed in the same process.
 
 Image, dataset, and scorer hashes are supplied identity claims, not validation
 of the referenced evidence. A self-hash detects modification, not authenticity.
@@ -95,6 +99,7 @@ ineligible:
 uv run python scripts/phase6_promotion.py seal-blocked-decision \
   --baseline .fleet-evidence/receipts/phase6/baseline.json \
   --candidate .fleet-evidence/receipts/phase6/candidate.json \
+  --blocker clean_candidate \
   --blocker strict_daytona \
   --blocker trusted_scorer \
   --blocker campaign_complete \
@@ -105,13 +110,15 @@ uv run python scripts/phase6_promotion.py seal-blocked-decision \
   --blocker rollback_rehearsal \
   --blocker quiescent \
   --blocker deletion_inventory \
-  --clean-candidate-verified \
   --output .fleet-evidence/receipts/phase6/promotion-decision-blocked.json
 ```
 
 The blocked command validates any optional pair, preflight, campaign,
 rehearsal, strict-proof, and deletion receipts before carrying their digests;
-it never turns incomplete evidence into a passing gate.
+it never turns incomplete evidence into a passing gate. The legacy boolean flags
+remain parseable for receipt compatibility but cannot clear a gate;
+clean-candidate authority is available only when the in-process bundle capture
+is composed directly with the decision builder.
 
 ## Offline preflight and measurement comparison
 
@@ -126,6 +133,13 @@ observations older than 60 seconds or from the future. The controller must hold
 the admission fence through the switch; an offline observation cannot prove
 that the state remains quiescent. The compatibility digest is a reference to
 evidence the operator still must verify, not compatibility proof itself.
+
+The offline preflight is intentionally non-authoritative. To clear the
+promotion quiescence gate, the maintenance composition must pass the validated
+observation and a `TransitionReceipt` returned by
+`MaintenanceWindowController` to `authorize_switch_preflight`. That seam binds
+the compatibility identity to a controller transition made while the shared
+admission fence was held. A JSON copy of either receipt remains inspection-only.
 
 `compare-quality --baseline BASELINE --candidate CANDIDATE
 --baseline-measurements BEFORE --candidate-measurements AFTER --output RECEIPT`
@@ -165,7 +179,10 @@ The host-owned `TrustedGEPAFeedbackMetric` in
 feedback, keeps qualitative-only expectations unscorable, and never uses an
 observed answer as ground truth. `run_authoritative_gepa` in
 `src/fleet_rlm/optimization/gepa_runner.py` requires a validated
-`fleet.strict-daytona-proof/v2` receipt, distinct task/reflection models,
+`fleet.strict-daytona-proof/v2` receipt plus an explicit
+`StrictDaytonaPolicyBinding` whose snapshot, gateway set, network mode, and
+lifecycle controls match that receipt. It also requires the supplied scorer
+digest to equal `metric.scorer_sha256`, distinct task/reflection models,
 `auto=None`, one explicit `max_metric_calls` budget (the 8+24-round budget),
 `track_stats=True`, held-out evaluation, and a fresh-process instruction reload.
 It persists only bounded GEPA statistics and hashes, not candidate traces or raw
@@ -193,7 +210,9 @@ Runs and workers, confirms cleanup, re-reads quiescence while holding the fence,
 switches the complete bundle atomically, verifies durable continuity and stage
 health, then releases the fence. A failure keeps the fence held. A deployment
 composition must provide the real cross-process adapter; the controller does
-not substitute an in-process lock.
+not substitute an in-process lock. Only `TransitionReceipt` objects returned
+by that controller carry rehearsal authority; their JSON projection is not
+sufficient to clear the rollback gate.
 
 After the exact baseline → candidate → baseline → candidate rehearsal, seal an
 explicit deletion inventory. If no migration-only path is proven safe, use an

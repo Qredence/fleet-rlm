@@ -76,8 +76,11 @@ class TrustedGEPAFeedbackMetric:
             raise TrustedMetricError("trusted scorer identity must be a SHA-256 digest")
         if not isinstance(self.failure_score, (int, float)) or isinstance(self.failure_score, bool):
             raise TrustedMetricError("failure score must be numeric")
-        if not math.isfinite(float(self.failure_score)) or not 0 <= float(self.failure_score) <= 1:
-            raise TrustedMetricError("failure score must be between zero and one")
+        # A scorer exception is an infrastructure/quality failure, never a
+        # valid model result.  Do not allow a caller to turn that failure into
+        # a passing (or even nonzero) GEPA score.
+        if self.failure_score != 0:
+            raise TrustedMetricError("failure score must be exactly zero")
 
     def __call__(
         self,

@@ -23,7 +23,12 @@ from typing import Any
 import dspy
 
 from fleet_rlm.optimization.dataset import OptimizationDatasetError, load_export, split_records
-from fleet_rlm.optimization.evidence import EvidenceStore, ValidatedStrictDaytonaProof
+from fleet_rlm.optimization.evidence import (
+    EvidenceStore,
+    StrictDaytonaPolicyBinding,
+    StrictDaytonaProofError,
+    ValidatedStrictDaytonaProof,
+)
 from fleet_rlm.optimization.metric import TrustedGEPAFeedbackMetric
 from fleet_rlm.optimization.mlflow_observability import development_gepa_trace
 from fleet_rlm.rlm.program import FleetRLMSignature, LMTier, build_lm_for_tier
@@ -66,6 +71,7 @@ def run_authoritative_gepa(
     task_model_id: str,
     reflection_model_id: str,
     strict_proof: ValidatedStrictDaytonaProof,
+    strict_policy: StrictDaytonaPolicyBinding,
     dataset_sha256: str,
     scorer_sha256: str,
     capability_coverage_sha256: str,
@@ -95,6 +101,19 @@ def run_authoritative_gepa(
         "fleet.strict-daytona-proof/v2"
     ):
         raise OptimizationPreflightError("production GEPA requires a validated block-all Daytona proof")
+    if not isinstance(strict_policy, StrictDaytonaPolicyBinding):
+        raise OptimizationPreflightError("production GEPA requires an explicit evaluator policy binding")
+    try:
+        strict_proof.require_matches(
+            policy_id=strict_policy.policy_id,
+            snapshot=strict_policy.snapshot,
+            gateway_domains=strict_policy.gateway_domains,
+            auto_stop_interval_seconds=strict_policy.auto_stop_interval_seconds,
+            auto_delete_interval_seconds=strict_policy.auto_delete_interval_seconds,
+            network_block_all=strict_policy.network_block_all,
+        )
+    except StrictDaytonaProofError as exc:
+        raise OptimizationPreflightError("strict Daytona proof does not match evaluator policy") from exc
     for name, value in (
         ("task_model_id", task_model_id),
         ("reflection_model_id", reflection_model_id),
@@ -105,6 +124,8 @@ def run_authoritative_gepa(
         raise OptimizationPreflightError("task and reflection models must be distinct")
     if not _is_sha256(dataset_sha256) or not _is_sha256(scorer_sha256):
         raise OptimizationPreflightError("dataset and scorer identities must be SHA-256 digests")
+    if metric.scorer_sha256 != scorer_sha256:
+        raise OptimizationPreflightError("campaign scorer identity does not match the trusted metric")
     if not _is_sha256(capability_coverage_sha256):
         raise OptimizationPreflightError("capability coverage identity must be a SHA-256 digest")
     if capability_coverage_verified is not True:
@@ -129,6 +150,15 @@ def run_authoritative_gepa(
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", run_id):
         raise OptimizationPreflightError("production GEPA run_id is not a safe identifier")
 
+    strict_policy_payload = {
+        "policy_id": strict_policy.policy_id,
+        "snapshot": strict_policy.snapshot,
+        "gateway_domains": list(strict_policy.gateway_domains),
+        "auto_stop_interval_seconds": strict_policy.auto_stop_interval_seconds,
+        "auto_delete_interval_seconds": strict_policy.auto_delete_interval_seconds,
+        "network_block_all": strict_policy.network_block_all,
+    }
+
     store = EvidenceStore(evidence_root, run_id)
     manifest = {
         "schema": _PRODUCTION_SCHEMA,
@@ -140,6 +170,7 @@ def run_authoritative_gepa(
         "capability_coverage_sha256": capability_coverage_sha256,
         "capability_coverage_verified": True,
         "strict_proof_id": strict_proof.proof_id,
+        "strict_policy": strict_policy_payload,
         "task_model_id": task_model_id,
         "reflection_model_id": reflection_model_id,
         "seed": seed,
@@ -190,6 +221,7 @@ def run_authoritative_gepa(
             "capability_coverage_sha256": capability_coverage_sha256,
             "capability_coverage_verified": True,
             "strict_proof_id": strict_proof.proof_id,
+            "strict_policy": strict_policy_payload,
             "task_model_id": task_model_id,
             "reflection_model_id": reflection_model_id,
             "seed": seed,

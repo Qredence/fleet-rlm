@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import shutil
@@ -12,6 +13,12 @@ from pathlib import Path
 
 import pytest
 
+from fleet_rlm.optimization.evidence import StrictDaytonaPolicyBinding, validate_strict_daytona_proof
+from fleet_rlm.optimization.maintenance import (
+    ContinuityObservation,
+    MaintenanceWindowController,
+    QuiescenceObservation,
+)
 from scripts import phase6_promotion as promotion
 from scripts.validate_release import build_artifact_manifest
 from tests.unit.optimization.test_evidence import _block_all_receipt
@@ -104,6 +111,88 @@ def _rehearsal_stages(baseline, candidate):
     return stage_rows
 
 
+class _ControllerAdapter:
+    """Small shared-fence adapter used to exercise the authority seam."""
+
+    def __init__(self, database_compatibility_sha256: str):
+        self.database_compatibility_sha256 = database_compatibility_sha256
+
+    async def close_admissions(self) -> str:
+        return "phase6-test-fence"
+
+    async def settle_and_fence_active_runs(self, _token: str) -> None:
+        return None
+
+    async def confirm_provider_cleanup(self, _token: str) -> None:
+        return None
+
+    async def observe_quiescence(self, _token: str) -> QuiescenceObservation:
+        return QuiescenceObservation(True, 0, 0, 0, True, self.database_compatibility_sha256)
+
+    async def switch_complete_bundle(self, _token: str, _bundle_sha256: str) -> None:
+        return None
+
+    async def verify_durable_continuity(self, _token: str, _bundle_sha256: str) -> ContinuityObservation:
+        return ContinuityObservation(
+            hashlib.sha256(b"history").hexdigest(),
+            hashlib.sha256(b"workspace").hexdigest(),
+            hashlib.sha256(b"artifacts").hexdigest(),
+            hashlib.sha256(b"turn").hexdigest(),
+        )
+
+    async def verify_stage_health(self, _token: str, _bundle_sha256: str) -> None:
+        return None
+
+    async def release_admissions(self, _token: str) -> None:
+        return None
+
+
+def _strict_policy():
+    return StrictDaytonaPolicyBinding(
+        policy_id="b" * 64,
+        snapshot="fleet-safe-v1",
+        gateway_domains=(),
+        auto_stop_interval_seconds=300,
+        auto_delete_interval_seconds=0,
+        network_block_all=True,
+    )
+
+
+def _controller_rehearsal(baseline, candidate):
+    database_digest = hashlib.sha256(b"compatibility").hexdigest()
+    controller = MaintenanceWindowController(_ControllerAdapter(database_digest))
+    receipts = asyncio.run(
+        controller.rehearse(
+            baseline_bundle_sha256=baseline["bundle_sha256"],
+            candidate_bundle_sha256=candidate["bundle_sha256"],
+            database_compatibility_sha256=database_digest,
+        )
+    )
+    stages = []
+    for receipt in receipts:
+        public = receipt.public_payload()
+        stages.append(
+            {
+                "stage": public["stage"],
+                "bundle_sha256": public["bundle_sha256"],
+                "observed_at": public["observed_at"],
+                "session_history_sha256": public["session_history_sha256"],
+                "workspace_sha256": public["workspace_sha256"],
+                "artifacts_sha256": public["artifacts_sha256"],
+                "new_turn_sha256": public["new_turn_sha256"],
+                "provider_cleanup_confirmed": public["provider_cleanup_confirmed"],
+                "durable_continuity": public["durable_continuity"],
+            }
+        )
+    authorized = promotion.authorize_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=stages,
+        controller_receipts=receipts,
+    )
+    return authorized, receipts
+
+
 def test_campaign_binds_live_measurements_and_all_external_identities(bundle_pair):
     baseline, candidate = bundle_pair
     campaign = promotion.build_quality_campaign(
@@ -124,6 +213,54 @@ def test_campaign_binds_live_measurements_and_all_external_identities(bundle_pai
     assert campaign["repetitions"] == [0, 1]
     assert (
         promotion.validate_quality_campaign(campaign, baseline_bundle=baseline, candidate_bundle=candidate) == campaign
+    )
+
+
+def test_campaign_recomputes_and_binds_comparison_receipt(bundle_pair):
+    baseline, candidate = bundle_pair
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id="f" * 64,
+        capability_coverage_sha256="c" * 64,
+    )
+    tampered = deepcopy(campaign)
+    tampered["comparison_passed"] = False
+    tampered["campaign_sha256"] = hashlib.sha256(
+        promotion._canonical_bytes({key: value for key, value in tampered.items() if key != "campaign_sha256"})
+    ).hexdigest()
+    with pytest.raises(promotion.PromotionBundleError, match="inconsistent with comparison"):
+        promotion.validate_quality_campaign(tampered, baseline_bundle=baseline, candidate_bundle=candidate)
+
+
+def test_candidate_bound_strict_proof_rejects_unbound_or_other_candidate(bundle_pair):
+    baseline, candidate = bundle_pair
+    proof = validate_strict_daytona_proof(_block_all_receipt())
+    policy = _strict_policy()
+    assert not promotion._validated_block_all_proof(
+        proof.receipt.public_payload(),
+        proof.proof_id,
+        candidate_bundle_sha256=candidate["bundle_sha256"],
+        expected_policy=policy,
+    )
+    bound = promotion.bind_strict_proof_to_candidate(candidate_bundle=candidate, proof=proof, policy=policy)
+    assert promotion._validated_block_all_proof(
+        bound,
+        proof.proof_id,
+        candidate_bundle_sha256=candidate["bundle_sha256"],
+        expected_policy=policy,
+    )
+    assert not promotion._validated_block_all_proof(
+        bound,
+        proof.proof_id,
+        candidate_bundle_sha256=baseline["bundle_sha256"],
+        expected_policy=policy,
     )
 
 
@@ -177,9 +314,20 @@ def test_promotion_decision_is_true_only_when_every_gate_is_proven(bundle_pair):
     baseline, candidate = bundle_pair
     now = datetime.now(UTC)
     observation = _observation(baseline, candidate, now)
-    preflight = promotion.validate_switch_observation(baseline, candidate, observation, now=now)
-    strict_proof = _block_all_receipt().public_payload()
-    strict_proof_id = strict_proof["proof_id"]
+    rehearsal, controller_receipts = _controller_rehearsal(baseline, candidate)
+    now = datetime.now(UTC)
+    observation["database_compatibility_sha256"] = controller_receipts[-1].database_compatibility_sha256
+    preflight = promotion.authorize_switch_preflight(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        observation=observation,
+        controller_receipt=controller_receipts[-1],
+        now=now,
+    )
+    strict_receipt = _block_all_receipt()
+    strict_proof = validate_strict_daytona_proof(strict_receipt)
+    strict_policy = _strict_policy()
+    strict_proof_id = strict_proof.proof_id
     campaign = promotion.build_quality_campaign(
         baseline_bundle=baseline,
         candidate_bundle=candidate,
@@ -192,12 +340,7 @@ def test_promotion_decision_is_true_only_when_every_gate_is_proven(bundle_pair):
         strict_proof_id=strict_proof_id,
         capability_coverage_sha256="c" * 64,
     )
-    rehearsal = promotion.build_rollback_rehearsal(
-        baseline_bundle=baseline,
-        candidate_bundle=candidate,
-        stages=_rehearsal_stages(baseline, candidate),
-    )
-    deletion_inventory = promotion.build_deletion_inventory(
+    inventory = promotion.build_deletion_inventory(
         rehearsal_sha256=rehearsal["rehearsal_sha256"],
         candidates=[
             {
@@ -216,6 +359,19 @@ def test_promotion_decision_is_true_only_when_every_gate_is_proven(bundle_pair):
             "artifacts_rebuilt": True,
         },
     )
+    deletion_inventory = promotion.authorize_deletion_inventory(
+        payload=inventory,
+        rehearsal_sha256=rehearsal["rehearsal_sha256"],
+        candidate_bundle_sha256=candidate["bundle_sha256"],
+        check_evidence=promotion.issue_gate_evidence(
+            "deletion_inventory", candidate["bundle_sha256"], inventory["inventory_sha256"]
+        ),
+    )
+    bound_strict_proof = promotion.bind_strict_proof_to_candidate(
+        candidate_bundle=candidate,
+        proof=strict_proof,
+        policy=strict_policy,
+    )
     pair = promotion.validate_rollback_pair(baseline, candidate)
     decision = promotion.build_promotion_decision(
         baseline_bundle=baseline,
@@ -225,11 +381,20 @@ def test_promotion_decision_is_true_only_when_every_gate_is_proven(bundle_pair):
         campaign=campaign,
         rehearsal=rehearsal,
         strict_proof_id=strict_proof_id,
-        strict_proof_receipt=strict_proof,
+        strict_proof_receipt=bound_strict_proof,
         deletion_inventory=deletion_inventory,
         clean_candidate_verified=True,
         trusted_scorer_verified=True,
         database_compatibility_verified=True,
+        strict_policy=strict_policy,
+        trusted_scorer_evidence=promotion.issue_gate_evidence(
+            "trusted_scorer", candidate["bundle_sha256"], candidate["scorer_sha256"]
+        ),
+        database_compatibility_evidence=promotion.issue_gate_evidence(
+            "database_compatibility",
+            candidate["bundle_sha256"],
+            controller_receipts[-1].database_compatibility_sha256,
+        ),
     )
     assert decision["promotion_eligible"] is True
     assert decision["blockers"] == []
@@ -281,8 +446,91 @@ def test_promotion_decision_blocks_without_validated_strict_proof_or_deletion_in
         database_compatibility_verified=True,
     )
     assert decision["promotion_eligible"] is False
-    assert decision["blockers"] == ["deletion_inventory", "strict_daytona"]
+    assert decision["blockers"] == [
+        "database_compatibility",
+        "deletion_inventory",
+        "quiescent",
+        "rollback_rehearsal",
+        "strict_daytona",
+        "trusted_scorer",
+    ]
     assert promotion.validate_promotion_decision(decision) == decision
+
+
+def test_promotion_decision_does_not_promote_resealed_operational_receipts(bundle_pair):
+    baseline, candidate = bundle_pair
+    now = datetime.now(UTC)
+    preflight = promotion.validate_switch_observation(
+        baseline, candidate, _observation(baseline, candidate, now), now=now
+    )
+    campaign = promotion.build_quality_campaign(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        baseline_measurements=_measurements(baseline),
+        candidate_measurements=_measurements(candidate),
+        split="held_out",
+        model_id="task-model-v1",
+        policy_id="strict-block-all-v2",
+        seed=42,
+        strict_proof_id="f" * 64,
+        capability_coverage_sha256="c" * 64,
+    )
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    inventory = promotion.build_deletion_inventory(
+        rehearsal_sha256=rehearsal["rehearsal_sha256"],
+        candidates=[],
+        checks={
+            "import_search": True,
+            "dependency_boundaries": True,
+            "deterministic_suite": True,
+            "security_checks": True,
+            "release_checks": True,
+            "artifacts_rebuilt": True,
+        },
+    )
+    decision = promotion.build_promotion_decision(
+        baseline_bundle=dict(baseline),
+        candidate_bundle=dict(candidate),
+        rollback_pair=promotion.validate_rollback_pair(baseline, candidate),
+        switch_preflight=dict(preflight),
+        campaign=dict(campaign),
+        rehearsal=dict(rehearsal),
+        strict_proof_id="f" * 64,
+        strict_proof_receipt=_block_all_receipt().public_payload(),
+        deletion_inventory=dict(inventory),
+        clean_candidate_verified=True,
+        trusted_scorer_verified=True,
+        database_compatibility_verified=True,
+        strict_policy=_strict_policy(),
+    )
+    assert decision["promotion_eligible"] is False
+    assert set(decision["blockers"]) == {
+        "clean_candidate",
+        "strict_daytona",
+        "trusted_scorer",
+        "campaign_complete",
+        "quality_noninferior",
+        "latency_within_tolerance",
+        "cost_within_tolerance",
+        "database_compatibility",
+        "rollback_rehearsal",
+        "quiescent",
+        "deletion_inventory",
+    }
+
+
+def test_trusted_scorer_authority_requires_candidate_scorer_identity(bundle_pair):
+    _baseline, candidate = bundle_pair
+    evidence = promotion.issue_gate_evidence("trusted_scorer", candidate["bundle_sha256"], "a" * 64)
+    assert not promotion._trusted_scorer_is_authorized(
+        evidence,
+        candidate_bundle_sha256=candidate["bundle_sha256"],
+        scorer_sha256="b" * 64,
+    )
 
 
 def test_blocked_promotion_decision_seals_missing_evidence_without_fabrication(bundle_pair):
@@ -346,6 +594,34 @@ def test_deletion_inventory_records_explicit_noop_and_preserves_safety_owners(bu
     assert promotion.validate_deletion_inventory(inventory, rehearsal_sha256=rehearsal["rehearsal_sha256"]) == inventory
 
 
+def test_deletion_inventory_authority_requires_matching_check_receipt(bundle_pair):
+    baseline, candidate = bundle_pair
+    rehearsal = promotion.build_rollback_rehearsal(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        stages=_rehearsal_stages(baseline, candidate),
+    )
+    inventory = promotion.build_deletion_inventory(
+        rehearsal_sha256=rehearsal["rehearsal_sha256"],
+        candidates=[],
+        checks={
+            "import_search": True,
+            "dependency_boundaries": True,
+            "deterministic_suite": True,
+            "security_checks": True,
+            "release_checks": True,
+            "artifacts_rebuilt": True,
+        },
+    )
+    with pytest.raises(promotion.PromotionBundleError, match="does not match its receipt"):
+        promotion.authorize_deletion_inventory(
+            payload=inventory,
+            rehearsal_sha256=rehearsal["rehearsal_sha256"],
+            candidate_bundle_sha256=candidate["bundle_sha256"],
+            check_evidence=promotion.issue_gate_evidence("deletion_inventory", candidate["bundle_sha256"], "a" * 64),
+        )
+
+
 @pytest.mark.parametrize("change", [{"score": 0.9}, {"seconds": 11.01}, {"cost": 1.101}])
 def test_quality_regression_fails_comparison(bundle_pair, change):
     baseline, candidate = bundle_pair
@@ -406,6 +682,24 @@ def test_quiescent_observation_does_not_authorize_switch(bundle_pair):
     result = promotion.validate_switch_observation(baseline, candidate, _observation(baseline, candidate, now), now=now)
     assert result["preflight_passed"] is True
     assert result["switch_eligible"] is False
+
+
+def test_switch_authorization_requires_controller_observation_identity(bundle_pair):
+    baseline, candidate = bundle_pair
+    rehearsal, controller_receipts = _controller_rehearsal(baseline, candidate)
+    del rehearsal
+    now = datetime.now(UTC)
+    observation = _observation(baseline, candidate, now)
+    observation["database_compatibility_sha256"] = controller_receipts[-1].database_compatibility_sha256
+    observation["active_runs"] = 1
+    with pytest.raises(promotion.PromotionBundleError, match="quiescence evidence"):
+        promotion.authorize_switch_preflight(
+            baseline_bundle=baseline,
+            candidate_bundle=candidate,
+            observation=observation,
+            controller_receipt=controller_receipts[-1],
+            now=now,
+        )
 
 
 @pytest.mark.parametrize(

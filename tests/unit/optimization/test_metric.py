@@ -55,6 +55,11 @@ def test_metric_failure_is_bounded_and_does_not_expose_exception_text():
     assert "password" not in result.feedback
 
 
+def test_metric_rejects_nonzero_failure_score():
+    with pytest.raises(TrustedMetricError, match="failure score must be exactly zero"):
+        TrustedGEPAFeedbackMetric(lambda _gold, _pred, **_kwargs: ScoreFeedback(1.0, "ok"), "b" * 64, 1.0)
+
+
 def test_metric_requires_digest_and_policy_hash_is_stable():
     with pytest.raises(TrustedMetricError):
         TrustedGEPAFeedbackMetric(lambda _gold, _pred, **_kwargs: ScoreFeedback(1.0, "ok"), "short")

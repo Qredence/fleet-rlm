@@ -77,6 +77,36 @@ class StrictDaytonaProofError(EvidenceError):
 
 
 @dataclass(frozen=True, slots=True)
+class StrictDaytonaPolicyBinding:
+    """The exact evaluator policy a strict proof is allowed to authorize.
+
+    A validated proof is useful only when its policy, snapshot, network mode,
+    and lifecycle controls match the run that is about to execute.  Keeping
+    this binding explicit prevents callers from treating any block-all receipt
+    as interchangeable with the authoritative evaluator policy.
+    """
+
+    policy_id: str
+    snapshot: str
+    gateway_domains: tuple[str, ...]
+    auto_stop_interval_seconds: int
+    auto_delete_interval_seconds: int
+    network_block_all: bool = True
+
+    def __post_init__(self) -> None:
+        if not _safe_identifier(self.policy_id) or not isinstance(self.snapshot, str) or not self.snapshot.strip():
+            raise StrictDaytonaProofError("strict evaluator policy binding is invalid")
+        if tuple(sorted(set(self.gateway_domains))) != self.gateway_domains:
+            raise StrictDaytonaProofError("strict evaluator gateway domains are not normalized")
+        for field_name in ("auto_stop_interval_seconds", "auto_delete_interval_seconds"):
+            value = getattr(self, field_name)
+            if type(value) is not int or value < 0:
+                raise StrictDaytonaProofError("strict evaluator lifecycle binding is invalid")
+        if type(self.network_block_all) is not bool:
+            raise StrictDaytonaProofError("strict evaluator network binding is invalid")
+
+
+@dataclass(frozen=True, slots=True)
 class DevelopmentDaytonaCanaryReport:
     """Sanitized development-only egress-canary report.
 
@@ -350,6 +380,7 @@ __all__ = [
     "DevelopmentDaytonaCanaryReport",
     "EvidenceError",
     "EvidenceStore",
+    "StrictDaytonaPolicyBinding",
     "StrictDaytonaProofError",
     "StrictDaytonaProofReceipt",
     "ValidatedStrictDaytonaProof",

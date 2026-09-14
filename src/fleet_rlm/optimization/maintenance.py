@@ -12,10 +12,13 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 _SHA256 = set("0123456789abcdef")
 _STAGES = ("baseline", "candidate", "baseline", "candidate")
+_CONTROLLER_ISSUER = object()
 
 
 class MaintenanceWindowError(RuntimeError):
@@ -146,6 +149,9 @@ class TransitionReceipt:
     before_observation_sha256: str
     after_observation_sha256: str
     continuity: ContinuityObservation
+    database_compatibility_sha256: str | None = None
+    observed_at: str = dataclass_field(default_factory=lambda: datetime.now(UTC).isoformat())
+    _issuer: object | None = dataclass_field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.stage not in {"baseline", "candidate"}:
@@ -153,6 +159,16 @@ class TransitionReceipt:
         _require_sha256(self.bundle_sha256, "bundle_sha256")
         _require_sha256(self.before_observation_sha256, "before_observation_sha256")
         _require_sha256(self.after_observation_sha256, "after_observation_sha256")
+        if self.database_compatibility_sha256 is not None:
+            _require_sha256(self.database_compatibility_sha256, "database_compatibility_sha256")
+        if not isinstance(self.observed_at, str) or not self.observed_at.strip():
+            raise MaintenanceWindowError("transition observation timestamp is invalid")
+        try:
+            timestamp = datetime.fromisoformat(self.observed_at)
+        except ValueError as exc:
+            raise MaintenanceWindowError("transition observation timestamp is invalid") from exc
+        if timestamp.tzinfo is None:
+            raise MaintenanceWindowError("transition observation timestamp must include timezone")
 
     def public_payload(self) -> dict[str, Any]:
         """Return the non-secret transition fields with an integrity digest."""
@@ -161,6 +177,7 @@ class TransitionReceipt:
             "bundle_sha256": self.bundle_sha256,
             "before_observation_sha256": self.before_observation_sha256,
             "after_observation_sha256": self.after_observation_sha256,
+            "observed_at": self.observed_at,
             "session_history_sha256": self.continuity.session_history_sha256,
             "workspace_sha256": self.continuity.workspace_sha256,
             "artifacts_sha256": self.continuity.artifacts_sha256,
@@ -169,6 +186,17 @@ class TransitionReceipt:
             "durable_continuity": self.continuity.durable_continuity,
         }
         return {**unsigned, "transition_sha256": _digest(unsigned)}
+
+
+def is_controller_transition_receipt(value: object) -> bool:
+    """Return whether a transition was issued by the live fence controller.
+
+    JSON receipts intentionally do not carry this marker.  Promotion code must
+    receive the controller's in-process object (or keep the rehearsal gate
+    blocked) instead of treating a caller-resealed mapping as execution proof.
+    """
+
+    return isinstance(value, TransitionReceipt) and value._issuer is _CONTROLLER_ISSUER
 
 
 class MaintenanceWindowController:
@@ -238,6 +266,9 @@ class MaintenanceWindowController:
                 before_observation_sha256=before.observation_sha256,
                 after_observation_sha256=after.observation_sha256,
                 continuity=continuity,
+                database_compatibility_sha256=database_compatibility_sha256,
+                observed_at=datetime.now(UTC).isoformat(),
+                _issuer=_CONTROLLER_ISSUER,
             )
 
     async def release_after_recovery(self, *, bundle_sha256: str, database_compatibility_sha256: str) -> None:
@@ -284,4 +315,5 @@ __all__ = [
     "MaintenanceWindowError",
     "QuiescenceObservation",
     "TransitionReceipt",
+    "is_controller_transition_receipt",
 ]
