@@ -285,6 +285,43 @@ def test_promotion_decision_blocks_without_validated_strict_proof_or_deletion_in
     assert promotion.validate_promotion_decision(decision) == decision
 
 
+def test_blocked_promotion_decision_seals_missing_evidence_without_fabrication(bundle_pair):
+    baseline, candidate = bundle_pair
+    blockers = [
+        "campaign_complete",
+        "cost_within_tolerance",
+        "database_compatibility",
+        "deletion_inventory",
+        "latency_within_tolerance",
+        "quality_noninferior",
+        "quiescent",
+        "rollback_rehearsal",
+        "strict_daytona",
+        "trusted_scorer",
+    ]
+    decision = promotion.build_blocked_promotion_decision(
+        baseline_bundle=baseline,
+        candidate_bundle=candidate,
+        blockers=blockers,
+        clean_candidate_verified=True,
+    )
+    assert decision["promotion_eligible"] is False
+    assert decision["blockers"] == blockers
+    assert decision["campaign_sha256"] is None
+    assert decision["rehearsal_sha256"] is None
+    assert promotion.validate_promotion_decision(decision) == decision
+
+
+def test_blocked_promotion_decision_rejects_inexact_blocker_list(bundle_pair):
+    baseline, candidate = bundle_pair
+    with pytest.raises(promotion.PromotionBundleError, match="blockers do not match"):
+        promotion.build_blocked_promotion_decision(
+            baseline_bundle=baseline,
+            candidate_bundle=candidate,
+            blockers=["strict_daytona"],
+        )
+
+
 def test_deletion_inventory_records_explicit_noop_and_preserves_safety_owners(bundle_pair):
     baseline, candidate = bundle_pair
     rehearsal = promotion.build_rollback_rehearsal(

@@ -46,6 +46,21 @@ _MAX_BYTES = 256 * 1024
 _SPLITS = frozenset({"selection", "held_out"})
 _REHEARSAL_STAGES = ("baseline", "candidate", "baseline", "candidate")
 _DELETION_RESULTS = frozenset({"no-op", "deleted-migration-only"})
+_DECISION_GATES = frozenset(
+    {
+        "clean_candidate",
+        "strict_daytona",
+        "trusted_scorer",
+        "campaign_complete",
+        "quality_noninferior",
+        "latency_within_tolerance",
+        "cost_within_tolerance",
+        "database_compatibility",
+        "rollback_rehearsal",
+        "quiescent",
+        "deletion_inventory",
+    }
+)
 
 
 class PromotionBundleError(ValueError):
@@ -88,6 +103,12 @@ def _require_digest(value: object, field: str, *, revision: bool = False) -> str
     if not isinstance(value, str) or not pattern.fullmatch(value):
         raise PromotionBundleError(f"{field} must be a full lowercase {'Git SHA' if revision else 'SHA-256'}")
     return value
+
+
+def _optional_digest(value: object, field: str) -> str | None:
+    if value is None:
+        return None
+    return _require_digest(value, field)
 
 
 def _require_bool(value: object, field: str) -> bool:
@@ -951,6 +972,134 @@ def build_promotion_decision(
     return {**unsigned, "decision_sha256": hashlib.sha256(_canonical_bytes(unsigned)).hexdigest()}
 
 
+def build_blocked_promotion_decision(
+    *,
+    baseline_bundle: dict[str, Any],
+    candidate_bundle: dict[str, Any],
+    blockers: list[str],
+    rollback_pair: dict[str, Any] | None = None,
+    switch_preflight: dict[str, Any] | None = None,
+    campaign: dict[str, Any] | None = None,
+    rehearsal: dict[str, Any] | None = None,
+    strict_proof_id: str | None = None,
+    strict_proof_receipt: dict[str, Any] | None = None,
+    deletion_inventory: dict[str, Any] | None = None,
+    clean_candidate_verified: bool = False,
+    trusted_scorer_verified: bool = False,
+    database_compatibility_verified: bool = False,
+) -> dict[str, Any]:
+    """Seal a fail-closed decision when one or more gates remain unresolved.
+
+    Missing evidence is represented by ``None`` identities, never by a fake
+    receipt.  Any supplied receipt is validated before its digest is carried
+    into the decision, and the caller-provided blocker list must exactly match
+    the gates that remain false.
+    """
+    baseline = validate_bundle(baseline_bundle)
+    candidate = validate_bundle(candidate_bundle)
+    pair: dict[str, Any] | None = None
+    if rollback_pair is not None:
+        pair = validate_rollback_pair(baseline, candidate)
+        if rollback_pair != pair:
+            raise PromotionBundleError("rollback pair receipt does not match bundles")
+
+    if not isinstance(blockers, list) or not blockers or blockers != sorted(set(blockers)):
+        raise PromotionBundleError("blocked decision blockers are invalid")
+    if any(not isinstance(name, str) or name not in _DECISION_GATES for name in blockers):
+        raise PromotionBundleError("blocked decision blocker name is invalid")
+    for field, value in (
+        ("clean_candidate_verified", clean_candidate_verified),
+        ("trusted_scorer_verified", trusted_scorer_verified),
+        ("database_compatibility_verified", database_compatibility_verified),
+    ):
+        _require_bool(value, field)
+
+    strict_id = _optional_digest(strict_proof_id, "strict_proof_id")
+    strict_ok = strict_id is not None and _validated_block_all_proof(strict_proof_receipt, strict_id)
+
+    campaign_digest: str | None = None
+    campaign_complete = False
+    quality_passed = False
+    if campaign is not None:
+        checked_campaign = validate_quality_campaign(campaign, baseline_bundle=baseline, candidate_bundle=candidate)
+        campaign_digest = checked_campaign["campaign_sha256"]
+        campaign_complete = checked_campaign["complete"] is True
+        quality_passed = checked_campaign["comparison_passed"] is True
+
+    switch_digest: str | None = None
+    quiescent = False
+    if switch_preflight is not None:
+        if not isinstance(switch_preflight, dict) or switch_preflight.get("schema") != (
+            "fleet.phase6-switch-preflight/v1"
+        ):
+            raise PromotionBundleError("blocked decision switch preflight is unsupported")
+        if (
+            switch_preflight.get("baseline_bundle_sha256") != baseline["bundle_sha256"]
+            or switch_preflight.get("candidate_bundle_sha256") != candidate["bundle_sha256"]
+            or switch_preflight.get("switch_eligible") is not False
+            or switch_preflight.get("preflight_passed") is not True
+        ):
+            raise PromotionBundleError("blocked decision switch preflight is not bound to the pair")
+        switch_digest = _require_digest(switch_preflight.get("observation_sha256"), "observation_sha256")
+        quiescent = True
+
+    rehearsal_digest: str | None = None
+    rollback_passed = False
+    if rehearsal is not None:
+        if pair is None:
+            raise PromotionBundleError("blocked decision rehearsal requires a rollback pair")
+        checked_rehearsal = validate_rollback_rehearsal(
+            rehearsal,
+            baseline_bundle=baseline,
+            candidate_bundle=candidate,
+        )
+        rehearsal_digest = checked_rehearsal["rehearsal_sha256"]
+        rollback_passed = checked_rehearsal["rehearsal_passed"] is True
+
+    deletion_digest: str | None = None
+    if deletion_inventory is not None:
+        if rehearsal_digest is None or not rollback_passed:
+            raise PromotionBundleError("blocked decision deletion inventory requires a passing rehearsal")
+        checked_inventory = validate_deletion_inventory(
+            deletion_inventory,
+            rehearsal_sha256=rehearsal_digest,
+        )
+        deletion_digest = checked_inventory["inventory_sha256"]
+
+    gates = {
+        "clean_candidate": clean_candidate_verified,
+        "strict_daytona": strict_ok,
+        "trusted_scorer": trusted_scorer_verified,
+        "campaign_complete": campaign_complete,
+        "quality_noninferior": quality_passed,
+        "latency_within_tolerance": quality_passed,
+        "cost_within_tolerance": quality_passed,
+        "database_compatibility": database_compatibility_verified,
+        "rollback_rehearsal": rollback_passed,
+        "quiescent": quiescent,
+        "deletion_inventory": deletion_digest is not None,
+    }
+    expected_blockers = sorted(name for name, passed in gates.items() if not passed)
+    if blockers != expected_blockers:
+        raise PromotionBundleError("blocked decision blockers do not match gates")
+
+    unsigned = {
+        "schema": DECISION_SCHEMA,
+        "baseline_bundle_sha256": baseline["bundle_sha256"],
+        "candidate_bundle_sha256": candidate["bundle_sha256"],
+        "rollback_pair_sha256": hashlib.sha256(_canonical_bytes(pair)).hexdigest() if pair is not None else None,
+        "switch_preflight_sha256": switch_digest,
+        "campaign_sha256": campaign_digest,
+        "rehearsal_sha256": rehearsal_digest,
+        "deletion_inventory_sha256": deletion_digest,
+        "strict_proof_id": strict_id,
+        "gates": gates,
+        "blockers": blockers,
+        "promotion_eligible": False,
+    }
+    return {**unsigned, "decision_sha256": hashlib.sha256(_canonical_bytes(unsigned)).hexdigest()}
+
+
 def validate_promotion_decision(payload: dict[str, Any]) -> dict[str, Any]:
     """Validate the final decision's self-hash and fail-closed gate semantics."""
     required = {
@@ -973,32 +1122,20 @@ def validate_promotion_decision(payload: dict[str, Any]) -> dict[str, Any]:
     unsigned = {key: value for key, value in payload.items() if key != "decision_sha256"}
     if payload["decision_sha256"] != hashlib.sha256(_canonical_bytes(unsigned)).hexdigest():
         raise PromotionBundleError("promotion decision digest does not match")
+    for field in ("baseline_bundle_sha256", "candidate_bundle_sha256"):
+        _require_digest(payload[field], field)
     for field in (
-        "baseline_bundle_sha256",
-        "candidate_bundle_sha256",
         "rollback_pair_sha256",
         "switch_preflight_sha256",
         "campaign_sha256",
         "rehearsal_sha256",
         "strict_proof_id",
     ):
-        _require_digest(payload[field], field)
+        _optional_digest(payload[field], field)
     deletion_digest = payload["deletion_inventory_sha256"]
     if deletion_digest is not None:
         _require_digest(deletion_digest, "deletion_inventory_sha256")
-    expected_gate_names = {
-        "clean_candidate",
-        "strict_daytona",
-        "trusted_scorer",
-        "campaign_complete",
-        "quality_noninferior",
-        "latency_within_tolerance",
-        "cost_within_tolerance",
-        "database_compatibility",
-        "rollback_rehearsal",
-        "quiescent",
-        "deletion_inventory",
-    }
+    expected_gate_names = _DECISION_GATES
     if set(payload["gates"]) != expected_gate_names or any(
         type(value) is not bool for value in payload["gates"].values()
     ):
@@ -1014,6 +1151,25 @@ def validate_promotion_decision(payload: dict[str, Any]) -> dict[str, Any]:
     if blockers != expected_blockers:
         raise PromotionBundleError("promotion decision blockers do not match gates")
     _require_bool(payload["promotion_eligible"], "promotion_eligible")
+    if payload["promotion_eligible"] and any(
+        payload[field] is None
+        for field in (
+            "rollback_pair_sha256",
+            "switch_preflight_sha256",
+            "campaign_sha256",
+            "rehearsal_sha256",
+            "strict_proof_id",
+        )
+    ):
+        raise PromotionBundleError("eligible promotion decision has missing evidence identities")
+    if payload["gates"]["strict_daytona"] and payload["strict_proof_id"] is None:
+        raise PromotionBundleError("strict Daytona gate has no proof identity")
+    if payload["gates"]["campaign_complete"] and payload["campaign_sha256"] is None:
+        raise PromotionBundleError("campaign gate has no campaign identity")
+    if payload["gates"]["rollback_rehearsal"] and payload["rehearsal_sha256"] is None:
+        raise PromotionBundleError("rollback gate has no rehearsal identity")
+    if payload["gates"]["quiescent"] and payload["switch_preflight_sha256"] is None:
+        raise PromotionBundleError("quiescence gate has no preflight identity")
     if payload["gates"]["deletion_inventory"] is not (deletion_digest is not None):
         raise PromotionBundleError("deletion inventory gate and identity are inconsistent")
     if payload["promotion_eligible"] is not (not blockers):
@@ -1103,6 +1259,21 @@ def main(argv: list[str] | None = None) -> int:
     decision.add_argument("--trusted-scorer-verified", action=argparse.BooleanOptionalAction, default=False)
     decision.add_argument("--database-compatibility-verified", action=argparse.BooleanOptionalAction, default=False)
     decision.add_argument("--output", type=Path, required=True)
+    blocked = commands.add_parser("seal-blocked-decision")
+    blocked.add_argument("--baseline", type=Path, required=True)
+    blocked.add_argument("--candidate", type=Path, required=True)
+    blocked.add_argument("--blocker", action="append", required=True)
+    blocked.add_argument("--rollback-pair", type=Path)
+    blocked.add_argument("--switch-preflight", type=Path)
+    blocked.add_argument("--campaign", type=Path)
+    blocked.add_argument("--rehearsal", type=Path)
+    blocked.add_argument("--strict-proof-id")
+    blocked.add_argument("--strict-proof", type=Path)
+    blocked.add_argument("--deletion-inventory", type=Path)
+    blocked.add_argument("--clean-candidate-verified", action=argparse.BooleanOptionalAction, default=False)
+    blocked.add_argument("--trusted-scorer-verified", action=argparse.BooleanOptionalAction, default=False)
+    blocked.add_argument("--database-compatibility-verified", action=argparse.BooleanOptionalAction, default=False)
+    blocked.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":
@@ -1188,6 +1359,23 @@ def main(argv: list[str] | None = None) -> int:
                 switch_preflight=_read_json(args.switch_preflight),
                 campaign=_read_json(args.campaign),
                 rehearsal=_read_json(args.rehearsal),
+                strict_proof_id=args.strict_proof_id,
+                strict_proof_receipt=_read_json(args.strict_proof) if args.strict_proof else None,
+                deletion_inventory=_read_json(args.deletion_inventory) if args.deletion_inventory else None,
+                clean_candidate_verified=args.clean_candidate_verified,
+                trusted_scorer_verified=args.trusted_scorer_verified,
+                database_compatibility_verified=args.database_compatibility_verified,
+            )
+            _write_once(args.output, payload)
+        elif args.command == "seal-blocked-decision":
+            payload = build_blocked_promotion_decision(
+                baseline_bundle=_read_bundle(args.baseline),
+                candidate_bundle=_read_bundle(args.candidate),
+                blockers=args.blocker,
+                rollback_pair=_read_json(args.rollback_pair) if args.rollback_pair else None,
+                switch_preflight=_read_json(args.switch_preflight) if args.switch_preflight else None,
+                campaign=_read_json(args.campaign) if args.campaign else None,
+                rehearsal=_read_json(args.rehearsal) if args.rehearsal else None,
                 strict_proof_id=args.strict_proof_id,
                 strict_proof_receipt=_read_json(args.strict_proof) if args.strict_proof else None,
                 deletion_inventory=_read_json(args.deletion_inventory) if args.deletion_inventory else None,

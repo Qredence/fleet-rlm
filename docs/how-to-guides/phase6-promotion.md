@@ -82,6 +82,34 @@ authority: a decision is eligible only when every gate is backed by validated
 live receipts. Do not interpret successful `prepare` or `validate-rollback-pair`
 as a passed gate.
 
+When a live prerequisite is unavailable, seal an honest blocked decision rather
+than omitting the decision or inventing a receipt. Repeat `--blocker` for every
+false gate; the command recomputes the list and refuses an inexact one. Missing
+receipt identities remain `null` and the resulting v1 decision is permanently
+ineligible:
+
+```bash
+uv run python scripts/phase6_promotion.py seal-blocked-decision \
+  --baseline .fleet-evidence/receipts/phase6/baseline.json \
+  --candidate .fleet-evidence/receipts/phase6/candidate.json \
+  --blocker strict_daytona \
+  --blocker trusted_scorer \
+  --blocker campaign_complete \
+  --blocker quality_noninferior \
+  --blocker latency_within_tolerance \
+  --blocker cost_within_tolerance \
+  --blocker database_compatibility \
+  --blocker rollback_rehearsal \
+  --blocker quiescent \
+  --blocker deletion_inventory \
+  --clean-candidate-verified \
+  --output .fleet-evidence/receipts/phase6/promotion-decision-blocked.json
+```
+
+The blocked command validates any optional pair, preflight, campaign,
+rehearsal, strict-proof, and deletion receipts before carrying their digests;
+it never turns incomplete evidence into a passing gate.
+
 ## Offline preflight and measurement comparison
 
 `validate-switch-preflight --baseline BASELINE --candidate CANDIDATE
