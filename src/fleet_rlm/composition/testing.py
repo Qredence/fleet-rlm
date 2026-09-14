@@ -138,10 +138,7 @@ def build_local_inventory(
         run_state = InMemoryRunStateStore()
         session_catalog = InMemorySessionCatalog(run_state)
     else:
-        run_state = SqlAlchemyRunStateStore(
-            session_factory,
-            stale_after_seconds=settings.run_stale_after_seconds,
-        )
+        run_state = SqlAlchemyRunStateStore(session_factory)
         session_catalog = SqlAlchemySessionCatalog(session_factory)
     cleanup = RunCleanupSupervisor(max_jobs=8)
     lifecycle = RunLifecycleService(

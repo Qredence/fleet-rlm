@@ -61,8 +61,6 @@ if TYPE_CHECKING:
 
 from typing import ClassVar
 
-from fleet_rlm.json_types import JsonScalar as JsonScalar
-
 RunFailedMessage: TypeAlias = Literal[
     "Turn failed",
     "Provider endpoint not found; check model and base URL",
@@ -1133,13 +1131,6 @@ def reconcile_trajectory(
             finish = step_finishes[step]
             assert start < finish
     return emissions
-
-
-__all__ = [
-    "has_reasoning",
-    "reconcile_trajectory",
-    "trajectory_details",
-]
 
 
 # ---------------------------------------------------------------------------

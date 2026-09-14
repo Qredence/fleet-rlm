@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.attachments.errors import AttachmentNotFoundError
@@ -78,11 +78,6 @@ class SqlAlchemyAttachmentCatalog:
                 )
                 for item in attachment_ids
             )
-
-    async def count(self) -> int:
-        async with self._session_factory() as db:
-            result = await db.execute(select(func.count()).select_from(AttachmentRow))
-            return int(result.scalar_one())
 
 
 __all__ = ["SqlAlchemyAttachmentCatalog", "StoredAttachment"]

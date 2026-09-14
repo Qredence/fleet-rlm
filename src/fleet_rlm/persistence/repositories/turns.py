@@ -67,7 +67,7 @@ from fleet_rlm.persistence.repositories.run_liveness import (
     _recovery_deadline_exhausted,
     _restore_after_fence_failure,
 )
-from fleet_rlm.persistence.repositories.run_queries import _committed_receipt, _committed_replay, _session_history
+from fleet_rlm.persistence.repositories.run_queries import _committed_replay, _session_history
 from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import (
@@ -471,14 +471,8 @@ class SqlAlchemyRunStateStore:
     _CANCELLATION_PROBE_ATTEMPTS = 2
     _CANCELLATION_PROBE_RETRY_DELAY_SECONDS = 0.05
 
-    def __init__(
-        self,
-        session_factory: async_sessionmaker[AsyncSession],
-        *,
-        stale_after_seconds: int = 60,
-    ) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = session_factory
-        self._stale_after = stale_after_seconds
 
     @observe_database_operation("claim")
     async def begin(self, request: RunClaim) -> RunStart:
@@ -762,9 +756,6 @@ class SqlAlchemyRunStateStore:
         """Complete recovery in one facade-owned transaction."""
         async with self._sessions() as db, db.begin():
             return await _complete_recovery(db, pending_run, recovery_owner)
-
-    async def _receipt(self, db: AsyncSession, run: RunRow) -> CommittedTurnReceipt:
-        return await _committed_receipt(db, run)
 
     @staticmethod
     async def _history(db: AsyncSession, session_id: UUID) -> SessionHistory:

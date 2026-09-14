@@ -427,22 +427,6 @@ class _DaytonaEnvironmentProvider:
             return
         await self._remove_resident_root(key, owner)
 
-    def _bind_runtime_root(self, key: tuple[UUID, UUID], owner: RootSessionLease) -> None:
-        """Chain provider-map cleanup onto the public runtime callback once."""
-        if getattr(owner, "_environment_provider_owner", None) is self:
-            return
-        previous = owner.on_closed
-
-        async def chained(closed: RootSessionLease) -> None:
-            if previous is not None:
-                result = previous(closed)
-                if inspect.isawaitable(result):
-                    await result
-            await self._remove_resident_root(key, closed)
-
-        owner.on_closed = chained
-        owner._environment_provider_owner = self
-
     def _release_late_root_gate(self, owner: RootSessionLease) -> None:
         """Release the preparation gate retained by an unresolved root."""
         retained = self._late_root_gate_owners.pop(id(owner), None)

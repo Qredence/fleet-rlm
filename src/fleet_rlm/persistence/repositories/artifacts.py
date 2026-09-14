@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
@@ -43,11 +43,6 @@ class SqlAlchemyArtifactCatalog:
                 ),
                 storage_ref=row.storage_ref,
             )
-
-    async def count(self) -> int:
-        async with self._session_factory() as db:
-            result = await db.execute(select(func.count()).select_from(ArtifactRow))
-            return int(result.scalar_one())
 
     async def list_storage_refs(self, *, workspace_id: UUID) -> frozenset[str]:
         """Return committed Artifact storage references for one Workspace."""

@@ -473,8 +473,6 @@ def supervise(
             "--profile",
             profile,
         ]
-        if reload:
-            backend_command.append("--reload")
     backend_env = dict(os.environ)
     # The backend resolves the committed TOML policy itself; do not pin an
     # ambient profile override into the child process environment.

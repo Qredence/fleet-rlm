@@ -611,33 +611,6 @@ class RLMWorkerHandle(Generic[T]):
         return self._effect.caller_cancelled
 
 
-async def invoke_native_rlm(
-    rlm: Any,
-    context: RLMExecutionContext,
-    kwargs: Mapping[str, Any],
-) -> Any:
-    """
-    Invoke the RLM operation using the caller-owned interpreter when required.
-
-    Parameters:
-        rlm (Any): RLM object to invoke.
-        context (RLMExecutionContext): Execution context containing the caller-owned interpreter.
-        kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM operation.
-
-    Returns:
-        Any: Result produced by the RLM operation.
-
-    Raises:
-        RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
-    """
-    native_call_args: tuple[Any, ...] = ()
-    if is_native_rlm(rlm):
-        if context.execution.interpreter is None:
-            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        native_call_args = (context.execution.interpreter,)
-    return await rlm.acall(*native_call_args, **dict(kwargs))
-
-
 def start_rlm_worker(
     *,
     rlm: Any,
