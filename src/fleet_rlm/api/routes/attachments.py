@@ -21,6 +21,10 @@ router = APIRouter(prefix="/api/attachments", tags=["attachments"])
     response_model=AttachmentResponse,
     status_code=201,
     operation_id="create_attachment",
+    responses={
+        400: {"description": "Attachment request is invalid"},
+        503: {"description": "Attachment storage is unavailable"},
+    },
 )
 async def upload_attachment(
     attachment: Annotated[UploadFile, File()],
@@ -49,6 +53,10 @@ async def upload_attachment(
     "/{attachment_id}",
     response_model=AttachmentResponse,
     operation_id="get_attachment",
+    responses={
+        404: {"description": "Attachment not found"},
+        503: {"description": "Attachment storage is unavailable"},
+    },
 )
 async def get_attachment(
     attachment_id: UUID,

@@ -97,14 +97,16 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
     if args.profile is not None and args.reload:
         parser.error("--reload cannot be combined with an explicit --profile")
 
-    try:
-        require_safe_bind_host(
-            args.host,
-            allow_non_loopback=bool(args.allow_non_loopback_bind),
-        )
-    except UnsafeBindError as exc:
-        parser.exit(1, f"fleet: error: {exc}\n")
     if args.supervise_tui:
+        # The supervisor spawns its own uvicorn process, so the shared launcher
+        # gate never runs on this path; apply the same policy before spawning.
+        try:
+            require_safe_bind_host(
+                args.host,
+                allow_non_loopback=bool(args.allow_non_loopback_bind),
+            )
+        except UnsafeBindError as exc:
+            parser.exit(1, f"fleet: error: {exc}\n")
         from fleet_rlm.cli.supervisor import SupervisorError, supervise
 
         tui_args = tuple(args.tui_args)
@@ -124,20 +126,18 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
         except SupervisorError as exc:
             parser.exit(1, f"fleet: error: {exc}\n")
         return
-    if args.profile is None:
-        import uvicorn
-
-        uvicorn.run(
-            "fleet_rlm.main:app",
-            host=args.host,
-            port=args.port,
-            reload=args.reload,
-        )
-        return
     from fleet_rlm.cli.server import ProfileReloadError, serve_api
 
     try:
-        serve_api(host=args.host, port=args.port, reload=args.reload, profile=args.profile)
+        serve_api(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            profile=args.profile,
+            allow_non_loopback=bool(args.allow_non_loopback_bind),
+        )
+    except UnsafeBindError as exc:
+        parser.exit(1, f"fleet: error: {exc}\n")
     except ProfileReloadError as exc:
         parser.error(str(exc))
 

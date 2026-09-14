@@ -14,7 +14,15 @@ from fleet_rlm.api.schemas import VolumeTreeResponse
 router = APIRouter(prefix="/api/volume", tags=["volume"])
 
 
-@router.get("/tree", response_model=VolumeTreeResponse, operation_id="list_volume_tree_api")
+@router.get(
+    "/tree",
+    response_model=VolumeTreeResponse,
+    operation_id="list_volume_tree_api",
+    responses={
+        400: {"description": "Volume tree request is invalid"},
+        503: {"description": "Workspace Volume is unavailable"},
+    },
+)
 async def list_volume_tree(
     identity: LocalScopeDep,
     gateway: WorkspaceVolumeGatewayDep,

@@ -247,7 +247,36 @@ def test_fleet_web_explicit_profile_uses_profile_aware_launcher(monkeypatch: pyt
 
     fleet_main(["web", "--profile", "phase4-campaign", "--port", "8124"])
 
-    assert calls == [{"host": "127.0.0.1", "port": 8124, "reload": False, "profile": "phase4-campaign"}]
+    assert calls == [
+        {
+            "host": "127.0.0.1",
+            "port": 8124,
+            "reload": False,
+            "profile": "phase4-campaign",
+            "allow_non_loopback": False,
+        }
+    ]
+
+
+def test_fleet_web_threads_the_non_loopback_opt_in_to_the_shared_launcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from fleet_rlm.cli import server
+
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(server, "serve_api", lambda **kwargs: calls.append(kwargs))
+
+    fleet_main(["web", "--host", "0.0.0.0", "--allow-non-loopback-bind"])
+
+    assert calls == [
+        {
+            "host": "0.0.0.0",
+            "port": 8000,
+            "reload": False,
+            "profile": None,
+            "allow_non_loopback": True,
+        }
+    ]
 
 
 def test_profile_aware_server_loads_settings_and_builds_app_before_binding(

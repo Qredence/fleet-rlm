@@ -10,7 +10,7 @@ from fastapi import APIRouter, Query
 from fleet_rlm.api.dependencies import LocalScopeDep, SkillCatalogDep
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SkillCardResponse
-from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import capture
 from fleet_rlm.skills.models import SkillCard
 
 router = APIRouter(tags=["skills"])
@@ -42,7 +42,12 @@ def _rank(cards: tuple[SkillCard, ...], query: str | None) -> tuple[SkillCard, .
     return tuple(sorted(cards, key=key))
 
 
-@router.get("/api/skills", response_model=list[SkillCardResponse], operation_id="list_skills")
+@router.get(
+    "/api/skills",
+    response_model=list[SkillCardResponse],
+    operation_id="list_skills",
+    responses={503: {"description": "Service is not ready"}},
+)
 def list_skills(
     catalog: SkillCatalogDep,
     identity: LocalScopeDep,
@@ -58,21 +63,26 @@ def list_skills(
         list[SkillCardResponse]: Response-formatted skill cards.
     """
     cards = _rank(catalog.cards(), q)
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="skill_listed",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "result_count": len(cards),
-                "has_query": q is not None and q.strip() != "",
-            },
-        )
+    capture(
+        "skill_listed",
+        properties={
+            "workspace_id": str(identity.workspace_id),
+            "result_count": len(cards),
+            "has_query": q is not None and q.strip() != "",
+        },
+    )
     return [_to_response(card) for card in cards]
 
 
-@router.get("/api/skills/{skill_id}", response_model=SkillCardResponse, operation_id="get_skill")
+@router.get(
+    "/api/skills/{skill_id}",
+    response_model=SkillCardResponse,
+    operation_id="get_skill",
+    responses={
+        404: {"description": "Skill not found"},
+        503: {"description": "Service is not ready"},
+    },
+)
 def get_skill(skill_id: UUID, catalog: SkillCatalogDep) -> SkillCardResponse:
     skill = catalog.get(skill_id)
     if skill is None:

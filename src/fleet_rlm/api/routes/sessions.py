@@ -26,7 +26,7 @@ from fleet_rlm.api.schemas import (
     UIMessageResponse,
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
-from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
@@ -60,6 +60,7 @@ def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
     response_model=SessionDetailResponse,
     status_code=201,
     operation_id="create_session",
+    responses={503: {"description": "Service is not ready"}},
 )
 async def create_session(
     body: SessionCreateRequest,
@@ -68,11 +69,11 @@ async def create_session(
     prewarm: SessionPrewarmDep,
 ) -> SessionDetailResponse:
     """
-    Create a session for the authenticated user in the current workspace.
+    Create a session for the local user in the current workspace.
 
     Parameters:
         body (SessionCreateRequest): Session creation data, including the optional title.
-        identity (LocalScopeDep): Authenticated user and workspace scope.
+        identity (LocalScopeDep): The deterministic local User and Workspace scope.
         repo (SessionCatalogDep): Session repository used to create the session.
         prewarm (SessionPrewarmDep): Optional background Sandbox pre-warm trigger.
 
@@ -90,13 +91,7 @@ async def create_session(
         # binding makes the first Turn skip sandbox creation and layout; a
         # failed or absent pre-warm leaves the first Turn acquiring normally.
         prewarm(record.id, identity.user_id, identity.workspace_id)
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="session_created",
-            properties={"workspace_id": str(identity.workspace_id)},
-        )
+    capture("session_created", properties={"workspace_id": str(identity.workspace_id)})
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
@@ -107,7 +102,12 @@ async def create_session(
     )
 
 
-@router.get("", response_model=SessionListResponse, operation_id="list_sessions")
+@router.get(
+    "",
+    response_model=SessionListResponse,
+    operation_id="list_sessions",
+    responses={503: {"description": "Service is not ready"}},
+)
 async def list_sessions(
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
@@ -137,6 +137,10 @@ async def list_sessions(
     "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="get_session",
+    responses={
+        404: {"description": "Session not found"},
+        503: {"description": "Service is not ready"},
+    },
 )
 async def get_session(
     session_id: UUID,
@@ -165,6 +169,11 @@ async def get_session(
     "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="update_session",
+    responses={
+        404: {"description": "Session not found"},
+        422: {"description": "Session update is invalid"},
+        503: {"description": "Service is not ready, or Session retirement is pending"},
+    },
 )
 async def patch_session(
     session_id: UUID,
@@ -174,7 +183,7 @@ async def patch_session(
     inventory: RuntimeInventoryIfReadyDep,
 ) -> SessionDetailResponse:
     """
-    Update the title or status of a session within the authenticated user's workspace.
+    Update the title or status of a session within the local user's workspace.
 
     Parameters:
         body (SessionPatchRequest): Fields to update; at least one field is required.
@@ -227,19 +236,16 @@ async def patch_session(
                     "session_retirement_pending",
                     "Session retirement is pending",
                 ) from exc
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="session_updated",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "session_id": str(session_id),
-                "title_changed": body.title is not None,
-                "status_changed": body.status is not None,
-                "new_status": body.status,
-            },
-        )
+    capture(
+        "session_updated",
+        properties={
+            "workspace_id": str(identity.workspace_id),
+            "session_id": str(session_id),
+            "title_changed": body.title is not None,
+            "status_changed": body.status is not None,
+            "new_status": body.status,
+        },
+    )
     return SessionDetailResponse(
         id=record.id,
         title=record.title,
@@ -254,6 +260,10 @@ async def patch_session(
     "/{session_id}/turns",
     response_model=SessionTurnPageResponse,
     operation_id="list_session_turns",
+    responses={
+        404: {"description": "Session not found"},
+        503: {"description": "Service is not ready"},
+    },
 )
 async def list_session_turns(
     session_id: UUID,

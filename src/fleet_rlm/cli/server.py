@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
+from fleet_rlm.cli.bind_safety import UnsafeBindError, require_safe_bind_host
+
 
 class ProfileReloadError(ValueError):
     """Raised when an explicit profile is combined with Uvicorn reload."""
@@ -16,8 +18,15 @@ def serve_api(
     port: int,
     reload: bool,
     profile: str | None = None,
+    allow_non_loopback: bool = False,
 ) -> None:
     """Run the FastAPI application with an optional explicit policy profile.
+
+    The bind-safety gate lives here rather than in each entrypoint so every
+    launcher -- including ``python -m fleet_rlm.cli.server`` -- enforces the
+    same policy. Fleet has no caller authentication, so a non-loopback bind
+    requires the explicit ``allow_non_loopback`` opt-in; callers thread their
+    own flag through instead of re-implementing the check.
 
     The no-profile path intentionally retains the import-string launcher used
     by existing deployments.  Explicit profiles construct ``Settings`` before
@@ -27,6 +36,7 @@ def serve_api(
     explicit profile launches reject ``--reload`` rather than falling back to
     the committed default profile.
     """
+    require_safe_bind_host(host, allow_non_loopback=allow_non_loopback)
     if profile is not None and reload:
         raise ProfileReloadError("--reload cannot be combined with an explicit --profile")
 
@@ -54,16 +64,34 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--reload", action="store_true")
+    parser.add_argument(
+        "--allow-non-loopback-bind",
+        action="store_true",
+        help=(
+            "allow binding to a non-loopback address; Fleet has no caller "
+            "authentication and will expose the local API on the network"
+        ),
+    )
     parser.add_argument("--profile")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
     try:
-        serve_api(host=args.host, port=args.port, reload=args.reload, profile=args.profile)
+        serve_api(
+            host=args.host,
+            port=args.port,
+            reload=args.reload,
+            profile=args.profile,
+            allow_non_loopback=args.allow_non_loopback_bind,
+        )
     except ProfileReloadError as exc:
-        _parser().error(str(exc))
+        parser.error(str(exc))
+    except UnsafeBindError as exc:
+        # Same policy and exit code as the `fleet` CLI bind gate.
+        parser.exit(1, f"{parser.prog}: error: {exc}\n")
     return 0
 
 

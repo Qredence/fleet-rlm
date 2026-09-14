@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any, NoReturn
 
 from fastapi import APIRouter, Query
 
@@ -32,7 +32,7 @@ def _entry(value: WorkspaceFileEntry) -> WorkspaceFileEntryResponse:
     return WorkspaceFileEntryResponse.model_validate(value, from_attributes=True)
 
 
-def _raise_public_error(exc: BaseException) -> None:
+def _raise_public_error(exc: BaseException) -> NoReturn:
     if isinstance(exc, (WorkspaceFileConflictError, FileExistsError)):
         raise http_error(
             409,
@@ -46,7 +46,26 @@ def _raise_public_error(exc: BaseException) -> None:
     raise http_error(503, "workspace_files_unavailable", "Workspace files are unavailable") from exc
 
 
-@router.get("", response_model=WorkspaceFileListResponse, operation_id="list_workspace_files_api")
+# ``_raise_public_error`` owns this closed mapping, so the declared responses
+# mirror its outcomes instead of each route restating them. Precondition
+# conflicts are only reachable through the mutating routes.
+_READ_ERRORS: dict[int | str, dict[str, Any]] = {
+    400: {"description": "Workspace file request is invalid"},
+    404: {"description": "Workspace file not found"},
+    503: {"description": "Workspace files are unavailable"},
+}
+_WRITE_ERRORS: dict[int | str, dict[str, Any]] = {
+    **_READ_ERRORS,
+    409: {"description": "Workspace file precondition did not match"},
+}
+
+
+@router.get(
+    "",
+    response_model=WorkspaceFileListResponse,
+    operation_id="list_workspace_files_api",
+    responses=_READ_ERRORS,
+)
 async def list_workspace_files(
     identity: LocalScopeDep,
     service: WorkspaceFileServiceDep,
@@ -74,6 +93,7 @@ async def list_workspace_files(
     "/stat",
     response_model=WorkspaceFileEntryResponse,
     operation_id="stat_workspace_file_api",
+    responses=_READ_ERRORS,
 )
 async def stat_workspace_file(
     path: Annotated[str, Query()],
@@ -86,10 +106,6 @@ async def stat_workspace_file(
             raise FileNotFoundError(path)
     except Exception as exc:
         _raise_public_error(exc)
-    if value is None:
-        # stat() raises for missing files; the guard keeps type narrowing even
-        # under `python -O`, where `assert` would be stripped.
-        raise http_error(503, "workspace_files_unavailable", "Workspace files are unavailable")
     return _entry(value)
 
 
@@ -97,6 +113,7 @@ async def stat_workspace_file(
     "/content",
     response_model=WorkspaceFileReadResponse,
     operation_id="read_workspace_file_api",
+    responses=_READ_ERRORS,
 )
 async def read_workspace_file(
     path: Annotated[str, Query()],
@@ -127,6 +144,7 @@ async def read_workspace_file(
     "/content",
     response_model=WorkspaceFileEntryResponse,
     operation_id="write_workspace_file_api",
+    responses=_WRITE_ERRORS,
 )
 async def write_workspace_file(
     body: WorkspaceFileWriteRequest,
@@ -150,6 +168,7 @@ async def write_workspace_file(
     "/append",
     response_model=WorkspaceFileEntryResponse,
     operation_id="append_workspace_file_api",
+    responses=_WRITE_ERRORS,
 )
 async def append_workspace_file(
     body: WorkspaceFileAppendRequest,
@@ -172,6 +191,7 @@ async def append_workspace_file(
     "/content",
     response_model=WorkspaceFileDeleteResponse,
     operation_id="delete_workspace_file_api",
+    responses=_WRITE_ERRORS,
 )
 async def delete_workspace_file(
     body: WorkspaceFileDeleteRequest,
@@ -195,6 +215,7 @@ async def delete_workspace_file(
     "/content",
     response_model=WorkspaceFileEntryResponse,
     operation_id="patch_workspace_file_api",
+    responses=_WRITE_ERRORS,
 )
 async def patch_workspace_file(
     body: WorkspaceFilePatchRequest,
