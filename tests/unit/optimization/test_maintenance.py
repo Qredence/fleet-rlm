@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 import pytest
@@ -54,6 +55,12 @@ class _Adapter:
         self.events.append(("release", token))
 
 
+class _CancellationAdapter(_Adapter):
+    async def switch_complete_bundle(self, token: str, bundle_sha256: str) -> None:
+        self.events.append(("switch", token, bundle_sha256))
+        raise asyncio.CancelledError
+
+
 @pytest.mark.asyncio
 async def test_switch_holds_fence_through_post_switch_health() -> None:
     adapter = _Adapter()
@@ -93,6 +100,20 @@ async def test_failed_switch_keeps_fence_until_explicit_healthy_recovery() -> No
     await controller.release_after_recovery(bundle_sha256=bundle, database_compatibility_sha256=_sha("db"))
     assert controller.fence_held is False
     assert adapter.events[-1] == ("release", adapter.token)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_switch_propagates_and_keeps_fence() -> None:
+    adapter = _CancellationAdapter()
+    controller = MaintenanceWindowController(adapter)
+    with pytest.raises(asyncio.CancelledError):
+        await controller.switch(
+            stage="candidate",
+            bundle_sha256=_sha("candidate"),
+            database_compatibility_sha256=_sha("db"),
+        )
+    assert controller.fence_held is True
+    assert not any(isinstance(event, tuple) and event[0] == "release" for event in adapter.events)
 
 
 @pytest.mark.asyncio

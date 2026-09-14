@@ -9,6 +9,7 @@ the fence held until a caller proves a healthy stage and explicitly releases it.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
@@ -253,6 +254,10 @@ class MaintenanceWindowController:
             after.require_safe(database_compatibility_sha256=database_compatibility_sha256)
             await self._adapter.verify_stage_health(token, bundle_sha256)
             await self._adapter.release_admissions(token)
+        except (asyncio.CancelledError, KeyboardInterrupt, SystemExit):
+            # Keep the fence held while preserving cancellation/termination
+            # semantics for the caller and its timeout machinery.
+            raise
         except BaseException as exc:
             # The adapter fence remains held.  Releasing here would allow new
             # Runs into a stage whose continuity or health has not been proven.

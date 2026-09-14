@@ -105,7 +105,8 @@ jobs:
         env:
           FLEET_RLM_UI_BUILD_DONE: "1"
         run: |
-          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export SOURCE_DATE_EPOCH
           uv build
           uv run python scripts/normalize_release_artifacts.py --dist-dir dist --epoch "$SOURCE_DATE_EPOCH"
 

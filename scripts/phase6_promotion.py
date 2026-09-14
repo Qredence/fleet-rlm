@@ -160,11 +160,6 @@ def issue_gate_evidence(gate: str, candidate_bundle_sha256: str, evidence_sha256
     return ValidatedGateEvidence(gate, candidate_bundle_sha256, evidence_sha256, _AUTHORITY_ISSUER)
 
 
-# Kept as a private alias for older in-repository callers while the public
-# name documents the owner-authenticated composition seam.
-_issue_gate_evidence = issue_gate_evidence
-
-
 def _gate_is_authorized(
     evidence: ValidatedGateEvidence | None,
     *,
@@ -1089,8 +1084,6 @@ def validate_quality_campaign(
             raise PromotionBundleError("quality campaign measurement validation requires both receipts")
         if baseline_bundle is None or candidate_bundle is None:
             raise PromotionBundleError("quality campaign measurement validation requires both bundles")
-        if comparison is None:
-            raise PromotionBundleError("quality campaign comparison receipt is required")
         recomputed = compare_quality(
             baseline_bundle,
             candidate_bundle,
