@@ -616,6 +616,31 @@ class DaytonaSessionManager:
         await self.release(lease)
         return True
 
+    def schedule_prewarm(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> asyncio.Task[None]:
+        """Schedule best-effort pre-warm work owned by this manager until drain."""
+
+        async def run_prewarm() -> None:
+            try:
+                await self.prewarm_session(
+                    session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except BaseException:
+                # Suppressed by design: the first Turn retries acquisition.
+                pass
+
+        task = asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
+        _retain_provider_task(task, self._provider_tasks)
+        return task
+
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(
             volume_id=volume_id,

@@ -35,6 +35,7 @@ from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 from fleet_rlm.sessions.catalog import SessionCatalog
+from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 
@@ -63,6 +64,13 @@ class RuntimeSessionManager(Protocol):
         workspace_id: UUID,
         deadline: float | None = None,
     ) -> bool: ...
+
+    def schedule_prewarm(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> asyncio.Task[None]: ...
 
 
 class RuntimeProcessResources(Protocol):
@@ -148,12 +156,14 @@ class RuntimeInventory:
     # Optional explicit runner owner; kept after existing fields for positional
     # compatibility with provider-neutral inventory construction.
     runner: object | None = None
+    session_lifecycle: SessionLifecycle | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
         "turn_runtime",
         "attachment_lifecycle",
         "artifact_reader",
         "session_catalog",
+        "session_lifecycle",
         "run_lifecycle",
         "config_policy",
         "workspace_volume_gateway",

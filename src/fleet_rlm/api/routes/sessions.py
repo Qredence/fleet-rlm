@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
@@ -11,8 +10,8 @@ from fastapi import APIRouter, Query
 
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
-    RuntimeInventoryIfReadyDep,
     SessionCatalogDep,
+    SessionLifecycleDep,
     SessionPrewarmDep,
 )
 from fleet_rlm.api.errors import http_error
@@ -28,7 +27,7 @@ from fleet_rlm.api.schemas import (
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.catalog import SequenceCursor
-from fleet_rlm.sessions.errors import SessionNotFoundError
+from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -46,6 +45,17 @@ def _status(value: str) -> Literal["active", "archived"]:
 
 def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
     return SessionSummaryResponse(
+        id=record.id,
+        title=record.title,
+        status=_status(record.status),
+        checkpoint_version=record.checkpoint_version,
+        created_at=_iso(record.created_at),
+        updated_at=_iso(record.updated_at),
+    )
+
+
+def _to_detail(record: SessionRecord) -> SessionDetailResponse:
+    return SessionDetailResponse(
         id=record.id,
         title=record.title,
         status=_status(record.status),
@@ -92,14 +102,7 @@ async def create_session(
         # failed or absent pre-warm leaves the first Turn acquiring normally.
         prewarm(record.id, identity.user_id, identity.workspace_id)
     capture("session_created", properties={"workspace_id": str(identity.workspace_id)})
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
+    return _to_detail(record)
 
 
 @router.get(
@@ -155,14 +158,7 @@ async def get_session(
         )
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
+    return _to_detail(record)
 
 
 @router.patch(
@@ -179,8 +175,7 @@ async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
     identity: LocalScopeDep,
-    repo: SessionCatalogDep,
-    inventory: RuntimeInventoryIfReadyDep,
+    lifecycle: SessionLifecycleDep,
 ) -> SessionDetailResponse:
     """
     Update the title or status of a session within the local user's workspace.
@@ -203,7 +198,7 @@ async def patch_session(
     if normalized_status is not None and normalized_status not in {"active", "archived"}:
         raise http_error(422, "session_status_invalid", "Status must be active or archived")
     try:
-        record = await repo.update(
+        record = await lifecycle.update(
             session_id,
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
@@ -216,26 +211,12 @@ async def patch_session(
         # Internal validation failures must not leak exception text into the
         # public contract; collapse them to the closed invalid_request code.
         raise http_error(422, "invalid_request", "Invalid request") from exc
-    if normalized_status == "archived":
-        resources = getattr(inventory, "run_environment_resources", None) if inventory is not None else None
-        runtime = getattr(resources, "runtime", None)
-        close_root = getattr(runtime, "close_root_session", None)
-        if callable(close_root):
-            try:
-                await close_root(
-                    identity.workspace_id,
-                    session_id,
-                    deadline=asyncio.get_running_loop().time() + 30.0,
-                )
-            except Exception as exc:
-                # The database transition is durable, but provider retirement
-                # remains pending and must be retried rather than reported as
-                # complete. Keep provider/SDK details out of the API error.
-                raise http_error(
-                    503,
-                    "session_retirement_pending",
-                    "Session retirement is pending",
-                ) from exc
+    except SessionRetirementPendingError as exc:
+        raise http_error(
+            503,
+            "session_retirement_pending",
+            "Session retirement is pending",
+        ) from exc
     capture(
         "session_updated",
         properties={
@@ -246,14 +227,7 @@ async def patch_session(
             "new_status": body.status,
         },
     )
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
+    return _to_detail(record)
 
 
 @router.get(

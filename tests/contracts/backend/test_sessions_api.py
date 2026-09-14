@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -11,7 +13,14 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.result import RLMOutcome
+from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+
+def test_sessions_route_does_not_discover_provider_retirement() -> None:
+    source = Path("src/fleet_rlm/api/routes/sessions.py").read_text(encoding="utf-8")
+    assert "close_root_session" not in source
+    assert "run_environment_resources" not in source
 
 
 def _headers(user_id=None, workspace_id=None):
@@ -54,6 +63,38 @@ def test_sessions_crud_happy_path() -> None:
         )
         assert archived.status_code == 200
         assert archived.json()["status"] == "archived"
+
+
+def test_archive_returns_pending_when_provider_retirement_fails() -> None:
+    class _FailingRetirement:
+        async def close_root_session(self, workspace_id, session_id, *, deadline=None) -> None:
+            del workspace_id, session_id, deadline
+            raise RuntimeError("provider unavailable")
+
+    app = create_testing_app()
+
+    with TestClient(app) as client:
+        inventory = app.state.runtime_inventory
+        assert inventory is not None
+        assert inventory.session_catalog is not None
+        app.state.runtime_inventory = replace(
+            inventory,
+            session_lifecycle=SessionLifecycle(inventory.session_catalog, _FailingRetirement()),
+        )
+        created = client.post("/api/sessions", json={"title": "retire-me"})
+        assert created.status_code == 201
+        session_id = created.json()["id"]
+
+        archived = client.patch(f"/api/sessions/{session_id}", json={"status": "archived"})
+        assert archived.status_code == 503
+        assert archived.json() == {
+            "code": "session_retirement_pending",
+            "message": "Session retirement is pending",
+        }
+
+        persisted = client.get(f"/api/sessions/{session_id}")
+        assert persisted.status_code == 200
+        assert persisted.json()["status"] == "archived"
 
 
 def test_caller_supplied_identity_headers_do_not_change_local_scope() -> None:

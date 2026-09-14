@@ -132,6 +132,7 @@ def build_local_inventory(
     )
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
 
     session_factory = database.session_factory
     if session_factory is None:
@@ -168,6 +169,7 @@ def build_local_inventory(
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
         session_catalog=session_catalog,
+        session_lifecycle=SessionLifecycle(session_catalog, NoOpSessionRetirement()),
         run_lifecycle=lifecycle,
         run_cleanup_supervisor=cleanup,
         run_preparation=preparation,

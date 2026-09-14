@@ -42,6 +42,7 @@ from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
+from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler
 
@@ -683,12 +684,14 @@ async def build_daytona_composition(
             mlflow_tracing_enabled=resolved.mlflow_tracing_enabled,
             mlflow_expose_trace_id=resolved.mlflow_expose_trace_id,
         )
+        session_lifecycle = SessionLifecycle(session_catalog, resources.runtime)
         return RuntimeInventory(
             run_environment_resources=resources,
             bridge_dispatcher=dispatcher,
             turn_runtime=coordinator,
             runner=runner,
             session_catalog=session_catalog,
+            session_lifecycle=session_lifecycle,
             run_lifecycle=lifecycle,
             attachment_lifecycle=attachment_lifecycle,
             artifact_reader=artifact_reader,
