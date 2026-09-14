@@ -1050,8 +1050,11 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
   evaluate held-out data, and verify immutable instructions in a fresh Run.
 - [x] **P6.5 — Documentation and closeout:** synchronize architecture, operator
   commands, this task list and ADR ledger; publish exact checks and open gates.
-  The current receipts are recorded outside tracked source under
-  `.scratch/phase6-*-final-20260914.log`; live gates remain explicitly open.
+  Clean candidate/baseline bundles and the identity-only rollback pair are
+  recorded outside tracked source under `.scratch/phase6-bundles/`; the live
+  strict proof is under `.fleet-evidence/receipts/phase6/`. Quality campaign,
+  database compatibility, rollback rehearsal, and final deletion gates remain
+  explicitly open.
 
 ## P6.1 - Build one clean promotion candidate
 
