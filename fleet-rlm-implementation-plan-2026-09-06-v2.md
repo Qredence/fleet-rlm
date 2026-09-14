@@ -1040,13 +1040,18 @@ agreed live envelope is US$50 / four hours, five concurrent Sandboxes, and a
   explicit no-op and protects historical readers and compatibility parsers.
   The unused compatibility-fingerprint helper block was removed earlier; no
   further deletion is claimed before rehearsal evidence.
-- [x] **P6.4a — Curated input draft:** inspect local MLflow, review at least 25
-  examples and expectations, and seal grouped 60/20/20 splits (seed 42).
+- [x] **P6.4a-draft — Curated input draft:** inspect local MLflow, review at least
+  25 examples and expectations, and seal grouped 60/20/20 splits (seed 42).
   `.scratch/phase6-curation-20260914/export-v2.json` contains 25 agent-reviewed
   historical local tasks (including six benchmark tasks), split 15/5/5 with
-  Session and task-family isolation. Three truncated requests and five generic
-  smoke requests were excluded. Seven cases need isolated host capabilities;
-  trusted scoring and evaluator capability coverage remain P6.4b prerequisites.
+  Session and task-family isolation. This is a non-promotable draft only.
+- [ ] **P6.4a-human — Human-aligned review:** produce a v2 review with an opaque
+  reviewer identity and an explicit approved/corrected decision for every row in
+  the sealed source snapshot. The current source snapshot has 33 captured rows
+  while the draft reviews 25; excluded or unsupported rows must be re-reviewed
+  or recaptured, never silently dropped. Seven cases need isolated host
+  capabilities; trusted scoring and evaluator capability coverage remain P6.4b
+  prerequisites.
 - [ ] **P6.4b — Production evaluator:** prove strict Daytona policy and trusted
   evaluation; keep safety/infrastructure immutable and synthetic smoke
   non-promotable. The selected boundary is host-polled authenticated broker

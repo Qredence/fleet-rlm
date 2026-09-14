@@ -24,10 +24,10 @@ Daytona interpreter cutover is not selected.
 
 ## Current runtime and active migration
 
-- [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md) — current legacy behavior.
+- [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md) — historical Session-state decision; current ownership is recorded in ADR 006.
 - [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
 - [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md) — historical migration contract.
-- [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — proposed architecture and gates.
+- [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — retained-broker architecture, historical target decisions, and open gates.
 - [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and remaining work.
 - [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
 

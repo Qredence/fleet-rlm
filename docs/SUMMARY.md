@@ -1,10 +1,11 @@
 # Table of contents
 
 Current guides, active migration records, and historical baselines are grouped
-in [Documentation Home](index.md). The retained broker-backed `legacy` runtime
-is current; Fleet child RLM tools follow the selected policy and are enabled in
-the shipped `daytona-recursive` default. A dated decision or passing receipt is
-scoped to its recorded revision and is not current production certification.
+in [Documentation Home](index.md). Retained broker-backed execution is the sole
+supported runtime; Fleet child RLM tools follow the selected policy and are
+enabled in the shipped `daytona-recursive` default. A dated decision or passing
+receipt is scoped to its recorded revision and is not current production
+certification.
 
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)

@@ -35,6 +35,23 @@ deletion. A clean candidate is merge-ready only when those boundaries have
 candidate-SHA-bound receipts; otherwise the write-once promotion decision stays
 blocked with the exact missing evidence.
 
+### Overall implementation audit ledger (2026-09-14)
+
+This compact ledger reconciles the plan checkboxes with current owners and
+evidence. A receipt marked “identity only” binds bytes or schema but does not
+certify an external system. Historical receipts remain readable and are never
+rebound to the current candidate.
+
+| Plan scope | Implementation owner and local validation | Current evidence | Candidate binding | Live status and deletion eligibility |
+| --- | --- | --- | --- | --- |
+| Phases 1–2 — persistence, provider boundary, and lifecycle ownership | `src/fleet_rlm/persistence/`, `src/fleet_rlm/daytona/`, `src/fleet_rlm/chat/`; deterministic suites, tree and dependency checks | Historical PostgreSQL/Daytona receipts under `.fleet-evidence/receipts/adr006/` | No; receipts predate the current candidate | Deployed database and provider continuity remain open; no deletion is eligible |
+| Phase 3 — broker settlement, containment, and public contracts | `src/fleet_rlm/rlm/`, `src/fleet_rlm/daytona/broker.py`, `src/fleet_rlm/chat/`; `make check` and containment regressions | Native-containment no-go and broker/lifecycle receipts remain historical | No; the current policy intentionally retains broker execution | Native cutover is not selected; safety owners remain protected |
+| Phase 4 — snapshots, profiles, recursion, and optional capacity | `src/fleet_rlm/config/`, `src/fleet_rlm/daytona/`, `src/fleet_rlm/rlm/recursion.py`; snapshot/profile suites | Current bundle carries image manifest/probe identities; provider snapshot verification is not re-run here | Identity only; live proof is still required for the exact candidate | Warm capacity is explicitly deferred; no capacity or migration deletion is eligible |
+| Phase 5 — snapshot promotion, managed PostgreSQL, and MLflow | Existing snapshot, database, and observability owners; focused P5 suites | Local/disposable receipts are retained with their recorded revisions | No current candidate-bound live receipt | Managed deployment and configured MLflow prerequisites are unavailable; deletion blocked |
+| P6.1/P6.3 — reproducible bundle, rollback identity, and deletion contract | `scripts/phase6_promotion.py`, `scripts/normalize_release_artifacts.py`; focused tests plus release checks | Current clean baseline/candidate bundles and identity-only rollback pair under `.scratch/phase6-final-*` | Yes for bundle bytes and revisions; pair is explicitly not switch authority | Reproducibility passed locally; compatibility, rehearsal, and deletion proof remain open |
+| P6.2/P6.4 — fenced switch, strict evaluator, human review, and GEPA | `src/fleet_rlm/optimization/{maintenance,evidence,metric,gepa_runner}.py` and `scripts/benchmarks/curate_mlflow.py`; focused contract suites | Strict boundary receipt is same-day but not candidate-bound; blocked decision is under `.fleet-evidence/receipts/phase6/` | Blocked; no live receipt is silently rebound | Human review, trusted campaign, fenced rehearsal, and deletion inventory are required before any deletion |
+| P6.5 — documentation and closeout | ADR/status, architecture, operator guide, plan, and generated checks | `make check-docs`, `make check`, and release/security checks pass locally | Documentation is rebuilt into the next candidate | Merge-ready review branch only; no merge or production switch is authorized |
+
 ### Phase 6 implementation continuation (2026-09-14)
 
 - P6.1 now has a v2 write-once bundle reader that verifies a clean HEAD,

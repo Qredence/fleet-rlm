@@ -1,11 +1,13 @@
 # ADR 006: Native Turn-scoped runtime, recursive delegation, and MLflow evidence
 
-Status: proposed; native feasibility mechanics are available, while live evidence gates remain open.
+Status: proposed target and evidence record; retained-broker execution is the
+current supported boundary, while live evidence gates remain open.
 
 Read implementation and dated results in the [status ledger](006-implementation-status.md).
-Normative statements below describe the target architecture, not proof that
-each phase is complete. The selectable `legacy` runtime remains the current
-product contract until the cutover gates pass.
+Normative statements below describe target and evidence contracts, not proof that
+each phase is complete. The current product contract is retained-broker
+execution; the native Daytona interpreter target is not selected until its
+containment and continuity gates pass.
 
 Date: 2026-09-06.
 
@@ -21,8 +23,9 @@ Turn interpreter contexts and child data authority;
 [ADR 005](005-runtime-variant.md) records the retired runtime selector. This ADR
 complements those decisions with dependency targets, native execution adoption,
 recursive evaluation, and MLflow ownership. The
-[Session runtime ADR](ADR-session-scoped-rlm-state.md) continues to describe the
-selected legacy implementation until the production cutover passes its gates.
+[Session runtime ADR](ADR-session-scoped-rlm-state.md) is retained as a
+historical state decision; the current implementation and remaining gates are
+owned by the [ADR 006 status ledger](006-implementation-status.md).
 
 ## Context
 

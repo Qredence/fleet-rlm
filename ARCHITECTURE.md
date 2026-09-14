@@ -277,13 +277,13 @@ remain transport-neutral until the API SSE adapter projects them.
 
 ## DSPy RLM contract
 
-The historical migration target uses a fresh InterpreterContext per Turn and distinguishes
-Volume-less SemanticChild from restricted-data WorkspaceChild. See
-[ADR 004](docs/decisions/004-turn-interpreter-context.md). These are target
-contracts; the Phase 1 decision retains broker execution and existing Session
-reuse while resident-state subtraction remains open. Native execution is not
-a pending selectable alternative. [ADR 005](docs/decisions/005-runtime-variant.md)
-defines the single execution-architecture selector.
+The retained broker is the sole execution boundary. Each Run receives a fresh
+DSPy program, interpreter bindings, and Turn capabilities; a healthy broker Root
+Sandbox may be reused only across sequential successful Turns. Recursive child
+inputs are capsule-bound and depth-limited by the selected policy. The native
+Daytona interpreter cutover described in [ADR 004](docs/decisions/004-turn-interpreter-context.md)
+is not a production path, and [ADR 005](docs/decisions/005-runtime-variant.md)
+records the retired architecture selector.
 
 Fleet uses the repository-pinned DSPy implementation as the behavioral source
 of truth. A native RLM invocation receives the declared request, committed
