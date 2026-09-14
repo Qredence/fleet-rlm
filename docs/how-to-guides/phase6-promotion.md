@@ -51,7 +51,10 @@ SHA-256 values (replace these illustrative hashes with actual receipt hashes):
 ```
 
 Create and validate an equivalent baseline bundle before opening the maintenance
-window. A rollback pair requires distinct revisions and the same database head.
+window. Run the same v2 builder from the baseline checkout with
+`FLEET_PHASE6_ROOT=/path/to/clean-baseline` when the released tag predates the
+helper script; this keeps the baseline source and `HEAD` checks scoped to that
+isolated worktree. A rollback pair requires distinct revisions and the same database head.
 This checks identity only: equal heads do not prove additive compatibility with
 data written by the other release. The receipt always reports
 `switch_eligible: false` and names the missing compatibility, quiescence, and
