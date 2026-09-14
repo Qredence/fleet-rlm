@@ -10,11 +10,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.session_manager import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
-    DaytonaAdmission,
     DaytonaSessionManager,
     LeaseRequest,
 )
@@ -845,8 +845,6 @@ async def test_cancelled_admission_wait_restores_session_claim() -> None:
 
 @pytest.mark.asyncio
 async def test_admission_timeout_restores_session_claim() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeoutError
-
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)
     mgr, _plat, _store, _volumes = _manager(admission=admission)

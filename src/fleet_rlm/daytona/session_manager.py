@@ -17,13 +17,9 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona._lease import LeaseState
-
-# Admission ownership lives in fleet_rlm.daytona.admission (QRE-156); the
-# re-export here keeps the historical session_manager import surface working.
 from fleet_rlm.daytona.admission import (
     DaytonaAdmission,
     DaytonaAdmissionPermit,
-    DaytonaAdmissionTimeoutError,
 )
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
@@ -2279,8 +2275,6 @@ __all__ = [
     "PREWARM_RUN_ID",
     "ActiveLeaseConflictError",
     "BindingStoreLike",
-    "DaytonaAdmission",
-    "DaytonaAdmissionTimeoutError",
     "DaytonaSessionManager",
     "InterpreterLease",
     "LeaseRequest",

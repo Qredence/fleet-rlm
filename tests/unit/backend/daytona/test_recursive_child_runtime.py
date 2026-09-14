@@ -11,13 +11,13 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
+from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease, ChildRuntimeLeaseState
-from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
 
 

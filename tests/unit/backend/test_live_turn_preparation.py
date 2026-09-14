@@ -15,15 +15,15 @@ import pytest
 
 from fleet_rlm.attachments.models import AttachmentRef
 from fleet_rlm.chat.preparation import RunPreparationUnavailableError
+from fleet_rlm.composition.live import build_run_preparation
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.admission import DaytonaAdmission
+from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     _RunClaimToken,
 )
-from fleet_rlm.composition.live import build_run_preparation
-from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.session_manager import DaytonaAdmission
-from fleet_rlm.rlm.program import RLMModelBundle
-from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
 
 @pytest.mark.asyncio
@@ -339,19 +339,18 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
-
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
             return CommittedTurnReceipt(claimed.run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
             from fleet_rlm.sessions.run_claim import FailClaim
             from fleet_rlm.sessions.run_state import RunFailure
-            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -388,7 +387,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
 @pytest.mark.asyncio
 async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeoutError
+    from fleet_rlm.daytona.admission import DaytonaAdmissionTimeoutError
 
     class SessionManager:
         async def acquire(self, _request, *, deadline):

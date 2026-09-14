@@ -24,13 +24,13 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.broker import (
     SyncBridgeDispatcher,
     sync_sandbox,
 )
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 _DEADLOCK_BOUND_S = 5.0
