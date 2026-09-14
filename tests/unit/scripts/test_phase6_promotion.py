@@ -573,15 +573,8 @@ def test_blocked_promotion_decision_rejects_inexact_blocker_list(bundle_pair):
 def test_blocked_promotion_decision_rejects_controller_preflight_without_rollback_pair(bundle_pair):
     baseline, candidate = bundle_pair
     now = datetime.now(UTC)
-    _, controller_receipts = _controller_rehearsal(baseline, candidate)
-    observation = _observation(baseline, candidate, now)
-    observation["database_compatibility_sha256"] = controller_receipts[-1].database_compatibility_sha256
-    preflight = promotion.authorize_switch_preflight(
-        baseline_bundle=baseline,
-        candidate_bundle=candidate,
-        observation=observation,
-        controller_receipt=controller_receipts[-1],
-        now=now,
+    preflight = promotion.validate_switch_observation(
+        baseline, candidate, _observation(baseline, candidate, now), now=now
     )
     blockers = [
         "campaign_complete",
