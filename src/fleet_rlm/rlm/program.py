@@ -1669,15 +1669,6 @@ def _copy_lm_for_deadline(
     )
 
 
-def _copy_lm_for_child(lm: Any, *, deadline: float) -> Any:
-    """Compatibility helper for callers that copy one child LM directly."""
-    return _copy_lm_for_deadline(
-        lm,
-        deadline=deadline,
-        error_message="recursive child LM deadline exceeded",
-    )
-
-
 def _remaining_lm_timeout(
     deadline: float | None,
     lm: Any,
