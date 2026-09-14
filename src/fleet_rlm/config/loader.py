@@ -28,6 +28,30 @@ from fleet_rlm.config.settings import (
 )
 
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+_RETIRED_ENVIRONMENT_VARIABLES = frozenset({
+    "FLEET_LIVE_KERNEL",
+    "FLEET_UPLOAD_ROOT",
+    "FLEET_ARTIFACT_ROOT",
+    "FLEET_MAX_TURN_WALL_SECONDS",
+    "FLEET_BUDGET_MAX_ITERATIONS",
+    "FLEET_BUDGET_MAX_LLM_CALLS",
+    "FLEET_BUDGET_MAX_OUTPUT_CHARS",
+    "FLEET_BUDGET_MAX_WALL_SECONDS",
+    "FLEET_BUDGET_MAX_SUB_LM_CONCURRENCY",
+    "FLEET_BUDGET_MAX_TOOL_CALLS",
+    "FLEET_BUDGET_MAX_SKILL_LOADS",
+})
+
+
+def reject_retired_environment_variables() -> None:
+    """Reject retired process and ``.env`` keys before settings resolution."""
+    configured = set(_RETIRED_ENVIRONMENT_VARIABLES.intersection(os.environ))
+    for name in dotenv_values(".env"):
+        if name in _RETIRED_ENVIRONMENT_VARIABLES:
+            configured.add(name)
+    if configured:
+        names = ", ".join(sorted(configured))
+        raise ValueError(f"retired Fleet environment variable(s): {names}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -525,15 +549,13 @@ def _require_managed_profile_environment_values(
     # managed Databricks MLflow topology.
     references: list[tuple[str, str]] = [("database_url", "database_url_env")]
     if flattened.settings.get("mlflow_tracking_uri") == "databricks":
-        references.extend(
-            (
-                ("mlflow_experiment_name", "mlflow_experiment_name_env"),
-                ("mlflow_trace_catalog", "mlflow_trace_catalog_env"),
-                ("mlflow_trace_schema", "mlflow_trace_schema_env"),
-                ("mlflow_trace_table_prefix", "mlflow_trace_table_prefix_env"),
-                ("mlflow_tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id_env"),
-            )
-        )
+        references.extend((
+            ("mlflow_experiment_name", "mlflow_experiment_name_env"),
+            ("mlflow_trace_catalog", "mlflow_trace_catalog_env"),
+            ("mlflow_trace_schema", "mlflow_trace_schema_env"),
+            ("mlflow_trace_table_prefix", "mlflow_trace_table_prefix_env"),
+            ("mlflow_tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id_env"),
+        ))
     missing: set[str] = set()
     for field_name, label in references:
         environment_name = flattened.environment_references.get(field_name)

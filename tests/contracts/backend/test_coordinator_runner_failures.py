@@ -12,7 +12,8 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunLifecycleService
+from fleet_rlm.sessions.run_state import ClaimedRun
+from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.persistence.repositories import InMemoryRunStateStore
@@ -113,7 +114,7 @@ class _Harness:
         await self.store.add_session(self.session_id, self.access)
 
     async def prepare(self, turn: ClaimedRun, *, deadline: float):
-        from fleet_rlm.chat.session_context import build_session_context_manifest
+        from fleet_rlm.sessions.context import build_session_context_manifest
 
         if self.mode == "internal_cancel":
             assert await self.lifecycle.request_cancel(self.access, turn.run_id) == "requested"

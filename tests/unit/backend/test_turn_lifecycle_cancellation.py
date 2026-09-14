@@ -190,7 +190,8 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
 @pytest.mark.asyncio
 async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> None:
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunLifecycleService
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
     turn = claimed_run()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
@@ -246,7 +247,12 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
 @pytest.mark.asyncio
 async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -299,7 +305,11 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
 
 @pytest.mark.asyncio
 async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_usage() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunFailure,
+    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
@@ -326,7 +336,12 @@ async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_
 
 @pytest.mark.asyncio
 async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.sessions.run_state import (
+        CommittedTurnReceipt,
+        RunClaim,
+        RunFailure,
+    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
         PredictionResult,

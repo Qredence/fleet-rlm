@@ -16,7 +16,7 @@ from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime
-from fleet_rlm.composition.inventory import RuntimeInventory, get_runtime_inventory
+from fleet_rlm.composition.inventory import RuntimeInventory, RuntimeInventoryError, get_runtime_inventory
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
@@ -78,38 +78,38 @@ def get_runtime_inventory_if_ready(request: Request) -> RuntimeInventory | None:
 
 
 def get_turn_runtime(request: Request) -> TurnRuntime:
-    runtime = get_ready_runtime_inventory(request).turn_runtime
-    if runtime is None:
-        raise _composition_unavailable()
-    return runtime
+    try:
+        return get_ready_runtime_inventory(request).require_turn_runtime()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_attachment_lifecycle(request: Request) -> AttachmentLifecycle:
-    lifecycle = get_ready_runtime_inventory(request).attachment_lifecycle
-    if lifecycle is None:
-        raise _composition_unavailable()
-    return lifecycle
+    try:
+        return get_ready_runtime_inventory(request).require_attachment_lifecycle()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_artifact_reader(request: Request) -> ArtifactReader:
-    reader = get_ready_runtime_inventory(request).artifact_reader
-    if reader is None:
-        raise _composition_unavailable()
-    return reader
+    try:
+        return get_ready_runtime_inventory(request).require_artifact_reader()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_session_catalog(request: Request) -> SessionCatalog:
-    catalog = get_ready_runtime_inventory(request).session_catalog
-    if catalog is None:
-        raise _composition_unavailable()
-    return catalog
+    try:
+        return get_ready_runtime_inventory(request).require_session_catalog()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_session_lifecycle(request: Request) -> SessionLifecycle:
-    lifecycle = get_ready_runtime_inventory(request).session_lifecycle
-    if lifecycle is None:
-        raise _composition_unavailable()
-    return lifecycle
+    try:
+        return get_ready_runtime_inventory(request).require_session_lifecycle()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
@@ -125,10 +125,10 @@ def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asynci
 
 
 def get_run_lifecycle(request: Request) -> RunLifecycle:
-    lifecycle = get_ready_runtime_inventory(request).run_lifecycle
-    if lifecycle is None:
-        raise _composition_unavailable()
-    return lifecycle
+    try:
+        return get_ready_runtime_inventory(request).require_run_lifecycle()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_settings(request: Request) -> Settings:
@@ -161,24 +161,24 @@ def get_skill_catalog(request: Request) -> SkillCatalog:
 
 
 def get_config_policy(request: Request) -> ConfigPolicyService:
-    policy = get_ready_runtime_inventory(request).config_policy
-    if not isinstance(policy, ConfigPolicyService):
-        raise _composition_unavailable()
-    return policy
+    try:
+        return get_ready_runtime_inventory(request).require_config_policy()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_workspace_file_service(request: Request) -> WorkspaceFileService:
-    service = get_ready_runtime_inventory(request).workspace_file_service
-    if not isinstance(service, WorkspaceFileService):
-        raise _composition_unavailable()
-    return service
+    try:
+        return get_ready_runtime_inventory(request).require_workspace_file_service()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
-    gateway = get_ready_runtime_inventory(request).workspace_volume_gateway
-    if gateway is None:
-        raise _composition_unavailable()
-    return gateway
+    try:
+        return get_ready_runtime_inventory(request).require_workspace_volume_gateway()
+    except RuntimeInventoryError:
+        raise _composition_unavailable() from None
 
 
 TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]

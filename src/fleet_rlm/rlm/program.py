@@ -635,7 +635,7 @@ class AttachmentInput(FleetInputModel):
 
 
 if TYPE_CHECKING:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)

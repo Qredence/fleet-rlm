@@ -15,7 +15,7 @@ from uuid import UUID, uuid4
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
 from fleet_rlm.artifacts.safety import parse_kind
-from fleet_rlm.chat.run_claim import (
+from fleet_rlm.sessions.run_claim import (
     ClaimCommand,
     ClaimFailure,
     ClaimFailureCode,
@@ -24,14 +24,15 @@ from fleet_rlm.chat.run_claim import (
     ClaimTransition,
     failure_code_for_terminal_status,
 )
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     FailedRunReceipt,
     RunFailure,
     RunFailureCode,
     RunStateError,
 )
-from fleet_rlm.chat.turn_detail_policy import commit_cancelled_tombstone
+
+from fleet_rlm.sessions.committed_turn import commit_cancelled_tombstone
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, TurnRow
 from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, CommittedTurnCodec

@@ -20,7 +20,10 @@ from fleet_rlm.workspace.paths import volume_paths_from_settings
 
 
 def _turn(*, session_id=None, workspace_id=None, attachment_ids=(), skill_selections=()):
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     async def not_cancelled() -> bool:
         return False

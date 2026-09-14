@@ -13,7 +13,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -83,7 +83,7 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
 
 @pytest.mark.asyncio
 async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,

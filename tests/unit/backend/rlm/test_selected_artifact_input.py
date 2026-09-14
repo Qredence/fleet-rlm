@@ -14,7 +14,10 @@ from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
 from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
 from fleet_rlm.chat.capability_preparation import prepare_host_capabilities
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    _RunClaimToken,
+)
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions, SubproblemCapsule
 from fleet_rlm.sessions.models import SessionHistory, TurnInput
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog

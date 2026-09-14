@@ -30,32 +30,6 @@ _MEMORY_CONTENT_PATTERNS = (
     re.compile(r"memory_promotion"),
 )
 
-# Documented chat-cycle exceptions (P52.10): the claim/lifecycle domain types and
-# the Session context manifest/Run authority currently live in ``chat`` while
-# ``rlm`` and ``persistence`` consume them, inverting the target DAG.  The
-# allowlist is shrink-only: removing an edge is always fine, adding a new
-# chat-import edge outside these files fails ``make check``.  Re-homing the
-# domain types below the boundary (``sessions/``) removes this table.
-_CYCLE_EXCEPTIONS: dict[str, frozenset[str]] = {
-    "rlm": frozenset(
-        {
-            "rlm/program.py",
-            "rlm/recursion.py",
-            "rlm/runtime.py",
-        }
-    ),
-    "persistence": frozenset(
-        {
-            "persistence/repositories/run_claim_decisions.py",
-            "persistence/repositories/run_codec.py",
-            "persistence/repositories/run_final_state.py",
-            "persistence/repositories/run_liveness.py",
-            "persistence/repositories/run_queries.py",
-            "persistence/repositories/turns.py",
-        }
-    ),
-}
-
 
 @dataclass(frozen=True)
 class BoundaryViolation:
@@ -158,6 +132,8 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("provider-neutral runtime must not import chat", "fleet_rlm.chat"),
             ("provider-neutral runtime must not import api", "fleet_rlm.api"),
         )
+    if scope == "sessions":
+        return (("sessions must not import chat", "fleet_rlm.chat"),)
     if scope == "chat":
         return (
             ("chat must not import api", "fleet_rlm.api"),
@@ -236,10 +212,6 @@ def check_dependency_boundaries(root: Path = ROOT) -> tuple[BoundaryViolation, .
             for line_number, imported in imports:
                 for rule, target in import_rules:
                     if target == "fleet_rlm.daytona" and _is_storage_transport_exception(relative, imported):
-                        continue
-                    if target == "fleet_rlm.chat" and relative.as_posix() in _CYCLE_EXCEPTIONS.get(
-                        relative.parts[0], ()
-                    ):
                         continue
                     if _matches(imported, target):
                         key = (line_number, rule, target)

@@ -21,7 +21,13 @@ async def test_successful_native_context_cleanup_precedes_durable_finish() -> No
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+
+        ClaimedRun,
+
+        _RunClaimToken,
+
+    )
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -70,7 +76,13 @@ async def test_native_context_cleanup_failure_blocks_durable_success() -> None:
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+
+        ClaimedRun,
+
+        _RunClaimToken,
+
+    )
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput

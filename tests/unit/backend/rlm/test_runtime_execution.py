@@ -60,7 +60,7 @@ async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full()
 
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -141,7 +141,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
     The outcome includes events, usage metrics, configured tools, and execution tracing.
     """
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -344,7 +344,7 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import (
         AttachmentContextCapsule,
         AttachmentContextEntry,
@@ -412,7 +412,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest, TurnPreview
+    from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -476,7 +476,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
     from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,

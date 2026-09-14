@@ -10,7 +10,7 @@ from uuid import UUID, uuid4
 import dspy
 import pytest
 
-from fleet_rlm.chat.session_context import SessionContextManifest
+from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.result import RunCancelledError

@@ -35,7 +35,7 @@ from fleet_rlm.chat.preparation import (
     RunPreparationUnavailableError,
     claim_history_records,
 )
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox

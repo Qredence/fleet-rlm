@@ -24,7 +24,10 @@ from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 
 
 def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     async def not_cancelled() -> bool:
         return False
@@ -374,7 +377,11 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
 
     from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunLifecycleService
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner

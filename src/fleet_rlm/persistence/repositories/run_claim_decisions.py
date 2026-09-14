@@ -10,13 +10,14 @@ from __future__ import annotations
 from typing import Protocol
 from uuid import uuid4
 
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     RunClaim,
     RunIdempotencyMismatchError,
     RunInProgressError,
     RunStateError,
     _RunClaimToken,
 )
+
 
 
 class _PriorRunView(Protocol):

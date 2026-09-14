@@ -176,6 +176,51 @@ class RuntimeInventory:
         if missing:
             raise RuntimeInventoryError("runtime inventory missing required service(s): " + ", ".join(missing))
 
+    def require_turn_runtime(self) -> TurnRuntime:
+        if self.turn_runtime is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: turn_runtime")
+        return self.turn_runtime
+
+    def require_attachment_lifecycle(self) -> AttachmentLifecycle:
+        if self.attachment_lifecycle is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: attachment_lifecycle")
+        return self.attachment_lifecycle
+
+    def require_artifact_reader(self) -> ArtifactReader:
+        if self.artifact_reader is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: artifact_reader")
+        return self.artifact_reader
+
+    def require_session_catalog(self) -> SessionCatalog:
+        if self.session_catalog is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: session_catalog")
+        return self.session_catalog
+
+    def require_session_lifecycle(self) -> SessionLifecycle:
+        if self.session_lifecycle is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: session_lifecycle")
+        return self.session_lifecycle
+
+    def require_run_lifecycle(self) -> RunLifecycle:
+        if self.run_lifecycle is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: run_lifecycle")
+        return self.run_lifecycle
+
+    def require_config_policy(self) -> ConfigPolicyService:
+        if self.config_policy is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: config_policy")
+        return self.config_policy
+
+    def require_workspace_volume_gateway(self) -> WorkspaceVolumeGateway:
+        if self.workspace_volume_gateway is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: workspace_volume_gateway")
+        return self.workspace_volume_gateway
+
+    def require_workspace_file_service(self) -> WorkspaceFileService:
+        if self.workspace_file_service is None:
+            raise RuntimeInventoryError("runtime inventory missing required service: workspace_file_service")
+        return self.workspace_file_service
+
     @property
     def db_engine(self) -> AsyncEngine | None:
         return self.database.engine

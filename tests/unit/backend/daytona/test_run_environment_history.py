@@ -28,7 +28,10 @@ from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 
 
 def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     async def not_cancelled() -> bool:
         return False

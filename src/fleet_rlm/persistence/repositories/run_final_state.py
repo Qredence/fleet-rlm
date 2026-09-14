@@ -15,7 +15,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from fleet_rlm.artifacts.promotion import PromotedArtifact
-from fleet_rlm.chat.run_claim import (
+from fleet_rlm.sessions.run_claim import (
     BeginSettlement,
     ClaimCommand,
     CompleteSettlement,
@@ -25,7 +25,7 @@ from fleet_rlm.chat.run_claim import (
     RevokeClaim,
     decide_claim_transition,
 )
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedTurnReceipt,
     FailedRunReceipt,
@@ -33,6 +33,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunNotFoundError,
     RunStateError,
 )
+
 from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow, TurnRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import _claim_owner_matches, _validate_sql_claim
 from fleet_rlm.persistence.repositories.run_codec import (

@@ -13,9 +13,12 @@ from sqlalchemy.exc import SQLAlchemyError
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_type", [OSError, SQLAlchemyError], ids=["os-error", "sqlalchemy-error"])
 async def test_sql_begin_translates_session_setup_failures(failure_type: type[BaseException]) -> None:
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunLifecycleUnavailableError
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunLifecycleUnavailableError,
+    )
 
     def failing_factory():
         raise failure_type("database unavailable")
@@ -35,13 +38,17 @@ def test_stale_claim_is_a_canonical_typed_failure_code() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
-    from fleet_rlm.chat.run_claim import ClaimFailure, FailClaim
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import ClaimFailure, FailClaim
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -49,18 +56,16 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="typed failure",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="typed failure",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemyRunStateStore(factory)
@@ -93,13 +98,17 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
-    from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -107,18 +116,16 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="stale claim parity",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="stale claim parity",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemyRunStateStore(factory)
@@ -172,12 +179,16 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
 
 @pytest.mark.asyncio
 async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedRunReplay, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedRunReplay,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -185,18 +196,16 @@ async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> 
         factory = create_session_factory(engine)
         access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="Test",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="Test",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory)
         request = RunClaim(access, session_id, TurnInput("hello"), "key", uuid4())
@@ -223,13 +232,18 @@ async def test_sql_state_round_trips_canonical_turn_without_result_mirrors() -> 
 async def test_sql_terminal_replay_and_transition_require_session_scope() -> None:
     from dataclasses import replace
 
-    from fleet_rlm.chat.run_claim import CompleteSettlement
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedRunReplay, RunClaim, RunNotFoundError
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import CompleteSettlement
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedRunReplay,
+        RunClaim,
+        RunNotFoundError,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -237,13 +251,11 @@ async def test_sql_terminal_replay_and_transition_require_session_scope() -> Non
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="scope"),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="scope"),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory)
         begun = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
@@ -274,11 +286,14 @@ async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
 
     The recovered run retains the `stale_claim` failure code and has its claim ownership and heartbeat cleared.
     """
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -286,18 +301,16 @@ async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
         factory = create_session_factory(engine)
         access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="Test",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="Test",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
         first_id, replacement_id = uuid4(), uuid4()
@@ -325,11 +338,14 @@ async def test_sql_state_replaces_a_stale_claim_after_recovery() -> None:
 
 @pytest.mark.asyncio
 async def test_reconcile_recovers_stale_running_after_provider_fence() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -337,18 +353,16 @@ async def test_reconcile_recovers_stale_running_after_provider_fence() -> None:
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="recovery",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="recovery",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
@@ -379,11 +393,14 @@ async def test_reconcile_recovers_stale_running_after_provider_fence() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_for_staleness() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -391,15 +408,11 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="startup"
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="startup"),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
         assert isinstance(
@@ -425,11 +438,14 @@ async def test_startup_reconciliation_fences_a_live_prior_claim_without_waiting_
 
 @pytest.mark.asyncio
 async def test_reconcile_deadline_bounds_provider_fence_and_leaves_claim_retryable() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -506,13 +522,17 @@ async def test_reconcile_deadline_bounds_provider_fence_and_leaves_claim_retryab
 
 @pytest.mark.asyncio
 async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -> None:
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -520,18 +540,16 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="settling recovery",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="settling recovery",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
@@ -701,11 +719,14 @@ async def test_reconcile_deadline_bounds_fence_failure_restore(
 
 @pytest.mark.asyncio
 async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -713,18 +734,16 @@ async def test_concurrent_recovery_workers_fence_a_run_once() -> None:
         factory = create_session_factory(engine)
         access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="concurrent recovery",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="concurrent recovery",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
         started = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", run_id))
@@ -761,7 +780,7 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
     outside live idempotency replay."""
     from sqlalchemy import select
 
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
@@ -769,6 +788,11 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.catalog import SequenceCursor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -776,18 +800,16 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
         factory = create_session_factory(engine)
         access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="cancelled attempt",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="cancelled attempt",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemyRunStateStore(factory)
@@ -853,11 +875,15 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
 @pytest.mark.asyncio
 async def test_sql_racing_begins_fence_one_claimant() -> None:
     """P52.7(c): two racing begin claims on one Session commit exactly one winner."""
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunInProgressError
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunInProgressError,
+    )
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:
@@ -865,18 +891,16 @@ async def test_sql_racing_begins_fence_one_claimant() -> None:
         factory = create_session_factory(engine)
         access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
-                    SessionRow(
-                        id=session_id,
-                        user_id=access.user_id,
-                        workspace_id=access.workspace_id,
-                        title="racing begins",
-                    ),
-                )
-            )
+            db.add_all((
+                UserRow(id=access.user_id),
+                WorkspaceRow(id=access.workspace_id),
+                SessionRow(
+                    id=session_id,
+                    user_id=access.user_id,
+                    workspace_id=access.workspace_id,
+                    title="racing begins",
+                ),
+            ))
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
         store = SqlAlchemyRunStateStore(factory, stale_after_seconds=30)
 
@@ -904,7 +928,7 @@ async def test_sql_racing_begins_fence_one_claimant() -> None:
         assert len(losers) == 1
         # The loser fails closed: either a clean in-progress refusal or, under
         # SQLite lock contention, the lifecycle-unavailable fencing error.
-        from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
+        from fleet_rlm.sessions.run_state import RunLifecycleUnavailableError
 
         assert isinstance(losers[0], (RunInProgressError, RunLifecycleUnavailableError))
     finally:

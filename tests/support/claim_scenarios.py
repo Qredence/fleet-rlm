@@ -8,7 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedRunReplay,
     RunClaim,
@@ -65,7 +65,7 @@ async def concurrent_claims_have_one_owner(postgres_claim_store, race):
 
 
 async def cancel_settlement_races_commit(postgres_claim_store):
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
 
     store, factory, access, session_id = postgres_claim_store
     run = await store.begin(RunClaim(access, session_id, TurnInput("cancel race"), "cancel", uuid4()))

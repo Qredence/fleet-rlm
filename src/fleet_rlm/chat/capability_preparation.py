@@ -12,7 +12,7 @@ import dspy
 from fleet_rlm.artifacts.models import ArtifactAccess
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.chat.preparation import RunPreparationCancelledError, RunPreparationTimeoutError
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.rlm.events import AttachmentRead, SkillActivated, SkillLoaded, ToolEventView
 from fleet_rlm.rlm.runtime import PreparationNotice, RLMExecutionSpec
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost

@@ -26,7 +26,7 @@ from fleet_rlm.chat.preparation import (
     RunEnvironmentProvider,
     RunPreparation,
 )
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.composition.inventory import (
     CompositionError,
     RuntimeDatabaseLifecycle,

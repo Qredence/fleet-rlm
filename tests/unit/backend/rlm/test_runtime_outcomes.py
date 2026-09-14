@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -74,7 +74,7 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 
 @pytest.mark.asyncio
 async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -135,7 +135,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
 
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -205,7 +205,7 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -287,7 +287,7 @@ def test_public_failure_message_honors_instance_override() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,

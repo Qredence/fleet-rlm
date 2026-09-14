@@ -30,7 +30,7 @@ from dspy.utils.exceptions import AdapterParseError
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments.models import PreparedAttachment
-from fleet_rlm.chat.run_authority import RunAuthority
+from fleet_rlm.runtime.authority import RunAuthority
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
@@ -104,7 +104,7 @@ from fleet_rlm.workspace.memory import MemoryCandidate
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 
 if TYPE_CHECKING:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
 
 logger = logging.getLogger(__name__)
 

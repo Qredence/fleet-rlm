@@ -199,7 +199,9 @@ when enabled, its candidates enter a durable post-commit promotion outbox.
 Alembic owns live schema evolution. Explicit SQLite test/local helpers may
 create tables, but production startup does not use `create_all`. In-memory and
 SQL Run repositories share the same typed claim-transition policy while
-retaining their respective lock or transaction boundaries.
+retaining their respective lock or transaction boundaries. Claim-transition
+values, run-state receipts, and session context manifests live in
+`sessions/`; `chat/` owns coordination.
 
 ### Configuration
 

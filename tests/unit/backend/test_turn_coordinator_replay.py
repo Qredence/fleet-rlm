@@ -10,7 +10,7 @@ import pytest
 @pytest.mark.asyncio
 async def test_replay_bypasses_preparation_and_runner() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import CommittedRunReplay
+    from fleet_rlm.sessions.run_state import CommittedRunReplay
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput

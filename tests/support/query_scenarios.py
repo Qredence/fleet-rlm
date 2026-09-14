@@ -11,7 +11,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import event
 
-from fleet_rlm.chat.run_lifecycle import RunClaim
+from fleet_rlm.sessions.run_state import RunClaim
 from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart

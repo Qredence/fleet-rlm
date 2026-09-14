@@ -48,3 +48,6 @@ class RunAuthority:
             except BaseException:
                 # Revocation must not be blocked by an observer defect.
                 continue
+
+
+__all__ = ["RunAuthority"]

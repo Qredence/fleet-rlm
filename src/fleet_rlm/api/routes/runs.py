@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import LocalScopeDep, RunLifecycleDep
 from fleet_rlm.api.errors import http_error
-from fleet_rlm.chat.run_lifecycle import RunNotFoundError
+from fleet_rlm.sessions.run_state import RunNotFoundError
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.models import TurnAccess
 

@@ -353,7 +353,7 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fallback", [False, True], ids=["invalid-submit-repair", "typed-extract"])
 async def test_runner_completes_native_repair_and_extract_as_prediction_result(fallback: bool) -> None:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.runtime import RLMExecutionContext
 
     class Capabilities:

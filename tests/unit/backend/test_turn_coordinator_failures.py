@@ -15,7 +15,7 @@ import pytest
 def test_terminal_maps_turn_output_too_large_public_message() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.chat.turn_runtime import terminal
     from fleet_rlm.rlm.events import EventRecorder, RunFailed
 
@@ -34,7 +34,7 @@ def test_terminal_maps_turn_output_too_large_public_message() -> None:
 
 
 def test_terminal_preserves_provider_endpoint_not_found_message_from_durable_failure() -> None:
-    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.chat.turn_runtime import terminal
     from fleet_rlm.rlm.events import PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE, EventRecorder, RunFailed
 
@@ -207,7 +207,11 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 async def test_open_preparation_failure_is_durable_before_stream_and_releases_claim() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.chat.preparation import RunPreparationUnavailableError
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunLifecycleService
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunFailure,
+    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage

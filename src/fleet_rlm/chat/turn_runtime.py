@@ -18,7 +18,7 @@ from fleet_rlm.chat.preparation import (
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
 )
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedRunReplay,
     CommittedTurnReceipt,
@@ -26,11 +26,12 @@ from fleet_rlm.chat.run_lifecycle import (
     RunAlreadyCompletedError,
     RunClaim,
     RunFailure,
-    RunLifecycle,
     RunLifecycleUnavailableError,
     RunSettlement,
     RunStateError,
 )
+from fleet_rlm.chat.run_lifecycle import RunLifecycle
+
 from fleet_rlm.chat.run_ownership import (
     ClaimHeartbeat,
     shield_cleanup,

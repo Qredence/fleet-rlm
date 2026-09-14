@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI
@@ -13,7 +11,7 @@ from fastapi import FastAPI
 from fleet_rlm.observability.posthog import init_posthog, shutdown_posthog
 
 from . import __version__
-from .config.loader import configure_logging, load_runtime_settings
+from .config.loader import configure_logging, load_runtime_settings, reject_retired_environment_variables
 from .config.settings import Settings
 
 if TYPE_CHECKING:
@@ -28,39 +26,6 @@ class _CompositionInstaller(Protocol):
         *,
         database: RuntimeDatabaseLifecycle,
     ) -> RuntimeInventory: ...
-
-
-_RETIRED_ENVIRONMENT_VARIABLES = frozenset(
-    {
-        "FLEET_LIVE_KERNEL",
-        "FLEET_UPLOAD_ROOT",
-        "FLEET_ARTIFACT_ROOT",
-        "FLEET_MAX_TURN_WALL_SECONDS",
-        "FLEET_BUDGET_MAX_ITERATIONS",
-        "FLEET_BUDGET_MAX_LLM_CALLS",
-        "FLEET_BUDGET_MAX_OUTPUT_CHARS",
-        "FLEET_BUDGET_MAX_WALL_SECONDS",
-        "FLEET_BUDGET_MAX_SUB_LM_CONCURRENCY",
-        "FLEET_BUDGET_MAX_TOOL_CALLS",
-        "FLEET_BUDGET_MAX_SKILL_LOADS",
-    }
-)
-
-
-def _reject_retired_environment_variables() -> None:
-    configured = set(_RETIRED_ENVIRONMENT_VARIABLES.intersection(os.environ))
-    env_file = Path(".env")
-    if env_file.is_file():
-        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            name = line.split("=", 1)[0].removeprefix("export ").strip()
-            if name in _RETIRED_ENVIRONMENT_VARIABLES:
-                configured.add(name)
-    if configured:
-        names = ", ".join(sorted(configured))
-        raise ValueError(f"retired Fleet environment variable(s): {names}")
 
 
 @asynccontextmanager
@@ -162,7 +127,7 @@ def create_app(
     from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 
     assert_dspy_version()
-    _reject_retired_environment_variables()
+    reject_retired_environment_variables()
     resolved = settings if settings is not None else load_runtime_settings()
     configure_logging(resolved)
 

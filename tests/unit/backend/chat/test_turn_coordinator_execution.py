@@ -10,7 +10,10 @@ import pytest
 
 
 def _turn():
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
@@ -82,14 +85,14 @@ class _CleanupLifecycle:
         self.finish_started.set()
         if self.release_finish is not None:
             await self.release_finish.wait()
-        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+        from fleet_rlm.sessions.run_state import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "failed", "execution_failed", "Turn failed", True)
 
     async def settle(self, turn, failure):
         del turn, failure
         self.settle_calls += 1
-        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+        from fleet_rlm.sessions.run_state import FailedRunReceipt
 
         status = self.outcome.terminal_status
         message = "Turn cancelled" if status == "cancelled" else "Turn timed out"
@@ -98,7 +101,7 @@ class _CleanupLifecycle:
     async def revoke_claim(self, turn, failure):
         del turn, failure
         self.revoke_calls += 1
-        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+        from fleet_rlm.sessions.run_state import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "failed", "stale_claim", "Turn failed", True)
 
@@ -162,7 +165,7 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage

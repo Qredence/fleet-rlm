@@ -19,7 +19,10 @@ from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    _RunClaimToken,
+)
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent

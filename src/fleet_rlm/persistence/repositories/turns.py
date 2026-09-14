@@ -15,15 +15,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
-from fleet_rlm.chat.run_authority import RunAuthority
-from fleet_rlm.chat.run_claim import (
+from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.sessions.run_claim import (
     ClaimCommand,
     ClaimFailure,
     CompleteSettlement,
     RevokeClaim,
     decide_claim_transition,
 )
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.sessions.run_state import (
     CancelResult,
     ClaimedRun,
     CommittedRunReplay,
@@ -39,6 +39,7 @@ from fleet_rlm.chat.run_lifecycle import (
     RunStateError,
     _RunClaimToken,
 )
+
 from fleet_rlm.persistence.database import DatabaseConnectionError, observe_database_operation
 from fleet_rlm.persistence.models import RunRow, SessionRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import (

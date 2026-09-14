@@ -15,7 +15,10 @@ import pytest
 
 from fleet_rlm.attachments.models import AttachmentRef
 from fleet_rlm.chat.preparation import RunPreparationUnavailableError
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    _RunClaimToken,
+)
 from fleet_rlm.composition.live import build_run_preparation
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.session_manager import DaytonaAdmission
@@ -336,7 +339,9 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, RunLifecycleService
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
+
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     class Store:
@@ -344,8 +349,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return CommittedTurnReceipt(claimed.run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.chat.run_claim import FailClaim
-            from fleet_rlm.chat.run_lifecycle import RunFailure
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
             from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)

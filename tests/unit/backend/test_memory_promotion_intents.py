@@ -114,7 +114,7 @@ async def _seed_store():
     Returns:
         tuple: The database engine, session factory, run state store, and newly started run.
     """
-    from fleet_rlm.chat.run_lifecycle import RunClaim
+    from fleet_rlm.sessions.run_state import RunClaim
     from fleet_rlm.persistence.database import (
         create_async_engine_from_url,
         create_session_factory,
@@ -206,7 +206,7 @@ async def test_rolled_back_commit_leaves_no_intents() -> None:
     engine, factory, store, run = await _seed_store()
     try:
         run.authority.revoke()
-        from fleet_rlm.chat.run_lifecycle import RunStateError
+        from fleet_rlm.sessions.run_state import RunStateError
 
         with pytest.raises(RunStateError):
             await store.commit(run, _committed_turn(), (), memory_intents=_intents_for(1))
@@ -232,8 +232,11 @@ async def test_completed_commit_replay_cannot_duplicate_intents() -> None:
 
 @pytest.mark.asyncio
 async def test_failed_transition_never_touches_the_outbox() -> None:
-    from fleet_rlm.chat.run_claim import FailClaim
-    from fleet_rlm.chat.run_lifecycle import RunFailure, _claim_failure
+    from fleet_rlm.sessions.run_claim import FailClaim
+    from fleet_rlm.sessions.run_state import (
+        RunFailure,
+        _claim_failure,
+    )
     from fleet_rlm.rlm.result import empty_rlm_usage
 
     engine, factory, store, run = await _seed_store()
