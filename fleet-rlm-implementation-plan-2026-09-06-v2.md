@@ -72,7 +72,7 @@ These rules apply to every phase below.
 8. **Use parameterized scenario tables for equivalent cases.** Avoid near-duplicate test functions that differ only by state/error/status values.
 9. **Keep live/certification evidence separate from deterministic unit tests.** A unit fake must not duplicate a provider campaign, and a provider campaign must not become the ordinary test suite.
 10. **No new agent framework layer.** Do not add Flex, ReActV2, another `dspy.Module` wrapper, grandchildren, or another orchestration loop during this migration.
-11. **Warm capacity is optional optimization.** It stays disabled until recursive demand and quality/cost evidence justify it.
+11. **Warm capacity is optional optimization.** Its provider activation and capacity evidence remain deferred until recursive demand and quality/cost evidence justify it; the configured policy is not itself a promotion gate.
 12. **The plan stays short and reports completion.** When a task is completed, mark its heading/status as **complete** in this plan with a concise dated outcome, then update the ADR006 status ledger with the supporting evidence. Remove obsolete implementation detail instead of turning this file into another receipt archive.
 
 ## 3. What is already strong and should not be redesigned
@@ -683,11 +683,13 @@ Also keep coverage as a coarse floor, not a reason to test every internal branch
 
 Recursive child RLMs are an optimization, not a required architectural feature. DSPy's native `llm_query` and `llm_query_batched` remain the default semantic delegation mechanisms.
 
-**Status: complete (2026-09-12) — disable.** P4.1–P4.4 provide one
+**Status: complete (2026-09-12) — policy-controlled.** P4.1–P4.4 provide one
 byte-bounded capsule contract, accessed/cited evidence, one application-loop
-scheduler, and two Root-only Fleet tools. P4.6 disables those tools by default;
-native `llm_query` / `llm_query_batched` remain available. Explicit profiles
-may still opt in; no new recursive architecture or paid ablation is required.
+scheduler, and two Root-only Fleet tools. The current operator-selected
+`daytona-recursive` policy enables those tools; comparison profiles disable
+them explicitly, and native `llm_query` / `llm_query_batched` remain available.
+The historical matched campaign's disable recommendation remains evidence, not
+a silent override of the current 0.7.8 policy.
 
 The 144-admission continuation receipt remains mechanically `incomplete` because
 14 frozen-baseline C rows lacked call-shape telemetry. ADR006 records a separate
@@ -788,7 +790,12 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 ## P4.6 - Delete recursive infrastructure that does not justify itself — complete (2026-09-12)
 
-**Status: complete — disable by default.** `[defaults.rlm] recursion_enabled = false`. Default Root instructions omit Fleet `rlm_query` tools. Recursive executor and tools still exist for explicit opt-in profiles. Recursion code is not deleted in this step so `phase4-campaign` can still run; P6.3 may remove unused machinery after cutover.
+**Status: complete — retain one policy-controlled path.** The shipped
+`daytona-recursive` profile sets `recursion_enabled = true`; comparison profiles
+remain explicitly disabled. The recursive executor and tools remain one bounded
+implementation, not a second runtime architecture. Recursion code is not
+deleted in this step so `phase4-campaign` can still run; P6.3 may remove unused
+machinery after cutover.
 
 **Rationale:** Recursion is not sacred. The simplest successful RLM should win.
 
@@ -800,7 +807,10 @@ Measure correctness, evidence validity, completion, root/child LM calls, known t
 
 **Done when:** Fleet pays the code/runtime complexity cost of recursive children only when evidence supports it.
 
-**Phase 4 exit:** Fleet child RLMs are intentionally absent from the default architecture. Native `llm_query` / `llm_query_batched` remain. Opt-in recursion is an explicit profile override, not a production default.
+**Phase 4 exit:** Fleet child RLMs are policy-controlled rather than a required
+architecture. Native `llm_query` / `llm_query_batched` remain. The current
+operator-selected default enables the bounded child path; comparison profiles
+can disable it, and the historical value-proof limitations remain visible.
 
 ---
 
@@ -1197,7 +1207,7 @@ ADR006 is complete only when all of the following are true:
 - [ ] test files are organized around behavior contracts rather than migration tasks/internals;
 - [ ] tests for deleted internals are deleted while safety/lifecycle/public-contract coverage remains;
 - [ ] managed PostgreSQL, selected Daytona snapshot/runtime, and configured MLflow gates have honest retained evidence;
-- [ ] warm capacity is either evidence-backed or disabled/removed;
+- [ ] warm capacity is evidence-backed or deliberately disabled/removed (deferred for the 0.7.8 continuation and excluded from its promotion gate);
 - [ ] one clean candidate has passed public-contract, containment, settlement, quality, operational, and rollback gates;
 - [ ] obsolete runtime flags, registries, fingerprints, schedulers, broker/native compatibility branches, and migration docs are removed;
 - [ ] `ARCHITECTURE.md` and source-layout documentation describe only the supported end state.

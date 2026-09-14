@@ -104,7 +104,10 @@ jobs:
       - name: Build distributions
         env:
           FLEET_RLM_UI_BUILD_DONE: "1"
-        run: uv build
+        run: |
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          uv build
+          uv run python scripts/normalize_release_artifacts.py --dist-dir dist --epoch "$SOURCE_DATE_EPOCH"
 
       - name: Verify packaged backend assets
         env:

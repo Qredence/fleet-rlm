@@ -11,8 +11,10 @@ The selectable architecture is `legacy`: it runs native DSPy RLM with a
 broker-backed interpreter and may reuse a healthy Root Sandbox across sequential
 successful Turns. Each Run gets a fresh DSPy program. Native Daytona interpreter
 cutover is not selected. Native `llm_query` remains available, while Fleet child
-RLM tools are disabled by default after the Phase 4 ablation and require an
-explicit profile. See the [status ledger](docs/decisions/006-implementation-status.md).
+RLM tools follow the selected runtime policy: the shipped `daytona-recursive`
+profile enables the bounded child path and comparison profiles can disable it.
+This operator choice does not establish recursive value or certification. See
+the [status ledger](docs/decisions/006-implementation-status.md).
 
 ## What operators can do
 

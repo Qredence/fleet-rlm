@@ -16,6 +16,25 @@ as a fixture only. The maintained quality dataset and ingestion path still use
 the five `QUALITY_RECORDS`; corpus integration and per-case experimental
 classification must be completed before claiming a Phase 6 quality campaign.
 
+### Current implementation authority (2026-09-14)
+
+The current 0.7.8 policy is the checked-in `config/fleet.toml`: the selected
+`daytona-recursive` profile enables the bounded recursive child path, while the
+comparison profiles disable it. The historical Phase 4 matched-campaign
+recommendation to disable recursion remains retained evidence and is not a
+silent configuration override. Warm-pool settings are operator-selected but
+provider activation and capacity evidence are explicitly deferred; warm
+capacity is outside the 0.7.8 promotion gate.
+
+The overall implementation audit maps Phases 1–4 to completed source/test
+contracts, and maps the remaining release work to these open certification
+boundaries: deployed snapshot identity, managed PostgreSQL compatibility,
+configured MLflow certification, human-aligned quality data, trusted GEPA
+campaign provenance, fenced rollback rehearsal, and proof-backed migration
+deletion. A clean candidate is merge-ready only when those boundaries have
+candidate-SHA-bound receipts; otherwise the write-once promotion decision stays
+blocked with the exact missing evidence.
+
 ### Phase 6 implementation continuation (2026-09-14)
 
 - P6.1 now has a v2 write-once bundle reader that verifies a clean HEAD,

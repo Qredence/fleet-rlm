@@ -27,7 +27,10 @@ The candidate checkout must be clean throughout capture. The v2 bundle verifies
 the artifact manifest against wheel/sdist bytes and matches the wheel's Python
 sources against tracked candidate sources. It validates the selected profile
 and hashes its merged, unresolved policy without reading credentials. This is
-not a substitute for `make check-release` or reproducible-build provenance.
+not a substitute for `make check-release` or live provenance. `make build`
+derives `SOURCE_DATE_EPOCH` from the candidate commit and normalizes wheel and
+sdist metadata before writing the manifest, so two clean builds of one SHA must
+produce identical artifact bytes.
 
 `images.json` binds both snapshot identifiers to manifest and probe receipt
 SHA-256 values (replace these illustrative hashes with actual receipt hashes):

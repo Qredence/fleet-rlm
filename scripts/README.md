@@ -32,9 +32,10 @@ hand.
 | `db_init.py` | Apply Alembic to the configured database target. |
 | `migrate_sqlite_to_postgres.py` | Run the explicit one-time database import. |
 | `daytona_snapshot.py` | Plan, create, check, or verify immutable Daytona snapshots. |
-| `daytona_warm_pool.py` | Plan, inspect, or explicitly reconcile the disabled-by-default SemanticChild pool. |
+| `daytona_warm_pool.py` | Plan, inspect, or explicitly reconcile the operator-selected SemanticChild pool; activation remains separately gated. |
 | `inventory_db_heads.py` | Record a read-only deployed database-head inventory. |
 | `lakebase_preflight.py` | Run the sanitized Lakebase readiness preflight. |
+| `normalize_release_artifacts.py` | Normalize wheel and sdist metadata for reproducible release identities. |
 | `validate_mlflow_tracing.py` | Validate tracing for the selected policy. |
 | `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
 | `deployment_observability.py` | Inspect release observability inputs. |
