@@ -61,15 +61,17 @@ def test_broker_history_context_and_submit_need_only_standard_library(tmp_path: 
     broker_path = tmp_path / "broker.py"
     broker_path.write_text(source)
     history = CommittedSessionHistory([{"request": "earlier", "answer": "41"}])
-    code = "\n".join((
-        remote_submit_setup_code([{"name": "answer", "type": "str"}]),
-        history.sandbox_setup(),
-        history.sandbox_assignment("history", repr(history.to_sandbox())),
-        capsule.sandbox_setup(),
-        capsule.sandbox_assignment("attachments", repr(raw)),
-        "assert attachments[0]['data'] == context == 'prepared evidence'",
-        "SUBMIT(answer=str(int(history.messages[0]['answer']) + 1))",
-    ))
+    code = "\n".join(
+        (
+            remote_submit_setup_code([{"name": "answer", "type": "str"}]),
+            history.sandbox_setup(),
+            history.sandbox_assignment("history", repr(history.to_sandbox())),
+            capsule.sandbox_setup(),
+            capsule.sandbox_assignment("attachments", repr(raw)),
+            "assert attachments[0]['data'] == context == 'prepared evidence'",
+            "SUBMIT(answer=str(int(history.messages[0]['answer']) + 1))",
+        )
+    )
     harness = (
         "import importlib.util, runpy\n"
         "assert importlib.util.find_spec('dspy') is None\n"
@@ -101,8 +103,7 @@ def test_co_located_worker_preserves_state_and_services_callbacks(tmp_path: Path
         port = int(reservation.getsockname()[1])
     secret = "test-broker-secret"
     source = (
-        BROKER_SERVER_CODE
-        .replace("__BROKER_SECRET__", repr(secret))
+        BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(secret))
         .replace("__BROKER_PORT__", str(port))
         .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
         .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))

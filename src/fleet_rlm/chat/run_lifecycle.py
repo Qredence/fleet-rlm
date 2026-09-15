@@ -318,11 +318,13 @@ class RunLifecycleService:
                     "Memory Candidate promotion exceeded the bounded post-commit deadline; "
                     "owned cleanup will retain the Run lease"
                 )
-                span.set_outputs({
-                    "promotion_outcome": "deadline_exceeded",
-                    "promoted_count": 0,
-                    "deadline_ms": int(_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S * 1000),
-                })
+                span.set_outputs(
+                    {
+                        "promotion_outcome": "deadline_exceeded",
+                        "promoted_count": 0,
+                        "deadline_ms": int(_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S * 1000),
+                    }
+                )
                 return
             if attempt.status == "interrupted":
                 await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_INTERRUPTED)
@@ -343,13 +345,15 @@ class RunLifecycleService:
             duplicates = int(getattr(result, "duplicate_count", 0))
             dropped = int(getattr(result, "dropped_count", 0))
             failures = int(getattr(result, "failure_count", 0))
-            span.set_outputs({
-                "promotion_outcome": "failed" if failures else "completed",
-                "promoted_count": promoted,
-                "duplicate_count": duplicates,
-                "dropped_count": dropped,
-                "failure_count": failures,
-            })
+            span.set_outputs(
+                {
+                    "promotion_outcome": "failed" if failures else "completed",
+                    "promoted_count": promoted,
+                    "duplicate_count": duplicates,
+                    "dropped_count": dropped,
+                    "failure_count": failures,
+                }
+            )
             if failures:
                 await self._mark_run_outbox(run_id, outbox, "note", reason=OUTCOME_PROMOTION_FAILED)
                 logger.warning(

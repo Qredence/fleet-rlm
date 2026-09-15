@@ -138,19 +138,23 @@ def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
             default_values[name] = default_json
         signature_parts.append(parameter)
         if not required:
-            validation_parts.extend((
-                f"if {name} is _FLEET_MISSING:",
-                f"    {name} = _fleet_default({name!r})",
-            ))
+            validation_parts.extend(
+                (
+                    f"if {name} is _FLEET_MISSING:",
+                    f"    {name} = _fleet_default({name!r})",
+                )
+            )
         if type_hint in {"str", "builtins.str"}:
             message = (
                 f"SUBMIT field {name} must be a string; serialize mappings/lists with "
                 "json.dumps(value, ensure_ascii=False)"
             )
-            validation_parts.extend((
-                f"if not isinstance({name}, str):",
-                f"    raise TypeError({message!r})",
-            ))
+            validation_parts.extend(
+                (
+                    f"if not isinstance({name}, str):",
+                    f"    raise TypeError({message!r})",
+                )
+            )
         result_parts.append(f'"{name}": {name}')
     signature = ", ".join(signature_parts) or "**kwargs"
     body_lines = [
@@ -748,20 +752,22 @@ _MAX_CALLBACK_WORKERS = 8
 # deduplication.  The cache is per ``execute_with_callbacks`` call, never
 # process-global, and callers may add a custom name only by opting in at the
 # explicit ``register_tools`` boundary.
-DEFAULT_RETRYABLE_TOOL_NAMES = frozenset({
-    "list_workspace_files",
-    "stat_workspace_file",
-    "read_workspace_text",
-    "read_workspace_text_batch",
-    "list_project_files",
-    "stat_project_file",
-    "read_project_text",
-    "read_workspace_memory",
-    "list_memories",
-    "search_memories",
-    "read_attachment",
-    "read_curated_input",
-})
+DEFAULT_RETRYABLE_TOOL_NAMES = frozenset(
+    {
+        "list_workspace_files",
+        "stat_workspace_file",
+        "read_workspace_text",
+        "read_workspace_text_batch",
+        "list_project_files",
+        "stat_project_file",
+        "read_project_text",
+        "read_workspace_memory",
+        "list_memories",
+        "search_memories",
+        "read_attachment",
+        "read_curated_input",
+    }
+)
 
 _MAX_DEDUPE_ENTRIES = 256
 _DEDUPE_WAIT_SECONDS = 120.0
@@ -1002,8 +1008,7 @@ class DaytonaHttpToolBroker:
         if self._broker_url is not None:
             return
         server_code = (
-            BROKER_SERVER_CODE
-            .replace("__BROKER_SECRET__", repr(self._broker_secret))
+            BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
             .replace("__BROKER_PORT__", str(self._broker_port))
             .replace("__MAX_REQUEST_BYTES__", str(_MAX_EXECUTE_REQUEST_BYTES))
             .replace("__MAX_OUTPUT_CHARS__", str(_MAX_EXECUTE_OUTPUT_CHARS))

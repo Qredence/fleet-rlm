@@ -1548,15 +1548,17 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     }
     if judge_ab:
         judge_ab_receipt = _judge_ab_receipt(result, baseline, rationale_first)
-        judge_ab_receipt.update({
-            "model": args.judge_model,
-            "instructions": {
-                "correctness": CORRECTNESS_INSTRUCTIONS,
-                "evidence_coverage": EVIDENCE_COVERAGE_INSTRUCTIONS,
-            },
-            "inference_params": dict(JUDGE_INFERENCE_PARAMS),
-            "rationale_settings": {"baseline": False, "rationale_first": True},
-        })
+        judge_ab_receipt.update(
+            {
+                "model": args.judge_model,
+                "instructions": {
+                    "correctness": CORRECTNESS_INSTRUCTIONS,
+                    "evidence_coverage": EVIDENCE_COVERAGE_INSTRUCTIONS,
+                },
+                "inference_params": dict(JUDGE_INFERENCE_PARAMS),
+                "rationale_settings": {"baseline": False, "rationale_first": True},
+            }
+        )
         receipt["judge_ab"] = judge_ab_receipt
         receipt["quality_complete"] = None
     else:
@@ -1632,12 +1634,14 @@ def _judge_ab_receipt(result: Any, baseline: Sequence[Any], rationale_first: Seq
                 if base_value == rationale_value:
                     matching += 1
                 elif len(disagreements) < 64:
-                    disagreements.append({
-                        "row_index": int(index) if isinstance(index, int) else str(index),
-                        "judge": base_name.removesuffix("_baseline"),
-                        "baseline": base_value,
-                        "rationale_first": rationale_value,
-                    })
+                    disagreements.append(
+                        {
+                            "row_index": int(index) if isinstance(index, int) else str(index),
+                            "judge": base_name.removesuffix("_baseline"),
+                            "baseline": base_value,
+                            "rationale_first": rationale_value,
+                        }
+                    )
             judge_name = base_name.removesuffix("_baseline")
             agreement[judge_name] = {
                 "matching": matching,
