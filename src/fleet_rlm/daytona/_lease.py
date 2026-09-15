@@ -71,9 +71,6 @@ class RootSessionLease:
         self.mount_path = mount_path or _optional_text(getattr(lease, "mount_path", None))
         self.volume_subpath = volume_subpath or _optional_text(getattr(lease, "volume_subpath", None))
         self._state = LeaseState.OPEN
-        # Optional composition owner marker used when this primitive is shared
-        # by a provider facade and its preparation adapter.
-        self._environment_provider_owner: Any | None = None
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._close_error: BaseException | None = None
