@@ -4,6 +4,28 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.9] - 2026-09-15
+
+This release follows 0.7.8 with the merged codebase-simplification work,
+dead provider-callback removal, and Phase 6 promotion-gate follow-through
+already on `main`. Package metadata now points documentation at
+`https://docs.qredence.ai/`. Managed provider, database, and production
+certification gates remain explicitly scoped in the ADR 006 ledger.
+
+### Changed
+
+- Removed unused package barrels, Daytona admission re-exports, and dead
+  provider root-callback helpers after the #532 ownership consolidation.
+- Unified remaining lifecycle ownership onto runtime-owned seams, moved
+  session archive and prewarm into composed services, and kept idle-stop
+  from retiring a sandbox while a Turn still holds it.
+- Normalized HTTP errors, isolated analytics, and gated binds; capped
+  DeepSeek judge output so local GenAI eval stays under OTPM.
+- Completed Phase 6 promotion-bundle, rollback, deletion, and blocked-
+  decision gates with content-free GEPA evidence and reproducible release
+  identities.
+- Pointed `pyproject.toml` documentation URL at `https://docs.qredence.ai/`.
+
 ## [0.7.8] - 2026-09-14
 
 This release carries the Phase 5 operational-certification follow-up from

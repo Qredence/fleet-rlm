@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.8"
+version = "0.7.9"
 description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -71,7 +71,7 @@ dependencies = [
 Homepage = "https://github.com/qredence/fleet-rlm"
 Repository = "https://github.com/qredence/fleet-rlm"
 Issues = "https://github.com/qredence/fleet-rlm/issues"
-Documentation = "https://fleet-rlm.readthedocs.io/"
+Documentation = "https://docs.qredence.ai/"
 
 [project.scripts]
 fleet = "fleet_rlm.cli.main:fleet_main"
