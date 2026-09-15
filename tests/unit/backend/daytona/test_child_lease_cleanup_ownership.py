@@ -13,13 +13,13 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona import recursive_child_runtime
+from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.recursive_child_runtime import (
     ChildRuntimeLease,
     ChildRuntimeLeaseState,
     LateCleanupOwner,
     build_child_runtime_factory,
 )
-from fleet_rlm.daytona.session_manager import DaytonaAdmission
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 _MOUNT = "/home/daytona/fleet"

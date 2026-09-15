@@ -12,7 +12,8 @@ from pydantic import ValidationError
 
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
-from fleet_rlm.rlm.result import RLMUsage, validate_rlm_usage
+from fleet_rlm.rlm.result import validate_rlm_usage
+from fleet_rlm.runtime.usage import RLMUsage
 
 
 class CommittedTurnValidationError(ValueError):
@@ -366,3 +367,23 @@ class CommittedTurnCodec:
                 message = "a committed Turn requires non-blank final text"
             raise CommittedTurnValidationError(message) from exc
         return CommittedTurn(schema_version=1, parts=parts, trace_id=trace_id)
+
+
+CANCELLED_TOMBSTONE_TEXT = "Turn cancelled"
+
+
+def commit_cancelled_tombstone(usage: RLMUsage) -> CommittedTurn:
+    """Build the bounded D2 tombstone committed for one cancelled Run.
+
+    The mark is deliberately closed: one status part with ``phase="cancelled"``,
+    the observed usage, and a constant final text. No evidence parts (reasoning,
+    code, output, tools) ever enter the durable cancellation record.
+    """
+    return CommittedTurn(
+        schema_version=1,
+        parts=(
+            StatusPart(phase="cancelled", status="cancelled"),
+            UsagePart(value=usage),
+            TextPart(text=CANCELLED_TOMBSTONE_TEXT),
+        ),
+    )

@@ -69,19 +69,26 @@ class HarnessChecker:
 
     repo_root: Path
     check_script_help: bool = True
+    editorial: bool = False
     errors: list[HarnessError] = field(default_factory=list)
 
     def run(self) -> list[HarnessError]:
-        """Run all checks and return collected errors."""
-        self._check_root_agents_budget()
+        """Run checks and return collected errors.
+
+        Default mode keeps CI/release hard gates only. Editorial checks cover
+        documentation hygiene and stale-marker scans that are useful locally
+        but brittle for routine ``make check-docs`` runs.
+        """
+        if self.editorial:
+            self._check_root_agents_budget()
+            self._check_docs_index_links()
+            self._check_generated_artifact_controls()
+            self._check_control_surface_drift()
         self._check_required_guidance_files()
         self._check_agent_guide_structure()
-        self._check_docs_index_links()
         self._check_codex_config()
-        self._check_generated_artifact_controls()
         self._check_script_inventory()
         self._check_removed_paths()
-        self._check_control_surface_drift()
         self._check_backend_import_boundaries()
         return self.errors
 
@@ -309,6 +316,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip executing top-level scripts with --help.",
     )
+    parser.add_argument(
+        "--editorial",
+        action="store_true",
+        help="Also run editorial documentation and stale-marker checks.",
+    )
     return parser.parse_args(argv)
 
 
@@ -318,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
     checker = HarnessChecker(
         repo_root=args.repo_root.resolve(),
         check_script_help=not args.skip_script_help,
+        editorial=args.editorial,
     )
     errors = checker.run()
     if errors:

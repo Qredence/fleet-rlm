@@ -10,7 +10,6 @@ import dspy
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -21,6 +20,7 @@ from fleet_rlm.rlm.program import (
     build_rlm_input_kwargs,
 )
 from fleet_rlm.rlm.result import RLMConfigError
+from fleet_rlm.sessions.context import SessionContextManifest
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
 
 
@@ -310,9 +310,9 @@ def test_invalid_request_fails_at_the_input_boundary() -> None:
 async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.chat.session_context import SessionContextManifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.rlm.program import FleetRLMSignature
+    from fleet_rlm.sessions.context import SessionContextManifest
 
     body = b"Fleet context"
     context_file = tmp_path / "report.txt"
@@ -542,7 +542,7 @@ _SESSION_ID = "00000000-0000-0000-0000-000000000001"
 
 
 def _manifest():
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
 
     return SessionContextManifest(
         session_id=__import__("uuid").UUID(_SESSION_ID),

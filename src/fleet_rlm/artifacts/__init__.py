@@ -1,19 +1,8 @@
-"""Durable generated artifacts (logical IDs, Volume layout)."""
+"""Durable generated artifacts (logical IDs, Volume layout).
 
-from fleet_rlm.artifacts.errors import (
-    ArtifactError,
-    ArtifactNotFoundError,
-    ArtifactValidationError,
-)
-from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.artifacts.models import ArtifactKind, ArtifactRef, CompletedRun
+Import concrete catalog, model, and error types from their owning modules.
+Keeping package initialization side-effect free avoids loading artifact
+graphs on submodule imports.
+"""
 
-__all__ = [
-    "ArtifactError",
-    "ArtifactKind",
-    "ArtifactNotFoundError",
-    "ArtifactRef",
-    "ArtifactValidationError",
-    "CompletedRun",
-    "LocalArtifactCatalog",
-]
+from __future__ import annotations

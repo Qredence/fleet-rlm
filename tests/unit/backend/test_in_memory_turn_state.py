@@ -10,10 +10,14 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_begin_commit_replay_and_history_are_input_bound() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedRunReplay, RunClaim
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedRunReplay,
+        RunClaim,
+    )
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -41,13 +45,13 @@ async def test_begin_commit_replay_and_history_are_input_bound() -> None:
 
 @pytest.mark.asyncio
 async def test_idempotency_mismatch_single_active_and_cancellation() -> None:
-    from fleet_rlm.chat.run_lifecycle import (
+    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
         RunClaim,
         RunIdempotencyMismatchError,
         RunInProgressError,
     )
-    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
-    from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -65,9 +69,12 @@ async def test_idempotency_mismatch_single_active_and_cancellation() -> None:
 
 @pytest.mark.asyncio
 async def test_idempotency_claim_changes_when_skill_selections_change() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunIdempotencyMismatchError
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunIdempotencyMismatchError,
+    )
     from fleet_rlm.skills.models import SkillSelectionRef
 
     store = InMemoryRunStateStore()
@@ -98,9 +105,12 @@ async def test_idempotency_claim_changes_when_skill_selections_change() -> None:
 
 @pytest.mark.asyncio
 async def test_archived_session_cannot_begin_turn() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunNotFoundError
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunNotFoundError,
+    )
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)
@@ -120,9 +130,12 @@ async def test_archived_session_cannot_begin_turn() -> None:
 
 @pytest.mark.asyncio
 async def test_startup_reconciliation_fences_running_claims_and_allows_same_key_retry() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -149,9 +162,12 @@ async def test_startup_reconciliation_fences_running_claims_and_allows_same_key_
 
 @pytest.mark.asyncio
 async def test_concurrent_in_memory_recovery_fences_one_claim_once() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -184,9 +200,12 @@ async def test_concurrent_in_memory_recovery_fences_one_claim_once() -> None:
 
 @pytest.mark.asyncio
 async def test_cancelled_in_memory_recovery_releases_recovery_guard() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
@@ -213,11 +232,15 @@ async def test_cancelled_in_memory_recovery_releases_recovery_guard() -> None:
 
 @pytest.mark.asyncio
 async def test_in_memory_recovery_preserves_settling_intent_after_fence_failure() -> None:
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     store = InMemoryRunStateStore()
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()

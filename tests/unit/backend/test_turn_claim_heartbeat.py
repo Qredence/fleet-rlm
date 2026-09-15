@@ -12,13 +12,13 @@ import pytest
 def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     import dspy
 
-    from fleet_rlm.chat.run_authority import RunAuthority
     from fleet_rlm.rlm.events import (
         ToolEventView,
         ToolFailed,
         ToolStarted,
         observe_tool,
     )
+    from fleet_rlm.runtime.authority import RunAuthority
 
     authority = RunAuthority()
     effects: list[str] = []
@@ -45,11 +45,15 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
 @pytest.mark.asyncio
 async def test_heartbeat_supervision_covers_preparation() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunLifecycleUnavailableError, RunStateError
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        RunLifecycleUnavailableError,
+        RunStateError,
+    )
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -65,7 +69,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.chat.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_claim import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise RunStateError("Turn claim is invalid")
@@ -133,7 +137,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.chat.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_claim import HeartbeatClaim
 
             if not isinstance(command, HeartbeatClaim):
                 return await authoritative.transition_claim(turn, command)
@@ -232,7 +236,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.chat.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_claim import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise ConnectionError("database unavailable")
@@ -303,13 +307,17 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 
 @pytest.mark.asyncio
 async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -365,13 +373,14 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
 @pytest.mark.asyncio
 async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunStateError
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import RunStateError
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -387,7 +396,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.chat.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_claim import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise RunStateError("Turn claim is invalid")
@@ -469,12 +478,13 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 @pytest.mark.asyncio
 async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService, RunStateError
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import RunStateError
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -492,7 +502,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.chat.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_claim import HeartbeatClaim
 
             if not isinstance(command, HeartbeatClaim):
                 return await authoritative.transition_claim(turn, command)
@@ -573,7 +583,10 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
     old_run = authoritative._runs[run_id]
     assert old_run.status == "failed"
     assert old_run.failure_code == "stale_claim"
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     replacement = await authoritative.begin(RunClaim(access, session.id, TurnInput("next"), "next", uuid4()))
     assert isinstance(replacement, ClaimedRun)
@@ -699,15 +712,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     """Claim-loss cleanup racing a committed Turn logs and no-ops; commit state is untouched."""
     import logging
 
-    from fleet_rlm.chat.run_lifecycle import (
-        ClaimedRun,
-        CommittedTurnReceipt,
-        RunAlreadyCompletedError,
-        RunClaim,
-        RunFailure,
-        RunLifecycleService,
-        RunStateError,
-    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
@@ -718,6 +723,14 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     )
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        RunAlreadyCompletedError,
+        RunClaim,
+        RunFailure,
+        RunStateError,
+    )
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
 
@@ -782,12 +795,7 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
     """The guard funnel returns None for committed Runs; live claims still revoke durably."""
     import logging
 
-    from fleet_rlm.chat.run_lifecycle import (
-        ClaimedRun,
-        CommittedTurnReceipt,
-        RunClaim,
-        RunLifecycleService,
-    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
@@ -796,6 +804,11 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
         empty_rlm_usage,
     )
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        RunClaim,
+    )
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -847,12 +860,7 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     """Driver cleanup with claim_lost still closes resources but never settles a committed Run."""
     import logging
 
-    from fleet_rlm.chat.run_lifecycle import (
-        ClaimedRun,
-        CommittedTurnReceipt,
-        RunClaim,
-        RunLifecycleService,
-    )
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
@@ -862,6 +870,11 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     )
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        RunClaim,
+    )
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())

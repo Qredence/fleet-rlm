@@ -57,11 +57,11 @@ export interface paths {
         put?: never;
         /**
          * Create Session
-         * @description Create a session for the authenticated user in the current workspace.
+         * @description Create a session for the local user in the current workspace.
          *
          *     Parameters:
          *         body (SessionCreateRequest): Session creation data, including the optional title.
-         *         identity (LocalScopeDep): Authenticated user and workspace scope.
+         *         identity (LocalScopeDep): The deterministic local User and Workspace scope.
          *         repo (SessionCatalogDep): Session repository used to create the session.
          *         prewarm (SessionPrewarmDep): Optional background Sandbox pre-warm trigger.
          *
@@ -91,7 +91,7 @@ export interface paths {
         head?: never;
         /**
          * Patch Session
-         * @description Update the title or status of a session within the authenticated user's workspace.
+         * @description Update the title or status of a session within the local user's workspace.
          *
          *     Parameters:
          *         body (SessionPatchRequest): Fields to update; at least one field is required.
@@ -243,7 +243,7 @@ export interface paths {
          *
          *     Parameters:
          *         run_id (UUID): The identifier of the run to cancel.
-         *         identity (LocalScopeDep): The authenticated user's workspace scope.
+         *         identity (LocalScopeDep): The deterministic local User and Workspace scope.
          *         lifecycle (RunLifecycleDep): The run lifecycle service.
          *
          *     Returns:
@@ -1475,8 +1475,26 @@ export interface operations {
                     "application/json": components["schemas"]["SessionTurnPageResponse"];
                 };
             };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1559,8 +1577,26 @@ export interface operations {
                     "application/json": components["schemas"]["TraceFeedbackResponse"];
                 };
             };
+            /** @description Trace not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Trace feedback is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1603,6 +1639,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Service is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     create_session: {
@@ -1636,6 +1681,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Service is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_session: {
@@ -1658,8 +1712,26 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDetailResponse"];
                 };
             };
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1693,8 +1765,26 @@ export interface operations {
                     "application/json": components["schemas"]["SessionDetailResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Session not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Session update is invalid */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready, or Session retirement is pending */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1726,8 +1816,26 @@ export interface operations {
                     "application/json": components["schemas"]["AttachmentResponse"];
                 };
             };
+            /** @description Attachment request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Attachment storage is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1757,8 +1865,26 @@ export interface operations {
                     "application/json": components["schemas"]["AttachmentResponse"];
                 };
             };
+            /** @description Attachment not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Attachment storage is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1788,8 +1914,26 @@ export interface operations {
                     "application/json": components["schemas"]["ArtifactResponse"];
                 };
             };
+            /** @description Artifact not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Artifact storage is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1881,6 +2025,15 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+            /** @description Service is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     get_skill: {
@@ -1903,8 +2056,26 @@ export interface operations {
                     "application/json": components["schemas"]["SkillCardResponse"];
                 };
             };
+            /** @description Skill not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1934,8 +2105,26 @@ export interface operations {
                     "application/json": components["schemas"]["CancellationResponse"];
                 };
             };
+            /** @description Run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1963,6 +2152,15 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsPolicyResponse"];
                 };
             };
+            /** @description Settings are unavailable, or the service is not ready */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     update_settings_policy: {
@@ -1987,8 +2185,26 @@ export interface operations {
                     "application/json": components["schemas"]["SettingsPolicyResponse"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Settings changed; reload before saving */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Settings value is invalid */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Service is not ready */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2021,8 +2237,35 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileListResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2052,8 +2295,35 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2085,8 +2355,35 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileReadResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2118,8 +2415,44 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file precondition did not match */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2151,8 +2484,44 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileDeleteResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file precondition did not match */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2184,8 +2553,44 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file precondition did not match */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2217,8 +2622,44 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceFileEntryResponse"];
                 };
             };
+            /** @description Workspace file request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace file precondition did not match */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace files are unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2250,8 +2691,26 @@ export interface operations {
                     "application/json": components["schemas"]["VolumeTreeResponse"];
                 };
             };
+            /** @description Volume tree request is invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace Volume is unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

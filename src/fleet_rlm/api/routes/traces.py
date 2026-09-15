@@ -28,6 +28,10 @@ router = APIRouter(prefix="/api/sessions", tags=["traces"])
     "/{session_id}/traces/feedback",
     response_model=TraceFeedbackResponse,
     operation_id="submit_trace_feedback",
+    responses={
+        404: {"description": "Trace not found"},
+        503: {"description": "Trace feedback is unavailable"},
+    },
 )
 async def submit_trace_feedback(
     session_id: UUID,

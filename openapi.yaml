@@ -117,6 +117,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionTurnPageResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -151,6 +163,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/TraceFeedbackResponse'
+        '404':
+          description: Trace not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Trace feedback is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -162,11 +186,11 @@ paths:
       tags:
       - sessions
       summary: Create Session
-      description: "Create a session for the authenticated user in the current workspace.\n\
+      description: "Create a session for the local user in the current workspace.\n\
         \nParameters:\n    body (SessionCreateRequest): Session creation data, including\
-        \ the optional title.\n    identity (LocalScopeDep): Authenticated user and\
-        \ workspace scope.\n    repo (SessionCatalogDep): Session repository used\
-        \ to create the session.\n    prewarm (SessionPrewarmDep): Optional background\
+        \ the optional title.\n    identity (LocalScopeDep): The deterministic local\
+        \ User and Workspace scope.\n    repo (SessionCatalogDep): Session repository\
+        \ used to create the session.\n    prewarm (SessionPrewarmDep): Optional background\
         \ Sandbox pre-warm trigger.\n\nReturns:\n    SessionDetailResponse: The newly\
         \ created session details."
       operationId: create_session
@@ -183,6 +207,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDetailResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -240,6 +270,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionListResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -267,6 +303,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDetailResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -277,9 +325,9 @@ paths:
       tags:
       - sessions
       summary: Patch Session
-      description: "Update the title or status of a session within the authenticated\
-        \ user's workspace.\n\nParameters:\n    body (SessionPatchRequest): Fields\
-        \ to update; at least one field is required.\n\nReturns:\n    SessionDetailResponse:\
+      description: "Update the title or status of a session within the local user's\
+        \ workspace.\n\nParameters:\n    body (SessionPatchRequest): Fields to update;\
+        \ at least one field is required.\n\nReturns:\n    SessionDetailResponse:\
         \ The updated session details.\n\nRaises:\n    HTTPException: If no fields\
         \ are provided, the title is blank, the status is invalid, or the\n      \
         \  session cannot be updated."
@@ -305,8 +353,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionDetailResponse'
+        '404':
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation Error
+          description: Session update is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready, or Session retirement is pending
           content:
             application/json:
               schema:
@@ -330,6 +390,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttachmentResponse'
+        '400':
+          description: Attachment request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Attachment storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -357,6 +429,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AttachmentResponse'
+        '404':
+          description: Attachment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Attachment storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -384,6 +468,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArtifactResponse'
+        '404':
+          description: Artifact not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Artifact storage is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -475,6 +571,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/SkillCardResponse'
                 title: Response List Skills
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -502,6 +604,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SkillCardResponse'
+        '404':
+          description: Skill not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -515,7 +629,7 @@ paths:
       summary: Request Run Cancellation
       description: "Request cancellation for a run.\n\nParameters:\n    run_id (UUID):\
         \ The identifier of the run to cancel.\n    identity (LocalScopeDep): The\
-        \ authenticated user's workspace scope.\n    lifecycle (RunLifecycleDep):\
+        \ deterministic local User and Workspace scope.\n    lifecycle (RunLifecycleDep):\
         \ The run lifecycle service.\n\nReturns:\n    CancellationResponse: The run\
         \ identifier and resulting cancellation state."
       operationId: request_run_cancellation
@@ -534,6 +648,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancellationResponse'
+        '404':
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -553,6 +679,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SettingsPolicyResponse'
+        '503':
+          description: Settings are unavailable, or the service is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       tags:
       - settings
@@ -577,8 +709,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SettingsPolicyResponse'
+        '409':
+          description: Settings changed; reload before saving
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
-          description: Validation Error
+          description: Settings value is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Service is not ready
           content:
             application/json:
               schema:
@@ -623,6 +767,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileListResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -649,6 +811,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -692,6 +872,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileReadResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -716,6 +914,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Workspace file precondition did not match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -740,6 +962,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileDeleteResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Workspace file precondition did not match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -764,6 +1010,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Workspace file precondition did not match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -789,6 +1059,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceFileEntryResponse'
+        '400':
+          description: Workspace file request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Workspace file not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace files are unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Workspace file precondition did not match
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:
@@ -836,6 +1130,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/VolumeTreeResponse'
+        '400':
+          description: Volume tree request is invalid
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Workspace Volume is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: Validation Error
           content:

@@ -17,7 +17,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
@@ -32,6 +32,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import ArtifactPart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import RunClaim
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -403,11 +404,15 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 @pytest.mark.asyncio
 async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> None:
     from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, CommittedTurnReceipt, _RunClaimToken
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        _RunClaimToken,
+    )
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 

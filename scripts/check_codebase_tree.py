@@ -8,17 +8,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE = ROOT / "src" / "fleet_rlm"
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+from scripts.import_walk import iter_imports, matches
 
-def _imports_from_tree(tree: ast.AST) -> list[tuple[int, str]]:
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            found.extend((node.lineno, alias.name) for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            found.append((node.lineno, node.module))
-    return found
+SOURCE_ROOT = ROOT / "src"
+PACKAGE = SOURCE_ROOT / "fleet_rlm"
 
 
 def find_nested_ternaries(tree: ast.AST) -> list[int]:
@@ -39,28 +35,33 @@ def find_nested_ternaries(tree: ast.AST) -> list[int]:
     return violations
 
 
-def main() -> int:
+def check_codebase_tree(root: Path = ROOT) -> tuple[list[str], list[str]]:
+    """Return boundary and clarity violation messages for the backend package."""
+    root = root.resolve()
+    source_root = root / "src"
+    package = source_root / "fleet_rlm"
     boundary_violations: list[str] = []
     clarity_violations: list[str] = []
-    for path in sorted(PACKAGE.rglob("*.py")):
-        relative = path.relative_to(PACKAGE)
+    for path in sorted(package.rglob("*.py")):
+        relative = path.relative_to(package)
         source = path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(path))
-        for line, imported in _imports_from_tree(tree):
+        for line, imported in iter_imports(path, source_root=source_root):
             if (imported == "daytona" or imported.startswith("daytona.")) and (
                 not relative.parts or relative.parts[0] != "daytona"
             ):
                 boundary_violations.append(f"{relative}:{line}: Daytona SDK import outside daytona/")
-            if relative.parts[:2] == ("api", "routes") and imported.startswith(
-                (
-                    "fleet_rlm.persistence",
-                    "fleet_rlm.daytona",
-                )
+            if relative.parts[:2] == ("api", "routes") and (
+                matches(imported, "fleet_rlm.persistence") or matches(imported, "fleet_rlm.daytona")
             ):
                 boundary_violations.append(f"{relative}:{line}: route bypasses injected application modules")
         for line in find_nested_ternaries(tree):
             clarity_violations.append(f"{relative}:{line}: nested conditional expression (IfExp)")
+    return boundary_violations, clarity_violations
 
+
+def main() -> int:
+    boundary_violations, clarity_violations = check_codebase_tree()
     if boundary_violations or clarity_violations:
         print("Backend tree check failed:", file=sys.stderr)
         if boundary_violations:

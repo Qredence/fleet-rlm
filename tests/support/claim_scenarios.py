@@ -8,7 +8,11 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow
+from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
+from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+from fleet_rlm.sessions.models import TurnInput
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedRunReplay,
     RunClaim,
@@ -16,10 +20,6 @@ from fleet_rlm.chat.run_lifecycle import (
     RunInProgressError,
     RunStateError,
 )
-from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow
-from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
-from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
-from fleet_rlm.sessions.models import TurnInput
 
 
 async def concurrent_claims_have_one_owner(postgres_claim_store, race):
@@ -65,7 +65,7 @@ async def concurrent_claims_have_one_owner(postgres_claim_store, race):
 
 
 async def cancel_settlement_races_commit(postgres_claim_store):
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
 
     store, factory, access, session_id = postgres_claim_store
     run = await store.begin(RunClaim(access, session_id, TurnInput("cancel race"), "cancel", uuid4()))

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.chat.run_claim import (
+from fleet_rlm.sessions.run_claim import (
     BeginSettlement,
     ClaimFailure,
     ClaimState,

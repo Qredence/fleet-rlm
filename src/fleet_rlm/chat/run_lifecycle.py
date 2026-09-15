@@ -6,35 +6,45 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from hashlib import sha256
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
 from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_authority import RunAuthority
-from fleet_rlm.chat.run_claim import (
+from fleet_rlm.chat.turn_detail_policy import commit_success
+from fleet_rlm.observability.tracing import turn_phase_span
+from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
+from fleet_rlm.rlm.result import RLMOutcome
+from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.runtime.owned_effect import OwnedEffect
+from fleet_rlm.sessions.committed_turn import CommittedTurn
+from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_claim import (
     BeginSettlement,
     ClaimCommand,
-    ClaimFailure,
-    ClaimFailureCode,
     CompleteSettlement,
     FailClaim,
     HeartbeatClaim,
     RevokeClaim,
     failure_code_for_terminal_status,
 )
-from fleet_rlm.chat.turn_detail_policy import commit_success
-from fleet_rlm.observability.tracing import turn_phase_span
-from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
-from fleet_rlm.rlm.result import RLMOutcome, RLMUsage
-from fleet_rlm.rlm.runtime import AsyncCancellationProbe
-from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
-from fleet_rlm.runtime.owned_effect import OwnedEffect
-from fleet_rlm.sessions.committed_turn import CommittedTurn
-from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+from fleet_rlm.sessions.run_state import (
+    CancelResult,
+    ClaimedRun,
+    CommittedTurnReceipt,
+    FailedRunReceipt,
+    RunClaim,
+    RunFailure,
+    RunIntegrityError,
+    RunLifecycleUnavailableError,
+    RunSettlement,
+    RunStart,
+    RunStateError,
+    RunValidationError,
+    _claim_failure,
+)
 from fleet_rlm.workspace.memory import (
     OUTCOME_DEADLINE_EXCEEDED,
     OUTCOME_INTERRUPTED,
@@ -48,120 +58,6 @@ MemoryIntentBuilder = Callable[[UUID, tuple[MemoryCandidate, ...]], tuple[Memory
 
 logger = logging.getLogger(__name__)
 _POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S = 2.0
-
-
-class RunLifecycleError(RuntimeError):
-    """Base class for safe lifecycle failures."""
-
-
-class RunNotFoundError(RunLifecycleError):
-    pass
-
-
-class RunInProgressError(RunLifecycleError):
-    pass
-
-
-class RunIdempotencyMismatchError(RunLifecycleError):
-    pass
-
-
-class RunValidationError(RunLifecycleError):
-    pass
-
-
-class RunStateError(RunLifecycleError):
-    pass
-
-
-class RunAlreadyCompletedError(RunStateError):
-    """The Run already committed; late claim work targeting it is a benign no-op."""
-
-
-class RunIntegrityError(RunLifecycleError):
-    pass
-
-
-class RunLifecycleUnavailableError(RunLifecycleError):
-    pass
-
-
-@dataclass(frozen=True, slots=True)
-class RunClaim:
-    access: TurnAccess
-    session_id: UUID
-    input: TurnInput
-    idempotency_key: str
-    proposed_run_id: UUID
-
-
-@dataclass(frozen=True, slots=True)
-class _RunClaimToken:
-    value: UUID
-    base_checkpoint_version: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class ClaimedRun:
-    run_id: UUID
-    session_id: UUID
-    access: TurnAccess
-    input: TurnInput
-    history: SessionHistory
-    cancellation_requested: AsyncCancellationProbe
-    _claim: _RunClaimToken
-    authority: RunAuthority = field(default_factory=RunAuthority, compare=False, repr=False)
-
-    @property
-    def checkpoint_version(self) -> int:
-        """Checkpoint from which this Turn was claimed."""
-        return self._claim.base_checkpoint_version
-
-
-@dataclass(frozen=True, slots=True)
-class CommittedRunReplay:
-    run_id: UUID
-    session_id: UUID
-    committed_turn: CommittedTurn
-    checkpoint_version: int
-
-
-RunStart: TypeAlias = ClaimedRun | CommittedRunReplay
-# The failure-code vocabulary is owned once by run_claim; lifecycle aliases it.
-RunFailureCode: TypeAlias = ClaimFailureCode
-
-
-@dataclass(frozen=True, slots=True)
-class RunFailure:
-    terminal_status: Literal["failed", "cancelled", "timeout"]
-    failure_code: RunFailureCode
-    public_message: str
-    usage: RLMUsage
-
-
-def _claim_failure(failure: RunFailure) -> ClaimFailure:
-    return ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message)
-
-
-@dataclass(frozen=True, slots=True)
-class CommittedTurnReceipt:
-    run_id: UUID
-    checkpoint_version: int
-    committed_turn: CommittedTurn
-    artifacts: tuple[ArtifactRef, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class FailedRunReceipt:
-    run_id: UUID
-    terminal_status: Literal["failed", "cancelled", "timeout"]
-    failure_code: RunFailureCode
-    public_message: str
-    durable: bool
-
-
-RunSettlement: TypeAlias = CommittedTurnReceipt | FailedRunReceipt
-CancelResult: TypeAlias = Literal["requested", "already_requested", "already_terminal"]
 
 
 class _RunStateStore(Protocol):
@@ -706,25 +602,7 @@ class RunLifecycleService:
 
 
 __all__ = [
-    "CancelResult",
-    "ClaimedRun",
-    "CommittedRunReplay",
-    "CommittedTurnReceipt",
-    "FailedRunReceipt",
-    "RunAlreadyCompletedError",
-    "RunClaim",
-    "RunFailure",
-    "RunFailureCode",
-    "RunIdempotencyMismatchError",
-    "RunInProgressError",
-    "RunIntegrityError",
+    "MemoryIntentBuilder",
     "RunLifecycle",
-    "RunLifecycleError",
     "RunLifecycleService",
-    "RunLifecycleUnavailableError",
-    "RunNotFoundError",
-    "RunSettlement",
-    "RunStart",
-    "RunStateError",
-    "RunValidationError",
 ]

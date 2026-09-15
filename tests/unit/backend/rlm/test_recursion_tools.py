@@ -13,7 +13,6 @@ import pytest
 from dspy.predict.rlm import RLM
 
 import fleet_rlm.rlm.recursion as recursion_module
-from fleet_rlm.chat.run_authority import RunAuthority
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
@@ -30,6 +29,7 @@ from fleet_rlm.rlm.recursion import (
     SelectedInputAccess,
     SubproblemCapsule,
 )
+from fleet_rlm.runtime.authority import RunAuthority
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 

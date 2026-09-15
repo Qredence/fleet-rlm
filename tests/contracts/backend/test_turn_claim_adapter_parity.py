@@ -28,9 +28,12 @@ async def _build_harness(adapter_kind: str) -> _Harness:
     Returns:
         _Harness: Harness containing the initialized store, claimed turn, state reader, and cleanup callback.
     """
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     session_id, run_id = uuid4(), uuid4()
@@ -83,9 +86,9 @@ async def _build_harness(adapter_kind: str) -> _Harness:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None:
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
-    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.sessions.run_state import RunFailure
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -111,9 +114,9 @@ async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_kind: str) -> None:
-    from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.sessions.run_state import RunFailure
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -139,9 +142,12 @@ async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) -> None:
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
-    from fleet_rlm.chat.run_lifecycle import RunFailure, RunStateError
     from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
+    from fleet_rlm.sessions.run_state import (
+        RunFailure,
+        RunStateError,
+    )
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -166,18 +172,21 @@ async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) ->
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -> None:
-    from fleet_rlm.chat.run_claim import (
-        ClaimFailure,
-        CompleteSettlement,
-        HeartbeatClaim,
-        RevokeClaim,
-    )
-    from fleet_rlm.chat.run_lifecycle import RunAlreadyCompletedError, RunStateError
     from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.result import (
         PredictionResult,
         RLMOutcome,
         empty_rlm_usage,
+    )
+    from fleet_rlm.sessions.run_claim import (
+        ClaimFailure,
+        CompleteSettlement,
+        HeartbeatClaim,
+        RevokeClaim,
+    )
+    from fleet_rlm.sessions.run_state import (
+        RunAlreadyCompletedError,
+        RunStateError,
     )
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)

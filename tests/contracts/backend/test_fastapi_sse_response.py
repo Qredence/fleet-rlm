@@ -17,9 +17,9 @@ from fastapi.routing import APIRoute
 from fastapi.sse import EventSourceResponse
 from fastapi.testclient import TestClient
 
-from fleet_rlm.chat.run_lifecycle import RunInProgressError
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import EventRecorder, RLMReasoning, RunCompleted, RunStarted, RuntimeEvent
+from fleet_rlm.sessions.run_state import RunInProgressError
 
 _END = object()
 

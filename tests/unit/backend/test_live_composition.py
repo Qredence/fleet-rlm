@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +33,7 @@ def _complete_runtime_inventory() -> RuntimeInventory:
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
+        session_lifecycle=object(),
         run_lifecycle=object(),
         config_policy=object(),
         workspace_volume_gateway=object(),
@@ -48,7 +50,7 @@ def test_composition_module_imports_without_credentials() -> None:
 
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
-    from fleet_rlm.composition.live import _reconcile_daytona_settling
+    import fleet_rlm.composition.live as composition
     from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 
     session_id = uuid4()
@@ -65,7 +67,7 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
             fence_calls.append(value)
             await asyncio.sleep(60)
 
-    await _reconcile_daytona_settling(
+    await composition._reconcile_daytona_settling(
         TurnState(),
         SessionManager(),
         fence_timeout=0.01,
@@ -138,7 +140,7 @@ async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
-    from fleet_rlm.composition.live import _reconcile_daytona_settling
+    import fleet_rlm.composition.live as composition
     from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 
     session_ids = [uuid4(), uuid4()]
@@ -167,7 +169,7 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
             await asyncio.sleep(60)
 
     deadline = asyncio.get_running_loop().time() + 0.01
-    summary = await _reconcile_daytona_settling(
+    summary = await composition._reconcile_daytona_settling(
         TurnState(),
         SessionManager(),
         fence_timeout=0.05,
@@ -511,6 +513,91 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
 
 
 @pytest.mark.asyncio
+async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -> None:
+    """Unsettled preparation must keep the bridge fenced for deferred disposal."""
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            return False
+
+    class Resources:
+        session_manager = object()
+
+        async def adispose(self) -> None:
+            raise AssertionError("resources must not dispose while preparation is unsettled")
+
+    class Gateway:
+        async def close(self) -> None:
+            raise AssertionError("gateway must not close while preparation is unsettled")
+
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    inventory = RuntimeInventory(
+        run_preparation=Preparation(),
+        run_environment_resources=Resources(),
+        workspace_volume_gateway=Gateway(),
+        bridge_dispatcher=dispatcher,
+    )
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.runtime_inventory = inventory
+    app.state.composition_ready = True
+
+    await composition.dispose_daytona_composition(app)
+
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+    assert dispatcher.service_loop() is asyncio.get_running_loop()
+    assert composition._COMPOSITION_DISPOSAL_TASKS or composition._COMPOSITION_DISPOSAL_MONITORS
+
+    # Settle deferred ownership so later tests do not inherit fenced tasks.
+    pending = list(composition._COMPOSITION_DISPOSAL_TASKS)
+    for task in pending:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, BaseException):
+            _ = await task
+    composition._COMPOSITION_DISPOSAL_TASKS.clear()
+    dispatcher.clear_loop(asyncio.get_running_loop())
+
+
+@pytest.mark.asyncio
+async def test_close_inventory_services_drains_all_phases_after_cancellation() -> None:
+    from fleet_rlm.composition.inventory import close_inventory_services
+
+    phases: list[str] = []
+
+    class Cleanup:
+        async def shutdown(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("cleanup")
+            raise asyncio.CancelledError
+
+    class Runner:
+        async def aclose(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("runner")
+            raise asyncio.CancelledError
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            phases.append("preparation")
+            raise asyncio.CancelledError
+
+    result = await close_inventory_services(
+        RuntimeInventory(
+            run_cleanup_supervisor=Cleanup(),
+            runner=Runner(),
+            run_preparation=Preparation(),
+        )
+    )
+
+    assert phases == ["cleanup", "runner", "preparation"]
+    assert isinstance(result.cancellation, asyncio.CancelledError)
+    assert result.preparation_settled is False
+
+
+@pytest.mark.asyncio
 async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -530,6 +617,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
         attachment_lifecycle=object(),
         artifact_reader=object(),
         session_catalog=object(),
+        session_lifecycle=object(),
         run_lifecycle=object(),
         run_preparation=object(),
         run_state_store=object(),
@@ -711,6 +799,7 @@ async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -
         run_environment_resources=Resources(),
         turn_runtime=object(),
         session_catalog=object(),
+        session_lifecycle=object(),
         run_lifecycle=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),
@@ -811,6 +900,7 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         run_environment_resources=Resources(),
         turn_runtime=object(),
         session_catalog=object(),
+        session_lifecycle=object(),
         run_lifecycle=object(),
         attachment_lifecycle=object(),
         artifact_reader=object(),

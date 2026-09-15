@@ -15,10 +15,13 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         RunEnvironment,
         RunPreparationUnavailableError,
     )
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     class Sink:
         async def remove_private(self, location):
@@ -75,10 +78,13 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         RunEnvironment,
         RunPreparationUnavailableError,
     )
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     class Sink:
         async def remove_private(self, location):
@@ -131,10 +137,13 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         RunEnvironment,
         RunPreparationUnavailableError,
     )
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     class Sink:
         async def remove_private(self, location):

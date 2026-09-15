@@ -47,7 +47,7 @@ def test_judge_registry_contract_is_two_boolean_gateway_judges() -> None:
     assert DEFAULT_JUDGE_MODEL == "databricks:/databricks-qwen35-122b-a10b"
     assert DEFAULT_REFLECTION_MODEL.startswith("databricks:/")
     assert DEFAULT_EMBEDDING_MODEL == "databricks:/databricks-gte-large-en"
-    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low"}
+    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low", "max_tokens": 1024}
     assert "expected_response" in CORRECTNESS_INSTRUCTIONS
     assert "required_evidence" in EVIDENCE_COVERAGE_INSTRUCTIONS
 

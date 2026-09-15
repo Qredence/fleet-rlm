@@ -18,8 +18,11 @@ from fleet_rlm.workspace.memory import MemoryCandidate
 
 
 def _turn():
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
 
     async def not_cancelled() -> bool:
         return False
@@ -59,7 +62,10 @@ class _Lifecycle:
         self.calls: list[str] = []
 
     async def finish(self, run, resolution, *, artifact_sink=None, result_snapshot_sink=None, memory_promotion=None):
-        from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt, FailedRunReceipt
+        from fleet_rlm.sessions.run_state import (
+            CommittedTurnReceipt,
+            FailedRunReceipt,
+        )
 
         del run, artifact_sink, result_snapshot_sink
         self.calls.append("commit")
@@ -131,7 +137,7 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
 
     assert lifecycle.calls == ["commit"]
     assert order == ["promote"]
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     assert isinstance(receipt, CommittedTurnReceipt)
     assert receipt.checkpoint_version == 1
@@ -165,7 +171,7 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
 
     assert lifecycle.calls == ["commit"]
     assert order == []
-    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
 
     assert isinstance(receipt, FailedRunReceipt)
     assert receipt.failure_code == "commit_failed"
@@ -196,7 +202,7 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
         )
     )
 
-    from fleet_rlm.chat.run_lifecycle import CommittedTurnReceipt
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     assert isinstance(receipt, CommittedTurnReceipt)
     assert receipt.checkpoint_version == 1
@@ -351,7 +357,7 @@ class _DriverLifecycle:
     async def settle(self, run, failure):
         del run
         self.settle_calls += 1
-        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+        from fleet_rlm.sessions.run_state import FailedRunReceipt
 
         return FailedRunReceipt(
             run_id=uuid4(),
@@ -364,7 +370,7 @@ class _DriverLifecycle:
     async def finish(self, run, resolution, **kwargs):
         del run, resolution, kwargs
         self.finish_calls += 1
-        from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
+        from fleet_rlm.sessions.run_state import FailedRunReceipt
 
         return FailedRunReceipt(uuid4(), "failed", "execution_failed", "Turn failed", True)
 
@@ -428,9 +434,9 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
 
     spy = _PromotionSpy()
     outcome = RLMOutcome("failed", public_error_message="provider stream interrupted")
@@ -469,8 +475,11 @@ async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> N
 
 @pytest.mark.asyncio
 async def test_driver_settlement_failure_recovery_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.run_lifecycle import FailedRunReceipt, RunFailure
     from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.sessions.run_state import (
+        FailedRunReceipt,
+        RunFailure,
+    )
 
     spy = _PromotionSpy()
     resolutions: list[object] = []

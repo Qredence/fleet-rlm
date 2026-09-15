@@ -447,3 +447,36 @@ async def test_resource_root_lookup_cleanup_error_is_not_hidden() -> None:
     with pytest.raises(RuntimeError, match="quarantine failed"):
         await runtime._acquire_from_resources(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
     assert released == [lease]
+
+
+@pytest.mark.asyncio
+async def test_owns_open_root_tracks_published_session_even_across_workspace_keys() -> None:
+    async def factory(*, spec: RootSessionSpec, force_new: bool = False):
+        del spec, force_new
+        return FakeRoot("root")
+
+    runtime = DaytonaRuntime(root_acquirer=factory)
+    workspace_id = uuid4()
+    session_id = uuid4()
+    owner = await runtime.acquire_root_session(RootSessionSpec(workspace_id=workspace_id, session_id=session_id))
+
+    assert runtime.owns_open_root(workspace_id, session_id)
+    assert runtime.owns_open_root(uuid4(), session_id)
+    assert not runtime.owns_open_root(workspace_id, uuid4())
+    await owner.close()
+    assert not runtime.owns_open_root(workspace_id, session_id)
+    assert await runtime.aclose() is True
+
+
+def test_runtime_binds_retained_root_probe_on_session_manager() -> None:
+    class Manager:
+        def __init__(self) -> None:
+            self.bound = None
+
+        def bind_runtime(self, runtime: DaytonaRuntime) -> None:
+            self.bound = runtime
+
+    manager = Manager()
+    runtime = DaytonaRuntime(resources=SimpleNamespace(session_manager=manager, platform=object()))
+    assert manager.bound is runtime
+    assert runtime.owns_open_root(uuid4(), uuid4()) is False

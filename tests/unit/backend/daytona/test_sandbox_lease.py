@@ -8,12 +8,12 @@ from typing import Any
 
 import pytest
 
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
 from fleet_rlm.daytona.sandbox_lease import (
     SandboxLease,
     SandboxLeasePolicy,
     SandboxLeaseReceipt,
 )
-from fleet_rlm.daytona.session_manager import DaytonaAdmission, DaytonaAdmissionPermit
 
 
 @dataclass

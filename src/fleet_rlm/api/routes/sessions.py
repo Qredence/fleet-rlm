@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Annotated, Literal, cast
 from uuid import UUID
@@ -11,8 +10,8 @@ from fastapi import APIRouter, Query
 
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
-    RuntimeInventoryIfReadyDep,
     SessionCatalogDep,
+    SessionLifecycleDep,
     SessionPrewarmDep,
 )
 from fleet_rlm.api.errors import http_error
@@ -26,9 +25,9 @@ from fleet_rlm.api.schemas import (
     UIMessageResponse,
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
-from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.catalog import SequenceCursor
-from fleet_rlm.sessions.errors import SessionNotFoundError
+from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -55,11 +54,23 @@ def _to_summary(record: SessionRecord) -> SessionSummaryResponse:
     )
 
 
+def _to_detail(record: SessionRecord) -> SessionDetailResponse:
+    return SessionDetailResponse(
+        id=record.id,
+        title=record.title,
+        status=_status(record.status),
+        checkpoint_version=record.checkpoint_version,
+        created_at=_iso(record.created_at),
+        updated_at=_iso(record.updated_at),
+    )
+
+
 @router.post(
     "",
     response_model=SessionDetailResponse,
     status_code=201,
     operation_id="create_session",
+    responses={503: {"description": "Service is not ready"}},
 )
 async def create_session(
     body: SessionCreateRequest,
@@ -68,11 +79,11 @@ async def create_session(
     prewarm: SessionPrewarmDep,
 ) -> SessionDetailResponse:
     """
-    Create a session for the authenticated user in the current workspace.
+    Create a session for the local user in the current workspace.
 
     Parameters:
         body (SessionCreateRequest): Session creation data, including the optional title.
-        identity (LocalScopeDep): Authenticated user and workspace scope.
+        identity (LocalScopeDep): The deterministic local User and Workspace scope.
         repo (SessionCatalogDep): Session repository used to create the session.
         prewarm (SessionPrewarmDep): Optional background Sandbox pre-warm trigger.
 
@@ -90,24 +101,16 @@ async def create_session(
         # binding makes the first Turn skip sandbox creation and layout; a
         # failed or absent pre-warm leaves the first Turn acquiring normally.
         prewarm(record.id, identity.user_id, identity.workspace_id)
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="session_created",
-            properties={"workspace_id": str(identity.workspace_id)},
-        )
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
+    capture("session_created", properties={"workspace_id": str(identity.workspace_id)})
+    return _to_detail(record)
 
 
-@router.get("", response_model=SessionListResponse, operation_id="list_sessions")
+@router.get(
+    "",
+    response_model=SessionListResponse,
+    operation_id="list_sessions",
+    responses={503: {"description": "Service is not ready"}},
+)
 async def list_sessions(
     identity: LocalScopeDep,
     repo: SessionCatalogDep,
@@ -137,6 +140,10 @@ async def list_sessions(
     "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="get_session",
+    responses={
+        404: {"description": "Session not found"},
+        503: {"description": "Service is not ready"},
+    },
 )
 async def get_session(
     session_id: UUID,
@@ -151,30 +158,27 @@ async def get_session(
         )
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
-    )
+    return _to_detail(record)
 
 
 @router.patch(
     "/{session_id}",
     response_model=SessionDetailResponse,
     operation_id="update_session",
+    responses={
+        404: {"description": "Session not found"},
+        422: {"description": "Session update is invalid"},
+        503: {"description": "Service is not ready, or Session retirement is pending"},
+    },
 )
 async def patch_session(
     session_id: UUID,
     body: SessionPatchRequest,
     identity: LocalScopeDep,
-    repo: SessionCatalogDep,
-    inventory: RuntimeInventoryIfReadyDep,
+    lifecycle: SessionLifecycleDep,
 ) -> SessionDetailResponse:
     """
-    Update the title or status of a session within the authenticated user's workspace.
+    Update the title or status of a session within the local user's workspace.
 
     Parameters:
         body (SessionPatchRequest): Fields to update; at least one field is required.
@@ -194,7 +198,7 @@ async def patch_session(
     if normalized_status is not None and normalized_status not in {"active", "archived"}:
         raise http_error(422, "session_status_invalid", "Status must be active or archived")
     try:
-        record = await repo.update(
+        record = await lifecycle.update(
             session_id,
             user_id=identity.user_id,
             workspace_id=identity.workspace_id,
@@ -207,53 +211,33 @@ async def patch_session(
         # Internal validation failures must not leak exception text into the
         # public contract; collapse them to the closed invalid_request code.
         raise http_error(422, "invalid_request", "Invalid request") from exc
-    if normalized_status == "archived":
-        resources = getattr(inventory, "run_environment_resources", None) if inventory is not None else None
-        runtime = getattr(resources, "runtime", None)
-        close_root = getattr(runtime, "close_root_session", None)
-        if callable(close_root):
-            try:
-                await close_root(
-                    identity.workspace_id,
-                    session_id,
-                    deadline=asyncio.get_running_loop().time() + 30.0,
-                )
-            except Exception as exc:
-                # The database transition is durable, but provider retirement
-                # remains pending and must be retried rather than reported as
-                # complete. Keep provider/SDK details out of the API error.
-                raise http_error(
-                    503,
-                    "session_retirement_pending",
-                    "Session retirement is pending",
-                ) from exc
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="session_updated",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "session_id": str(session_id),
-                "title_changed": body.title is not None,
-                "status_changed": body.status is not None,
-                "new_status": body.status,
-            },
-        )
-    return SessionDetailResponse(
-        id=record.id,
-        title=record.title,
-        status=_status(record.status),
-        checkpoint_version=record.checkpoint_version,
-        created_at=_iso(record.created_at),
-        updated_at=_iso(record.updated_at),
+    except SessionRetirementPendingError as exc:
+        raise http_error(
+            503,
+            "session_retirement_pending",
+            "Session retirement is pending",
+        ) from exc
+    capture(
+        "session_updated",
+        properties={
+            "workspace_id": str(identity.workspace_id),
+            "session_id": str(session_id),
+            "title_changed": body.title is not None,
+            "status_changed": body.status is not None,
+            "new_status": body.status,
+        },
     )
+    return _to_detail(record)
 
 
 @router.get(
     "/{session_id}/turns",
     response_model=SessionTurnPageResponse,
     operation_id="list_session_turns",
+    responses={
+        404: {"description": "Session not found"},
+        503: {"description": "Service is not ready"},
+    },
 )
 async def list_session_turns(
     session_id: UUID,

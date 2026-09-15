@@ -14,7 +14,6 @@ from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
 
 @pytest.mark.asyncio
 async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -> None:
-    from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.rlm.program import RLMFactory, RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -25,6 +24,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import build_session_context_manifest
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 
@@ -106,7 +106,6 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
 
 @pytest.mark.asyncio
 async def test_native_rlm_continues_history_across_truncated_pages() -> None:
-    from fleet_rlm.chat.session_context import build_session_context_manifest
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.rlm.program import RLMFactory, RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -117,6 +116,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import build_session_context_manifest
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 

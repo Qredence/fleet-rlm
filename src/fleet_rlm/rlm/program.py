@@ -228,9 +228,6 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             turn=budget,
         )
         self._explicit_budget = budget is not None
-        self._wrap_up_entered = False
-        self._wrap_up_rejection_reason: str | None = None
-        self._wrap_up_remaining_ms: int | None = None
 
     @property
     def _wrap_up_seconds(self) -> float:
@@ -269,20 +266,11 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def _enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
         """Record the first reserve transition and any bounded rejection reason."""
-        if not self._wrap_up_entered:
-            self._wrap_up_entered = True
-            self._wrap_up_remaining_ms = max(0, round(remaining * 1000))
-        if rejection_reason is not None:
-            self._wrap_up_rejection_reason = rejection_reason
+        self._budget.enter_wrap_up(remaining, rejection_reason=rejection_reason)
 
     def wrap_up_summary(self) -> dict[str, Any]:
         """Return bounded engineering metadata for the current adapter call."""
-        return {
-            "wrap_up_entered": self._wrap_up_entered,
-            "wrap_up_attempts": self._wrap_up_attempts,
-            "wrap_up_rejection_reason": self._wrap_up_rejection_reason,
-            "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
-        }
+        return dict(self._budget.wrap_up_summary())
 
     def _next_wrap_up_attempt(self, lm: BaseLM) -> None:
         """Reclassify an already-charged late response as finalization."""
@@ -501,7 +489,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 if wrap_up:
                     if not self._budget.can_finalize():
                         raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
-                    self._wrap_up_rejection_reason = "unparseable_json"
+                    self._budget.set_wrap_up_rejection("unparseable_json")
                     request_signature, request_inputs = self._with_wrap_up_correction(
                         request_signature,
                         request_inputs,
@@ -560,7 +548,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         field_name=directive_field,
                     )
                 if wrap_up and action and not is_submit_only_code(_action_code(response)):
-                    self._wrap_up_rejection_reason = "exploration_or_additional_code"
+                    self._budget.set_wrap_up_rejection("exploration_or_additional_code")
                     if not self._budget.can_finalize():
                         raise TimeoutError("wrap-up action did not submit before the Turn deadline")
                     request_signature, request_inputs = self._with_wrap_up_correction(
@@ -635,7 +623,7 @@ class AttachmentInput(FleetInputModel):
 
 
 if TYPE_CHECKING:
-    from fleet_rlm.chat.session_context import SessionContextManifest
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
