@@ -684,7 +684,11 @@ async def build_daytona_composition(
             mlflow_tracing_enabled=resolved.mlflow_tracing_enabled,
             mlflow_expose_trace_id=resolved.mlflow_expose_trace_id,
         )
-        session_lifecycle = SessionLifecycle(session_catalog, resources.runtime)
+        session_lifecycle = SessionLifecycle(
+            session_catalog,
+            resources.runtime,
+            active_turn_drain=run_preparation,
+        )
         return RuntimeInventory(
             run_environment_resources=resources,
             bridge_dispatcher=dispatcher,
@@ -786,9 +790,13 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     await phase(_cancel_orphan_cleanup(getattr(inventory, "memory_outbox_task", None)))
     service_close = await close_inventory_services(inventory, drain_seconds=30)
     errors.extend(service_close.errors)
+    if service_close.cancellation is not None:
+        errors.append(service_close.cancellation)
     cleanup = getattr(inventory, "run_cleanup_supervisor", None)
 
-    deferred_settled = not service_close.errors and service_close.preparation_settled
+    deferred_settled = (
+        not service_close.errors and service_close.cancellation is None and service_close.preparation_settled
+    )
 
     cleanup_pending = bool(getattr(cleanup, "active_jobs", 0)) if cleanup is not None else False
     ownership_pending = not deferred_settled or cleanup_pending

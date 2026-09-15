@@ -50,7 +50,7 @@ def test_composition_module_imports_without_credentials() -> None:
 
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
-    from fleet_rlm.composition.live import _reconcile_daytona_settling
+    import fleet_rlm.composition.live as composition
     from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 
     session_id = uuid4()
@@ -67,7 +67,7 @@ async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
             fence_calls.append(value)
             await asyncio.sleep(60)
 
-    await _reconcile_daytona_settling(
+    await composition._reconcile_daytona_settling(
         TurnState(),
         SessionManager(),
         fence_timeout=0.01,
@@ -140,7 +140,7 @@ async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytes
 
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
-    from fleet_rlm.composition.live import _reconcile_daytona_settling
+    import fleet_rlm.composition.live as composition
     from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
 
     session_ids = [uuid4(), uuid4()]
@@ -169,7 +169,7 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
             await asyncio.sleep(60)
 
     deadline = asyncio.get_running_loop().time() + 0.01
-    summary = await _reconcile_daytona_settling(
+    summary = await composition._reconcile_daytona_settling(
         TurnState(),
         SessionManager(),
         fence_timeout=0.05,
@@ -559,6 +559,42 @@ async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -
             _ = await task
     composition._COMPOSITION_DISPOSAL_TASKS.clear()
     dispatcher.clear_loop(asyncio.get_running_loop())
+
+
+@pytest.mark.asyncio
+async def test_close_inventory_services_drains_all_phases_after_cancellation() -> None:
+    from fleet_rlm.composition.inventory import close_inventory_services
+
+    phases: list[str] = []
+
+    class Cleanup:
+        async def shutdown(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("cleanup")
+            raise asyncio.CancelledError
+
+    class Runner:
+        async def aclose(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("runner")
+            raise asyncio.CancelledError
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            phases.append("preparation")
+            raise asyncio.CancelledError
+
+    result = await close_inventory_services(
+        RuntimeInventory(
+            run_cleanup_supervisor=Cleanup(),
+            runner=Runner(),
+            run_preparation=Preparation(),
+        )
+    )
+
+    assert phases == ["cleanup", "runner", "preparation"]
+    assert isinstance(result.cancellation, asyncio.CancelledError)
+    assert result.preparation_settled is False
 
 
 @pytest.mark.asyncio

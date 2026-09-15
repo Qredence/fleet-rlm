@@ -30,6 +30,17 @@ class _RecordingRetirement:
             raise self._fail
 
 
+class _BlockingTurnDrain:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def wait_for_session_idle(self, _workspace_id, _session_id, *, deadline) -> None:
+        del deadline
+        self.started.set()
+        await self.release.wait()
+
+
 @pytest.mark.asyncio
 async def test_title_only_update_never_calls_retirement() -> None:
     store = InMemoryRunStateStore()
@@ -72,6 +83,33 @@ async def test_archive_commits_before_retiring_provider_root() -> None:
     assert retirement.calls == [(workspace_id, record.id)]
     persisted = await catalog.get(record.id, user_id=user_id, workspace_id=workspace_id)
     assert persisted.status == "archived"
+
+
+@pytest.mark.asyncio
+async def test_archive_waits_for_active_turns_before_retiring_provider_root() -> None:
+    store = InMemoryRunStateStore()
+    catalog = InMemorySessionCatalog(store)
+    user_id, workspace_id = uuid4(), uuid4()
+    record = await catalog.create(user_id=user_id, workspace_id=workspace_id, title="archive-me")
+    retirement = _RecordingRetirement()
+    drain = _BlockingTurnDrain()
+    lifecycle = SessionLifecycle(catalog, retirement, active_turn_drain=drain)
+
+    update = asyncio.create_task(
+        lifecycle.update(
+            record.id,
+            user_id=user_id,
+            workspace_id=workspace_id,
+            title=None,
+            status="archived",
+        )
+    )
+    await drain.started.wait()
+    assert retirement.calls == []
+
+    drain.release.set()
+    await update
+    assert retirement.calls == [(workspace_id, record.id)]
 
 
 @pytest.mark.asyncio

@@ -648,6 +648,30 @@ async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
 
 
 @pytest.mark.asyncio
+async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
+    mgr, plat, _store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    class BrokenRuntime:
+        def owns_open_root(self, _workspace_id, _session_id):
+            raise ValueError("runtime ownership probe unavailable")
+
+    runtime = BrokenRuntime()
+    mgr.bind_runtime(runtime)
+    await mgr.release(lease)
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(req.workspace_id),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
 async def test_idle_stop_skips_when_holder_workspace_key_mismatches() -> None:
     mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
     req = _request()

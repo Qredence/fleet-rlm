@@ -351,7 +351,7 @@ def _eval_otpm_backoff_seconds() -> float:
         value = float(raw)
     except ValueError:
         return 0.0
-    return value if value > 0.0 else 0.0
+    return value if math.isfinite(value) and value > 0.0 else 0.0
 
 
 def _configure_judge_environment(judge_model: str) -> None:

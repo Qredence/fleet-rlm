@@ -272,10 +272,11 @@ class CloseServicesResult:
 
     errors: tuple[BaseException, ...] = ()
     preparation_settled: bool = True
+    cancellation: asyncio.CancelledError | None = None
 
     @property
     def first_error(self) -> BaseException | None:
-        return self.errors[0] if self.errors else None
+        return self.cancellation or (self.errors[0] if self.errors else None)
 
 
 async def close_inventory_services(
@@ -293,12 +294,15 @@ async def close_inventory_services(
         return CloseServicesResult()
 
     errors: list[Exception] = []
+    cancellation: asyncio.CancelledError | None = None
     preparation_settled = True
 
     cleanup = getattr(inventory, "run_cleanup_supervisor", None)
     if cleanup is not None:
         try:
             await cleanup.shutdown(drain_seconds=drain_seconds)
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
         except Exception as exc:
             errors.append(exc)
 
@@ -307,6 +311,8 @@ async def close_inventory_services(
     if callable(close_runner):
         try:
             await close_runner(drain_seconds=drain_seconds)
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
         except Exception as exc:
             errors.append(exc)
 
@@ -317,11 +323,18 @@ async def close_inventory_services(
             result = await close_preparation()
             if result is False:
                 preparation_settled = False
+        except asyncio.CancelledError as exc:
+            cancellation = cancellation or exc
+            preparation_settled = False
         except Exception as exc:
             preparation_settled = False
             errors.append(exc)
 
-    return CloseServicesResult(errors=tuple(errors), preparation_settled=preparation_settled)
+    return CloseServicesResult(
+        errors=tuple(errors),
+        preparation_settled=preparation_settled,
+        cancellation=cancellation,
+    )
 
 
 __all__ = [

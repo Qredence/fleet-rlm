@@ -485,7 +485,12 @@ class DaytonaSessionManager:
         try:
             return bool(owns(workspace_id, session_id))
         except (TypeError, ValueError):
-            return False
+            logger.warning(
+                "Unable to verify retained Daytona root before idle stop",
+                extra={"session_id": str(session_id), "workspace_id": str(workspace_id)},
+                exc_info=True,
+            )
+            return True
 
     def _idle_stop_blocked(self, session_id: UUID, workspace_id: UUID | None) -> bool:
         if self._active_leases.holder(session_id, workspace_id=workspace_id) is not None:

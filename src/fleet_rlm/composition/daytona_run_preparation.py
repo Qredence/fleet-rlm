@@ -334,6 +334,28 @@ class _DaytonaEnvironmentProvider:
             self._preparation_gates[key] = gate
         return gate
 
+    async def wait_for_session_idle(
+        self,
+        workspace_id: UUID,
+        session_id: UUID,
+        *,
+        deadline: float,
+    ) -> None:
+        """Wait for a prepared Turn before retiring its shared Session root."""
+        key = (workspace_id, session_id)
+        gate = self._preparation_gates.get(key)
+        if gate is None or not gate.locked():
+            return
+        acquired = False
+        try:
+            async with asyncio.timeout_at(deadline):
+                await gate.acquire()
+            acquired = True
+        finally:
+            if acquired:
+                gate.release()
+                self._prune_preparation_gate(key)
+
     def _mark_provider_root_tainted(self, key: tuple[UUID, UUID]) -> None:
         """Require a fresh provider root on the next acquisition for ``key``."""
         runtime = getattr(self.resources, "runtime", None)

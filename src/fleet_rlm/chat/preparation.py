@@ -565,6 +565,18 @@ class DefaultRunPreparer:
             return result is not False
         return True
 
+    async def wait_for_session_idle(
+        self,
+        workspace_id: UUID,
+        session_id: UUID,
+        *,
+        deadline: float,
+    ) -> None:
+        """Wait for provider preparation claims before retiring a Session root."""
+        wait = getattr(self._environments, "wait_for_session_idle", None)
+        if callable(wait):
+            await wait(workspace_id, session_id, deadline=deadline)
+
     async def _prepare_capabilities(
         self,
         run: ClaimedRun,

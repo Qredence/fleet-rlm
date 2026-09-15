@@ -301,6 +301,8 @@ def test_eval_otpm_backoff_seconds_reads_positive_env(monkeypatch: pytest.Monkey
     assert _eval_otpm_backoff_seconds() == 0.0
     monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "nope")
     assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "inf")
+    assert _eval_otpm_backoff_seconds() == 0.0
 
 
 def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:
