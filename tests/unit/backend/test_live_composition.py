@@ -556,7 +556,7 @@ async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -
     for task in pending:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, BaseException):
-            await task
+            _ = await task
     composition._COMPOSITION_DISPOSAL_TASKS.clear()
     dispatcher.clear_loop(asyncio.get_running_loop())
 

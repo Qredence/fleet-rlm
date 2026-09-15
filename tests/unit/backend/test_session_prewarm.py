@@ -51,8 +51,9 @@ class _RecordingManager:
                 )
             except asyncio.CancelledError:
                 raise
-            except BaseException:
-                pass
+            except Exception:
+                # Suppressed by design: the first Turn retries acquisition.
+                return
 
         return asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
 

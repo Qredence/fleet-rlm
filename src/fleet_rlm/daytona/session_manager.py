@@ -639,7 +639,7 @@ class DaytonaSessionManager:
                 )
             except asyncio.CancelledError:
                 raise
-            except BaseException:
+            except Exception:
                 # Suppressed by design: the first Turn retries acquisition.
                 pass
 
@@ -969,7 +969,7 @@ class DaytonaSessionManager:
                 if not owner.acquisition.done():
                     try:
                         acquisition_loop = owner.acquisition.get_loop()
-                    except BaseException:
+                    except Exception:
                         acquisition_loop = None
                     if acquisition_loop is not current_loop:
                         continue

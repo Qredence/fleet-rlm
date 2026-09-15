@@ -70,7 +70,8 @@ class RuntimeSessionManager(Protocol):
         session_id: UUID,
         user_id: UUID,
         workspace_id: UUID,
-    ) -> asyncio.Task[None]: ...
+    ) -> asyncio.Task[None]:
+        pass
 
 
 class RuntimeProcessResources(Protocol):
@@ -291,14 +292,14 @@ async def close_inventory_services(
     if inventory is None:
         return CloseServicesResult()
 
-    errors: list[BaseException] = []
+    errors: list[Exception] = []
     preparation_settled = True
 
     cleanup = getattr(inventory, "run_cleanup_supervisor", None)
     if cleanup is not None:
         try:
             await cleanup.shutdown(drain_seconds=drain_seconds)
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
 
     runner = getattr(inventory, "runner", None)
@@ -306,7 +307,7 @@ async def close_inventory_services(
     if callable(close_runner):
         try:
             await close_runner(drain_seconds=drain_seconds)
-        except BaseException as exc:
+        except Exception as exc:
             errors.append(exc)
 
     preparation = getattr(inventory, "run_preparation", None)
@@ -316,7 +317,7 @@ async def close_inventory_services(
             result = await close_preparation()
             if result is False:
                 preparation_settled = False
-        except BaseException as exc:
+        except Exception as exc:
             preparation_settled = False
             errors.append(exc)
 

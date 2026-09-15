@@ -20,7 +20,8 @@ class SessionRootRetirement(Protocol):
         session_id: UUID | str,
         *,
         deadline: float | None = None,
-    ) -> None: ...
+    ) -> None:
+        pass
 
 
 class NoOpSessionRetirement:
