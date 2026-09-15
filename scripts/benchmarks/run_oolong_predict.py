@@ -32,6 +32,7 @@ from scripts.benchmarks.oolong.adapter import (
     build_receipt,
     invoke_live_prediction,
     kwargs_context_mode,
+    release_ephemeral_lease,
     resolve_datapoints,
     score_prediction,
     stage_attachment_context_on_lease,
@@ -123,10 +124,11 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
         limit=args.limit,
         fixture=fixture,
     )
-    answer = args.answer.strip() or _default_dry_answer(loaded[0].row)
+    explicit_answer = args.answer.strip()
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
     for item in loaded:
+        answer = explicit_answer or _default_dry_answer(item.row)
         kwargs = build_predict_kwargs(item.row, mode="dry_shortcut")
         score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
         rows.append(
@@ -163,6 +165,7 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
 
 async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, object]:
     from fleet_rlm.daytona.provisioning import acquire_ephemeral_interpreter
+    from fleet_rlm.rlm.budget import TurnBudget
 
     loaded = resolve_datapoints(
         dataset=args.dataset,
@@ -171,25 +174,49 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
         limit=args.limit,
         fixture=_fixture_path(args),
     )
+    loop = asyncio.get_running_loop()
+    turn_timeout = float(getattr(settings, "turn_timeout_seconds", 1800))
+    wrap_up_seconds = float(getattr(settings, "rlm_wrap_up_seconds", 0))
+    deadline = loop.time() + turn_timeout
+    turn_budget = TurnBudget(deadline=deadline)
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
     for item in loaded:
         lease = await acquire_ephemeral_interpreter(settings, purpose="oolong-predict")
+        staged_paths: list[str] = []
+        primary_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+        answer = ""
+        kwargs: dict[str, Any] = {}
         try:
             context_text = str(item.row.get("context_window_text", ""))
             capsule = await stage_attachment_context_on_lease(lease, context_text)
+            staged_paths = [entry.sandbox_path for entry in capsule.entries]
             kwargs = build_predict_kwargs(
                 item.row,
                 mode="production",
                 session_id=lease.session_id,
                 attachment_context=capsule,
             )
-            answer = await invoke_live_prediction(settings, kwargs, interpreter=lease.interpreter)
+            answer = await invoke_live_prediction(
+                settings,
+                kwargs,
+                interpreter=lease.interpreter,
+                deadline=deadline,
+                wrap_up_seconds=wrap_up_seconds,
+                turn_budget=turn_budget,
+            )
+        except BaseException as exc:
+            primary_error = exc
         finally:
-            with contextlib.suppress(Exception):
-                lease.interpreter.shutdown()
-            with contextlib.suppress(Exception):
-                await lease.platform.delete(lease.sandbox)
+            try:
+                await release_ephemeral_lease(lease, staged_paths=staged_paths)
+            except BaseException as exc:
+                cleanup_error = exc
+        if primary_error is not None:
+            raise primary_error
+        if cleanup_error is not None:
+            raise cleanup_error
         score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
         rows.append(
             {
@@ -223,19 +250,22 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
 def _maybe_log_mlflow(args: argparse.Namespace, receipt: Mapping[str, object]) -> None:
     if not args.mlflow_url:
         return
-    _require_live_flag()
-    import mlflow
+    try:
+        _require_live_flag()
+        import mlflow
 
-    mlflow.set_tracking_uri(args.mlflow_url)
-    experiment = args.mlflow_experiment.strip() or "oolong-predict"
-    mlflow.set_experiment(experiment)
-    with mlflow.start_run(run_name="oolong-predict"):
-        mlflow.log_param("fleet.oolong.dataset", receipt.get("dataset"))
-        mlflow.log_param("fleet.oolong.mode", receipt.get("mode"))
-        mlflow.log_param("fleet.oolong.context_mode", receipt.get("context_mode"))
-        summary = receipt.get("summary")
-        if isinstance(summary, Mapping) and isinstance(summary.get("mean"), (int, float)):
-            mlflow.log_metric("fleet.oolong.score_mean", float(summary["mean"]))
+        mlflow.set_tracking_uri(args.mlflow_url)
+        experiment = args.mlflow_experiment.strip() or "oolong-predict"
+        mlflow.set_experiment(experiment)
+        with mlflow.start_run(run_name="oolong-predict"):
+            mlflow.log_param("fleet.oolong.dataset", receipt.get("dataset"))
+            mlflow.log_param("fleet.oolong.mode", receipt.get("mode"))
+            mlflow.log_param("fleet.oolong.context_mode", receipt.get("context_mode"))
+            summary = receipt.get("summary")
+            if isinstance(summary, Mapping) and isinstance(summary.get("mean"), (int, float)):
+                mlflow.log_metric("fleet.oolong.score_mean", float(summary["mean"]))
+    except Exception as exc:
+        print(f"oolong predict mlflow logging skipped: {exc}", file=sys.stderr)
 
 
 def _run_live(args: argparse.Namespace) -> dict[str, object]:

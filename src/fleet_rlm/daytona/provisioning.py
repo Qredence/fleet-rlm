@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import re
@@ -839,6 +840,21 @@ class EphemeralInterpreterLease:
     volume_paths: VolumePaths
 
 
+async def _retire_failed_ephemeral_sandbox(
+    platform: Any,
+    sandbox: Any,
+    *,
+    interpreter: Any | None = None,
+) -> None:
+    """Delete one ephemeral sandbox after lease construction fails."""
+    if interpreter is not None:
+        shutdown = getattr(interpreter, "shutdown", None)
+        if callable(shutdown):
+            with contextlib.suppress(BaseException):
+                await asyncio.to_thread(shutdown)
+    await platform.delete(sandbox)
+
+
 async def acquire_ephemeral_interpreter(
     settings: Any,
     *,
@@ -876,26 +892,31 @@ async def acquire_ephemeral_interpreter(
         },
         ephemeral=True,
     )
-    if sandbox_state(sandbox) != "running":
-        await platform.start(str(sandbox.id))
-        refreshed = await platform.get(str(sandbox.id))
-        if refreshed is None or sandbox_state(refreshed) != "running":
-            raise DaytonaAdapterError(
-                message="sandbox did not reach running state",
-                cause_type="SandboxLifecycleError",
-            )
-        sandbox = refreshed
-    session_id = uuid4()
-    run_id = uuid4()
-    await provisioner.verify_run_layout(
-        sandbox,
-        expected,
-        session_id=session_id,
-        run_id=run_id,
-    )
-    loop = asyncio.get_running_loop()
-    interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
-    await asyncio.to_thread(interpreter.execute, "pass")
+    interpreter: Any | None = None
+    try:
+        if sandbox_state(sandbox) != "running":
+            await platform.start(str(sandbox.id))
+            refreshed = await platform.get(str(sandbox.id))
+            if refreshed is None or sandbox_state(refreshed) != "running":
+                raise DaytonaAdapterError(
+                    message="sandbox did not reach running state",
+                    cause_type="SandboxLifecycleError",
+                )
+            sandbox = refreshed
+        session_id = uuid4()
+        run_id = uuid4()
+        await provisioner.verify_run_layout(
+            sandbox,
+            expected,
+            session_id=session_id,
+            run_id=run_id,
+        )
+        loop = asyncio.get_running_loop()
+        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
+        await asyncio.to_thread(interpreter.execute, "pass")
+    except BaseException:
+        await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
+        raise
     volume_paths = volume_config.paths()
     return EphemeralInterpreterLease(
         interpreter=interpreter,

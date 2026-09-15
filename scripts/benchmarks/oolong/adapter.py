@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import subprocess
@@ -37,6 +38,19 @@ DATASET_IDS = {
 }
 SYNTH_SPLITS = frozenset({"validation", "test"})
 REAL_SPLITS = frozenset({"test"})
+DEFAULT_HF_DATASET_REVISION = "main"
+RECEIPT_SCORE_FIELDS = frozenset(
+    {
+        "id",
+        "context_window_id",
+        "dataset",
+        "model",
+        "attempted_parse",
+        "parse_confidence",
+        "score",
+        "answer",
+    }
+)
 # Dry-only request concatenation cap; production/live must use AttachmentContextCapsule.
 DRY_REQUEST_CONCAT_CAP = 100_000
 ContextMode = Literal["production", "dry_shortcut"]
@@ -92,11 +106,17 @@ def load_fixture(path: Path = DEFAULT_FIXTURE) -> dict[str, object]:
     return dict(payload)
 
 
+def receipt_safe_score(score: Mapping[str, object]) -> dict[str, object]:
+    """Project one official score payload to bounded receipt fields."""
+    return {key: score[key] for key in RECEIPT_SCORE_FIELDS if key in score}
+
+
 def load_hf_row(
     *,
     dataset: str,
     split: str,
     index: int,
+    revision: str | None = None,
 ) -> LoadedDatapoint:
     """Load one Hugging Face row from the official Oolong dataset ids."""
     if dataset not in DATASET_IDS:
@@ -113,14 +133,10 @@ def load_hf_row(
             "the `datasets` package is required for Hugging Face loads; install benchmark extras or pass --fixture"
         ) from exc
     hf_id = DATASET_IDS[dataset]
-    revision: str | None = None
+    resolved_revision = revision or DEFAULT_HF_DATASET_REVISION
     try:
-        loaded = load_dataset(hf_id, split=f"{split}[{index}:{index + 1}]")
+        loaded = load_dataset(hf_id, split=f"{split}[{index}:{index + 1}]", revision=resolved_revision)
         row = loaded[0]
-        info = getattr(getattr(loaded, "info", None), "dataset_size", None)
-        _ = info
-        builder = getattr(loaded, "_builder", None)
-        revision = getattr(builder, "config_kwargs", {}).get("revision") if builder else None
     except Exception as exc:
         raise OolongAdapterError(f"could not load {hf_id} split={split} index={index}") from exc
     return LoadedDatapoint(
@@ -129,7 +145,7 @@ def load_hf_row(
         split=split,
         index=index,
         source="huggingface",
-        dataset_revision=revision if isinstance(revision, str) else None,
+        dataset_revision=resolved_revision,
     )
 
 
@@ -140,16 +156,23 @@ def resolve_datapoints(
     start_index: int,
     limit: int,
     fixture: Path | None,
+    hf_revision: str | None = None,
 ) -> tuple[LoadedDatapoint, ...]:
     """Load up to ``limit`` datapoints from a fixture or Hugging Face."""
     if limit < 1:
         raise OolongAdapterError("limit must be at least 1")
+    if start_index < 0:
+        raise OolongAdapterError("index must be non-negative")
     if dataset not in DATASET_IDS:
         raise OolongAdapterError(f"unknown dataset {dataset!r}; expected one of {sorted(DATASET_IDS)}")
     allowed = REAL_SPLITS if dataset == "real" else SYNTH_SPLITS
     if split not in allowed:
         raise OolongAdapterError(f"split {split!r} is invalid for dataset {dataset!r}")
     if fixture is not None:
+        if start_index != 0 or limit != 1:
+            raise OolongAdapterError("fixture mode supports only --index 0 --limit 1")
+        if dataset == "real":
+            raise OolongAdapterError("bundled synth fixture cannot be used with dataset=real; pass --hf")
         row = load_fixture(fixture)
         return (
             LoadedDatapoint(
@@ -160,7 +183,15 @@ def resolve_datapoints(
                 source="fixture",
             ),
         )
-    return tuple(load_hf_row(dataset=dataset, split=split, index=start_index + offset) for offset in range(limit))
+    return tuple(
+        load_hf_row(
+            dataset=dataset,
+            split=split,
+            index=start_index + offset,
+            revision=hf_revision,
+        )
+        for offset in range(limit)
+    )
 
 
 def stage_context_capsule(
@@ -231,7 +262,6 @@ def build_predict_kwargs(
     *,
     mode: ContextMode,
     session_id: UUID | None = None,
-    staging_root: Path | None = None,
     attachment_context: AttachmentContextCapsule | None = None,
 ) -> dict[str, Any]:
     """Build locked Fleet RLM kwargs for one Oolong row."""
@@ -244,14 +274,9 @@ def build_predict_kwargs(
     session_context = build_session_context_manifest(sid, 0, SessionHistory())
 
     if mode == "production":
-        if attachment_context is None and not context_text:
-            raise OolongAdapterError("production mode requires context_window_text")
-        sid = session_id or uuid4()
-        if attachment_context is not None:
-            capsule = attachment_context
-        else:
-            root = staging_root or Path.cwd() / ".scratch" / "oolong-staging" / str(sid)
-            capsule = stage_context_capsule(context_text, staging_root=root)
+        if attachment_context is None:
+            raise OolongAdapterError("production mode requires a lease-staged attachment_context capsule")
+        capsule = attachment_context
         kwargs = build_rlm_input_kwargs(
             request=question,
             session_context=session_context,
@@ -315,24 +340,92 @@ def build_native_program(settings: Any, *, sub_lm: Any | None = None) -> Any:
     )
 
 
+async def release_ephemeral_lease(
+    lease: Any,
+    *,
+    staged_paths: Sequence[str] = (),
+) -> None:
+    """Shut down the interpreter, remove staged volume paths, and delete the sandbox."""
+    from fleet_rlm.workspace.storage import AgentAsyncVolumeStorage
+
+    cleanup_errors: list[BaseException] = []
+    if staged_paths:
+        storage = AgentAsyncVolumeStorage(lease.sandbox, mount_path=lease.context_mount_path)
+        for logical_path in staged_paths:
+            try:
+                await storage.remove(logical_path)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+    interpreter = getattr(lease, "interpreter", None)
+    if interpreter is not None:
+        shutdown = getattr(interpreter, "shutdown", None)
+        if callable(shutdown):
+            try:
+                await asyncio.to_thread(shutdown, strict_broker_cleanup=True)
+            except BaseException as exc:
+                cleanup_errors.append(exc)
+    try:
+        await lease.platform.delete(lease.sandbox)
+    except BaseException as exc:
+        cleanup_errors.append(exc)
+    if cleanup_errors:
+        raise OolongAdapterError("ephemeral lease cleanup failed") from cleanup_errors[0]
+
+
+def _run_prediction_on_worker(
+    rlm: Any,
+    interpreter: Any,
+    resolved_root: Any,
+    adapter: Any,
+    invoke_kwargs: Mapping[str, Any],
+) -> Any:
+    """Execute one native RLM call on a private event loop outside the bridge guard."""
+
+    async def _execute() -> Any:
+        with dspy.context(lm=resolved_root, adapter=adapter, track_usage=True):
+            return await rlm.acall(interpreter, **dict(invoke_kwargs))
+
+    return asyncio.run(_execute())
+
+
 async def invoke_live_prediction(
     settings: Any,
     kwargs: Mapping[str, Any],
     *,
     interpreter: Any,
+    deadline: float,
+    wrap_up_seconds: float,
+    turn_budget: Any | None = None,
     root_lm: Any | None = None,
     sub_lm: Any | None = None,
 ) -> str:
-    """Invoke one live prediction through the caller-owned interpreter seam."""
-    import time
-
+    """Invoke one live prediction through the owned worker / private-loop seam."""
+    from fleet_rlm.rlm.budget import TurnBudget
     from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
-    from fleet_rlm.rlm.program import FleetJSONAdapter, build_model_bundle
+    from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle, build_model_bundle
+    from fleet_rlm.runtime.owned_effect import OwnedEffect
 
     assert_dspy_version()
-    bundle = build_model_bundle(settings)
-    resolved_root = root_lm or bundle.root_lm
-    resolved_sub = sub_lm or bundle.sub_lm
+    budget = turn_budget if turn_budget is not None else TurnBudget(deadline=deadline)
+    if root_lm is None or sub_lm is None:
+        bundle = build_model_bundle(settings)
+        resolved_root = root_lm or bundle.root_lm
+        resolved_sub = sub_lm or bundle.sub_lm
+        turn_models = bundle.bind_turn_deadline(
+            deadline=deadline,
+            reserve_seconds=wrap_up_seconds,
+            budget=budget,
+        )
+        resolved_root = turn_models.root_lm
+        resolved_sub = turn_models.sub_lm
+    else:
+        turn_models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm).bind_turn_deadline(
+            deadline=deadline,
+            reserve_seconds=wrap_up_seconds,
+            budget=budget,
+        )
+        resolved_root = turn_models.root_lm
+        resolved_sub = turn_models.sub_lm
     capsule = kwargs.get("attachment_context")
     if isinstance(capsule, AttachmentContextCapsule):
         bind = getattr(interpreter, "bind_context_capsule", None)
@@ -340,14 +433,25 @@ async def invoke_live_prediction(
             bind(capsule)
     rlm = build_native_program(settings, sub_lm=resolved_sub)
     invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
-    turn_timeout = float(getattr(settings, "turn_timeout_seconds", 1800))
-    wrap_up_seconds = float(getattr(settings, "rlm_wrap_up_seconds", 0))
     adapter = FleetJSONAdapter(
-        deadline=time.monotonic() + turn_timeout,
+        deadline=deadline,
         wrap_up_seconds=wrap_up_seconds,
+        budget=budget,
     )
-    with dspy.context(lm=resolved_root, adapter=adapter, track_usage=True):
-        prediction = await rlm.acall(interpreter, **invoke_kwargs)
+    effect = OwnedEffect.start(
+        asyncio.to_thread(
+            _run_prediction_on_worker,
+            rlm,
+            interpreter,
+            resolved_root,
+            adapter,
+            invoke_kwargs,
+        )
+    )
+    settled = await effect.settle()
+    if settled.caller_cancelled:
+        raise asyncio.CancelledError
+    prediction = settled.result()
     return str(getattr(prediction, "answer", ""))
 
 
@@ -391,7 +495,7 @@ def build_receipt(
         "status": status,
         "summary": summarize_scores(scores),
         "rows": rows,
-        "scores": scores,
+        "scores": [receipt_safe_score(item) for item in scores],
         "scoring_source": {
             "repo": "https://github.com/abertsch72/oolong",
             "helpers": "src/eval/eval_helpers.py",
@@ -405,6 +509,7 @@ def build_receipt(
 
 __all__ = [
     "DEFAULT_FIXTURE",
+    "DEFAULT_HF_DATASET_REVISION",
     "DRY_REQUEST_CONCAT_CAP",
     "LoadedDatapoint",
     "OolongAdapterError",
@@ -416,6 +521,8 @@ __all__ = [
     "kwargs_context_mode",
     "load_fixture",
     "load_hf_row",
+    "receipt_safe_score",
+    "release_ephemeral_lease",
     "resolve_datapoints",
     "score_prediction",
     "stage_attachment_context_on_lease",

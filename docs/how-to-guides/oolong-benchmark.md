@@ -70,8 +70,8 @@ FLEET_LIVE=1 uv run python scripts/benchmarks/run_oolong_predict.py \
 ```
 
 Optional MLflow 3.16 logging is available via ``--mlflow-url`` and
-``--mlflow-experiment``; see `Evaluation and monitoring
-<evaluation-optimization.md>`_ for local tracking setup. Logging is skipped when
+``--mlflow-experiment``; see [Evaluation and monitoring](evaluation-optimization.md)
+for local tracking setup. Logging is skipped when
 ``--mlflow-url`` is unset.
 
 ## Context mapping
