@@ -108,7 +108,7 @@ async def test_archive_waits_for_active_turns_before_retiring_provider_root() ->
     assert retirement.calls == []
 
     drain.release.set()
-    await update
+    _ = await update
     assert retirement.calls == [(workspace_id, record.id)]
 
 
