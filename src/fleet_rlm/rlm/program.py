@@ -70,6 +70,14 @@ def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
         str: Bounded instruction text for the corrected re-ask.
     """
     if _is_empty_adapter_parse(exc):
+        if attempt >= 3:
+            return (
+                f"Correction (attempt {attempt}): the previous responses produced no parseable output "
+                "because generation exhausted the output-token budget with reasoning prose before "
+                "emitting the action. Respond now with ONLY one JSON object containing exactly the "
+                "required output fields. Emit zero reasoning text, zero prose, zero markdown, zero "
+                "code fences."
+            )
         return (
             f"Correction (attempt {attempt}): the previous response produced no parseable output. "
             "It was empty or null, typically because generation exhausted the output-token budget "

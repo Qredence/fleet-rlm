@@ -620,3 +620,26 @@ async def test_async_cancellation_closes_repair_machine_without_retry(monkeypatc
     assert calls == 1
     assert len(machines) == 1
     assert machines[0].gi_frame is None
+
+
+def test_retry_correction_escalates_on_repeated_empty_failure() -> None:
+    from dspy.utils.exceptions import AdapterParseError
+
+    from fleet_rlm.rlm.program import _retry_correction_feedback
+
+    class _Sig(dspy.Signature):
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    exc = AdapterParseError(
+        adapter_name="JSONAdapter",
+        signature=_Sig,
+        lm_response="",
+        message="The LM returned an empty or null response.",
+    )
+    first = _retry_correction_feedback(1, exc)
+    third = _retry_correction_feedback(3, exc)
+    assert "Keep reasoning short" in first
+    assert third != first
+    assert "ONLY" in third
+    assert "zero reasoning" in third.lower()
