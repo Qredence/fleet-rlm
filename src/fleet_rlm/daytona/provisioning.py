@@ -835,6 +835,8 @@ class EphemeralInterpreterLease:
     session_id: UUID
     run_id: UUID
     workspace_id: UUID
+    context_mount_path: str
+    volume_paths: VolumePaths
 
 
 async def acquire_ephemeral_interpreter(
@@ -894,6 +896,7 @@ async def acquire_ephemeral_interpreter(
     loop = asyncio.get_running_loop()
     interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
     await asyncio.to_thread(interpreter.execute, "pass")
+    volume_paths = volume_config.paths()
     return EphemeralInterpreterLease(
         interpreter=interpreter,
         sandbox=sandbox,
@@ -901,6 +904,8 @@ async def acquire_ephemeral_interpreter(
         session_id=session_id,
         run_id=run_id,
         workspace_id=resolved_workspace,
+        context_mount_path=str(volume_paths.mount_path),
+        volume_paths=volume_paths,
     )
 
 

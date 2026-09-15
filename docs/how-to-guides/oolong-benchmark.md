@@ -50,13 +50,18 @@ uv run --with datasets python scripts/benchmarks/run_oolong_predict.py \
 
 ## Production/live path
 
-Live mode stages `context_window_text` as UTF-8 through
-`AttachmentContextCapsule`, constructs `build_native_rlm(...)`, and invokes
-`await rlm.acall(interpreter, **kwargs)` with a caller-owned Daytona
-interpreter acquired through
+Live mode acquires an ephemeral volume-backed Daytona interpreter through
 ``fleet_rlm.daytona.provisioning.acquire_ephemeral_interpreter`` (shared
-``SandboxProvisioner`` seam). This path requires explicit operator authorization
-and configured provider credentials.
+``SandboxProvisioner`` seam), stages `context_window_text` on the workspace
+volume using `WorkspaceAttachmentPathPolicy` (same layout as Turn
+`AttachmentContextCapsule` staging), constructs `build_native_rlm(...)`, and
+invokes `await rlm.acall(interpreter, **kwargs)` with `FleetJSONAdapter` so
+wrap-up and parse re-asks match production Turns. Capsule `sandbox_path` and
+`mount_root` are under the interpreter volume mount (typically
+`/home/daytona/fleet`), not host-only temp paths.
+
+This path requires explicit operator authorization and configured provider
+credentials.
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmarks/run_oolong_predict.py \

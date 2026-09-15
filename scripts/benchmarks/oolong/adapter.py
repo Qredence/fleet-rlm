@@ -169,7 +169,7 @@ def stage_context_capsule(
     staging_root: Path,
     attachment_id: UUID | None = None,
 ) -> AttachmentContextCapsule:
-    """Stage ``context_window_text`` as a host-bound AttachmentContextCapsule."""
+    """Stage ``context_window_text`` on a host path for dry/unit tests only."""
     staging_root.mkdir(parents=True, exist_ok=True)
     body = context_text.encode("utf-8")
     filename = "oolong_context.txt"
@@ -191,12 +191,48 @@ def stage_context_capsule(
     )
 
 
+async def stage_attachment_context_on_lease(
+    lease: Any,
+    context_text: str,
+    *,
+    filename: str = "oolong_context.txt",
+    attachment_id: UUID | None = None,
+    content_type: str = "text/plain; charset=utf-8",
+) -> AttachmentContextCapsule:
+    """Stage ``context_window_text`` on the lease volume using Turn path policy."""
+    from fleet_rlm.attachments.models import AttachmentRun
+    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.workspace.storage import AgentAsyncVolumeStorage
+
+    body = context_text.encode("utf-8")
+    attachment_uuid = attachment_id or uuid4()
+    path_policy = WorkspaceAttachmentPathPolicy(lease.volume_paths)
+    run = AttachmentRun(lease.session_id, lease.run_id)
+    logical_path = path_policy.run_attachment(run, attachment_uuid, filename)
+    storage = AgentAsyncVolumeStorage(lease.sandbox, mount_path=lease.context_mount_path)
+    await storage.write_bytes(logical_path, body)
+    return AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                attachment_id=attachment_uuid,
+                filename=filename,
+                content_type=content_type,
+                byte_size=len(body),
+                checksum_sha256=hashlib.sha256(body).hexdigest(),
+                sandbox_path=logical_path,
+            ),
+        ),
+        mount_root=lease.context_mount_path,
+    )
+
+
 def build_predict_kwargs(
     datapoint: Mapping[str, object],
     *,
     mode: ContextMode,
     session_id: UUID | None = None,
     staging_root: Path | None = None,
+    attachment_context: AttachmentContextCapsule | None = None,
 ) -> dict[str, Any]:
     """Build locked Fleet RLM kwargs for one Oolong row."""
     question = str(datapoint.get("question", "")).strip()
@@ -208,10 +244,14 @@ def build_predict_kwargs(
     session_context = build_session_context_manifest(sid, 0, SessionHistory())
 
     if mode == "production":
-        if not context_text:
+        if attachment_context is None and not context_text:
             raise OolongAdapterError("production mode requires context_window_text")
-        root = staging_root or Path.cwd() / ".scratch" / "oolong-staging" / str(sid)
-        capsule = stage_context_capsule(context_text, staging_root=root)
+        sid = session_id or uuid4()
+        if attachment_context is not None:
+            capsule = attachment_context
+        else:
+            root = staging_root or Path.cwd() / ".scratch" / "oolong-staging" / str(sid)
+            capsule = stage_context_capsule(context_text, staging_root=root)
         kwargs = build_rlm_input_kwargs(
             request=question,
             session_context=session_context,
@@ -284,8 +324,10 @@ async def invoke_live_prediction(
     sub_lm: Any | None = None,
 ) -> str:
     """Invoke one live prediction through the caller-owned interpreter seam."""
+    import time
+
     from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
-    from fleet_rlm.rlm.program import build_model_bundle
+    from fleet_rlm.rlm.program import FleetJSONAdapter, build_model_bundle
 
     assert_dspy_version()
     bundle = build_model_bundle(settings)
@@ -298,7 +340,13 @@ async def invoke_live_prediction(
             bind(capsule)
     rlm = build_native_program(settings, sub_lm=resolved_sub)
     invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
-    with dspy.context(lm=resolved_root, adapter=dspy.JSONAdapter(), track_usage=True):
+    turn_timeout = float(getattr(settings, "turn_timeout_seconds", 1800))
+    wrap_up_seconds = float(getattr(settings, "rlm_wrap_up_seconds", 0))
+    adapter = FleetJSONAdapter(
+        deadline=time.monotonic() + turn_timeout,
+        wrap_up_seconds=wrap_up_seconds,
+    )
+    with dspy.context(lm=resolved_root, adapter=adapter, track_usage=True):
         prediction = await rlm.acall(interpreter, **invoke_kwargs)
     return str(getattr(prediction, "answer", ""))
 
@@ -370,6 +418,7 @@ __all__ = [
     "load_hf_row",
     "resolve_datapoints",
     "score_prediction",
+    "stage_attachment_context_on_lease",
     "stage_context_capsule",
     "summarize_scores",
 ]

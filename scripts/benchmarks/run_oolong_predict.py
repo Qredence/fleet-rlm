@@ -14,7 +14,6 @@ import asyncio
 import contextlib
 import os
 import sys
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,7 @@ from scripts.benchmarks.oolong.adapter import (
     kwargs_context_mode,
     resolve_datapoints,
     score_prediction,
+    stage_attachment_context_on_lease,
 )
 
 RECEIPT_SCHEMA = "fleet.oolong-predict/v1"
@@ -173,37 +173,38 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
     )
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
-    with tempfile.TemporaryDirectory(dir=_REPO_ROOT / ".scratch", prefix="oolong-live-") as temporary:
-        staging_root = Path(temporary)
-        for item in loaded:
+    for item in loaded:
+        lease = await acquire_ephemeral_interpreter(settings, purpose="oolong-predict")
+        try:
+            context_text = str(item.row.get("context_window_text", ""))
+            capsule = await stage_attachment_context_on_lease(lease, context_text)
             kwargs = build_predict_kwargs(
                 item.row,
                 mode="production",
-                staging_root=staging_root / str(item.row.get("id", "row")),
+                session_id=lease.session_id,
+                attachment_context=capsule,
             )
-            lease = await acquire_ephemeral_interpreter(settings, purpose="oolong-predict")
-            try:
-                answer = await invoke_live_prediction(settings, kwargs, interpreter=lease.interpreter)
-            finally:
-                with contextlib.suppress(Exception):
-                    lease.interpreter.shutdown()
-                with contextlib.suppress(Exception):
-                    await lease.platform.delete(lease.sandbox)
-            score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
-            rows.append(
-                {
-                    "id": item.row.get("id"),
-                    "context_window_id": item.row.get("context_window_id"),
-                    "dataset": item.row.get("dataset"),
-                    "source": item.source,
-                    "index": item.index,
-                    "request_chars": len(str(kwargs.get("request", ""))),
-                    "context_mode": kwargs_context_mode(kwargs),
-                    "answer_chars": len(answer),
-                    "mocked": {"provider_llm": False, "daytona_interpreter": False},
-                }
-            )
-            scores.append(score)
+            answer = await invoke_live_prediction(settings, kwargs, interpreter=lease.interpreter)
+        finally:
+            with contextlib.suppress(Exception):
+                lease.interpreter.shutdown()
+            with contextlib.suppress(Exception):
+                await lease.platform.delete(lease.sandbox)
+        score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
+        rows.append(
+            {
+                "id": item.row.get("id"),
+                "context_window_id": item.row.get("context_window_id"),
+                "dataset": item.row.get("dataset"),
+                "source": item.source,
+                "index": item.index,
+                "request_chars": len(str(kwargs.get("request", ""))),
+                "context_mode": kwargs_context_mode(kwargs),
+                "answer_chars": len(answer),
+                "mocked": {"provider_llm": False, "daytona_interpreter": False},
+            }
+        )
+        scores.append(score)
     revision = next((item.dataset_revision for item in loaded if item.dataset_revision), None)
     return build_receipt(
         mode="live",

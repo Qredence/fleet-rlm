@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
+import dspy
 import pytest
 
-from fleet_rlm.rlm.program import AttachmentContextCapsule
+from fleet_rlm.daytona.provisioning import EphemeralInterpreterLease
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
+from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter
 from scripts.benchmarks import run_oolong_predict as runner
 from scripts.benchmarks.oolong.adapter import (
     OolongAdapterError,
@@ -18,6 +23,7 @@ from scripts.benchmarks.oolong.adapter import (
     load_fixture,
     resolve_datapoints,
     score_prediction,
+    stage_attachment_context_on_lease,
 )
 from scripts.benchmarks.oolong.scoring import synth_process_response
 
@@ -81,6 +87,85 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
     assert rlm.acall.await_args.args[0] is interpreter
     assert "attachment_context" not in rlm.acall.await_args.kwargs
     assert answer == "Label: spam"
+
+
+@pytest.mark.asyncio
+async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) -> None:
+    datapoint = load_fixture()
+    kwargs = build_predict_kwargs(
+        datapoint,
+        mode="production",
+        staging_root=tmp_path / "staging",
+    )
+    interpreter = MagicMock()
+    settings = MagicMock(turn_timeout_seconds=600, rlm_wrap_up_seconds=30)
+    root_lm = MagicMock()
+    sub_lm = MagicMock()
+    rlm = MagicMock()
+    rlm.acall = AsyncMock(return_value=MagicMock(answer="Label: spam"))
+    captured: dict[str, object] = {}
+
+    @contextlib.contextmanager
+    def capture_context(**context_kwargs: object):
+        captured.update(context_kwargs)
+        yield
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            "fleet_rlm.rlm.program.build_model_bundle",
+            lambda _settings: MagicMock(root_lm=root_lm, sub_lm=sub_lm),
+        )
+        patcher.setattr(
+            "scripts.benchmarks.oolong.adapter.build_native_program",
+            lambda *_args, **_kwargs: rlm,
+        )
+        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        patcher.setattr("scripts.benchmarks.oolong.adapter.dspy.context", capture_context)
+        await invoke_live_prediction(
+            settings,
+            kwargs,
+            interpreter=interpreter,
+            root_lm=root_lm,
+            sub_lm=sub_lm,
+        )
+
+    adapter = captured.get("adapter")
+    assert isinstance(adapter, FleetJSONAdapter)
+    assert type(adapter) is not dspy.JSONAdapter
+    assert adapter._budget.reserve_seconds == 30.0
+
+
+@pytest.mark.asyncio
+async def test_stage_attachment_context_on_lease_uses_volume_mount_paths() -> None:
+    session_id = uuid4()
+    run_id = uuid4()
+    volume_paths = VolumePaths.from_mount(DEFAULT_VOLUME_MOUNT_PATH)
+    lease = EphemeralInterpreterLease(
+        interpreter=MagicMock(),
+        sandbox=MagicMock(),
+        platform=MagicMock(),
+        session_id=session_id,
+        run_id=run_id,
+        workspace_id=uuid4(),
+        context_mount_path=str(volume_paths.mount_path),
+        volume_paths=volume_paths,
+    )
+    storage = MagicMock()
+    storage.write_bytes = AsyncMock()
+
+    with patch(
+        "fleet_rlm.workspace.storage.AgentAsyncVolumeStorage",
+        return_value=storage,
+    ) as storage_ctor:
+        capsule = await stage_attachment_context_on_lease(lease, "hello context")
+
+    storage_ctor.assert_called_once_with(lease.sandbox, mount_path=str(volume_paths.mount_path))
+    storage.write_bytes.assert_awaited_once()
+    written_path = storage.write_bytes.await_args.args[0]
+    assert written_path.startswith(str(volume_paths.mount_path))
+    assert f"/sessions/{session_id}/runs/{run_id}/attachments/" in written_path
+    assert capsule.mount_root == str(volume_paths.mount_path)
+    assert capsule.entries[0].sandbox_path == written_path
 
 
 def test_dry_shortcut_concatenates_context_into_request() -> None:
