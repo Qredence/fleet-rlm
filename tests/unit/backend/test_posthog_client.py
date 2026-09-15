@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,11 +12,46 @@ from pydantic import ValidationError
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.posthog import (
     _load_or_create_instance_id,
+    capture,
     get_client,
     get_distinct_id,
     init_posthog,
     shutdown_posthog,
 )
+
+
+class _FailingClient:
+    """Client double whose telemetry and shutdown paths both fail."""
+
+    def __init__(
+        self,
+        *,
+        capture_error: BaseException,
+        shutdown_error: BaseException | None = None,
+    ) -> None:
+        self._capture_error = capture_error
+        self._shutdown_error = shutdown_error
+
+    def capture(self, **_kwargs: object) -> None:
+        raise self._capture_error
+
+    def shutdown(self) -> None:
+        if self._shutdown_error is not None:
+            raise self._shutdown_error
+
+
+def _install_failing_client(monkeypatch: pytest.MonkeyPatch, client: object, tmp_path: Path) -> None:
+    """Point the module at *client* through the normal initialisation path."""
+    shutdown_posthog()
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", lambda *_args, **_kwargs: client)
+    init_posthog(
+        Settings(
+            posthog_enabled=True,
+            posthog_project_token="phc-test-token",
+            data_root=str(tmp_path),
+        )
+    )
+    assert get_client() is client
 
 
 def _fake_posthog(created: list[tuple[str, str | None, bool]], shutdowns: list[str] | None = None) -> object:
@@ -163,6 +199,76 @@ def test_load_or_create_instance_id_writes_fresh_id(tmp_path: Path) -> None:
 
     assert instance_id
     assert (tmp_path / "analytics-instance-id").read_text(encoding="utf-8").strip() == instance_id
+
+
+def test_load_or_create_instance_id_replaces_a_malformed_file(tmp_path: Path) -> None:
+    """A non-UTF-8 identity file must not break startup or identity stability."""
+    path = tmp_path / "analytics-instance-id"
+    path.write_bytes(b"\xff\xfe\x00not-utf8")
+
+    instance_id = _load_or_create_instance_id(str(tmp_path))
+
+    assert instance_id
+    assert path.read_text(encoding="utf-8").strip() == instance_id
+    assert _load_or_create_instance_id(str(tmp_path)) == instance_id
+
+
+def test_capture_is_a_noop_without_a_client() -> None:
+    shutdown_posthog()
+
+    capture("turn_created", properties={"session_id": "s"})
+
+
+def test_capture_contains_client_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    client = _FailingClient(capture_error=RuntimeError("analytics transport failed"))
+    _install_failing_client(monkeypatch, client, tmp_path)
+
+    capture("turn_created", properties={"session_id": "s"})
+
+    shutdown_posthog()
+    assert get_client() is None
+
+
+def test_capture_propagates_cancellation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Cancellation is control flow, never an analytics failure to contain."""
+    client = _FailingClient(capture_error=asyncio.CancelledError())
+    _install_failing_client(monkeypatch, client, tmp_path)
+
+    with pytest.raises(asyncio.CancelledError):
+        capture("turn_created")
+
+    shutdown_posthog()
+
+
+def test_init_contains_client_construction_failure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    shutdown_posthog()
+
+    def explode(*_args: object, **_kwargs: object) -> object:
+        raise RuntimeError("sdk construction failed")
+
+    monkeypatch.setattr("fleet_rlm.observability.posthog.Posthog", explode)
+
+    init_posthog(
+        Settings(
+            posthog_enabled=True,
+            posthog_project_token="phc-test-token",
+            data_root=str(tmp_path),
+        )
+    )
+
+    assert get_client() is None
+
+
+def test_shutdown_contains_client_failures(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    client = _FailingClient(
+        capture_error=RuntimeError("analytics transport failed"),
+        shutdown_error=RuntimeError("analytics shutdown failed"),
+    )
+    _install_failing_client(monkeypatch, client, tmp_path)
+
+    shutdown_posthog()
+
+    assert get_client() is None
 
 
 def test_default_profile_enables_posthog_and_resolves_token(monkeypatch) -> None:

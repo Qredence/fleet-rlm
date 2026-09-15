@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
 from fleet_rlm.cli.bind_safety import UnsafeBindError, is_loopback_bind_host, require_safe_bind_host
@@ -46,3 +49,39 @@ def test_launchers_reject_non_loopback_without_opt_in(
 
     assert error.value.code == 1
     assert "--allow-non-loopback-bind" in capsys.readouterr().err
+
+
+def test_module_launcher_rejects_non_loopback_without_opt_in(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """``python -m fleet_rlm.cli.server`` must enforce the same policy."""
+    from fleet_rlm.cli import server
+
+    with pytest.raises(SystemExit) as error:
+        server.main(["--host", "0.0.0.0"])
+
+    assert error.value.code == 1
+    assert "--allow-non-loopback-bind" in capsys.readouterr().err
+
+
+def test_module_launcher_accepts_the_explicit_non_loopback_opt_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.cli import server
+
+    calls: list[object] = []
+    monkeypatch.setitem(
+        sys.modules,
+        "uvicorn",
+        SimpleNamespace(run=lambda target, **kwargs: calls.append((target, kwargs))),
+    )
+
+    server.main(["--host", "0.0.0.0", "--allow-non-loopback-bind", "--port", "8126"])
+
+    assert calls == [("fleet_rlm.main:app", {"host": "0.0.0.0", "port": 8126, "reload": False})]
+
+
+def test_shared_launcher_gate_rejects_non_loopback_direct_calls() -> None:
+    """The gate lives in ``serve_api`` so no caller can bypass it."""
+    from fleet_rlm.cli import server
+
+    with pytest.raises(UnsafeBindError, match="--allow-non-loopback-bind"):
+        server.serve_api(host="0.0.0.0", port=8126, reload=False)

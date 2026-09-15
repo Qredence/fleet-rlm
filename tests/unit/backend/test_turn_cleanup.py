@@ -48,11 +48,16 @@ async def test_cleanup_supervisor_observes_cancelled_cleanup(caplog: pytest.LogC
 
 @pytest.mark.asyncio
 async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
-    from fleet_rlm.chat.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
-    from fleet_rlm.chat.run_lifecycle import RunClaim, RunFailure, RunInProgressError, RunStateError
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunFailure,
+        RunInProgressError,
+        RunStateError,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -86,11 +91,15 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
 
 @pytest.mark.asyncio
 async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
-    from fleet_rlm.chat.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim, RunFailure
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

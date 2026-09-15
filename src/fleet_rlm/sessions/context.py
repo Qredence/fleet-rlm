@@ -44,3 +44,10 @@ def build_session_context_manifest(
         for index, message in enumerate(history.messages[first_recent:], start=first_recent)
     )
     return SessionContextManifest(session_id, checkpoint_version, message_count, recent)
+
+
+__all__ = [
+    "SessionContextManifest",
+    "TurnPreview",
+    "build_session_context_manifest",
+]

@@ -11,6 +11,7 @@ import sys
 import time
 from pathlib import Path
 from threading import Event, Thread
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -758,6 +759,45 @@ def test_http_broker_retries_transient_preview_link_failure(monkeypatch: pytest.
     assert sleeps == [0.25, 0.5]
     assert broker._broker_url == "http://preview.test"
     assert broker._broker_token == "preview-token"
+
+
+def test_http_broker_execute_fails_fast_when_sandbox_stopped() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    class _Sandbox:
+        def __init__(self) -> None:
+            self.state = "stopped"
+
+        def get_preview_link(self, port: int) -> object:
+            del port
+            raise AssertionError("stopped sandbox must not contact Daytona")
+
+    broker = DaytonaHttpToolBroker(sandbox=_Sandbox())
+    broker._broker_url = "http://example.test"
+    started = time.perf_counter()
+    with pytest.raises(DaytonaAdapterError) as exc_info:
+        broker.execute_code("print(1)", timeout_s=30)
+    assert time.perf_counter() - started < 1.0
+    assert exc_info.value.cause_type == "InterpreterLifecycleError"
+
+
+def test_http_broker_ensure_started_fails_fast_when_sandbox_missing() -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    class _Fs:
+        def upload_file(self, content: bytes, path: str) -> None:
+            del content, path
+            raise AssertionError("missing sandbox must not contact Daytona")
+
+    sandbox = SimpleNamespace(state="missing", fs=_Fs())
+    broker = DaytonaHttpToolBroker(sandbox=sandbox)
+    started = time.perf_counter()
+    with pytest.raises(DaytonaAdapterError) as exc_info:
+        broker.ensure_started()
+    assert time.perf_counter() - started < 1.0
+    assert exc_info.value.cause_type == "InterpreterLifecycleError"
 
 
 def test_http_broker_preview_link_failure_is_bounded_and_cleanup_safe(

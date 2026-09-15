@@ -39,6 +39,7 @@ from fleet_rlm.daytona.errors import (
     provider_status_code,
     sanitize_provider_message,
 )
+from fleet_rlm.daytona.platform import sandbox_state
 from fleet_rlm.json_types import validate_json_value
 
 if TYPE_CHECKING:
@@ -987,8 +988,24 @@ class DaytonaHttpToolBroker:
             )
         return self._client
 
+    def _require_running_sandbox(self) -> None:
+        raw = getattr(self._sandbox, "state", None)
+        if raw is None:
+            raw = getattr(self._sandbox, "status", None)
+        if raw is None:
+            return
+        if sandbox_state(self._sandbox) == "running":
+            return
+        raise DaytonaAdapterError(
+            message="sandbox is not running",
+            cause_type="InterpreterLifecycleError",
+        )
+
     def ensure_started(self) -> None:
-        if self._broker_url is not None or self._stopped:
+        if self._stopped:
+            return
+        self._require_running_sandbox()
+        if self._broker_url is not None:
             return
         server_code = (
             BROKER_SERVER_CODE.replace("__BROKER_SECRET__", repr(self._broker_secret))
@@ -1170,6 +1187,7 @@ class DaytonaHttpToolBroker:
         """
         from fleet_rlm.daytona.interpreter import BackendExecutionResult
 
+        self._require_running_sandbox()
         self.ensure_started()
         if self._stopped:
             raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
@@ -1199,7 +1217,13 @@ class DaytonaHttpToolBroker:
                 Submit the execution payload and record either the HTTP response or the encountered exception.
                 """
                 try:
-                    response_box.append(self._http().post("/execute", json=payload, timeout=timeout_s))
+                    response_box.append(
+                        self._http().post(
+                            "/execute",
+                            json=payload,
+                            timeout=httpx.Timeout(timeout_s, connect=min(5.0, timeout_s)),
+                        )
+                    )
                 except Exception as exc:
                     request_errors.append(exc)
 

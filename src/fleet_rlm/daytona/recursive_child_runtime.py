@@ -36,6 +36,11 @@ from threading import Condition, Lock, Thread, get_ident
 from typing import Any
 from uuid import UUID
 
+from fleet_rlm.daytona.admission import (
+    DaytonaAdmission,
+    DaytonaAdmissionPermit,
+    DaytonaAdmissionTimeoutError,
+)
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
@@ -45,11 +50,6 @@ from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
 )
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
-from fleet_rlm.daytona.session_manager import (
-    DaytonaAdmission,
-    DaytonaAdmissionPermit,
-    DaytonaAdmissionTimeoutError,
-)
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,

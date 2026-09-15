@@ -58,7 +58,9 @@ and Turn Commit succeed.
 `src/fleet_rlm/api/` owns HTTP identity and validation, dependency aliases,
 schemas, routes, OpenAPI derivation, and SSE projection. Routes are transport
 adapters: they obtain runtime services through composition and dependency seams
-and do not construct stores, engines, models, or provider clients. The SSE
+and do not construct stores, engines, models, or provider clients. Session
+PATCH routes call the composed `SessionLifecycle` owner rather than discovering
+provider retirement through the inventory graph. The SSE
 layer projects typed, transport-neutral Runtime Events into the public client
 stream. Fleet exposes no `/api/v1`, WebSocket execution, compatibility aliases,
 or graphical frontend contract.
@@ -197,7 +199,9 @@ when enabled, its candidates enter a durable post-commit promotion outbox.
 Alembic owns live schema evolution. Explicit SQLite test/local helpers may
 create tables, but production startup does not use `create_all`. In-memory and
 SQL Run repositories share the same typed claim-transition policy while
-retaining their respective lock or transaction boundaries.
+retaining their respective lock or transaction boundaries. Claim-transition
+values, run-state receipts, and session context manifests live in
+`sessions/`; `chat/` owns coordination.
 
 ### Configuration
 

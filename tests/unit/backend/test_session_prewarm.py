@@ -22,7 +22,7 @@ from fleet_rlm.composition.inventory import RuntimeInventory
 
 
 class _RecordingManager:
-    """Session-manager double recording prewarm and fence calls."""
+    """Session-manager double recording prewarm scheduling."""
 
     def __init__(self, *, fail: BaseException | None = None) -> None:
         self.calls: list[tuple[object, object, object]] = []
@@ -40,6 +40,22 @@ class _RecordingManager:
         if self._fail is not None:
             raise self._fail
         return True
+
+    def schedule_prewarm(self, session_id, user_id, workspace_id) -> asyncio.Task[None]:
+        async def run_prewarm() -> None:
+            try:
+                await self.prewarm_session(
+                    session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Suppressed by design: the first Turn retries acquisition.
+                return
+
+        return asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
 
 
 class _Request:
@@ -63,7 +79,7 @@ def _inventory(manager: _RecordingManager | None) -> RuntimeInventory:
 
 
 @pytest.mark.asyncio
-async def test_prewarm_trigger_schedules_background_acquisition() -> None:
+async def test_prewarm_dependency_returns_manager_scheduler() -> None:
     manager = _RecordingManager()
     request = _Request(_App(ready=True, inventory=_inventory(manager)))
 

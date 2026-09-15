@@ -8,7 +8,6 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.chat.session_context import SessionContextManifest
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.runtime import (
     ExecutionRuntime,
@@ -17,6 +16,7 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 

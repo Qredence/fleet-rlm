@@ -35,9 +35,9 @@ from fleet_rlm.chat.preparation import (
     RunPreparationUnavailableError,
     claim_history_records,
 )
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona._lease import RootSessionLease
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found
 from fleet_rlm.daytona.platform import (
@@ -58,8 +58,6 @@ from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_le
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     BindingStoreLike,
-    DaytonaAdmission,
-    DaytonaAdmissionTimeoutError,
     DaytonaLeaseAcquisitionTimeoutError,
     DaytonaSessionManager,
     LeaseRequest,
@@ -67,6 +65,7 @@ from fleet_rlm.daytona.session_manager import (
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.workspace.memory import MemoryCandidateCollector, build_memory_promotion_intents
 from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
@@ -257,10 +256,6 @@ class _DaytonaEnvironmentProvider:
     _resident_context_keys: dict[tuple[UUID, UUID], tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]] = (
         field(default_factory=dict, init=False)
     )
-    # A tainted RLM may close its root before the next provider acquisition.
-    # Retain this marker across that close so a durable binding cannot silently
-    # reuse the retired Sandbox.
-    _tainted_root_keys: set[tuple[UUID, UUID]] = field(default_factory=set, init=False, repr=False)
     _resident_root_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False, repr=False)
     # Serialize root replacement and shutdown without holding the registry
     # lock across provider callbacks.
@@ -339,13 +334,33 @@ class _DaytonaEnvironmentProvider:
             self._preparation_gates[key] = gate
         return gate
 
+    async def wait_for_session_idle(
+        self,
+        workspace_id: UUID,
+        session_id: UUID,
+        *,
+        deadline: float,
+    ) -> None:
+        """Wait for a prepared Turn before retiring its shared Session root."""
+        key = (workspace_id, session_id)
+        gate = self._preparation_gates.get(key)
+        if gate is None or not gate.locked():
+            return
+        acquired = False
+        try:
+            async with asyncio.timeout_at(deadline):
+                await gate.acquire()
+            acquired = True
+        finally:
+            if acquired:
+                gate.release()
+                self._prune_preparation_gate(key)
+
     def _mark_provider_root_tainted(self, key: tuple[UUID, UUID]) -> None:
         """Require a fresh provider root on the next acquisition for ``key``."""
         runtime = getattr(self.resources, "runtime", None)
         if isinstance(runtime, DaytonaRuntime):
             runtime.mark_root_tainted(*key)
-            return
-        self._tainted_root_keys.add(key)
 
     def _prune_preparation_gate(self, key: tuple[UUID, UUID]) -> None:
         """Drop an idle Session preparation gate once no root remains."""
@@ -1005,25 +1020,9 @@ class _DaytonaEnvironmentProvider:
     ) -> None:
         """Drop a retired resident root without forcing a new Sandbox."""
         runtime = getattr(self.resources, "runtime", None)
-        if isinstance(runtime, DaytonaRuntime):
-            await runtime.discard_stale_root_session(*key, deadline=deadline)
-            return
-        async with self._resident_root_transition_lock:
-            async with self._resident_root_lock:
-                owner = self._resident_root_leases.get(key)
-            if owner is None:
-                return
-            try:
-                await owner.close(notify=False, deadline=deadline)
-            except BaseException:
-                # Keep the exact owner and context binding reachable for the
-                # environment shutdown/retry lane when close does not settle.
-                raise
-            async with self._resident_root_lock:
-                if self._resident_root_leases.get(key) is owner:
-                    self._resident_root_leases.pop(key, None)
-                    self._resident_context_keys.pop(key, None)
-                    self._prune_preparation_gate(key)
+        if not isinstance(runtime, DaytonaRuntime):
+            raise RuntimeError("Daytona runtime is required to discard a provider root")
+        await runtime.discard_stale_root_session(*key, deadline=deadline)
 
     async def _acquire_root_lease(
         self,
@@ -1031,96 +1030,28 @@ class _DaytonaEnvironmentProvider:
         *,
         deadline: float,
     ) -> tuple[RootSessionLease, bool]:
-        """Return the resident root lease and whether this call created it."""
+        """Return the runtime-owned root lease.
+
+        The second tuple element remains for call-site compatibility. Production
+        and tests always go through :meth:`DaytonaRuntime.acquire_root_session`,
+        which owns reuse, fingerprint rotation, and taint replacement, so the
+        caller never receives a newly created local resident owner.
+        """
         key = (run.access.workspace_id, run.session_id)
-        context_key = self._context_key(run)
         runtime = getattr(self.resources, "runtime", None)
-        if isinstance(runtime, DaytonaRuntime):
-            # The public runtime is the sole owner of production roots,
-            # including context-fingerprint replacement and late cleanup.
-            owner = await runtime.acquire_root_session(
-                RootSessionSpec(
-                    workspace_id=key[0],
-                    session_id=key[1],
-                    user_id=run.access.user_id,
-                    run_id=run.run_id,
-                    context_fingerprint=context_key,
-                    deadline=deadline,
-                )
-            )
-            return owner, False
-
-        # Compatibility resources predate DaytonaRuntime. Their test-only
-        # ownership remains local until those seams are retired.
-        async with self._resident_root_transition_lock:
-            async with self._resident_root_lock:
-                owner = self._resident_root_leases.get(key)
-                reusable = (
-                    owner is not None
-                    and not owner.closed
-                    and not owner.failed
-                    and not owner.closing
-                    and self._resident_context_keys.get(key) == context_key
-                    and key not in self._tainted_root_keys
-                )
-                if reusable:
-                    return owner, False
-            had_previous = owner is not None
-            force_new = had_previous or key in self._tainted_root_keys
-
-            # Compatibility path for test/provider resources that predate the
-            # public facade. Production DaytonaRuntimeResources always takes
-            # the branch above.
-            request = LeaseRequest(
-                session_id=run.session_id,
+        if not isinstance(runtime, DaytonaRuntime):
+            raise RuntimeError("Daytona runtime is required to acquire a provider root")
+        owner = await runtime.acquire_root_session(
+            RootSessionSpec(
+                workspace_id=key[0],
+                session_id=key[1],
                 user_id=run.access.user_id,
-                workspace_id=run.access.workspace_id,
                 run_id=run.run_id,
+                context_fingerprint=self._context_key(run),
+                deadline=deadline,
             )
-            force_new_sandbox = force_new
-            if owner is not None:
-                # Remove the map entry only after release and any compatibility
-                # quarantine succeed so a provider failure/cancellation leaves
-                # a retryable owner.
-                if id(owner) in self._compatibility_quarantines:
-                    await self._retry_failed_root(owner, deadline=deadline)
-                    if not owner.closed:
-                        raise RuntimeError("root Session cleanup remains unresolved")
-                else:
-                    await owner.close(notify=True, deadline=deadline)
-                async with self._resident_root_lock:
-                    if self._resident_root_leases.get(key) is owner:
-                        self._resident_root_leases.pop(key, None)
-                        self._resident_context_keys.pop(key, None)
-            acquire = self.resources.session_manager.acquire
-            acquire_kwargs: dict[str, Any] = {"deadline": deadline}
-            if force_new_sandbox:
-                try:
-                    supports_force_new = "force_new" in inspect.signature(acquire).parameters
-                except (TypeError, ValueError):
-                    supports_force_new = False
-                if supports_force_new:
-                    acquire_kwargs["force_new"] = True
-            lease = await acquire(request, **acquire_kwargs)
-            owner = RootSessionLease(
-                key=key,
-                lease=lease,
-                release_callback=self.resources.session_manager.release,
-                on_closed=self._on_root_closed,
-            )
-            try:
-                async with self._resident_root_lock:
-                    self._resident_root_leases[key] = owner
-                    self._resident_context_keys[key] = context_key
-                    self._tainted_root_keys.discard(key)
-            except BaseException:
-                # The raw manager lease became ours before local publication.
-                # Retire it even if cancellation wins while the index lock is
-                # contended; otherwise admission can be leaked indefinitely.
-                with contextlib.suppress(BaseException):
-                    await asyncio.shield(owner.close(notify=False, deadline=deadline))
-                raise
-            return owner, True
+        )
+        return owner, False
 
     async def aclose(self, *, drain_seconds: float = 30.0) -> bool:
         """Close provider roots only after tracked acquisitions settle."""
@@ -1246,7 +1177,6 @@ class _DaytonaEnvironmentProvider:
         preparation_gate = self._preparation_gate(key)
         gate_held = False
         owner: RootSessionLease | None = None
-        created_root = False
         sandbox_lookup_failed = False
         try:
             try:
@@ -1257,7 +1187,7 @@ class _DaytonaEnvironmentProvider:
             gate_held = True
             try:
                 owner, created_root = await self._acquire_root_lease(run, deadline=deadline)
-                owner, created_root = await self._align_root_to_durable_binding(
+                owner, _created_root = await self._align_root_to_durable_binding(
                     run, owner, created_root, deadline=deadline
                 )
             except DaytonaAdmissionTimeoutError as exc:
@@ -1341,12 +1271,6 @@ class _DaytonaEnvironmentProvider:
                     preparation_gate.release()
                     self._prune_preparation_gate(key)
 
-            async def release_root() -> None:
-                # Only the first Turn owns the provider lease directly. Later
-                # Turns reuse the resident root and release only their
-                # preparation reservation.
-                await root_owner.close()
-
             child_runtime_factory = build_child_runtime_factory(
                 loop=main_loop,
                 dispatcher=getattr(self.resources, "dispatcher", None),
@@ -1366,16 +1290,13 @@ class _DaytonaEnvironmentProvider:
 
             sandbox_spec = getattr(self.resources, "sandbox_spec", None)
             image_identity = environment_manifest(sandbox_spec).digest if sandbox_spec is not None else None
-            resident_release = None
-            if not isinstance(getattr(self.resources, "runtime", None), DaytonaRuntime) and created_root:
-                resident_release = release_root
             return RunEnvironment(
                 interpreter=lease.interpreter,
                 attachment_sink=sink,
                 artifact_sink=sink,
                 # ``release`` is always the per-Turn preparation reservation.
-                # The first resident state receives ``resident_release`` and
-                # owns the root until its generation is retired.
+                # DaytonaRuntime retains the broker root independently of a
+                # Run's DSPy program.
                 release=release_preparation,
                 result_snapshot_sink=sink,
                 child_runtime_factory=child_runtime_factory,
@@ -1383,10 +1304,7 @@ class _DaytonaEnvironmentProvider:
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,
                 memory_intent_builder=memory_intent_builder,
-                # DaytonaRuntime retains the broker root independently of a
-                # Run's DSPy program. Compatibility resources retain the old
-                # callback ownership until their tests migrate.
-                resident_release=resident_release,
+                resident_release=None,
                 release_is_resident=False,
                 history_transport=build_committed_session_history_for_claim(run),
                 mark_tainted=lambda key=key: self._mark_provider_root_tainted(key),

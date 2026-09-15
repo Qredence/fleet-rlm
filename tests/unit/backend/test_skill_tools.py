@@ -217,8 +217,11 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
     from uuid import uuid4 as _uuid4
 
     from fleet_rlm.chat.capability_preparation import prepare_host_capabilities
-    from fleet_rlm.chat.run_lifecycle import ClaimedRun, _RunClaimToken
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
     from fleet_rlm.skills.models import SkillSelectionRef
     from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 

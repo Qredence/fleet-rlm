@@ -9,7 +9,7 @@ from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyResponse
 from fleet_rlm.config.policy import PolicyAccessError, PolicyConflictError, PolicyMutation
 from fleet_rlm.config.settings import FleetConfigurationError
-from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import capture
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -29,6 +29,7 @@ def _response(snapshot) -> SettingsPolicyResponse:
     response_model=SettingsPolicyResponse,
     operation_id="get_settings_policy",
     dependencies=[Depends(require_loopback_client)],
+    responses={503: {"description": "Settings are unavailable, or the service is not ready"}},
 )
 def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     try:
@@ -42,6 +43,11 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     response_model=SettingsPolicyResponse,
     operation_id="update_settings_policy",
     dependencies=[Depends(require_loopback_client)],
+    responses={
+        409: {"description": "Settings changed; reload before saving"},
+        422: {"description": "Settings value is invalid"},
+        503: {"description": "Service is not ready"},
+    },
 )
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     """
@@ -88,13 +94,7 @@ def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicy
             )
             update_kind = "field"
             properties = {"update_kind": update_kind, "scope": body.scope, "path": body.path}
-        ph = get_client()
-        if ph is not None:
-            ph.capture(
-                distinct_id=get_distinct_id(),
-                event="settings_policy_updated",
-                properties=properties,
-            )
+        capture("settings_policy_updated", properties=properties)
         return result
     except PolicyConflictError as exc:
         raise http_error(409, "settings_revision_conflict", "Settings changed; reload before saving") from exc

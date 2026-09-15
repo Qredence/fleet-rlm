@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -17,13 +18,9 @@ from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona._lease import LeaseState
-
-# Admission ownership lives in fleet_rlm.daytona.admission (QRE-156); the
-# re-export here keeps the historical session_manager import surface working.
 from fleet_rlm.daytona.admission import (
     DaytonaAdmission,
     DaytonaAdmissionPermit,
-    DaytonaAdmissionTimeoutError,
 )
 from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
@@ -68,40 +65,25 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
-class _LateLeaseOwner:
-    """Retryable ownership record for a late provider acquisition."""
+class _LateOwner:
+    """One late ownership record spanning acquisition, lease, or unpublished fence.
 
-    lease: InterpreterLease
-    permit: DaytonaAdmissionPermit
-    session_id: UUID
-    user_id: UUID
-    workspace_id: UUID
-    run_id: UUID
-    retry_task: asyncio.Task[None] | None = None
+    Acquisition owners retain a pending provider task. Lease owners retain an
+    admitted interpreter that still needs release/quarantine. Unpublished
+    owners retain a released interpreter until its provider fence and deferred
+    admission callback settle.
+    """
 
-
-@dataclass(slots=True)
-class _UnpublishedLeaseOwner:
-    """Retain a released interpreter until its provider fence is confirmed."""
-
-    lease: InterpreterLease
     request: LeaseRequest
+    run_id: UUID
+    permit: DaytonaAdmissionPermit | None = None
+    acquisition: asyncio.Task[InterpreterLease] | None = None
+    lease: InterpreterLease | None = None
+    cleanup_task: Any | None = None
     cleanup_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     callback_started: bool = False
     callback_settled: bool = False
-
-
-@dataclass(slots=True)
-class _LateAcquisitionOwner:
-    """Strong owner retained even when no event-loop task can be scheduled."""
-
-    acquisition: asyncio.Task[InterpreterLease]
-    permit: DaytonaAdmissionPermit
-    request: LeaseRequest
-    run_id: UUID
-    # Usually an asyncio.Task on the manager loop; a closed-loop fallback may
-    # retain the concurrent Future returned by ``schedule_owned_close``.
-    cleanup_task: Any | None = None
+    unpublished: bool = False
 
 
 class ActiveLeaseConflictError(RuntimeError):
@@ -188,6 +170,11 @@ class ActiveLeaseRegistry:
                 return self._holders.get(self._key(session_id, workspace_id))
             matches = [run_id for (scope, sid), run_id in self._holders.items() if sid == session_id]
             return matches[0] if len(matches) == 1 else None
+
+    def has_session(self, session_id: UUID) -> bool:
+        """Return True when any Workspace still claims this Session."""
+        with self._lock:
+            return any(sid == session_id for _workspace_id, sid in self._holders)
 
 
 @dataclass(slots=True)
@@ -458,6 +445,7 @@ class DaytonaSessionManager:
             raise ValueError("idle_stop_seconds must be positive")
         self._idle_stop_seconds = idle_stop_seconds
         self._idle_tasks: dict[tuple[UUID, UUID], asyncio.Task[None]] = {}
+        self._runtime_ref: weakref.ReferenceType[Any] | None = None
         self._owned_sandbox_ids: set[str] = set()
         self._owned_sandbox_lock = Lock()
         self._release_tasks: set[asyncio.Task[None]] = set()
@@ -466,15 +454,12 @@ class DaytonaSessionManager:
         # its caller so shutdown can retry the exact owner.
         self._release_leases: dict[asyncio.Task[None], InterpreterLease] = {}
         self._late_cleanup_tasks: set[Any] = set()
-        self._late_lease_owners: dict[int, _LateLeaseOwner] = {}
-        self._late_acquisition_owners: dict[int, _LateAcquisitionOwner] = {}
+        # One registry for late acquisition, late lease, and unpublished fence
+        # ownership. Keys are ``id(acquisition)`` or ``id(lease)``.
+        self._late_owners: dict[int, _LateOwner] = {}
         # Provider calls which outlive the Turn deadline remain owned until the
         # SDK task settles; this fence is independent of caller references.
         self._provider_tasks: set[asyncio.Future[Any]] = set()
-        # A provider lookup can fail after interpreter acquisition. Keep the
-        # exact lease, request, and admission owner until release-then-fence
-        # succeeds; a failed fence is retryable rather than silently released.
-        self._unpublished_leases: dict[int, _UnpublishedLeaseOwner] = {}
         self._provisioner = SandboxProvisioner(
             platform=platform,
             volume_config=volume_config,
@@ -485,6 +470,34 @@ class DaytonaSessionManager:
     def active_leases(self) -> ActiveLeaseRegistry:
         """Return the claim owner scoped to this Session manager."""
         return self._active_leases
+
+    def bind_runtime(self, runtime: Any) -> None:
+        """Observe retained OPEN roots without owning the process runtime."""
+        self._runtime_ref = weakref.ref(runtime)
+
+    def _has_open_retained_root(self, workspace_id: UUID | None, session_id: UUID) -> bool:
+        runtime = self._runtime_ref() if self._runtime_ref is not None else None
+        if runtime is None:
+            return False
+        owns = getattr(runtime, "owns_open_root", None)
+        if not callable(owns):
+            return False
+        try:
+            return bool(owns(workspace_id, session_id))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Unable to verify retained Daytona root before idle stop",
+                extra={"session_id": str(session_id), "workspace_id": str(workspace_id)},
+                exc_info=True,
+            )
+            return True
+
+    def _idle_stop_blocked(self, session_id: UUID, workspace_id: UUID | None) -> bool:
+        if self._active_leases.holder(session_id, workspace_id=workspace_id) is not None:
+            return True
+        if self._active_leases.has_session(session_id):
+            return True
+        return self._has_open_retained_root(workspace_id, session_id)
 
     def _observe_binding(self, binding: SandboxBinding | None) -> None:
         """Publish the latest durable generation to synchronous native guards."""
@@ -554,9 +567,7 @@ class DaytonaSessionManager:
             or any(not lease._released for lease in self._release_leases.values())
             or self._idle_tasks
             or sandbox_owned
-            or bool(self._late_lease_owners)
-            or bool(self._late_acquisition_owners)
-            or bool(self._unpublished_leases)
+            or bool(self._late_owners)
         )
 
     def owns_sandbox(self, sandbox_id: str) -> bool:
@@ -615,6 +626,31 @@ class DaytonaSessionManager:
             return False
         await self.release(lease)
         return True
+
+    def schedule_prewarm(
+        self,
+        session_id: UUID,
+        user_id: UUID,
+        workspace_id: UUID,
+    ) -> asyncio.Task[None]:
+        """Schedule best-effort pre-warm work owned by this manager until drain."""
+
+        async def run_prewarm() -> None:
+            try:
+                await self.prewarm_session(
+                    session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # Suppressed by design: the first Turn retries acquisition.
+                pass
+
+        task = asyncio.create_task(run_prewarm(), name=f"fleet-session-prewarm-{session_id}")
+        _retain_provider_task(task, self._provider_tasks)
+        return task
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(
@@ -711,9 +747,20 @@ class DaytonaSessionManager:
         await effect.settle()
         return effect.result()
 
-    async def _run_late_acquisition_owner(self, owner: _LateAcquisitionOwner) -> None:
+    async def _settle_late_owner(self, owner: _LateOwner, *, deadline: float | None = None) -> None:
+        """Settle one late owner through acquisition, lease, or unpublished fence."""
+        if owner.unpublished:
+            await self._finish_unpublished_lease(owner, deadline=deadline)
+            return
+        if owner.acquisition is not None and owner.lease is None:
+            await self._settle_late_acquisition(owner)
+            return
+        await self._settle_late_lease(owner)
+
+    async def _settle_late_acquisition(self, owner: _LateOwner) -> None:
         """Settle one late acquisition, then retire any produced lease."""
         acquisition = owner.acquisition
+        assert acquisition is not None
         # A disposable-loop fallback may be invoked after the acquisition's
         # original loop has been destroyed.  Never await a pending Task from a
         # foreign loop: leave the acquisition owner quarantined for the done
@@ -734,7 +781,8 @@ class DaytonaSessionManager:
                 # run, but the admission/claim still belong to this owner until
                 # this point.
                 try:
-                    owner.permit.release()
+                    if owner.permit is not None:
+                        owner.permit.release()
                 finally:
                     self._active_leases.release(
                         owner.request.session_id,
@@ -742,25 +790,21 @@ class DaytonaSessionManager:
                         workspace_id=owner.request.workspace_id,
                     )
                 return
-            late_owner = _LateLeaseOwner(
-                lease,
-                owner.permit,
-                owner.request.session_id,
-                owner.request.user_id,
-                owner.request.workspace_id,
-                owner.run_id,
-            )
-            self._late_lease_owners[id(lease)] = late_owner
+            owner.lease = lease
+            owner.acquisition = None
+            if self._late_owners.get(id(acquisition)) is owner:
+                self._late_owners.pop(id(acquisition), None)
+            self._late_owners[id(lease)] = owner
             self._mark_sandbox_owned(lease.sandbox_id)
-            await self._run_late_owner_cleanup(late_owner)
+            await self._settle_late_lease(owner)
         finally:
-            if acquisition.done() and self._late_acquisition_owners.get(id(acquisition)) is owner:
-                self._late_acquisition_owners.pop(id(acquisition), None)
+            if acquisition.done() and self._late_owners.get(id(acquisition)) is owner:
+                self._late_owners.pop(id(acquisition), None)
 
-    def _schedule_late_acquisition_fallback(self, owner: _LateAcquisitionOwner) -> bool:
-        """Run settled late acquisition cleanup when its owner loop is closing."""
+    def _schedule_late_owner_fallback(self, owner: _LateOwner) -> bool:
+        """Run settled late ownership cleanup when its owner loop is closing."""
         try:
-            owner_loop = owner.acquisition.get_loop()
+            owner_loop = owner.acquisition.get_loop() if owner.acquisition is not None else None
         except BaseException:
             owner_loop = None
         if owner_loop is None or owner_loop.is_closed() or not owner_loop.is_running():
@@ -773,12 +817,12 @@ class DaytonaSessionManager:
         try:
             execution = schedule_owned_close(
                 loop=owner_loop,
-                build=lambda: self._run_late_acquisition_owner(owner),
-                thread_name="fleet-daytona-late-acquisition-fallback",
+                build=lambda: self._settle_late_owner(owner),
+                thread_name="fleet-daytona-late-ownership-fallback",
             )
         except BaseException as exc:
             logger.critical(
-                "unable to retain late Daytona acquisition cleanup",
+                "unable to retain late Daytona ownership cleanup",
                 extra={"error_type": type(exc).__name__},
             )
             return False
@@ -788,24 +832,24 @@ class DaytonaSessionManager:
         task.add_done_callback(self._settled_late_cleanup)
         return True
 
-    def _schedule_late_acquisition_owner(self, owner: _LateAcquisitionOwner) -> bool:
+    def _schedule_late_owner(self, owner: _LateOwner) -> bool:
         """Schedule late cleanup or leave its owner quarantined for a retry."""
         if owner.cleanup_task is not None and not owner.cleanup_task.done():
             return True
-        awaitable = self._run_late_acquisition_owner(owner)
+        awaitable = self._settle_late_owner(owner)
         try:
             task = self._cleanup.submit(awaitable)
         except BaseException as scheduler_error:
             try:
-                task = asyncio.create_task(awaitable, name="fleet-daytona-late-acquisition-cleanup")
+                task = asyncio.create_task(awaitable, name="fleet-daytona-late-ownership-cleanup")
             except BaseException:
                 with contextlib.suppress(BaseException):
                     awaitable.close()
                 logger.warning(
-                    "Daytona cleanup supervisor rejected late acquisition; using owned fallback",
+                    "Daytona cleanup supervisor rejected late ownership; using owned fallback",
                     extra={"error_type": type(scheduler_error).__name__},
                 )
-                return self._schedule_late_acquisition_fallback(owner)
+                return self._schedule_late_owner_fallback(owner)
         owner.cleanup_task = task
         self._late_cleanup_tasks.add(task)
         task.add_done_callback(self._settled_late_cleanup)
@@ -819,9 +863,14 @@ class DaytonaSessionManager:
         run_id: UUID,
     ) -> None:
         """Own an acquisition that outlives its caller before scheduling cleanup."""
-        owner = _LateAcquisitionOwner(acquisition, permit, request, run_id)
-        self._late_acquisition_owners[id(acquisition)] = owner
-        if self._schedule_late_acquisition_owner(owner):
+        owner = _LateOwner(
+            request=request,
+            run_id=run_id,
+            permit=permit,
+            acquisition=acquisition,
+        )
+        self._late_owners[id(acquisition)] = owner
+        if self._schedule_late_owner(owner):
             return
 
         # If both the cleanup supervisor and the current loop reject task
@@ -830,13 +879,15 @@ class DaytonaSessionManager:
         # claim, and acquisition identity alive across that gap.
         def retry_after_settlement(_completed: asyncio.Future[Any]) -> None:
             if owner.cleanup_task is None:
-                self._schedule_late_acquisition_owner(owner)
+                self._schedule_late_owner(owner)
 
         acquisition.add_done_callback(retry_after_settlement)
 
-    async def _run_late_owner_cleanup(self, owner: _LateLeaseOwner) -> None:
+    async def _settle_late_lease(self, owner: _LateOwner) -> None:
         """Retry interpreter release and provider quarantine for one late lease."""
         lease = owner.lease
+        assert lease is not None
+        assert owner.permit is not None
         release_error: BaseException | None = None
         try:
             # Interpreter shutdown is synchronous and may block on the broker.
@@ -853,8 +904,8 @@ class DaytonaSessionManager:
                 await self._quarantine(
                     lease,
                     LeaseRequest(
-                        session_id=owner.session_id,
-                        user_id=owner.user_id,
+                        session_id=owner.request.session_id,
+                        user_id=owner.request.user_id,
                         workspace_id=UUID(str(lease.workspace_id)) if lease.workspace_id else UUID(int=0),
                         run_id=owner.run_id,
                     ),
@@ -880,56 +931,81 @@ class DaytonaSessionManager:
 
         owner.permit.release()
         self._active_leases.release(
-            owner.session_id,
+            owner.request.session_id,
             owner.run_id,
-            workspace_id=owner.workspace_id,
+            workspace_id=owner.request.workspace_id,
         )
         self._mark_sandbox_released(lease.sandbox_id)
-        self._late_lease_owners.pop(id(lease), None)
+        self._late_owners.pop(id(lease), None)
 
     async def _retry_late_owners(self, deadline: float) -> bool:
         """Start retryable late-owner cleanup and wait only through shutdown bound."""
         current_loop = asyncio.get_running_loop()
         tasks: list[asyncio.Future[Any]] = []
-        for owner in tuple(self._late_acquisition_owners.values()):
-            # A Task still pending on another loop cannot be awaited or moved
-            # to this loop.  Its original done callback remains responsible for
-            # adopting it; retaining the owner here is the safe outcome.
-            if not owner.acquisition.done():
+        unique_owners: list[_LateOwner] = []
+        seen_owner_ids: set[int] = set()
+        for owner in self._late_owners.values():
+            owner_id = id(owner)
+            if owner_id in seen_owner_ids:
+                continue
+            seen_owner_ids.add(owner_id)
+            unique_owners.append(owner)
+        for owner in unique_owners:
+            if owner.unpublished:
+                awaitable = self._settle_late_owner(owner, deadline=deadline)
                 try:
-                    acquisition_loop = owner.acquisition.get_loop()
+                    task = asyncio.create_task(
+                        awaitable,
+                        name="fleet-daytona-unpublished-lease-retry",
+                    )
                 except BaseException:
-                    acquisition_loop = None
-                if acquisition_loop is not current_loop:
+                    with contextlib.suppress(BaseException):
+                        awaitable.close()
                     continue
+                owner.cleanup_task = task
+                self._late_cleanup_tasks.add(task)
+                task.add_done_callback(self._settled_late_cleanup)
+                tasks.append(task)
+                continue
+            if owner.acquisition is not None and owner.lease is None:
+                # A Task still pending on another loop cannot be awaited or moved
+                # to this loop.  Its original done callback remains responsible for
+                # adopting it; retaining the owner here is the safe outcome.
+                if not owner.acquisition.done():
+                    try:
+                        acquisition_loop = owner.acquisition.get_loop()
+                    except Exception:
+                        acquisition_loop = None
+                    if acquisition_loop is not current_loop:
+                        continue
+                task = owner.cleanup_task
+                if task is None or task.done():
+                    self._schedule_late_owner(owner)
+                    task = owner.cleanup_task
+                if task is not None:
+                    if isinstance(task, asyncio.Future):
+                        tasks.append(task)
+                    else:
+                        # Closed-loop fallback ownership is represented by a
+                        # concurrent Future.  Wrap it only for this loop's bounded
+                        # wait; the owner retains the underlying Future.
+                        tasks.append(asyncio.wrap_future(task))
+                continue
             task = owner.cleanup_task
             if task is None or task.done():
-                self._schedule_late_acquisition_owner(owner)
-                task = owner.cleanup_task
-            if task is not None:
-                if isinstance(task, asyncio.Future):
-                    tasks.append(task)
-                else:
-                    # Closed-loop fallback ownership is represented by a
-                    # concurrent Future.  Wrap it only for this loop's bounded
-                    # wait; the owner retains the underlying Future.
-                    tasks.append(asyncio.wrap_future(task))
-        for owner in tuple(self._late_lease_owners.values()):
-            task = owner.retry_task
-            if task is None or task.done():
                 task = asyncio.create_task(
-                    self._run_late_owner_cleanup(owner),
+                    self._settle_late_lease(owner),
                     name="fleet-daytona-late-lease-retry",
                 )
-                owner.retry_task = task
+                owner.cleanup_task = task
                 self._late_cleanup_tasks.add(task)
                 task.add_done_callback(self._settled_late_cleanup)
             tasks.append(task)
         if not tasks:
-            return True
+            return not self._late_owners
         remaining = max(0.0, deadline - current_loop.time())
         _, pending = await asyncio.wait(tuple(tasks), timeout=remaining)
-        return not pending
+        return not pending and not self._late_owners
 
     def _settled_late_cleanup(self, task: Any) -> None:
         """Retire fallback ownership and consume cleanup failures explicitly."""
@@ -940,7 +1016,7 @@ class DaytonaSessionManager:
             error = task.exception()
         if error is not None:
             logger.warning(
-                "late Daytona acquisition cleanup failed",
+                "late Daytona ownership cleanup failed",
                 extra={"error_type": type(error).__name__},
                 exc_info=(type(error), error, error.__traceback__),
             )
@@ -1639,8 +1715,8 @@ class DaytonaSessionManager:
 
     async def release(self, lease: InterpreterLease) -> None:
         """Release an interpreter with owned thread settlement and idle fencing."""
-        unpublished = self._unpublished_leases.get(id(lease))
-        if unpublished is not None:
+        unpublished = self._late_owners.get(id(lease))
+        if unpublished is not None and unpublished.unpublished:
             await self._finish_unpublished_lease(unpublished)
             return
         if lease.requires_sandbox_deletion and not lease._provider_retired:
@@ -1660,15 +1736,16 @@ class DaytonaSessionManager:
 
     async def _finish_unpublished_lease(
         self,
-        owner: _UnpublishedLeaseOwner,
+        owner: _LateOwner,
         *,
         deadline: float | None = None,
     ) -> None:
         """Shutdown an unpublished interpreter before fencing its Sandbox."""
         async with owner.cleanup_lock:
             lease = owner.lease
+            assert lease is not None
             if lease._provider_retired:
-                self._unpublished_leases.pop(id(lease), None)
+                self._late_owners.pop(id(lease), None)
                 return
             # Keep the admission permit, active Session claim, and sandbox owner
             # callback until the provider fence/delete is confirmed.
@@ -1694,7 +1771,7 @@ class DaytonaSessionManager:
             lease._provider_retired = True
             lease._defer_owner_release = False
             lease._defer_idle_cleanup = False
-            self._unpublished_leases.pop(id(lease), None)
+            self._late_owners.pop(id(lease), None)
 
     async def release_and_quarantine(
         self,
@@ -1710,10 +1787,15 @@ class DaytonaSessionManager:
         interpreter is still live can leave provider state and admission
         ownership irreconcilable.
         """
-        owner = self._unpublished_leases.get(id(lease))
-        if owner is None:
-            owner = _UnpublishedLeaseOwner(lease=lease, request=request)
-            self._unpublished_leases[id(lease)] = owner
+        owner = self._late_owners.get(id(lease))
+        if owner is None or not owner.unpublished:
+            owner = _LateOwner(
+                request=request,
+                run_id=request.run_id or UUID(int=0),
+                lease=lease,
+                unpublished=True,
+            )
+            self._late_owners[id(lease)] = owner
         else:
             owner.request = request
         await self._finish_unpublished_lease(owner, deadline=deadline)
@@ -1860,7 +1942,7 @@ class DaytonaSessionManager:
         """Stop an idle Sandbox only after identity and active-lease rechecks."""
         await asyncio.sleep(delay)
         workspace_scope = UUID(workspace_id) if workspace_id is not None else None
-        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._idle_stop_blocked(session_id, workspace_scope):
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1878,7 +1960,7 @@ class DaytonaSessionManager:
         if binding is None or binding.sandbox_id != sandbox_id or binding.provider_state != "running":
             return
         sandbox = await self._get_bound_sandbox(sandbox_id)
-        if sandbox is None or self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if sandbox is None or self._idle_stop_blocked(session_id, workspace_scope):
             return
 
         # Keep the provider stop request owned if a new acquire cancels this
@@ -1891,7 +1973,7 @@ class DaytonaSessionManager:
         except asyncio.CancelledError:
             await asyncio.shield(stop_task)
             raise
-        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._idle_stop_blocked(session_id, workspace_scope):
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1933,31 +2015,6 @@ class DaytonaSessionManager:
             # a new acquisition for this Session.
             await OwnedEffect.from_task(update).settle()
             raise
-
-    async def _retry_unpublished_leases(self, deadline: float) -> bool:
-        """Retry ordered cleanup for leases retained after a failed fence."""
-        tasks: list[asyncio.Task[None]] = []
-        for owner in tuple(self._unpublished_leases.values()):
-            task = asyncio.create_task(
-                self._finish_unpublished_lease(owner, deadline=deadline),
-                name="fleet-daytona-unpublished-lease-retry",
-            )
-            tasks.append(task)
-            self._late_cleanup_tasks.add(task)
-
-            def settled(completed: asyncio.Task[Any]) -> None:
-                self._late_cleanup_tasks.discard(completed)
-                if not completed.cancelled():
-                    with contextlib.suppress(BaseException):
-                        completed.exception()
-
-            task.add_done_callback(settled)
-        if tasks:
-            remaining = max(0.0, deadline - asyncio.get_running_loop().time())
-            _, pending = await asyncio.wait(tuple(tasks), timeout=remaining)
-            if pending:
-                return False
-        return not self._unpublished_leases
 
     async def aclose(self, *, drain_seconds: float = 30.0) -> bool:
         """Bound policy-task draining without abandoning late ownership."""
@@ -2003,10 +2060,8 @@ class DaytonaSessionManager:
                 logger.warning("Daytona interpreter release ownership remains pending")
                 return False
 
-        unpublished_settled = await self._retry_unpublished_leases(deadline)
         retry_settled = await self._retry_late_owners(deadline)
-        pending_owner = bool(self._late_lease_owners or self._late_acquisition_owners)
-        return unpublished_settled and retry_settled and not pending_owner
+        return retry_settled
 
     def _retain_late_created_sandbox(self, task: asyncio.Future[Any]) -> None:
         """Retire a Sandbox produced after a bounded creation call returned."""
@@ -2254,8 +2309,6 @@ __all__ = [
     "PREWARM_RUN_ID",
     "ActiveLeaseConflictError",
     "BindingStoreLike",
-    "DaytonaAdmission",
-    "DaytonaAdmissionTimeoutError",
     "DaytonaSessionManager",
     "InterpreterLease",
     "LeaseRequest",

@@ -17,6 +17,7 @@ from __future__ import annotations
 import atexit
 import logging
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 
 from posthog import Posthog
@@ -35,7 +36,9 @@ def _load_or_create_instance_id(data_root: str) -> str:
 
     Reads or writes a fresh ``uuid4`` under ``data_root``. The id is stable
     across restarts and unique per install; persistence failures never block
-    startup and fall back to a process-random id.
+    startup and fall back to a process-random id. A malformed identity file is
+    replaced rather than re-read on every start, because a fresh random id per
+    process would collapse the one-PostHog-user-per-install contract.
     """
     path = Path(data_root) / "analytics-instance-id"
     try:
@@ -43,12 +46,23 @@ def _load_or_create_instance_id(data_root: str) -> str:
             existing = path.read_text(encoding="utf-8").strip()
             if existing:
                 return existing
-        fresh = str(uuid.uuid4())
+    except (OSError, UnicodeDecodeError):
+        logger.warning("PostHog analytics identity file is unreadable; issuing a fresh one")
+    fresh = str(uuid.uuid4())
+    try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(fresh, encoding="utf-8")
-        return fresh
     except OSError:
-        return str(uuid.uuid4())
+        pass
+    return fresh
+
+
+def _shutdown_client(client: Posthog) -> None:
+    """Shut one client down without letting an SDK failure escape."""
+    try:
+        client.shutdown()
+    except Exception as exc:
+        logger.warning("PostHog client shutdown failed (%s); continuing shutdown", type(exc).__name__)
 
 
 def init_posthog(settings: Settings) -> None:
@@ -66,7 +80,7 @@ def init_posthog(settings: Settings) -> None:
     global _client, _atexit_registered, _distinct_id
 
     if _client is not None:
-        _client.shutdown()
+        _shutdown_client(_client)
         _client = None
 
     if not settings.posthog_enabled:
@@ -79,11 +93,18 @@ def init_posthog(settings: Settings) -> None:
         return
 
     _distinct_id = _load_or_create_instance_id(settings.data_root)
-    _client = Posthog(
-        token,
-        host=settings.posthog_host or None,
-        enable_exception_autocapture=False,
-    )
+    try:
+        _client = Posthog(
+            token,
+            host=settings.posthog_host or None,
+            enable_exception_autocapture=False,
+        )
+    except Exception as exc:
+        # Analytics observe Fleet; they are never a startup dependency. Only the
+        # exception type is logged: the SDK payload carries the project token.
+        logger.warning("PostHog client construction failed (%s); analytics are disabled", type(exc).__name__)
+        _client = None
+        return
     if not _atexit_registered:
         atexit.register(shutdown_posthog)
         _atexit_registered = True
@@ -93,16 +114,43 @@ def init_posthog(settings: Settings) -> None:
 def shutdown_posthog() -> None:
     """Shut down the active PostHog client and clear the client reference.
 
-    Called once during the FastAPI lifespan shutdown.
+    Called once during the FastAPI lifespan shutdown. A failing SDK shutdown
+    must not fail application shutdown, so the failure is contained here.
     """
     global _client
     if _client is not None:
-        _client.shutdown()
+        _shutdown_client(_client)
         _client = None
+
+
+def capture(event: str, *, properties: Mapping[str, object] | None = None) -> None:
+    """Record one analytics event without ever failing the caller.
+
+    Analytics observe Fleet behaviour; they never participate in it. A disabled
+    client, a malformed installation identity, a transport error, or an SDK
+    defect is contained here so telemetry can neither turn a durable success
+    into a failed request nor strand an opened Turn owner awaiting cleanup.
+    """
+    client = _client
+    if client is None:
+        return
+    try:
+        client.capture(
+            distinct_id=get_distinct_id(),
+            event=event,
+            properties=dict(properties or {}),
+        )
+    except Exception as exc:
+        # Bounded on purpose: the capture payload carries the project token, so
+        # the raw SDK failure is never logged.
+        logger.warning("PostHog capture failed for event %s (%s); continuing", event, type(exc).__name__)
 
 
 def get_client() -> Posthog | None:
     """Return the active PostHog analytics client.
+
+    Routes must use :func:`capture` rather than this raw client: it exists for
+    lifecycle introspection, not as a telemetry path.
 
     Returns:
         Posthog | None: The active client, or `None` when analytics are disabled.

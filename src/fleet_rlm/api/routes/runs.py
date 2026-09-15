@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import LocalScopeDep, RunLifecycleDep
 from fleet_rlm.api.errors import http_error
-from fleet_rlm.chat.run_lifecycle import RunNotFoundError
-from fleet_rlm.observability.posthog import get_client, get_distinct_id
+from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_state import RunNotFoundError
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 
@@ -26,6 +26,10 @@ class CancellationResponse(BaseModel):
     "/{run_id}/cancellation",
     response_model=CancellationResponse,
     operation_id="request_run_cancellation",
+    responses={
+        404: {"description": "Run not found"},
+        503: {"description": "Service is not ready"},
+    },
 )
 async def request_run_cancellation(
     run_id: UUID,
@@ -37,7 +41,7 @@ async def request_run_cancellation(
 
     Parameters:
         run_id (UUID): The identifier of the run to cancel.
-        identity (LocalScopeDep): The authenticated user's workspace scope.
+        identity (LocalScopeDep): The deterministic local User and Workspace scope.
         lifecycle (RunLifecycleDep): The run lifecycle service.
 
     Returns:
@@ -47,15 +51,12 @@ async def request_run_cancellation(
         status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
     except RunNotFoundError as exc:
         raise http_error(404, "run_not_found", "Run not found") from exc
-    ph = get_client()
-    if ph is not None:
-        ph.capture(
-            distinct_id=get_distinct_id(),
-            event="run_cancellation_requested",
-            properties={
-                "workspace_id": str(identity.workspace_id),
-                "run_id": str(run_id),
-                "cancellation_state": status,
-            },
-        )
+    capture(
+        "run_cancellation_requested",
+        properties={
+            "workspace_id": str(identity.workspace_id),
+            "run_id": str(run_id),
+            "cancellation_state": status,
+        },
+    )
     return CancellationResponse(run_id=run_id, state=status)

@@ -56,17 +56,22 @@ def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> No
 
 
 def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
-    _write(tmp_path, "rlm/runtime.py", "from fleet_rlm.chat.session_context import SessionContextManifest\n")
+    _write(tmp_path, "rlm/runtime.py", "from fleet_rlm.sessions.context import SessionContextManifest\n")
     _write(tmp_path, "rlm/events.py", "from fleet_rlm.chat.preparation import RunPreparation\n")
     _write(
         tmp_path,
         "persistence/repositories/turns.py",
-        "from fleet_rlm.chat.run_claim import decide_claim_transition\n",
+        "from fleet_rlm.sessions.run_claim import decide_claim_transition\n",
     )
     _write(
         tmp_path,
         "persistence/repositories/outbox.py",
-        "from fleet_rlm.chat.run_lifecycle import ClaimedRun\n",
+        "from fleet_rlm.chat.run_lifecycle import RunLifecycleService\n",
+    )
+    _write(
+        tmp_path,
+        "sessions/catalog.py",
+        "from fleet_rlm.chat.run_lifecycle import RunLifecycleService\n",
     )
 
     violations = check_dependency_boundaries(tmp_path)
@@ -78,6 +83,8 @@ def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
     assert "rlm must not import chat" in rendered
     assert "persistence/repositories/outbox.py:1" in rendered
     assert "persistence must not import chat" in rendered
+    assert "sessions/catalog.py:1" in rendered
+    assert "sessions must not import chat" in rendered
 
 
 def test_checker_reports_daytona_memory_content_even_without_imports(tmp_path: Path) -> None:

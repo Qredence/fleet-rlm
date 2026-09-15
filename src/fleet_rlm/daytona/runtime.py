@@ -350,6 +350,10 @@ class DaytonaRuntime:
                 self._root_releaser = self._release_from_resources
             if self._child_acquirer is None:
                 self._child_acquirer = self._acquire_child_from_resources
+            manager = getattr(self._resources, "session_manager", None)
+            bind_runtime = getattr(manager, "bind_runtime", None)
+            if callable(bind_runtime):
+                bind_runtime(self)
 
     @property
     def state(self) -> DaytonaRuntimeState:
@@ -360,6 +364,21 @@ class DaytonaRuntime:
     def roots(self) -> tuple[RootSessionLease, ...]:
         """Return a stable, non-provider view of retained roots."""
         return tuple(self._roots.values())
+
+    def owns_open_root(self, workspace_id: UUID | str | None, session_id: UUID | str) -> bool:
+        """Return True when an OPEN root still retains this Session."""
+        sid = _identity_text(session_id, "session_id")
+        if workspace_id is not None:
+            try:
+                owner = self._roots.get((_identity_text(workspace_id, "workspace_id"), sid))
+            except ValueError:
+                owner = None
+            if owner is not None and not owner.closed:
+                return True
+        return any(
+            not owner.closed and isinstance(owner.key, tuple) and len(owner.key) > 1 and str(owner.key[1]) == sid
+            for owner in tuple(self._roots.values())
+        )
 
     @property
     def children(self) -> tuple[ChildEnvironment, ...]:

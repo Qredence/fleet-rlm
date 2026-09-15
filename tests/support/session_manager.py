@@ -4,11 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
-from fleet_rlm.daytona.session_manager import (
-    DaytonaAdmission,
-    DaytonaSessionManager,
-)
+from fleet_rlm.daytona.session_manager import DaytonaSessionManager
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")

@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
 from fleet_rlm.chat.preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
-from fleet_rlm.chat.run_lifecycle import RunLifecycleUnavailableError
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
+from fleet_rlm.sessions.run_state import RunLifecycleUnavailableError
 
 
 class _FailingCoordinator:

@@ -21,9 +21,7 @@ from fleet_rlm.attachments.models import (
     RunAttachmentSink,
 )
 from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-from fleet_rlm.chat.run_authority import RunAuthority
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, MemoryIntentBuilder
-from fleet_rlm.chat.session_context import build_session_context_manifest
+from fleet_rlm.chat.run_lifecycle import MemoryIntentBuilder
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
@@ -43,10 +41,13 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.runtime.authority import RunAuthority
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+from fleet_rlm.sessions.context import build_session_context_manifest
 from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 
 AsyncCleanup = Callable[[], Awaitable[Any]]
@@ -563,6 +564,18 @@ class DefaultRunPreparer:
             result = await close()
             return result is not False
         return True
+
+    async def wait_for_session_idle(
+        self,
+        workspace_id: UUID,
+        session_id: UUID,
+        *,
+        deadline: float,
+    ) -> None:
+        """Wait for provider preparation claims before retiring a Session root."""
+        wait = getattr(self._environments, "wait_for_session_idle", None)
+        if callable(wait):
+            await wait(workspace_id, session_id, deadline=deadline)
 
     async def _prepare_capabilities(
         self,

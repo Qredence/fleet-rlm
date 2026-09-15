@@ -23,6 +23,7 @@ from scripts.benchmarks.run_rlm_latency import (
     _attach_trace_identity,
     _campaign_preflight,
     _enforce_campaign_observations,
+    _eval_otpm_backoff_seconds,
     _execution_trace_diagnostics,
     _execution_trace_id,
     _judge_ab_receipt,
@@ -288,13 +289,26 @@ def test_quality_dataset_is_five_bounded_json_records() -> None:
 
 def test_default_judge_is_the_probe_verified_qwen_endpoint() -> None:
     assert DEFAULT_JUDGE_MODEL == "databricks:/databricks-qwen35-122b-a10b"
-    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low"}
+    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low", "max_tokens": 1024}
     assert "expected_response" in CORRECTNESS_INSTRUCTIONS
     assert CORRECTNESS_DESCRIPTION.startswith("Check whether the response")
     assert "required_evidence" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert "required_uncertainty" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert "forbidden_claims" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert EVIDENCE_COVERAGE_DESCRIPTION.startswith("Check whether the response")
+
+
+def test_eval_otpm_backoff_seconds_reads_positive_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", raising=False)
+    assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "70")
+    assert _eval_otpm_backoff_seconds() == 70.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "-1")
+    assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "nope")
+    assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "inf")
+    assert _eval_otpm_backoff_seconds() == 0.0
 
 
 def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:

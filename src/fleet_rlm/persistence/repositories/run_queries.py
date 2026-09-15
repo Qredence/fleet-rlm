@@ -7,7 +7,6 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from fleet_rlm.chat.run_lifecycle import CommittedRunReplay, CommittedTurnReceipt, RunStateError
 from fleet_rlm.persistence.models import ArtifactRow, RunRow, TurnRow
 from fleet_rlm.persistence.repositories.run_codec import (
     _artifact_refs_from_rows,
@@ -16,6 +15,11 @@ from fleet_rlm.persistence.repositories.run_codec import (
 )
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory
+from fleet_rlm.sessions.run_state import (
+    CommittedRunReplay,
+    CommittedTurnReceipt,
+    RunStateError,
+)
 
 
 async def _committed_output(db: AsyncSession, run: RunRow) -> tuple[CommittedTurn, int]:

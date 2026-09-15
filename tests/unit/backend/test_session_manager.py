@@ -5,16 +5,18 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
+from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
+from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
 from fleet_rlm.daytona.session_manager import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
-    DaytonaAdmission,
     DaytonaSessionManager,
     LeaseRequest,
 )
@@ -38,6 +40,7 @@ def test_active_lease_registry_is_scoped_by_workspace_and_session() -> None:
     registry.acquire(session_id, run_a, workspace_id=workspace_a)
     registry.acquire(session_id, run_b, workspace_id=workspace_b)
 
+    assert registry.has_session(session_id)
     assert registry.holder(session_id, workspace_id=workspace_a) == run_a
     assert registry.holder(session_id, workspace_id=workspace_b) == run_b
     with pytest.raises(ActiveLeaseConflictError):
@@ -45,8 +48,10 @@ def test_active_lease_registry_is_scoped_by_workspace_and_session() -> None:
 
     registry.release(session_id, run_a, workspace_id=workspace_a)
     assert registry.holder(session_id, workspace_id=workspace_a) is None
+    assert registry.has_session(session_id)
     assert registry.holder(session_id, workspace_id=workspace_b) == run_b
     registry.release(session_id, run_b, workspace_id=workspace_b)
+    assert not registry.has_session(session_id)
 
 
 class _LimitedSandbox:
@@ -209,13 +214,14 @@ async def test_release_and_quarantine_retains_admission_when_fence_fails() -> No
         await mgr.release_and_quarantine(lease, request)
     assert lease.closed
     assert mgr.has_pending_ownership
-    assert mgr._unpublished_leases
+    assert mgr._late_owners
+    assert any(owner.unpublished for owner in mgr._late_owners.values())
 
     # A later owner can retry the same request/lease; no new admission slot is
     # made available until provider quarantine and callback finalization pass.
     await mgr.release(lease)
     assert not mgr.has_pending_ownership
-    assert not mgr._unpublished_leases
+    assert not mgr._late_owners
 
 
 @pytest.mark.asyncio
@@ -618,6 +624,96 @@ async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> N
 
 
 @pytest.mark.asyncio
+async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=plat))
+    req = _request()
+    owner = await runtime.acquire_root_session(
+        RootSessionSpec(
+            workspace_id=req.workspace_id,
+            session_id=req.session_id,
+            user_id=req.user_id,
+        )
+    )
+
+    await mgr.release(owner.lease)
+    await asyncio.sleep(0.05)
+
+    assert plat.sandboxes[owner.lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    assert runtime.owns_open_root(req.workspace_id, req.session_id)
+    await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
+    mgr, plat, _store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    class BrokenRuntime:
+        def owns_open_root(self, _workspace_id, _session_id):
+            raise ValueError("runtime ownership probe unavailable")
+
+    runtime = BrokenRuntime()
+    mgr.bind_runtime(runtime)
+    await mgr.release(lease)
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(req.workspace_id),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_skips_when_holder_workspace_key_mismatches() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(UUID(int=0)),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    await mgr.release(lease)
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_skips_while_session_holder_is_still_claimed() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(req.workspace_id),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    await mgr.release(lease)
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
 async def test_replacement_deadline_retains_late_created_sandbox_cleanup() -> None:
     """A timed-out replacement owns a late-created Sandbox until deletion settles."""
     platform = _BlockingCreatePlatform(expected_entries=1)
@@ -812,7 +908,7 @@ async def test_shutdown_reports_unscheduled_foreign_loop_acquisition_pending(mon
     # A provider loop that has stopped cannot service cleanup on this loop.
     acquisition = foreign_loop.create_task(asyncio.sleep(0))
     permit = await manager._admission.acquire(deadline=asyncio.get_running_loop().time() + 2)
-    monkeypatch.setattr(manager, "_schedule_late_acquisition_owner", lambda _owner: True)
+    monkeypatch.setattr(manager, "_schedule_late_owner", lambda _owner: True)
     try:
         manager._adopt_late_acquisition(acquisition, permit, _request(), uuid4())
         assert manager.has_pending_ownership
@@ -845,8 +941,6 @@ async def test_cancelled_admission_wait_restores_session_claim() -> None:
 
 @pytest.mark.asyncio
 async def test_admission_timeout_restores_session_claim() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaAdmissionTimeoutError
-
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 10)
     mgr, _plat, _store, _volumes = _manager(admission=admission)

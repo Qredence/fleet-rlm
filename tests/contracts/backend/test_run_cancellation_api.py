@@ -8,9 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.chat.run_lifecycle import ClaimedRun, RunClaim
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    RunClaim,
+)
 
 
 def _headers(user_id=None, workspace_id=None):

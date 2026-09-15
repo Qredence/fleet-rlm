@@ -28,6 +28,32 @@ from fleet_rlm.config.settings import (
 )
 
 _CONFIG_PATH = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+_RETIRED_ENVIRONMENT_VARIABLES = frozenset(
+    {
+        "FLEET_LIVE_KERNEL",
+        "FLEET_UPLOAD_ROOT",
+        "FLEET_ARTIFACT_ROOT",
+        "FLEET_MAX_TURN_WALL_SECONDS",
+        "FLEET_BUDGET_MAX_ITERATIONS",
+        "FLEET_BUDGET_MAX_LLM_CALLS",
+        "FLEET_BUDGET_MAX_OUTPUT_CHARS",
+        "FLEET_BUDGET_MAX_WALL_SECONDS",
+        "FLEET_BUDGET_MAX_SUB_LM_CONCURRENCY",
+        "FLEET_BUDGET_MAX_TOOL_CALLS",
+        "FLEET_BUDGET_MAX_SKILL_LOADS",
+    }
+)
+
+
+def reject_retired_environment_variables() -> None:
+    """Reject retired process and ``.env`` keys before settings resolution."""
+    configured = set(_RETIRED_ENVIRONMENT_VARIABLES.intersection(os.environ))
+    for name in dotenv_values(".env"):
+        if name in _RETIRED_ENVIRONMENT_VARIABLES:
+            configured.add(name)
+    if configured:
+        names = ", ".join(sorted(configured))
+        raise ValueError(f"retired Fleet environment variable(s): {names}")
 
 
 @dataclass(frozen=True, slots=True)

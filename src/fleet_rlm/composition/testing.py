@@ -26,7 +26,6 @@ from fleet_rlm.chat.preparation import (
     RunEnvironmentProvider,
     RunPreparation,
 )
-from fleet_rlm.chat.run_lifecycle import ClaimedRun
 from fleet_rlm.composition.inventory import (
     CompositionError,
     RuntimeDatabaseLifecycle,
@@ -38,6 +37,7 @@ from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import RLMFactoryLike
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
@@ -132,6 +132,7 @@ def build_local_inventory(
     )
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
 
     session_factory = database.session_factory
     if session_factory is None:
@@ -168,6 +169,7 @@ def build_local_inventory(
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
         session_catalog=session_catalog,
+        session_lifecycle=SessionLifecycle(session_catalog, NoOpSessionRetirement()),
         run_lifecycle=lifecycle,
         run_cleanup_supervisor=cleanup,
         run_preparation=preparation,

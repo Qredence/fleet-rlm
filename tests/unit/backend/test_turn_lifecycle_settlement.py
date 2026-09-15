@@ -14,13 +14,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.chat.run_lifecycle import (
+from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedTurnReceipt,
     FailedRunReceipt,
-    RunLifecycleService,
 )
-from fleet_rlm.sessions.models import TurnAccess
 from tests.support.turn_lifecycle import claimed_run, completed_outcome
 
 
@@ -344,8 +344,8 @@ async def test_settle_emits_claim_transition_span_with_command_name(
     monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
 ) -> None:
     del fleet_trace_active
-    from fleet_rlm.chat.run_lifecycle import RunFailure
     from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.run_state import RunFailure
 
     calls = _install_fake_mlflow(monkeypatch)
     turn = claimed_run()

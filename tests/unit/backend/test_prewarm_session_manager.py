@@ -343,3 +343,127 @@ async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
         registry.release(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
 
     assert loop.time() - started < 0.1
+
+
+@pytest.mark.asyncio
+async def test_schedule_prewarm_failure_is_suppressed_and_drains_cleanly() -> None:
+    mgr, _platform, _store, _volumes = _manager()
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("provider create failed")
+
+    mgr._platform.create = boom  # type: ignore[method-assign]
+
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(task, timeout=5)
+    assert await mgr.aclose(drain_seconds=5.0) is True
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_schedule_prewarm_failure_then_real_turn_acquires_normally() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    original_create = platform.create
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("provider create failed")
+
+    mgr._platform.create = boom  # type: ignore[method-assign]
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(task, timeout=5)
+    mgr._platform.create = original_create  # type: ignore[method-assign]
+
+    lease = await mgr.acquire(
+        LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
+        deadline=asyncio.get_running_loop().time() + 10,
+    )
+    try:
+        assert lease.sandbox_id
+        assert len(platform.created) == 1
+        assert isinstance(await store.get(session_id), SandboxBinding)
+    finally:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_during_scheduled_prewarm_waits_for_owned_work() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    create_started = asyncio.Event()
+    allow_create = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        create_started.set()
+        await asyncio.wait_for(allow_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(create_started.wait(), timeout=5)
+    assert mgr.has_pending_ownership
+
+    drain = asyncio.create_task(mgr.aclose(drain_seconds=5.0))
+    await asyncio.sleep(0.05)
+    assert not drain.done(), "drain must wait for in-flight scheduled pre-warm work"
+    allow_create.set()
+
+    assert await asyncio.wait_for(drain, timeout=10) is True
+    await asyncio.wait_for(task, timeout=10)
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_archive_during_scheduled_prewarm_requests_retirement() -> None:
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.sessions.lifecycle import SessionLifecycle
+
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    create_started = asyncio.Event()
+    allow_create = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        create_started.set()
+        await asyncio.wait_for(allow_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    class _RecordingRetirement:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, object]] = []
+
+        async def close_root_session(self, workspace_id, session_id, *, deadline=None) -> None:
+            del deadline
+            self.calls.append((workspace_id, session_id))
+
+    retirement = _RecordingRetirement()
+    catalog = InMemorySessionCatalog(InMemoryRunStateStore())
+    record = await catalog.create(user_id=user_id, workspace_id=workspace_id, title="archive-during-prewarm")
+    session_id = record.id
+    lifecycle = SessionLifecycle(catalog, retirement)
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(create_started.wait(), timeout=5)
+
+    updated = await lifecycle.update(
+        session_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        title=None,
+        status="archived",
+    )
+    assert updated.status == "archived"
+    assert retirement.calls == [(workspace_id, session_id)]
+
+    allow_create.set()
+    await asyncio.wait_for(task, timeout=10)
+    assert isinstance(await store.get(session_id), SandboxBinding)
+    assert await mgr.aclose(drain_seconds=5.0) is True
+    assert not mgr.has_pending_ownership
