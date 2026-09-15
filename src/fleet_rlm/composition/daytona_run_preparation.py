@@ -398,66 +398,6 @@ class _DaytonaEnvironmentProvider:
             str(run.run_id) if attachment_ids else None,
         )
 
-    async def _remove_resident_root(self, key: tuple[UUID, UUID], owner: RootSessionLease) -> None:
-        """Remove one exact provider root after successful cleanup."""
-        async with self._resident_root_lock:
-            if self._resident_root_leases.get(key) is owner:
-                self._resident_root_leases.pop(key, None)
-                self._resident_context_keys.pop(key, None)
-                self._prune_preparation_gate(key)
-        # A retained failed-root cleanup may complete through a callback after
-        # its retry task has already been dropped. Never leave per-owner
-        # metadata keyed by a recycled object id after the exact owner closes.
-        owner_id = id(owner)
-        quarantine_task = self._root_quarantine_tasks.get(owner_id)
-        compatibility = self._compatibility_quarantines.get(owner_id)
-        quarantine_succeeded = (
-            owner_id in self._suppressed_root_release_callbacks
-            or (
-                quarantine_task is not None
-                and quarantine_task.done()
-                and not quarantine_task.cancelled()
-                and quarantine_task.exception() is None
-            )
-            or (quarantine_task is None and owner_id not in self._late_root_cleanup_runs and compatibility is None)
-        )
-        quarantine_pending = not quarantine_succeeded or (compatibility is not None and not compatibility.quarantined)
-        if not quarantine_pending:
-            self._late_root_cleanup_runs.pop(owner_id, None)
-            self._suppressed_root_release_callbacks.pop(owner_id, None)
-            self._compatibility_quarantines.pop(owner_id, None)
-            self._retained_root_owners.pop(owner_id, None)
-            self._release_late_root_gate(owner)
-        elif compatibility is not None:
-            retained = self._late_root_gate_owners.get(owner_id)
-            if retained is not None and not any(known is owner for known in self._late_root_cleanup_owners.values()):
-                gate, retained_key = retained
-                self._retain_failed_root(owner, gate, retained_key)
-        self._maybe_release_environment_owner()
-
-    async def _on_root_closed(self, owner: RootSessionLease) -> None:
-        """Remove a directly-owned root using its legacy UUID key."""
-        key = owner.key
-        if not isinstance(key, tuple) or len(key) != 2:
-            return
-        await self._remove_resident_root(key, owner)
-
-    def _bind_runtime_root(self, key: tuple[UUID, UUID], owner: RootSessionLease) -> None:
-        """Chain provider-map cleanup onto the public runtime callback once."""
-        if getattr(owner, "_environment_provider_owner", None) is self:
-            return
-        previous = owner.on_closed
-
-        async def chained(closed: RootSessionLease) -> None:
-            if previous is not None:
-                result = previous(closed)
-                if inspect.isawaitable(result):
-                    await result
-            await self._remove_resident_root(key, closed)
-
-        owner.on_closed = chained
-        owner._environment_provider_owner = self
-
     def _release_late_root_gate(self, owner: RootSessionLease) -> None:
         """Release the preparation gate retained by an unresolved root."""
         retained = self._late_root_gate_owners.pop(id(owner), None)
