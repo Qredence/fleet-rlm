@@ -62,6 +62,7 @@ snapshot, enable paid capacity, or certify a deployment by themselves.
 | `benchmark_daytona_lifecycle.py` | Measure Daytona lifecycle behavior. |
 | `benchmarks/run_phase4_campaign.py` | Run the sealed four-arm recursion ablation. |
 | `benchmarks/run_rlm_latency.py` / `run_routing_eval.py` | Run bounded latency, quality, or routing evaluations. |
+| `benchmarks/run_oolong_predict.py` | Run the official Oolong predict adapter (dry N=1 or live). |
 | `benchmarks/certify_mlflow.py` / `certify_postgres.py` / `certify_daytona_sdk.py` | Run bounded certification lanes. |
 | `benchmarks/record_mlflow_campaign.py` / `attach_phase3_receipt.py` | Attach bounded evidence to MLflow. |
 | `benchmarks/rlm_eval_dataset.py`, `enable_monitoring.py`, `align_judges.py` | Manage the operator-gated evaluation loop. |

@@ -13,6 +13,7 @@ certification.
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 * [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
+* [Oolong benchmark adapter](how-to-guides/oolong-benchmark.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
 * Historical baselines
