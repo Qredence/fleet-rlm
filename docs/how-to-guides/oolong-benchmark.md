@@ -53,8 +53,10 @@ uv run --with datasets python scripts/benchmarks/run_oolong_predict.py \
 Live mode stages `context_window_text` as UTF-8 through
 `AttachmentContextCapsule`, constructs `build_native_rlm(...)`, and invokes
 `await rlm.acall(interpreter, **kwargs)` with a caller-owned Daytona
-interpreter. This path requires explicit operator authorization and configured
-provider credentials.
+interpreter acquired through
+``fleet_rlm.daytona.provisioning.acquire_ephemeral_interpreter`` (shared
+``SandboxProvisioner`` seam). This path requires explicit operator authorization
+and configured provider credentials.
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmarks/run_oolong_predict.py \

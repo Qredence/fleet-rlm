@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
 from typing import Any, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
@@ -825,6 +825,85 @@ class SandboxProvisioner:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EphemeralInterpreterLease:
+    """Caller-owned ephemeral volume sandbox and interpreter for operator scripts."""
+
+    interpreter: Any
+    sandbox: Any
+    platform: Any
+    session_id: UUID
+    run_id: UUID
+    workspace_id: UUID
+
+
+async def acquire_ephemeral_interpreter(
+    settings: Any,
+    *,
+    purpose: str,
+    workspace_id: UUID | None = None,
+) -> EphemeralInterpreterLease:
+    """Acquire one ephemeral volume-backed interpreter through ``SandboxProvisioner``."""
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+    from fleet_rlm.daytona.platform import (
+        LiveDaytonaPlatform,
+        LiveDaytonaVolumeClient,
+        build_daytona_client,
+        sandbox_state,
+    )
+
+    client = build_daytona_client(settings)
+    spec = sandbox_spec_from_settings(settings)
+    platform = LiveDaytonaPlatform(client, spec)
+    volume_client = LiveDaytonaVolumeClient(client)
+    volume_config = volume_config_from_settings(settings)
+    provisioner = SandboxProvisioner(
+        platform=platform,
+        volume_config=volume_config,
+        sandbox_spec=spec,
+    )
+    resolved_workspace = workspace_id or uuid4()
+    volume_id = await get_or_create_volume_id(volume_client, volume_config)
+    expected = provisioner.expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
+    sandbox = await provisioner.create(
+        expected,
+        labels={
+            "fleet-package": "fleet_rlm",
+            "purpose": purpose,
+            "workspace_id": str(resolved_workspace),
+        },
+        ephemeral=True,
+    )
+    if sandbox_state(sandbox) != "running":
+        await platform.start(str(sandbox.id))
+        refreshed = await platform.get(str(sandbox.id))
+        if refreshed is None or sandbox_state(refreshed) != "running":
+            raise DaytonaAdapterError(
+                message="sandbox did not reach running state",
+                cause_type="SandboxLifecycleError",
+            )
+        sandbox = refreshed
+    session_id = uuid4()
+    run_id = uuid4()
+    await provisioner.verify_run_layout(
+        sandbox,
+        expected,
+        session_id=session_id,
+        run_id=run_id,
+    )
+    loop = asyncio.get_running_loop()
+    interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
+    await asyncio.to_thread(interpreter.execute, "pass")
+    return EphemeralInterpreterLease(
+        interpreter=interpreter,
+        sandbox=sandbox,
+        platform=platform,
+        session_id=session_id,
+        run_id=run_id,
+        workspace_id=resolved_workspace,
+    )
+
+
 __all__ = [
     "BASE_IMAGE",
     "DEFAULT_CHILD_SNAPSHOT_NAME",
@@ -834,11 +913,13 @@ __all__ = [
     "DaytonaEnvironmentManifest",
     "DaytonaEnvironmentProfile",
     "DaytonaSandboxSpec",
+    "EphemeralInterpreterLease",
     "ExpectedWorkspaceMount",
     "MissingImportObservation",
     "MissingImportOutcome",
     "SandboxProvisioner",
     "VolumeConfig",
+    "acquire_ephemeral_interpreter",
     "build_snapshot_image",
     "environment_manifest",
     "normalize_missing_import_observation",

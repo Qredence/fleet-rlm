@@ -18,7 +18,6 @@ import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from dotenv import load_dotenv
 
@@ -162,84 +161,9 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
     )
 
 
-async def _provision_daytona_interpreter(settings: Any) -> tuple[Any, Any, Any]:
-    """Create one caller-owned Daytona interpreter for a live predict row."""
-    from fleet_rlm.daytona.broker import sync_sandbox
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-    from fleet_rlm.daytona.platform import (
-        LiveDaytonaPlatform,
-        LiveDaytonaVolumeClient,
-        build_daytona_client,
-        sandbox_state,
-    )
-    from fleet_rlm.daytona.provisioning import (
-        ExpectedWorkspaceMount,
-        ensure_volume_layout,
-        get_or_create_volume_id,
-        sandbox_spec_from_settings,
-        verify_sandbox_spec,
-        verify_sandbox_workspace_mount,
-        volume_config_from_settings,
-        volume_mount_spec,
-    )
-
-    client = build_daytona_client(settings)
-    spec = sandbox_spec_from_settings(settings)
-    platform = LiveDaytonaPlatform(client, spec)
-    volume_client = LiveDaytonaVolumeClient(client)
-    volume_config = volume_config_from_settings(settings)
-    workspace_id = uuid4()
-    volume_id = await get_or_create_volume_id(volume_client, volume_config)
-    mount = volume_mount_spec(volume_config, volume_id, workspace_id=workspace_id)
-    expected = ExpectedWorkspaceMount(
-        volume_id=mount["volume_id"],
-        volume_subpath=mount["subpath"],
-        mount_path=mount["mount_path"],
-        workspace_id=workspace_id,
-    )
-
-    sandbox = await platform.create(
-        volume_id=expected.volume_id,
-        mount_path=expected.mount_path,
-        volume_subpath=expected.volume_subpath,
-        labels={
-            "fleet-package": "fleet_rlm",
-            "purpose": "oolong-predict",
-            "workspace_id": str(workspace_id),
-        },
-        ephemeral=True,
-    )
-    if sandbox_state(sandbox) != "running":
-        await platform.start(str(sandbox.id))
-        refreshed = await platform.get(str(sandbox.id))
-        if refreshed is None or sandbox_state(refreshed) != "running":
-            raise OolongPredictError("sandbox did not reach running state")
-        sandbox = refreshed
-    loop = asyncio.get_running_loop()
-
-    def verify() -> None:
-        bridge = sync_sandbox(sandbox, loop)
-        verify_sandbox_spec(sandbox, spec)
-        verify_sandbox_workspace_mount(sandbox, expected)
-        result = bridge.process.code_run("import getpass; print(getpass.getuser())")
-        if str(getattr(result, "result", "") or "").strip() != "daytona":
-            raise OolongPredictError("sandbox user did not match Fleet contract")
-
-    await asyncio.to_thread(verify)
-    session_id = uuid4()
-    run_id = uuid4()
-    await ensure_volume_layout(
-        sandbox,
-        volume_config.paths(),
-        session_id=session_id,
-        run_id=run_id,
-    )
-    interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
-    await asyncio.to_thread(interpreter.execute, "pass")
-    return interpreter, sandbox, platform
-
-
 async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, object]:
+    from fleet_rlm.daytona.provisioning import acquire_ephemeral_interpreter
+
     loaded = resolve_datapoints(
         dataset=args.dataset,
         split=args.split,
@@ -257,19 +181,14 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
                 mode="production",
                 staging_root=staging_root / str(item.row.get("id", "row")),
             )
-            interpreter = None
-            sandbox = None
-            platform = None
+            lease = await acquire_ephemeral_interpreter(settings, purpose="oolong-predict")
             try:
-                interpreter, sandbox, platform = await _provision_daytona_interpreter(settings)
-                answer = await invoke_live_prediction(settings, kwargs, interpreter=interpreter)
+                answer = await invoke_live_prediction(settings, kwargs, interpreter=lease.interpreter)
             finally:
-                if interpreter is not None:
-                    with contextlib.suppress(Exception):
-                        interpreter.shutdown()
-                if sandbox is not None and platform is not None:
-                    with contextlib.suppress(Exception):
-                        await platform.delete(sandbox)
+                with contextlib.suppress(Exception):
+                    lease.interpreter.shutdown()
+                with contextlib.suppress(Exception):
+                    await lease.platform.delete(lease.sandbox)
             score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
             rows.append(
                 {

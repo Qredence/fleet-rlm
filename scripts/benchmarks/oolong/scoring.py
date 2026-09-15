@@ -16,9 +16,7 @@ from datetime import datetime
 import dateutil.parser
 
 OOLONG_REPO_URL = "https://github.com/abertsch72/oolong"
-OOLONG_EVAL_HELPERS_SOURCE = (
-    "https://github.com/abertsch72/oolong/blob/main/src/eval/eval_helpers.py"
-)
+OOLONG_EVAL_HELPERS_SOURCE = "https://github.com/abertsch72/oolong/blob/main/src/eval/eval_helpers.py"
 OOLONG_EVAL_HELPERS_REVISION = "5c8113ee360957cff010d27310e844630216b21d"
 
 

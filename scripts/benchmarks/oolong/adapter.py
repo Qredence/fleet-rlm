@@ -160,10 +160,7 @@ def resolve_datapoints(
                 source="fixture",
             ),
         )
-    return tuple(
-        load_hf_row(dataset=dataset, split=split, index=start_index + offset)
-        for offset in range(limit)
-    )
+    return tuple(load_hf_row(dataset=dataset, split=split, index=start_index + offset) for offset in range(limit))
 
 
 def stage_context_capsule(
@@ -215,7 +212,7 @@ def build_predict_kwargs(
             raise OolongAdapterError("production mode requires context_window_text")
         root = staging_root or Path.cwd() / ".scratch" / "oolong-staging" / str(sid)
         capsule = stage_context_capsule(context_text, staging_root=root)
-        return build_rlm_input_kwargs(
+        kwargs = build_rlm_input_kwargs(
             request=question,
             session_context=session_context,
             skill_cards=(),
@@ -224,6 +221,8 @@ def build_predict_kwargs(
             history=history,
             signature=FleetRLMSignature,
         )
+        kwargs["attachment_context"] = capsule
+        return kwargs
 
     if mode == "dry_shortcut":
         combined = f"{context_text}\n\n{question}".strip() if context_text else question
@@ -245,8 +244,7 @@ def build_predict_kwargs(
 
 def kwargs_context_mode(kwargs: Mapping[str, Any]) -> str:
     """Return a receipt-safe label for how context reached the model."""
-    attachments = kwargs.get("attachments")
-    if isinstance(attachments, AttachmentContextCapsule):
+    if isinstance(kwargs.get("attachment_context"), AttachmentContextCapsule):
         return "attachment_context_capsule"
     return "dry_request_concat"
 
@@ -293,14 +291,15 @@ async def invoke_live_prediction(
     bundle = build_model_bundle(settings)
     resolved_root = root_lm or bundle.root_lm
     resolved_sub = sub_lm or bundle.sub_lm
-    capsule = kwargs.get("attachments")
+    capsule = kwargs.get("attachment_context")
     if isinstance(capsule, AttachmentContextCapsule):
         bind = getattr(interpreter, "bind_context_capsule", None)
         if callable(bind):
             bind(capsule)
     rlm = build_native_program(settings, sub_lm=resolved_sub)
+    invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
     with dspy.context(lm=resolved_root, adapter=dspy.JSONAdapter(), track_usage=True):
-        prediction = await rlm.acall(interpreter, **dict(kwargs))
+        prediction = await rlm.acall(interpreter, **invoke_kwargs)
     return str(getattr(prediction, "answer", ""))
 
 
@@ -354,6 +353,7 @@ def build_receipt(
     if error_category:
         receipt["error_category"] = error_category
     return receipt
+
 
 __all__ = [
     "DEFAULT_FIXTURE",
