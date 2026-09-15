@@ -57,6 +57,10 @@ class _SessionManager:
         self.force_new_calls: list[bool] = []
         self.released: list[object] = []
         self.quarantined: list[object] = []
+        self.bound_runtime: object | None = None
+
+    def bind_runtime(self, runtime: object) -> None:
+        self.bound_runtime = runtime
 
     async def acquire(self, request, *, deadline, force_new=False):
         del deadline
@@ -115,6 +119,12 @@ def _provider(monkeypatch: pytest.MonkeyPatch):
     )
     resources.runtime = DaytonaRuntime(resources)
     return _DaytonaEnvironmentProvider(cast(Any, resources), settings), manager, platform
+
+
+def test_environment_runtime_binds_retained_root_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    _provider_obj, manager, _platform = _provider(monkeypatch)
+    assert manager.bound_runtime is not None
+    assert manager.bound_runtime.owns_open_root
 
 
 @pytest.mark.asyncio

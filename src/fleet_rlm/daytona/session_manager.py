@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import weakref
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -169,6 +170,11 @@ class ActiveLeaseRegistry:
                 return self._holders.get(self._key(session_id, workspace_id))
             matches = [run_id for (scope, sid), run_id in self._holders.items() if sid == session_id]
             return matches[0] if len(matches) == 1 else None
+
+    def has_session(self, session_id: UUID) -> bool:
+        """Return True when any Workspace still claims this Session."""
+        with self._lock:
+            return any(sid == session_id for _workspace_id, sid in self._holders)
 
 
 @dataclass(slots=True)
@@ -439,6 +445,7 @@ class DaytonaSessionManager:
             raise ValueError("idle_stop_seconds must be positive")
         self._idle_stop_seconds = idle_stop_seconds
         self._idle_tasks: dict[tuple[UUID, UUID], asyncio.Task[None]] = {}
+        self._runtime_ref: weakref.ReferenceType[Any] | None = None
         self._owned_sandbox_ids: set[str] = set()
         self._owned_sandbox_lock = Lock()
         self._release_tasks: set[asyncio.Task[None]] = set()
@@ -463,6 +470,29 @@ class DaytonaSessionManager:
     def active_leases(self) -> ActiveLeaseRegistry:
         """Return the claim owner scoped to this Session manager."""
         return self._active_leases
+
+    def bind_runtime(self, runtime: Any) -> None:
+        """Observe retained OPEN roots without owning the process runtime."""
+        self._runtime_ref = weakref.ref(runtime)
+
+    def _has_open_retained_root(self, workspace_id: UUID | None, session_id: UUID) -> bool:
+        runtime = self._runtime_ref() if self._runtime_ref is not None else None
+        if runtime is None:
+            return False
+        owns = getattr(runtime, "owns_open_root", None)
+        if not callable(owns):
+            return False
+        try:
+            return bool(owns(workspace_id, session_id))
+        except (TypeError, ValueError):
+            return False
+
+    def _idle_stop_blocked(self, session_id: UUID, workspace_id: UUID | None) -> bool:
+        if self._active_leases.holder(session_id, workspace_id=workspace_id) is not None:
+            return True
+        if self._active_leases.has_session(session_id):
+            return True
+        return self._has_open_retained_root(workspace_id, session_id)
 
     def _observe_binding(self, binding: SandboxBinding | None) -> None:
         """Publish the latest durable generation to synchronous native guards."""
@@ -1907,7 +1937,7 @@ class DaytonaSessionManager:
         """Stop an idle Sandbox only after identity and active-lease rechecks."""
         await asyncio.sleep(delay)
         workspace_scope = UUID(workspace_id) if workspace_id is not None else None
-        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._idle_stop_blocked(session_id, workspace_scope):
             return
         if workspace_id is not None:
             assert workspace_scope is not None
@@ -1925,7 +1955,7 @@ class DaytonaSessionManager:
         if binding is None or binding.sandbox_id != sandbox_id or binding.provider_state != "running":
             return
         sandbox = await self._get_bound_sandbox(sandbox_id)
-        if sandbox is None or self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if sandbox is None or self._idle_stop_blocked(session_id, workspace_scope):
             return
 
         # Keep the provider stop request owned if a new acquire cancels this
@@ -1938,7 +1968,7 @@ class DaytonaSessionManager:
         except asyncio.CancelledError:
             await asyncio.shield(stop_task)
             raise
-        if self._active_leases.holder(session_id, workspace_id=workspace_scope) is not None:
+        if self._idle_stop_blocked(session_id, workspace_scope):
             return
         if workspace_id is not None:
             assert workspace_scope is not None

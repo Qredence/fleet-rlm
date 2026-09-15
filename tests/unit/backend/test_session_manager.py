@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -12,6 +13,7 @@ import pytest
 
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
+from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
 from fleet_rlm.daytona.session_manager import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
@@ -38,6 +40,7 @@ def test_active_lease_registry_is_scoped_by_workspace_and_session() -> None:
     registry.acquire(session_id, run_a, workspace_id=workspace_a)
     registry.acquire(session_id, run_b, workspace_id=workspace_b)
 
+    assert registry.has_session(session_id)
     assert registry.holder(session_id, workspace_id=workspace_a) == run_a
     assert registry.holder(session_id, workspace_id=workspace_b) == run_b
     with pytest.raises(ActiveLeaseConflictError):
@@ -45,8 +48,10 @@ def test_active_lease_registry_is_scoped_by_workspace_and_session() -> None:
 
     registry.release(session_id, run_a, workspace_id=workspace_a)
     assert registry.holder(session_id, workspace_id=workspace_a) is None
+    assert registry.has_session(session_id)
     assert registry.holder(session_id, workspace_id=workspace_b) == run_b
     registry.release(session_id, run_b, workspace_id=workspace_b)
+    assert not registry.has_session(session_id)
 
 
 class _LimitedSandbox:
@@ -615,6 +620,72 @@ async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> N
     assert binding is not None
     assert binding.provider_state == "stopped"
     assert plat.deleted == []
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=plat))
+    req = _request()
+    owner = await runtime.acquire_root_session(
+        RootSessionSpec(
+            workspace_id=req.workspace_id,
+            session_id=req.session_id,
+            user_id=req.user_id,
+        )
+    )
+
+    await mgr.release(owner.lease)
+    await asyncio.sleep(0.05)
+
+    assert plat.sandboxes[owner.lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    assert runtime.owns_open_root(req.workspace_id, req.session_id)
+    await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_skips_when_holder_workspace_key_mismatches() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(UUID(int=0)),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    await mgr.release(lease)
+    await mgr.aclose()
+
+
+@pytest.mark.asyncio
+async def test_idle_stop_skips_while_session_holder_is_still_claimed() -> None:
+    mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
+    req = _request()
+    lease = await _acquire(mgr, req)
+
+    await mgr._stop_after_idle(
+        session_id=req.session_id,
+        sandbox_id=lease.sandbox_id,
+        workspace_id=str(req.workspace_id),
+        delay=0.01,
+    )
+
+    assert plat.sandboxes[lease.sandbox_id].state == "running"
+    binding = await store.get(req.session_id)
+    assert binding is not None
+    assert binding.provider_state == "running"
+    await mgr.release(lease)
     await mgr.aclose()
 
 
