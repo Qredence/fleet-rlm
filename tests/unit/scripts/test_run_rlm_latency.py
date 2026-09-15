@@ -23,6 +23,7 @@ from scripts.benchmarks.run_rlm_latency import (
     _attach_trace_identity,
     _campaign_preflight,
     _enforce_campaign_observations,
+    _eval_otpm_backoff_seconds,
     _execution_trace_diagnostics,
     _execution_trace_id,
     _judge_ab_receipt,
@@ -80,12 +81,10 @@ class _TurnClient:
         lines = [
             "data: " + json_module.dumps({"type": "data-attachment", "data": {"attachment_id": "attachment-1"}}),
             "data: "
-            + json_module.dumps(
-                {
-                    "type": "data-rlm-code",
-                    "data": {"code": "source = read_attachment(attachment_id=attachments[0]['id'])"},
-                }
-            ),
+            + json_module.dumps({
+                "type": "data-rlm-code",
+                "data": {"code": "source = read_attachment(attachment_id=attachments[0]['id'])"},
+            }),
             "data: " + json_module.dumps({"type": "data-rlm-output", "data": {"output": "FINAL submitted"}}),
             "data: " + json_module.dumps({"type": "data-structured-result", "data": {"value": "{}"}}),
             "data: " + json_module.dumps({"type": "finish", "finishReason": "stop"}),
@@ -122,14 +121,12 @@ def test_judge_ab_receipt_compares_same_input_variant_scores() -> None:
         SimpleNamespace(name="evidence_coverage_rationale_first"),
     ]
     result = SimpleNamespace(
-        result_df=pd.DataFrame(
-            {
-                "correctness_baseline/value": [True, False],
-                "correctness_rationale_first/value": [True, True],
-                "evidence_coverage_baseline/value": [True, True],
-                "evidence_coverage_rationale_first/value": [True, True],
-            }
-        )
+        result_df=pd.DataFrame({
+            "correctness_baseline/value": [True, False],
+            "correctness_rationale_first/value": [True, True],
+            "evidence_coverage_baseline/value": [True, True],
+            "evidence_coverage_rationale_first/value": [True, True],
+        })
     )
 
     receipt = _judge_ab_receipt(result, baseline, rationale_first)
@@ -192,12 +189,10 @@ def test_run_turn_preserves_partial_spend_and_concurrency_on_failure() -> None:
         def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
             lines = [
                 "data: "
-                + json_module.dumps(
-                    {
-                        "type": "data-usage",
-                        "data": {"usage": {"observed_lm_usage": {"root": {"input_cost": 0.2, "output_cost": 0.1}}}},
-                    }
-                ),
+                + json_module.dumps({
+                    "type": "data-usage",
+                    "data": {"usage": {"observed_lm_usage": {"root": {"input_cost": 0.2, "output_cost": 0.1}}}},
+                }),
                 "data: "
                 + json_module.dumps({"type": "tool-output-available", "output": {"peak_child_concurrency": 1}}),
                 "data: " + json_module.dumps({"type": "error", "errorText": "provider failed"}),
@@ -288,13 +283,24 @@ def test_quality_dataset_is_five_bounded_json_records() -> None:
 
 def test_default_judge_is_the_probe_verified_qwen_endpoint() -> None:
     assert DEFAULT_JUDGE_MODEL == "databricks:/databricks-qwen35-122b-a10b"
-    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low"}
+    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low", "max_tokens": 1024}
     assert "expected_response" in CORRECTNESS_INSTRUCTIONS
     assert CORRECTNESS_DESCRIPTION.startswith("Check whether the response")
     assert "required_evidence" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert "required_uncertainty" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert "forbidden_claims" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert EVIDENCE_COVERAGE_DESCRIPTION.startswith("Check whether the response")
+
+
+def test_eval_otpm_backoff_seconds_reads_positive_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", raising=False)
+    assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "70")
+    assert _eval_otpm_backoff_seconds() == 70.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "-1")
+    assert _eval_otpm_backoff_seconds() == 0.0
+    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "nope")
+    assert _eval_otpm_backoff_seconds() == 0.0
 
 
 def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:
@@ -407,36 +413,34 @@ def test_execution_trace_diagnostics_reads_nested_broker_metrics(
 
 
 def test_aggregate_sums_broker_metrics_and_preserves_maxima() -> None:
-    aggregate = _aggregate(
-        [
-            {
-                "sample_kind": "measured",
-                "duration_ms": 100,
-                "first_event_ms": 10,
-                "trace_diagnostics": {
-                    "sandbox_execute_span_count": 2,
-                    "broker_metrics": {
-                        "poll_count": 3,
-                        "output_release_count": 1,
-                        "poll_latency_max_ms": 7,
-                    },
+    aggregate = _aggregate([
+        {
+            "sample_kind": "measured",
+            "duration_ms": 100,
+            "first_event_ms": 10,
+            "trace_diagnostics": {
+                "sandbox_execute_span_count": 2,
+                "broker_metrics": {
+                    "poll_count": 3,
+                    "output_release_count": 1,
+                    "poll_latency_max_ms": 7,
                 },
             },
-            {
-                "sample_kind": "measured",
-                "duration_ms": 200,
-                "first_event_ms": 20,
-                "trace_diagnostics": {
-                    "sandbox_execute_span_count": 1,
-                    "broker_metrics": {
-                        "poll_count": 4,
-                        "output_release_count": 1,
-                        "poll_latency_max_ms": 9,
-                    },
+        },
+        {
+            "sample_kind": "measured",
+            "duration_ms": 200,
+            "first_event_ms": 20,
+            "trace_diagnostics": {
+                "sandbox_execute_span_count": 1,
+                "broker_metrics": {
+                    "poll_count": 4,
+                    "output_release_count": 1,
+                    "poll_latency_max_ms": 9,
                 },
             },
-        ]
-    )
+        },
+    ])
 
     assert aggregate["sandbox_execute_span_count"] == 3
     assert aggregate["broker_metrics"]["poll_count"] == 7
@@ -445,17 +449,15 @@ def test_aggregate_sums_broker_metrics_and_preserves_maxima() -> None:
 
 
 def test_usage_totals_keep_only_approved_counters() -> None:
-    assert _usage_totals(
-        {
-            "root": {
-                "prompt_tokens": 10,
-                "completion_tokens": 4,
-                "completion_tokens_details": {"reasoning_tokens": 3},
-                "cache_read_input_tokens": 2,
-                "cost": 99,
-            }
+    assert _usage_totals({
+        "root": {
+            "prompt_tokens": 10,
+            "completion_tokens": 4,
+            "completion_tokens_details": {"reasoning_tokens": 3},
+            "cache_read_input_tokens": 2,
+            "cost": 99,
         }
-    ) == {"prompt_tokens": 10, "completion_tokens": 4, "reasoning_tokens": 3, "cache_read_tokens": 2}
+    }) == {"prompt_tokens": 10, "completion_tokens": 4, "reasoning_tokens": 3, "cache_read_tokens": 2}
 
 
 def test_termination_mode_requires_explicit_stream_evidence() -> None:
@@ -469,13 +471,11 @@ def test_termination_mode_requires_explicit_stream_evidence() -> None:
 
 
 def test_aggregate_excludes_failed_durations_from_latency_metrics() -> None:
-    aggregate = _aggregate(
-        [
-            {"sample_kind": "measured", "duration_ms": 100, "first_event_ms": 10},
-            {"sample_kind": "measured", "duration_ms": 10_000, "first_event_ms": -1, "error_category": "failed"},
-            {"sample_kind": "warmup", "duration_ms": 1_000, "first_event_ms": 1},
-        ]
-    )
+    aggregate = _aggregate([
+        {"sample_kind": "measured", "duration_ms": 100, "first_event_ms": 10},
+        {"sample_kind": "measured", "duration_ms": 10_000, "first_event_ms": -1, "error_category": "failed"},
+        {"sample_kind": "warmup", "duration_ms": 1_000, "first_event_ms": 1},
+    ])
 
     assert aggregate["sample_count"] == 2
     assert aggregate["end_to_end_ms"] == {"mean": 100.0, "p50": 100.0, "p95": 100.0}
@@ -586,17 +586,15 @@ def test_trace_identity_must_match_public_and_execution_roots() -> None:
 
 
 def test_parser_supports_seeded_corpus_workloads() -> None:
-    args = build_parser().parse_args(
-        [
-            "benchmark",
-            "--workload",
-            "corpus-chain-v1",
-            "--corpus-seed",
-            "1",
-            "--output",
-            "receipt.json",
-        ]
-    )
+    args = build_parser().parse_args([
+        "benchmark",
+        "--workload",
+        "corpus-chain-v1",
+        "--corpus-seed",
+        "1",
+        "--output",
+        "receipt.json",
+    ])
 
     assert args.workload == "corpus-chain-v1"
     assert args.corpus_seed == 1
@@ -650,24 +648,20 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
         def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
             lines = [
                 "data: "
-                + json_module.dumps(
-                    {
-                        "type": "messageMetadata",
-                        "messageMetadata": {"traceId": "tr-1", "runId": "run-1"},
-                    }
-                ),
+                + json_module.dumps({
+                    "type": "messageMetadata",
+                    "messageMetadata": {"traceId": "tr-1", "runId": "run-1"},
+                }),
                 "data: "
-                + json_module.dumps(
-                    {
-                        "type": "data-usage",
-                        "data": {
-                            "usage": {
-                                "iterations": 1,
-                                "observed_lm_usage": {"root": {"input_cost": 0.1, "output_cost": 0.1}},
-                            }
-                        },
-                    }
-                ),
+                + json_module.dumps({
+                    "type": "data-usage",
+                    "data": {
+                        "usage": {
+                            "iterations": 1,
+                            "observed_lm_usage": {"root": {"input_cost": 0.1, "output_cost": 0.1}},
+                        }
+                    },
+                }),
                 "data: "
                 + json_module.dumps({"type": "tool-output-available", "output": {"peak_child_concurrency": 0}}),
                 "data: " + json_module.dumps({"type": "error", "errorText": "Adapter parse failure"}),
@@ -694,29 +688,27 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setenv("FLEET_LIVE", "1")
 
-    args = build_parser().parse_args(
-        [
-            "benchmark",
-            "--campaign",
-            "test-campaign",
-            "--target",
-            "local-daytona",
-            "--max-elapsed-seconds",
-            "60",
-            "--max-admissions",
-            "1",
-            "--max-sandbox-concurrency",
-            "1",
-            "--spend-cap",
-            "10",
-            "--warmups",
-            "0",
-            "--runs",
-            "1",
-            "--output",
-            "receipt.json",
-        ]
-    )
+    args = build_parser().parse_args([
+        "benchmark",
+        "--campaign",
+        "test-campaign",
+        "--target",
+        "local-daytona",
+        "--max-elapsed-seconds",
+        "60",
+        "--max-admissions",
+        "1",
+        "--max-sandbox-concurrency",
+        "1",
+        "--spend-cap",
+        "10",
+        "--warmups",
+        "0",
+        "--runs",
+        "1",
+        "--output",
+        "receipt.json",
+    ])
 
     with monkeypatch.context() as m:
         m.setattr("httpx.Client", lambda **_kwargs: _FailingTurnClient())

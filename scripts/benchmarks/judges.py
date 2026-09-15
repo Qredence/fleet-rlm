@@ -15,7 +15,7 @@ from typing import Any
 DEFAULT_JUDGE_MODEL = "databricks:/databricks-qwen35-122b-a10b"
 DEFAULT_REFLECTION_MODEL = "databricks:/system.ai.claude-opus-4-8"
 DEFAULT_EMBEDDING_MODEL = "databricks:/databricks-gte-large-en"
-JUDGE_INFERENCE_PARAMS = {"temperature": 0, "reasoning_effort": "low"}
+JUDGE_INFERENCE_PARAMS = {"temperature": 0, "reasoning_effort": "low", "max_tokens": 1024}
 
 CORRECTNESS_DESCRIPTION = (
     "Check whether the response reaches the expected conclusion and preserves the expected material facts "

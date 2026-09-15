@@ -342,6 +342,18 @@ def _load_repository_env() -> None:
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
+def _eval_otpm_backoff_seconds() -> float:
+    """Optional pause after each predict so LLM judges miss the Turn OTPM window."""
+    raw = os.environ.get("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "").strip()
+    if not raw:
+        return 0.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.0
+    return value if value > 0.0 else 0.0
+
+
 def _configure_judge_environment(judge_model: str) -> None:
     """
     Configure OpenAI adapter credentials for a Databricks-hosted judge model.
@@ -1475,7 +1487,11 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             str: The answer produced for the query.
         """
         with httpx.Client(base_url=args.api_url.rstrip("/"), timeout=httpx.Timeout(args.timeout)) as client:
-            return str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
+            answer = str(run_turn(client, query, nonce=f"quality-{uuid4()}")["answer"])
+        backoff = _eval_otpm_backoff_seconds()
+        if backoff > 0.0:
+            time.sleep(backoff)
+        return answer
 
     run_name = args.run_name or f"quality-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     if judge_ab:
@@ -1532,17 +1548,15 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
     }
     if judge_ab:
         judge_ab_receipt = _judge_ab_receipt(result, baseline, rationale_first)
-        judge_ab_receipt.update(
-            {
-                "model": args.judge_model,
-                "instructions": {
-                    "correctness": CORRECTNESS_INSTRUCTIONS,
-                    "evidence_coverage": EVIDENCE_COVERAGE_INSTRUCTIONS,
-                },
-                "inference_params": dict(JUDGE_INFERENCE_PARAMS),
-                "rationale_settings": {"baseline": False, "rationale_first": True},
-            }
-        )
+        judge_ab_receipt.update({
+            "model": args.judge_model,
+            "instructions": {
+                "correctness": CORRECTNESS_INSTRUCTIONS,
+                "evidence_coverage": EVIDENCE_COVERAGE_INSTRUCTIONS,
+            },
+            "inference_params": dict(JUDGE_INFERENCE_PARAMS),
+            "rationale_settings": {"baseline": False, "rationale_first": True},
+        })
         receipt["judge_ab"] = judge_ab_receipt
         receipt["quality_complete"] = None
     else:
@@ -1618,14 +1632,12 @@ def _judge_ab_receipt(result: Any, baseline: Sequence[Any], rationale_first: Seq
                 if base_value == rationale_value:
                     matching += 1
                 elif len(disagreements) < 64:
-                    disagreements.append(
-                        {
-                            "row_index": int(index) if isinstance(index, int) else str(index),
-                            "judge": base_name.removesuffix("_baseline"),
-                            "baseline": base_value,
-                            "rationale_first": rationale_value,
-                        }
-                    )
+                    disagreements.append({
+                        "row_index": int(index) if isinstance(index, int) else str(index),
+                        "judge": base_name.removesuffix("_baseline"),
+                        "baseline": base_value,
+                        "rationale_first": rationale_value,
+                    })
             judge_name = base_name.removesuffix("_baseline")
             agreement[judge_name] = {
                 "matching": matching,
