@@ -17,7 +17,6 @@ async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: 
     Returns:
         tuple: The database engine, session factory, run state store, created run, and turn access context.
     """
-    from fleet_rlm.sessions.run_state import RunClaim
     from fleet_rlm.persistence.database import (
         create_async_engine_from_url,
         create_session_factory,
@@ -27,6 +26,7 @@ async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: 
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import RunClaim
 
     engine = create_async_engine_from_url(database_url)
     await create_tables(engine)

@@ -377,15 +377,15 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
 
     from fleet_rlm.attachments.models import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.sessions.run_state import (
-        ClaimedRun,
-        RunClaim,
-    )
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

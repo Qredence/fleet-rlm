@@ -60,7 +60,6 @@ async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full()
 
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
-    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -69,6 +68,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -141,7 +141,6 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
     The outcome includes events, usage metrics, configured tools, and execution tracing.
     """
-    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
@@ -152,6 +151,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
     from fleet_rlm.workspace.models import WorkspaceCapabilityMetadata
@@ -344,7 +344,6 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
-    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import (
         AttachmentContextCapsule,
         AttachmentContextEntry,
@@ -357,6 +356,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -412,7 +412,6 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
-    from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -421,6 +420,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -476,7 +476,6 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
     from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
-    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -486,6 +485,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource

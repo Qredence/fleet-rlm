@@ -299,14 +299,14 @@ async def test_store_level_cross_session_history_isolation() -> None:
     for Session A must carry exactly Session A's checkpoint (P52.1(g)).
     """
     from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
-    from fleet_rlm.sessions.run_state import (
-        ClaimedRun,
-        RunClaim,
-    )
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)
@@ -359,15 +359,15 @@ async def test_store_level_cross_session_history_isolation() -> None:
 async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None:
     """The authoritative SQL store scopes claimed checkpoints to the claimed Session."""
     from fleet_rlm.chat.preparation import build_dspy_history_for_claim
-    from fleet_rlm.sessions.run_state import (
-        ClaimedRun,
-        RunClaim,
-    )
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     session_a, session_b = uuid4(), uuid4()
@@ -450,16 +450,16 @@ async def test_timed_out_turn_persists_terminal_status_but_never_enters_committe
         build_dspy_history_for_claim,
         claim_history_records,
     )
-    from fleet_rlm.sessions.run_state import (
-        ClaimedRun,
-        RunClaim,
-        RunFailure,
-    )
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -532,15 +532,15 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     keep exactly the committed conversation (P52.1(c)/(d) end-to-end half).
     """
     from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         RunClaim,
         RunFailure,
     )
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
-    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
-    from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -609,11 +609,11 @@ def test_claim_history_records_excludes_tombstone_bearing_checkpoints() -> None:
     defends) with one successful Turn interleaved.
     """
     from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
+    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
     failed_tombstone = _terminal_turn("failed", "failed", "internal failure details")
     timed_out_tombstone = _terminal_turn("timed_out", "timed_out", "Turn timed out")

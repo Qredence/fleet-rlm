@@ -108,15 +108,15 @@ def test_daytona_volume_adapter_removes_exact_file_path() -> None:
 
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
+    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.composition.daytona_run_preparation import _DaytonaRunSink
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         FailedRunReceipt,
         _RunClaimToken,
     )
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.composition.daytona_run_preparation import _DaytonaRunSink
-    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.workspace.paths import VolumePaths
 
     values: dict[str, bytes] = {}
@@ -163,9 +163,9 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
             raise RuntimeError("commit failed")
 
         async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
             from fleet_rlm.sessions.run_claim import FailClaim
             from fleet_rlm.sessions.run_state import RunFailure
-            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(

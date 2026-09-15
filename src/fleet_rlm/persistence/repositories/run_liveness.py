@@ -15,6 +15,9 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow
+from fleet_rlm.persistence.repositories.run_codec import _apply_row_next_state, _cancel_tombstone_rows, _row_claim_state
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.sessions.run_claim import (
     ClaimFailure,
     CompleteSettlement,
@@ -26,9 +29,6 @@ from fleet_rlm.sessions.run_state import (
     CancelResult,
     RunNotFoundError,
 )
-from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow
-from fleet_rlm.persistence.repositories.run_codec import _apply_row_next_state, _cancel_tombstone_rows, _row_claim_state
-from fleet_rlm.sessions.models import TurnAccess, TurnInput
 
 
 async def _await_recovery_step(awaitable: Awaitable[Any], *, deadline: float | None) -> Any:

@@ -12,7 +12,6 @@ import pytest
 
 
 def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool = False):
-    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -20,6 +19,7 @@ def _context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool 
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 

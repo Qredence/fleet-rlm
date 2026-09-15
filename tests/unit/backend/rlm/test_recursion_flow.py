@@ -9,8 +9,6 @@ import dspy
 import pytest
 
 import fleet_rlm.rlm.runtime as runtime_module
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
@@ -25,6 +23,8 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
     WorkerOwnership,
 )
+from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 

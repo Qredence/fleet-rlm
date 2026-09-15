@@ -27,11 +27,11 @@ class _GeneratedAgentProcess:
 
 
 def _turn():
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False

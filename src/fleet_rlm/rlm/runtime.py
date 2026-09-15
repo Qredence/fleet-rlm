@@ -30,7 +30,6 @@ from dspy.utils.exceptions import AdapterParseError
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments.models import PreparedAttachment
-from fleet_rlm.runtime.authority import RunAuthority
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
@@ -96,6 +95,7 @@ from fleet_rlm.rlm.result import (
     rlm_termination_mode,
     truncate_public_text,
 )
+from fleet_rlm.runtime.authority import RunAuthority
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess

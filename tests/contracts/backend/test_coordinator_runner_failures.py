@@ -12,7 +12,6 @@ import dspy
 import pytest
 
 from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
@@ -36,6 +35,7 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
+from fleet_rlm.sessions.run_state import ClaimedRun
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
 HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]

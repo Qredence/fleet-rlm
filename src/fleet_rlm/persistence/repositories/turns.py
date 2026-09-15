@@ -15,31 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.artifacts.promotion import PromotedArtifact
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.sessions.run_claim import (
-    ClaimCommand,
-    ClaimFailure,
-    CompleteSettlement,
-    RevokeClaim,
-    decide_claim_transition,
-)
-from fleet_rlm.sessions.run_state import (
-    CancelResult,
-    ClaimedRun,
-    CommittedRunReplay,
-    CommittedTurnReceipt,
-    FailedRunReceipt,
-    RunAlreadyCompletedError,
-    RunClaim,
-    RunFailure,
-    RunFailureCode,
-    RunLifecycleUnavailableError,
-    RunNotFoundError,
-    RunStart,
-    RunStateError,
-    _RunClaimToken,
-)
-
 from fleet_rlm.persistence.database import DatabaseConnectionError, observe_database_operation
 from fleet_rlm.persistence.models import RunRow, SessionRow
 from fleet_rlm.persistence.repositories.run_claim_decisions import (
@@ -69,6 +44,7 @@ from fleet_rlm.persistence.repositories.run_liveness import (
     _restore_after_fence_failure,
 )
 from fleet_rlm.persistence.repositories.run_queries import _committed_receipt, _committed_replay, _session_history
+from fleet_rlm.runtime.authority import RunAuthority
 from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import (
@@ -78,6 +54,29 @@ from fleet_rlm.sessions.models import (
     TurnAccess,
     TurnInput,
     UserTurnRecord,
+)
+from fleet_rlm.sessions.run_claim import (
+    ClaimCommand,
+    ClaimFailure,
+    CompleteSettlement,
+    RevokeClaim,
+    decide_claim_transition,
+)
+from fleet_rlm.sessions.run_state import (
+    CancelResult,
+    ClaimedRun,
+    CommittedRunReplay,
+    CommittedTurnReceipt,
+    FailedRunReceipt,
+    RunAlreadyCompletedError,
+    RunClaim,
+    RunFailure,
+    RunFailureCode,
+    RunLifecycleUnavailableError,
+    RunNotFoundError,
+    RunStart,
+    RunStateError,
+    _RunClaimToken,
 )
 from fleet_rlm.workspace.memory import MemoryPromotionIntent
 

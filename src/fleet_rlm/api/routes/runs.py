@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import LocalScopeDep, RunLifecycleDep
 from fleet_rlm.api.errors import http_error
-from fleet_rlm.sessions.run_state import RunNotFoundError
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_state import RunNotFoundError
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
 

@@ -9,11 +9,11 @@ import pytest
 
 
 def _turn():
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     access = TurnAccess(uuid4(), uuid4())
 
@@ -54,10 +54,10 @@ class _SnapshotSink:
 
 @pytest.mark.asyncio
 async def test_successful_turn_retains_one_closed_deterministic_snapshot() -> None:
-    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.result_snapshot import encode_result_snapshot
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     turn = _turn()
     snapshot = _SnapshotSink(turn)
@@ -77,9 +77,9 @@ async def test_successful_turn_retains_one_closed_deterministic_snapshot() -> No
             return CommittedTurnReceipt(turn.run_id, 1, committed, artifacts)
 
         async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
             from fleet_rlm.sessions.run_claim import FailClaim
             from fleet_rlm.sessions.run_state import RunFailure
-            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -130,9 +130,9 @@ async def test_successful_turn_retains_one_closed_deterministic_snapshot() -> No
 
 @pytest.mark.asyncio
 async def test_commit_failure_removes_snapshot_before_failure_is_durable() -> None:
-    from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
 
     turn = _turn()
     snapshot = _SnapshotSink(turn)
@@ -143,9 +143,9 @@ async def test_commit_failure_removes_snapshot_before_failure_is_durable() -> No
             raise RuntimeError("database unavailable")
 
         async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
             from fleet_rlm.sessions.run_claim import FailClaim
             from fleet_rlm.sessions.run_state import RunFailure
-            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -179,17 +179,17 @@ async def test_commit_failure_removes_snapshot_before_failure_is_durable() -> No
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_successful_turn_never_requests_a_snapshot(status: str) -> None:
-    from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
 
     turn = _turn()
 
     class Store:
         async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
             from fleet_rlm.sessions.run_claim import FailClaim
             from fleet_rlm.sessions.run_state import RunFailure
-            from fleet_rlm.rlm.result import empty_rlm_usage
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(

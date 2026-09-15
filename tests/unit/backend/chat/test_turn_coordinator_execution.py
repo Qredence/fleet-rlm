@@ -10,11 +10,11 @@ import pytest
 
 
 def _turn():
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False
@@ -165,12 +165,12 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     release_finish = asyncio.Event()
     committed_turn = CommittedTurn(

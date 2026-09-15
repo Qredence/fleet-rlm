@@ -18,11 +18,11 @@ from fleet_rlm.workspace.memory import MemoryCandidate
 
 
 def _turn():
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False
@@ -434,9 +434,9 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.chat.run_ownership import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.sessions.run_state import FailedRunReceipt
 
     spy = _PromotionSpy()
     outcome = RLMOutcome("failed", public_error_message="provider stream interrupted")
@@ -475,11 +475,11 @@ async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> N
 
 @pytest.mark.asyncio
 async def test_driver_settlement_failure_recovery_never_promotes_memory_candidates() -> None:
+    from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.sessions.run_state import (
         FailedRunReceipt,
         RunFailure,
     )
-    from fleet_rlm.rlm.events import RunFailed
 
     spy = _PromotionSpy()
     resolutions: list[object] = []

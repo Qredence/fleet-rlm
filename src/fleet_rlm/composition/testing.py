@@ -26,7 +26,6 @@ from fleet_rlm.chat.preparation import (
     RunEnvironmentProvider,
     RunPreparation,
 )
-from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.composition.inventory import (
     CompositionError,
     RuntimeDatabaseLifecycle,
@@ -38,6 +37,7 @@ from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import RLMFactoryLike
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 

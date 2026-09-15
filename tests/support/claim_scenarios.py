@@ -8,6 +8,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import select
 
+from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow
+from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
+from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+from fleet_rlm.sessions.models import TurnInput
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedRunReplay,
@@ -16,10 +20,6 @@ from fleet_rlm.sessions.run_state import (
     RunInProgressError,
     RunStateError,
 )
-from fleet_rlm.persistence.models import MemoryPromotionIntentRow, RunRow, SessionRow
-from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
-from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
-from fleet_rlm.sessions.models import TurnInput
 
 
 async def concurrent_claims_have_one_owner(postgres_claim_store, race):

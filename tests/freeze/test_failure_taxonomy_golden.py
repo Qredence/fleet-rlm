@@ -21,6 +21,8 @@ from fleet_rlm.chat.preparation import (
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
 )
+from fleet_rlm.chat.turn_runtime import terminal
+from fleet_rlm.rlm.events import EventRecorder
 from fleet_rlm.sessions.run_state import (
     FailedRunReceipt,
     RunIdempotencyMismatchError,
@@ -28,8 +30,6 @@ from fleet_rlm.sessions.run_state import (
     RunLifecycleUnavailableError,
     RunNotFoundError,
 )
-from fleet_rlm.chat.turn_runtime import terminal
-from fleet_rlm.rlm.events import EventRecorder
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "fixtures" / "failure-taxonomy.json"

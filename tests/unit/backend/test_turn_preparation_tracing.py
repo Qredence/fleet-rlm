@@ -53,11 +53,11 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
 
 def _make_turn() -> Any:
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 
     async def not_cancelled() -> bool:
         return False

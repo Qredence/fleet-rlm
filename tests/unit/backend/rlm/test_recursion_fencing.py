@@ -12,8 +12,6 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.events import RunCompleted, Status
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
@@ -29,6 +27,8 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities

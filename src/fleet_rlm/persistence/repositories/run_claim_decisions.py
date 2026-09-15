@@ -19,7 +19,6 @@ from fleet_rlm.sessions.run_state import (
 )
 
 
-
 class _PriorRunView(Protocol):
     @property
     def input_fingerprint(self) -> str: ...

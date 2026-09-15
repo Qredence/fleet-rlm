@@ -10,14 +10,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.sessions.run_state import (
-    ClaimedRun,
-    RunClaim,
-)
 from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.result import RLMOutcome
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    RunClaim,
+)
 
 
 def test_sessions_route_does_not_discover_provider_retirement() -> None:
