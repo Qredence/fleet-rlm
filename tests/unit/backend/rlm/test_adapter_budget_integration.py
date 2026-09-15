@@ -379,3 +379,14 @@ def test_concurrent_finalization_admissions_do_not_overdraw():
     with ThreadPoolExecutor(max_workers=4) as executor:
         assert sum(executor.map(attempt, range(10))) == 2
     assert scope.finalization_used == scope.turn.snapshot()["provider_attempts"] == 2
+
+
+def test_truncated_flag_set_when_output_hits_configured_max() -> None:
+    from fleet_rlm.rlm.compat_3_3_1 import _lm_max_tokens
+
+    class FakeLM:
+        def __init__(self) -> None:
+            self.kwargs = {"max_tokens": 16384}
+
+    assert _lm_max_tokens(FakeLM()) == 16384
+    assert _lm_max_tokens(object()) is None

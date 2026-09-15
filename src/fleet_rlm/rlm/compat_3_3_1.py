@@ -352,6 +352,15 @@ class _RLMTraceCallback(BaseCallback):
         if exception is not None:
             failure_outputs, failure_attributes = _lm_failure_details(exception)
             last_call.update(failure_outputs)
+            ceiling = _lm_max_tokens(instance)
+            observed = usage.get("output_tokens", usage.get("completion_tokens"))
+            if (
+                isinstance(ceiling, int)
+                and isinstance(observed, int)
+                and not isinstance(observed, bool)
+                and observed >= ceiling
+            ):
+                last_call["truncated"] = True
         self._last_call = last_call
         if self._metrics is not None:
             self._metrics.record_lm_call(
@@ -597,6 +606,17 @@ def _adapter_parse_profile(exc: BaseException) -> dict[str, JsonValue]:
     if "reasoning_content" in text:
         profile["has_reasoning_content"] = True
     return profile
+
+
+def _lm_max_tokens(instance: Any) -> int | None:
+    """Return the LM's configured output-token ceiling when discoverable."""
+    kwargs = getattr(instance, "kwargs", None)
+    if not isinstance(kwargs, Mapping):
+        return None
+    value = kwargs.get("max_tokens")
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    return None
 
 
 def _latest_lm_telemetry(
