@@ -10,9 +10,12 @@ from uuid import uuid4
 import dspy
 import pytest
 
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.provisioning import EphemeralInterpreterLease
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
 from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from scripts.benchmarks import run_oolong_predict as runner
 from scripts.benchmarks.oolong.adapter import (
     OolongAdapterError,
@@ -60,6 +63,24 @@ def test_production_kwargs_use_attachment_capsule(tmp_path: Path) -> None:
     assert kwargs_context_mode(kwargs) == "attachment_context_capsule"
     assert "context_window_text" not in kwargs["request"]
     assert len(str(kwargs["request"])) < len(datapoint["context_window_text"])
+
+
+def test_production_kwargs_use_committed_session_history(tmp_path: Path) -> None:
+    datapoint = load_fixture()
+    capsule = stage_context_capsule("hello", staging_root=tmp_path / "staging")
+    kwargs = _production_kwargs(datapoint, capsule)
+    history = kwargs["history"]
+    assert type(history) is CommittedSessionHistory
+    assert isinstance(history, dspy.SandboxSerializable)
+    assert history.to_sandbox() == b"[]"
+    with pytest.raises(DaytonaAdapterError, match="unsupported"):
+        DaytonaHttpToolBroker._encode_value(dspy.History(messages=[]))
+
+
+def test_dry_shortcut_uses_dspy_history() -> None:
+    datapoint = load_fixture()
+    kwargs = build_predict_kwargs(datapoint, mode="dry_shortcut")
+    assert type(kwargs["history"]).__name__ == "History"
 
 
 @pytest.mark.asyncio

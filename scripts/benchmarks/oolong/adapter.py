@@ -23,6 +23,7 @@ from fleet_rlm.rlm.program import (
     rlm_options,
 )
 from fleet_rlm.sessions.context import build_session_context_manifest
+from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import SessionHistory
 from scripts.benchmarks.oolong.scoring import (
     OOLONG_EVAL_HELPERS_REVISION,
@@ -270,7 +271,6 @@ def build_predict_kwargs(
         raise OolongAdapterError("datapoint is missing question")
     context_text = str(datapoint.get("context_window_text", ""))
     sid = session_id or uuid4()
-    history = dspy.History(messages=[])
     session_context = build_session_context_manifest(sid, 0, SessionHistory())
 
     if mode == "production":
@@ -283,7 +283,7 @@ def build_predict_kwargs(
             skill_cards=(),
             attachments=(),
             attachment_context=capsule,
-            history=history,
+            history=CommittedSessionHistory([]),
             signature=FleetRLMSignature,
         )
         kwargs["attachment_context"] = capsule
@@ -300,7 +300,7 @@ def build_predict_kwargs(
             session_context=session_context,
             skill_cards=(),
             attachments=(),
-            history=history,
+            history=dspy.History(messages=[]),
             signature=FleetRLMSignature,
         )
 
