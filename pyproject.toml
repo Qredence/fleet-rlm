@@ -84,6 +84,7 @@ server = [
 ]
 benchmark = [
     "databricks-agents>=1.5",
+    "datasets>=3.6.0",
 ]
 optimize = [
     # Exact official published release; no Git override remains.
