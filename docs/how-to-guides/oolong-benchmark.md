@@ -14,6 +14,7 @@ of truth and are intentionally absent on current tip.
 
 - Benchmark repo: https://github.com/abertsch72/oolong
 - HF datasets: `oolongbench/oolong-synth`, `oolongbench/oolong-real`
+- Default HF revisions: synth `f0d59eaf0febf130664cfceb710436c8e3216b2b`; real `6bc9ef04866fcf005c9749b70649be69dd37fffb`
 - Scoring: `synth_process_response` / `dnd_process_response` from the official
   repo (vendored under `scripts/benchmarks/oolong/scoring.py`)
 

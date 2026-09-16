@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -18,12 +20,15 @@ from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from scripts.benchmarks import run_oolong_predict as runner
 from scripts.benchmarks.oolong.adapter import (
+    DEFAULT_HF_DATASET_REVISIONS,
+    LoadedDatapoint,
     OolongAdapterError,
     build_predict_kwargs,
     build_receipt,
     invoke_live_prediction,
     kwargs_context_mode,
     load_fixture,
+    load_hf_row,
     receipt_safe_score,
     release_ephemeral_lease,
     resolve_datapoints,
@@ -95,11 +100,6 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
     worker_result = MagicMock(answer="Label: spam")
     deadline = 1_000_000.0
 
-    async def fake_settle() -> MagicMock:
-        settled = MagicMock(caller_cancelled=False)
-        settled.result.return_value = worker_result
-        return settled
-
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
             "fleet_rlm.rlm.program.build_model_bundle",
@@ -109,11 +109,8 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
             "scripts.benchmarks.oolong.adapter.build_native_program",
             lambda *_args, **_kwargs: MagicMock(),
         )
+        patcher.setattr("scripts.benchmarks.oolong.adapter._run_prediction_on_worker", lambda *_args: worker_result)
         patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
-        patcher.setattr(
-            "fleet_rlm.runtime.owned_effect.OwnedEffect.start",
-            lambda _awaitable: MagicMock(settle=fake_settle),
-        )
         answer = await invoke_live_prediction(
             settings,
             kwargs,
@@ -146,11 +143,6 @@ async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) ->
         created.append(adapter)
         return adapter
 
-    async def fake_settle() -> MagicMock:
-        settled = MagicMock(caller_cancelled=False)
-        settled.result.return_value = MagicMock(answer="Label: spam")
-        return settled
-
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
             "fleet_rlm.rlm.program.build_model_bundle",
@@ -160,12 +152,12 @@ async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) ->
             "scripts.benchmarks.oolong.adapter.build_native_program",
             lambda *_args, **_kwargs: MagicMock(),
         )
+        patcher.setattr(
+            "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
+            lambda *_args: MagicMock(answer="Label: spam"),
+        )
         patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
         patcher.setattr("fleet_rlm.rlm.program.FleetJSONAdapter", capture_adapter)
-        patcher.setattr(
-            "fleet_rlm.runtime.owned_effect.OwnedEffect.start",
-            lambda _awaitable: MagicMock(settle=fake_settle),
-        )
         await invoke_live_prediction(
             settings,
             kwargs,
@@ -190,11 +182,6 @@ async def test_invoke_live_prediction_skips_bundle_when_models_injected(tmp_path
     kwargs = _production_kwargs(datapoint, capsule)
     calls: list[object] = []
 
-    async def fake_settle() -> MagicMock:
-        settled = MagicMock(caller_cancelled=False)
-        settled.result.return_value = MagicMock(answer="Label: spam")
-        return settled
-
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
             "fleet_rlm.rlm.program.build_model_bundle",
@@ -204,11 +191,11 @@ async def test_invoke_live_prediction_skips_bundle_when_models_injected(tmp_path
             "scripts.benchmarks.oolong.adapter.build_native_program",
             lambda *_args, **_kwargs: MagicMock(),
         )
-        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
         patcher.setattr(
-            "fleet_rlm.runtime.owned_effect.OwnedEffect.start",
-            lambda _awaitable: MagicMock(settle=fake_settle),
+            "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
+            lambda *_args: MagicMock(answer="Label: spam"),
         )
+        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
         await invoke_live_prediction(
             MagicMock(),
             kwargs,
@@ -220,6 +207,168 @@ async def test_invoke_live_prediction_skips_bundle_when_models_injected(tmp_path
         )
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provided_role", ("root", "sub"))
+async def test_invoke_live_prediction_preserves_partially_injected_model(
+    tmp_path: Path,
+    provided_role: str,
+) -> None:
+    datapoint = load_fixture()
+    capsule = stage_context_capsule("hello", staging_root=tmp_path / "staging")
+    kwargs = _production_kwargs(datapoint, capsule)
+    provided = MagicMock(name=f"provided_{provided_role}")
+    fallback_root = MagicMock(name="fallback_root")
+    fallback_sub = MagicMock(name="fallback_sub")
+    bundles: list[tuple[object, object]] = []
+
+    class CapturingBundle:
+        def __init__(self, *, root_lm: object, sub_lm: object) -> None:
+            self.root_lm = root_lm
+            self.sub_lm = sub_lm
+            bundles.append((root_lm, sub_lm))
+
+        def bind_turn_deadline(self, **_kwargs: object) -> SimpleNamespace:
+            return SimpleNamespace(root_lm=self.root_lm, sub_lm=self.sub_lm)
+
+    root_lm = provided if provided_role == "root" else None
+    sub_lm = provided if provided_role == "sub" else None
+    expected_root = provided if provided_role == "root" else fallback_root
+    expected_sub = provided if provided_role == "sub" else fallback_sub
+
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(
+            "fleet_rlm.rlm.program.build_model_bundle",
+            lambda _settings: SimpleNamespace(root_lm=fallback_root, sub_lm=fallback_sub),
+        )
+        patcher.setattr("fleet_rlm.rlm.program.RLMModelBundle", CapturingBundle)
+        patcher.setattr(
+            "scripts.benchmarks.oolong.adapter.build_native_program",
+            lambda _settings, **_kwargs: MagicMock(),
+        )
+        patcher.setattr(
+            "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
+            lambda *_args: MagicMock(answer="Label: spam"),
+        )
+        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        await invoke_live_prediction(
+            MagicMock(),
+            kwargs,
+            interpreter=MagicMock(),
+            deadline=1_000_000.0,
+            wrap_up_seconds=30.0,
+            root_lm=root_lm,
+            sub_lm=sub_lm,
+        )
+
+    assert bundles == [(expected_root, expected_sub)]
+
+
+@pytest.mark.parametrize(("dataset", "split"), (("synth", "validation"), ("real", "test")))
+def test_load_hf_row_uses_immutable_dataset_default(
+    monkeypatch: pytest.MonkeyPatch,
+    dataset: str,
+    split: str,
+) -> None:
+    calls: list[dict[str, str]] = []
+    datasets = ModuleType("datasets")
+
+    def fake_load_dataset(dataset_id: str, *, split: str, revision: str) -> list[dict[str, object]]:
+        calls.append({"dataset_id": dataset_id, "split": split, "revision": revision})
+        return [{"id": "row"}]
+
+    datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "datasets", datasets)
+
+    datapoint = load_hf_row(dataset=dataset, split=split, index=2)
+
+    assert calls[0]["revision"] == DEFAULT_HF_DATASET_REVISIONS[dataset]
+    assert datapoint.dataset_revision == DEFAULT_HF_DATASET_REVISIONS[dataset]
+
+
+def test_load_hf_row_preserves_explicit_revision_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+    datasets = ModuleType("datasets")
+
+    def fake_load_dataset(_dataset_id: str, *, split: str, revision: str) -> list[dict[str, object]]:
+        assert split == "validation[0:1]"
+        calls.append(revision)
+        return [{"id": "row"}]
+
+    datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "datasets", datasets)
+
+    datapoint = load_hf_row(dataset="synth", split="validation", index=0, revision="test-revision")
+
+    assert calls == ["test-revision"]
+    assert datapoint.dataset_revision == "test-revision"
+
+
+@pytest.mark.asyncio
+async def test_live_rows_receive_independent_deadlines_and_budgets(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows = (
+        LoadedDatapoint(
+            row={"id": "first", "context_window_id": "first", "context_window_text": "first"},
+            dataset="synth",
+            split="validation",
+            index=0,
+            source="fixture",
+        ),
+        LoadedDatapoint(
+            row={"id": "second", "context_window_id": "second", "context_window_text": "second"},
+            dataset="synth",
+            split="validation",
+            index=1,
+            source="fixture",
+        ),
+    )
+    leases = [
+        SimpleNamespace(interpreter=MagicMock(), session_id=uuid4()),
+        SimpleNamespace(interpreter=MagicMock(), session_id=uuid4()),
+    ]
+    observed: list[tuple[float, object]] = []
+
+    async def fake_acquire(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return leases.pop(0)
+
+    async def fake_stage(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(entries=())
+
+    async def fake_invoke(*_args: object, deadline: float, turn_budget: object, **_kwargs: object) -> str:
+        observed.append((deadline, turn_budget))
+        return "Label: spam"
+
+    async def fake_release(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(runner, "resolve_datapoints", lambda **_kwargs: rows)
+    monkeypatch.setattr("fleet_rlm.daytona.provisioning.acquire_ephemeral_interpreter", fake_acquire)
+    monkeypatch.setattr(runner, "stage_attachment_context_on_lease", fake_stage)
+    monkeypatch.setattr(runner, "build_predict_kwargs", lambda *_args, **_kwargs: {"request": "request"})
+    monkeypatch.setattr(runner, "kwargs_context_mode", lambda _kwargs: "attachment_context_capsule")
+    monkeypatch.setattr(runner, "invoke_live_prediction", fake_invoke)
+    monkeypatch.setattr(runner, "release_ephemeral_lease", fake_release)
+    monkeypatch.setattr(runner, "score_prediction", lambda *_args, **_kwargs: {"score": 1})
+    monkeypatch.setattr(runner, "build_receipt", lambda **_kwargs: {"schema": runner.RECEIPT_SCHEMA})
+    fake_loop = SimpleNamespace(time=MagicMock(side_effect=(100.0, 200.0)))
+    monkeypatch.setattr(runner.asyncio, "get_running_loop", lambda: fake_loop)
+
+    await runner._run_live_async(
+        SimpleNamespace(
+            dataset="synth",
+            split="validation",
+            index=0,
+            limit=2,
+            hf=True,
+            model_name="fleet-test",
+        ),
+        SimpleNamespace(turn_timeout_seconds=30.0, rlm_wrap_up_seconds=5.0),
+    )
+
+    assert [deadline for deadline, _budget in observed] == [130.0, 230.0]
+    assert observed[0][1] is not observed[1][1]
+    assert [budget.deadline for _deadline, budget in observed] == [130.0, 230.0]
 
 
 @pytest.mark.asyncio

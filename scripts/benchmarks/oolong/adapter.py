@@ -39,7 +39,10 @@ DATASET_IDS = {
 }
 SYNTH_SPLITS = frozenset({"validation", "test"})
 REAL_SPLITS = frozenset({"test"})
-DEFAULT_HF_DATASET_REVISION = "main"
+DEFAULT_HF_DATASET_REVISIONS = {
+    "synth": "f0d59eaf0febf130664cfceb710436c8e3216b2b",
+    "real": "6bc9ef04866fcf005c9749b70649be69dd37fffb",
+}
 RECEIPT_SCORE_FIELDS = frozenset(
     {
         "id",
@@ -134,7 +137,7 @@ def load_hf_row(
             "the `datasets` package is required for Hugging Face loads; install benchmark extras or pass --fixture"
         ) from exc
     hf_id = DATASET_IDS[dataset]
-    resolved_revision = revision or DEFAULT_HF_DATASET_REVISION
+    resolved_revision = revision or DEFAULT_HF_DATASET_REVISIONS[dataset]
     try:
         loaded = load_dataset(hf_id, split=f"{split}[{index}:{index + 1}]", revision=resolved_revision)
         row = loaded[0]
@@ -411,21 +414,16 @@ async def invoke_live_prediction(
         bundle = build_model_bundle(settings)
         resolved_root = root_lm or bundle.root_lm
         resolved_sub = sub_lm or bundle.sub_lm
-        turn_models = bundle.bind_turn_deadline(
-            deadline=deadline,
-            reserve_seconds=wrap_up_seconds,
-            budget=budget,
-        )
-        resolved_root = turn_models.root_lm
-        resolved_sub = turn_models.sub_lm
     else:
-        turn_models = RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm).bind_turn_deadline(
-            deadline=deadline,
-            reserve_seconds=wrap_up_seconds,
-            budget=budget,
-        )
-        resolved_root = turn_models.root_lm
-        resolved_sub = turn_models.sub_lm
+        resolved_root = root_lm
+        resolved_sub = sub_lm
+    turn_models = RLMModelBundle(root_lm=resolved_root, sub_lm=resolved_sub).bind_turn_deadline(
+        deadline=deadline,
+        reserve_seconds=wrap_up_seconds,
+        budget=budget,
+    )
+    resolved_root = turn_models.root_lm
+    resolved_sub = turn_models.sub_lm
     capsule = kwargs.get("attachment_context")
     if isinstance(capsule, AttachmentContextCapsule):
         bind = getattr(interpreter, "bind_context_capsule", None)
@@ -509,7 +507,7 @@ def build_receipt(
 
 __all__ = [
     "DEFAULT_FIXTURE",
-    "DEFAULT_HF_DATASET_REVISION",
+    "DEFAULT_HF_DATASET_REVISIONS",
     "DRY_REQUEST_CONCAT_CAP",
     "LoadedDatapoint",
     "OolongAdapterError",
