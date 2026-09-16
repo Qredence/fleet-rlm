@@ -913,7 +913,6 @@ async def acquire_ephemeral_interpreter(
         )
         loop = asyncio.get_running_loop()
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
-        await asyncio.to_thread(interpreter.execute, "pass")
     except BaseException:
         await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
         raise

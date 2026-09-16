@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.provisioning import acquire_ephemeral_interpreter
 
@@ -35,33 +36,31 @@ def _patch_acquire_dependencies(
             return_value=interpreter or MagicMock(),
         ),
         patch("fleet_rlm.daytona.interpreter.sandbox_backend", return_value=MagicMock()),
-        patch("asyncio.to_thread", AsyncMock(side_effect=lambda fn, *args, **kwargs: fn(*args, **kwargs))),
     )
 
 
 @pytest.mark.asyncio
-async def test_acquire_ephemeral_interpreter_retires_sandbox_when_probe_fails() -> None:
+async def test_acquire_ephemeral_interpreter_does_not_probe_execute() -> None:
     settings = MagicMock()
     sandbox = MagicMock(id="sandbox-1")
     platform = MagicMock()
     platform.start = AsyncMock()
     platform.get = AsyncMock(return_value=sandbox)
-    platform.delete = AsyncMock()
     provisioner = MagicMock()
     provisioner.create = AsyncMock(return_value=sandbox)
     provisioner.expected_mount = MagicMock(return_value=MagicMock())
     provisioner.verify_run_layout = AsyncMock()
     interpreter = MagicMock()
-    interpreter.execute = MagicMock(side_effect=RuntimeError("probe failed"))
+    interpreter.execute = MagicMock()
 
     patches = _patch_acquire_dependencies(platform=platform, provisioner=provisioner, interpreter=interpreter)
     with ExitStack() as stack:
         for item in patches:
             stack.enter_context(item)
-        with pytest.raises(RuntimeError, match="probe failed"):
-            await acquire_ephemeral_interpreter(settings, purpose="test", workspace_id=uuid4())
+        lease = await acquire_ephemeral_interpreter(settings, purpose="test", workspace_id=uuid4())
 
-    platform.delete.assert_awaited_once_with(sandbox)
+    interpreter.execute.assert_not_called()
+    assert lease.interpreter is interpreter
 
 
 @pytest.mark.asyncio
@@ -85,3 +84,13 @@ async def test_acquire_ephemeral_interpreter_retires_sandbox_when_layout_fails()
             await acquire_ephemeral_interpreter(settings, purpose="test", workspace_id=uuid4())
 
     platform.delete.assert_awaited_once_with(sandbox)
+
+
+def test_bind_context_manifest_rejects_after_broker_startup() -> None:
+    broker = DaytonaHttpToolBroker(sandbox=MagicMock())
+    broker._broker_url = "http://example"
+    with pytest.raises(DaytonaAdapterError, match="must be bound before broker startup"):
+        broker.bind_context_manifest(
+            trusted_mount_root="/home/daytona/fleet",
+            expected_manifest_sha256="abc123",
+        )
