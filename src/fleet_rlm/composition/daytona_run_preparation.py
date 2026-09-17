@@ -20,7 +20,7 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments.models import (
+from fleet_rlm.attachments import (
     PreparedAttachments,
 )
 from fleet_rlm.chat.preparation import (
@@ -655,7 +655,7 @@ class _LiveCapabilityPreparer:
             LivePreparedCapabilities: Prepared capabilities and any preparation notices.
         """
         from fleet_rlm.artifacts.tools import ArtifactToolHost
-        from fleet_rlm.attachments.tools import AttachmentToolHost
+        from fleet_rlm.attachments import AttachmentToolHost
         from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost, build_workspace_memory_store
         from fleet_rlm.workspace.projects import ProjectToolHost
         from fleet_rlm.workspace.storage import AgentStorageSession

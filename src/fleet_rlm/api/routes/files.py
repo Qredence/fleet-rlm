@@ -33,8 +33,13 @@ from fleet_rlm.api.schemas import (
 )
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-from fleet_rlm.attachments.errors import AttachmentError, AttachmentNotFoundError, AttachmentStorageError
-from fleet_rlm.attachments.models import AttachmentAccess, AttachmentUpload
+from fleet_rlm.attachments import (
+    AttachmentAccess,
+    AttachmentError,
+    AttachmentNotFoundError,
+    AttachmentStorageError,
+    AttachmentUpload,
+)
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.workspace.workspace import (
     MAX_PUBLIC_LIST_LIMIT,

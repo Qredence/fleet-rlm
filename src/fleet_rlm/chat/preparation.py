@@ -15,7 +15,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from fleet_rlm.artifacts.models import ArtifactAccess
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments.models import (
+from fleet_rlm.attachments import (
     AttachmentAccess,
     AttachmentRun,
     PreparedAttachment,

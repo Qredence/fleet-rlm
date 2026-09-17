@@ -471,8 +471,10 @@ async def build_daytona_composition(
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.attachments import (
+        AttachmentLifecycleService,
+        WorkspaceAttachmentPathPolicy,
+    )
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.composition.daytona_run_preparation import resolve_settings

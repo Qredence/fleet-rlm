@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
+from fleet_rlm.attachments import AttachmentLifecycle
 from fleet_rlm.chat.preparation import RunPreparation
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime

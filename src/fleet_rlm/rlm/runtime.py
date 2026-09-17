@@ -29,7 +29,7 @@ from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.attachments.models import PreparedAttachment
+from fleet_rlm.attachments import PreparedAttachment
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget

@@ -16,8 +16,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
-from fleet_rlm.attachments.models import PreparedAttachments
+from fleet_rlm.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
     PreparedHostCapabilities,
@@ -72,9 +71,12 @@ def build_local_storage_adapters(
         LocalArtifactReaderCatalog,
     )
     from fleet_rlm.artifacts.reader import ArtifactReader
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
-    from fleet_rlm.attachments.paths import LocalAttachmentPathPolicy
+    from fleet_rlm.attachments import (
+        AttachmentLifecycleService,
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+        LocalAttachmentPathPolicy,
+    )
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     upload_root, artifact_root = host_roots(settings)
@@ -315,7 +317,7 @@ class TestingCapabilityPreparer:
         deadline: float,
     ) -> PreparedHostCapabilities:
         """Prepare host capabilities for one turn within the execution deadline."""
-        from fleet_rlm.attachments.tools import AttachmentToolHost
+        from fleet_rlm.attachments import AttachmentToolHost
         from fleet_rlm.workspace.url import UrlToolHost
 
         sink = environment.attachment_sink
@@ -421,7 +423,7 @@ def install_testing_composition(
     database: RuntimeDatabaseLifecycle | None = None,
 ) -> RuntimeInventory:
     """Install credential-free deterministic adapters for a test lifespan."""
-    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.attachments import WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
     from fleet_rlm.workspace.workspace import (
