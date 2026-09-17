@@ -29,7 +29,6 @@ from fleet_rlm.sessions.run_state import (
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_skill_catalog", [False, True])
 async def test_live_preparation_stages_attachment_and_cleans_it(
-    monkeypatch,
     tmp_path,
     with_skill_catalog: bool,
 ) -> None:
@@ -51,17 +50,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
 
-    from fleet_rlm.daytona.workspace_agent import client as workspace_agent_client
-    from fleet_rlm.daytona.workspace_agent import protocol as workspace_agent_protocol
-
-    # Materialize the installed agent OUTSIDE the claimed volume tree so the
-    # test's exact volume-content assertion is unaffected (real installs also
-    # live outside the mounted Volume).
-    agent_remote = tmp_path / "remote" / "home" / "daytona" / "fleet_rlm_workspace_agent_v1.py"
-    agent_remote_path = str(agent_remote)
-    monkeypatch.setattr(workspace_agent_client, "WORKSPACE_AGENT_INSTALL_PATH", agent_remote_path)
-    monkeypatch.setattr(workspace_agent_protocol, "WORKSPACE_AGENT_INSTALL_PATH", agent_remote_path)
-
     class SandboxFs:
         async def create_folder(self, path: str, mode: str | None = None) -> None:
             del path, mode
@@ -70,14 +58,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return volume[path]
 
         async def upload_file(self, value: bytes, path: str) -> None:
-            # Emulate a real remote filesystem so the installed Workspace
-            # Agent module is importable by the exec-based process double.
-            # The install is Sandbox-local state, not mounted-Volume state,
-            # so it is kept out of the simulated Volume content map.
-            if path == agent_remote_path:
-                agent_remote.parent.mkdir(parents=True, exist_ok=True)
-                agent_remote.write_bytes(value)
-                return
             volume[path] = value
 
         async def delete_file(self, path: str) -> None:

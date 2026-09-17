@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import inspect
 import io
 import json
@@ -85,6 +86,10 @@ DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 DEFAULT_BROKER_PORT = 8765
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
 _UNSET = object()
+_BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "fleet_interpreter_binding_reservation",
+    default=None,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,18 +147,25 @@ class _BindingTools(dict[str, Callable[..., Any]]):
         super().__init__(initial or {})
 
     def __setitem__(self, key: str, value: Callable[..., Any]) -> None:
+        self._owner._begin_binding_injection()
+        self._owner._ensure_binding_mutation_allowed()
         super().__setitem__(key, value)
         self._owner._binding_generation += 1
 
     def __delitem__(self, key: str) -> None:
+        self._owner._ensure_binding_mutation_allowed()
         super().__delitem__(key)
         self._owner._binding_generation += 1
 
     def clear(self) -> None:
+        self._owner._ensure_binding_mutation_allowed()
         super().clear()
         self._owner._binding_generation += 1
 
     def update(self, *args: Any, **kwargs: Any) -> None:
+        self._owner._begin_binding_injection()
+        self._owner._ensure_binding_mutation_allowed()
+        super().clear()
         super().update(*args, **kwargs)
         self._owner._binding_generation += 1
 
@@ -561,6 +573,10 @@ class DaytonaCodeInterpreter:
         self._installed_binding_generation = -1
         self._execution_lock = Lock()
         self._shutdown_lock = Lock()
+        self._reservation_token: object | None = None
+        self._reservation_task: asyncio.Task[Any] | None = None
+        self._execution_started: bool = False
+        self._reservation_state_lock = Lock()
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._fleet_output_contract: FleetOutputContract | None = None
@@ -585,6 +601,97 @@ class DaytonaCodeInterpreter:
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
+    def _ensure_binding_mutation_allowed(self) -> None:
+        """Reject an overlapping invocation before it can mutate the current namespace."""
+        current = _BINDING_RESERVATION.get()
+        with self._reservation_state_lock:
+            allowed = not self._execution_lock.locked() or (
+                self._reservation_token is current and current is not None and not self._execution_started
+            )
+        if not allowed:
+            raise DaytonaAdapterError(
+                message="interpreter is already executing",
+                cause_type="InterpreterReuseError",
+            )
+
+    def _begin_binding_injection(self) -> None:
+        """Reserve this interpreter before DSPy starts an overlapping acall."""
+        try:
+            task = asyncio.current_task()
+        except RuntimeError:
+            task = None
+        if task is None:
+            return
+        current = _BINDING_RESERVATION.get()
+        with self._reservation_state_lock:
+            if self._reservation_token is current and current is not None and not self._execution_started:
+                return
+            if not self._execution_lock.acquire(blocking=False):
+                raise DaytonaAdapterError(
+                    message="interpreter is already executing",
+                    cause_type="InterpreterReuseError",
+                )
+            token = object()
+            self._reservation_token = token
+            self._reservation_task = task
+            self._execution_started = False
+            _BINDING_RESERVATION.set(token)
+        task.add_done_callback(lambda _done, token=token: self._release_reservation(token))
+
+    def _release_reservation(self, token: object) -> None:
+        """Release a pre-execution reservation when an async call settles early."""
+        clear_context = False
+        with self._reservation_state_lock:
+            if token is not self._reservation_token or self._execution_started:
+                return
+            self._reservation_token = None
+            self._reservation_task = None
+            if self._execution_lock.locked():
+                self._execution_lock.release()
+            clear_context = _BINDING_RESERVATION.get() is token
+        if clear_context:
+            _BINDING_RESERVATION.set(None)
+
+    def _acquire_execution(self) -> object:
+        """Consume an injection reservation or acquire one for direct execution."""
+        current = _BINDING_RESERVATION.get()
+        with self._reservation_state_lock:
+            if self._reservation_token is current and current is not None and not self._execution_started:
+                self._execution_started = True
+                return current
+            if not self._execution_lock.acquire(blocking=False):
+                raise DaytonaAdapterError(
+                    message="interpreter is already executing",
+                    cause_type="InterpreterReuseError",
+                )
+            token = object()
+            self._reservation_token = token
+            try:
+                task = asyncio.current_task()
+            except RuntimeError:
+                task = None
+            self._reservation_task = task
+            self._execution_started = True
+            _BINDING_RESERVATION.set(token)
+            if task is not None:
+                task.add_done_callback(lambda _done, token=token: self._release_reservation(token))
+            return token
+
+    def _release_execution(self, token: object) -> None:
+        """Release the execution lease after backend output and callbacks settle."""
+        clear_context = False
+        with self._reservation_state_lock:
+            if token is not self._reservation_token:
+                return
+            self._execution_started = False
+            self._reservation_task = None
+            self._reservation_token = None
+            if self._execution_lock.locked():
+                self._execution_lock.release()
+            clear_context = _BINDING_RESERVATION.get() is token
+        if clear_context:
+            _BINDING_RESERVATION.set(None)
+
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
         return self._tools
@@ -603,6 +710,9 @@ class DaytonaCodeInterpreter:
 
     @output_fields.setter
     def output_fields(self, value: list[dict[str, Any]] | None) -> None:
+        self._ensure_binding_mutation_allowed()
+        if value is not None and self._fleet_output_contract is not None:
+            value = self._fleet_output_contract.merge(value)
         self._output_fields = value
         self._binding_generation += 1
 
@@ -618,10 +728,12 @@ class DaytonaCodeInterpreter:
         self._started = True
 
     def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
+        self._ensure_binding_mutation_allowed()
         self._observer = observer
         self._observation_max_chars = max(1, int(max_chars))
 
     def bind_turn_budget(self, budget: TurnBudget | None) -> None:
+        self._ensure_binding_mutation_allowed()
         self._turn_budget = budget
         self._output_budget_exhausted = False
 
@@ -629,6 +741,7 @@ class DaytonaCodeInterpreter:
         self._turn_request = request
 
     def bind_context_capsule(self, capsule: Any) -> None:
+        self._ensure_binding_mutation_allowed()
         from fleet_rlm.rlm.program import AttachmentContextCapsule
 
         if not isinstance(capsule, AttachmentContextCapsule):
@@ -729,15 +842,11 @@ class DaytonaCodeInterpreter:
     @with_callbacks
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """Execute one action under single-flight concurrency protection."""
-        if not self._execution_lock.acquire(blocking=False):
-            raise DaytonaAdapterError(
-                message="concurrent interpreter execution is not allowed",
-                cause_type="InterpreterConcurrencyError",
-            )
+        token = self._acquire_execution()
         try:
             return self._execute_once(code, variables)
         finally:
-            self._execution_lock.release()
+            self._release_execution(token)
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if self._shutdown:
@@ -820,6 +929,13 @@ class DaytonaCodeInterpreter:
 
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 if isinstance(result, _RepairFeedback):
+                    if not public:
+                        raise DaytonaAdapterError(
+                            message=result.feedback,
+                            cause_type="ContextVerificationError"
+                            if "integrity" in result.feedback
+                            else "HostSetupError",
+                        )
                     repair_np = self._reject_repeated_no_progress(normalized_code, result.feedback)
                     if repair_np is not None:
                         raise repair_np
@@ -876,7 +992,8 @@ class DaytonaCodeInterpreter:
                 stdout_projector.finish()
                 if not isinstance(exc, CodeExecutionError):
                     cat = str(getattr(exc, "category", "CodeInterpreterError"))
-                    exc = _terminal_error(str(exc), category=cat)
+                    msg = sanitize_repair_text(sanitize_provider_message(str(exc)))
+                    exc = _terminal_error(msg, category=cat)
                     _close_output_stream(
                         "Execution failed",
                         step=step,
@@ -888,7 +1005,10 @@ class DaytonaCodeInterpreter:
                     raise exc from None
 
                 cat = str(getattr(exc, "category", "execution_error"))
-                exc = _repair_error(str(exc), category=cat)
+                msg = str(exc)
+                if "characters omitted" not in msg:
+                    msg = sanitize_repair_text(msg)
+                exc = _repair_error(msg, category=cat)
                 phase.finish(
                     phase_status="failed",
                     outputs={
@@ -946,6 +1066,13 @@ class DaytonaCodeInterpreter:
             if self._shutdown:
                 return
 
+            with self._reservation_state_lock:
+                if self._reservation_token is not None and not self._execution_started:
+                    self._reservation_token = None
+                    self._reservation_task = None
+                    if self._execution_lock.locked():
+                        self._execution_lock.release()
+
             broker_error: BaseException | None = None
             if self._http_broker is not None:
                 stop = getattr(self._http_broker, "stop", None)
@@ -963,14 +1090,14 @@ class DaytonaCodeInterpreter:
                     backend.close()
                 except BaseException as exc:
                     backend_error = exc
-                finally:
+                else:
                     self._backend = None
 
-            self._shutdown = True
             if broker_error is not None:
                 raise broker_error
             if backend_error is not None:
                 raise backend_error
+            self._shutdown = True
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any], *args: Any) -> Any:
@@ -1039,14 +1166,14 @@ class DaytonaCodeInterpreter:
     def _finalize(self, raw: str | BackendExecutionResult) -> Any:
         if isinstance(raw, BackendExecutionResult):
             if raw.error:
-                error = sanitize_provider_message(raw.error)
+                error = sanitize_repair_text(sanitize_provider_message(raw.error))
                 category = raw.error_category or _repair_category(error)
                 if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
                     raise _terminal_error(error, category=category)
                 feedback = error
                 stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
                 if stderr:
-                    feedback = f"{feedback}\nstderr: {sanitize_repair_text(stderr)}"
+                    feedback = f"{feedback}\nstderr: {stderr}"
                 return _RepairFeedback(feedback=feedback, category=category)
             if raw.final is not None:
                 return wrap_final_output(raw.final)

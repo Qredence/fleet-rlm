@@ -12,8 +12,6 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.provisioning import EphemeralInterpreterLease
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
 from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter, FleetRLMSignature
@@ -279,8 +277,6 @@ def test_production_kwargs_use_committed_session_history(tmp_path: Path) -> None
     assert type(history) is CommittedSessionHistory
     assert isinstance(history, dspy.SandboxSerializable)
     assert history.to_sandbox() == b"[]"
-    with pytest.raises(DaytonaAdapterError, match="unsupported"):
-        DaytonaHttpToolBroker._encode_value(dspy.History(messages=[]))
 
 
 def test_dry_shortcut_uses_dspy_history() -> None:

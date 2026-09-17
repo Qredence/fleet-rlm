@@ -590,18 +590,34 @@ class TurnRuntime:
         if not tasks:
             return False
         done, pending = await asyncio.wait(tasks, timeout=_PREPARATION_CLEANUP_TIMEOUT_S)
+        assert state.quarantine is not None
         if state.preparation_task is not None and state.preparation_task in pending:
-            quarantine = asyncio.create_task(
-                self._drain_late_preparation(state, state.preparation_task),
-                name="fleet-late-preparation-cleanup",
-            )
-            self._retain_preparation_quarantine(state, quarantine)
+            prep_task = state.preparation_task
+
+            async def _drain_late() -> None:
+                try:
+                    prepared = await prep_task
+                    await shield_cleanup(prepared.aclose())
+                except BaseException as exc:
+                    if state.cleanup_error is None:
+                        state.cleanup_error = exc
+                    logger.error("late Turn preparation cleanup failed", exc_info=exc)
+
+            quarantine = asyncio.create_task(_drain_late(), name="fleet-late-preparation-cleanup")
+            state.quarantine.add(quarantine)
+            quarantine.add_done_callback(state.quarantine.discard)
+
         if state.heartbeat_lost is not None and state.heartbeat_lost in pending:
-            quarantine = asyncio.create_task(
-                self._wait_late_task(state.heartbeat_lost),
-                name="fleet-late-heartbeat-cleanup",
-            )
-            self._retain_preparation_quarantine(state, quarantine)
+            hb_task = state.heartbeat_lost
+
+            async def _wait_hb() -> None:
+                with contextlib.suppress(BaseException):
+                    await hb_task
+
+            quarantine = asyncio.create_task(_wait_hb(), name="fleet-late-heartbeat-cleanup")
+            state.quarantine.add(quarantine)
+            quarantine.add_done_callback(state.quarantine.discard)
+
         if (
             state.preparation_task is not None
             and state.preparation_task in done
@@ -615,74 +631,39 @@ class TurnRuntime:
                 try:
                     await shield_cleanup(late_prepared.aclose())
                 except BaseException as exc:
-                    self._record_preparation_cleanup_error(state, exc)
+                    if state.cleanup_error is None:
+                        state.cleanup_error = exc
+                    logger.error("late Turn preparation cleanup failed", exc_info=exc)
         return bool(pending) or state.cleanup_error is not None
-
-    async def _drain_late_preparation(
-        self,
-        state: _PreparationState,
-        task: asyncio.Task[PreparedTurn],
-    ) -> None:
-        try:
-            prepared = await task
-        except BaseException:
-            return
-        try:
-            await shield_cleanup(prepared.aclose())
-        except BaseException as exc:
-            self._record_preparation_cleanup_error(state, exc)
-
-    @staticmethod
-    async def _wait_late_task(task: asyncio.Task[Any]) -> None:
-        with contextlib.suppress(BaseException):
-            await task
-
-    @staticmethod
-    def _retain_preparation_quarantine(state: _PreparationState, task: asyncio.Task[Any]) -> None:
-        assert state.quarantine is not None
-        state.quarantine.add(task)
-        task.add_done_callback(state.quarantine.discard)
-
-    @staticmethod
-    def _record_preparation_cleanup_error(state: _PreparationState, exc: BaseException) -> None:
-        if state.cleanup_error is None:
-            state.cleanup_error = exc
-        logger.error("late Turn preparation cleanup failed", exc_info=exc)
 
     async def _drain_preparation_quarantine(self, state: _PreparationState) -> None:
         assert state.quarantine is not None
-        tasks = tuple(state.quarantine)
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for result in results:
-                if isinstance(result, BaseException):
-                    self._record_preparation_cleanup_error(state, result)
+        if state.quarantine:
+            results = await asyncio.gather(*tuple(state.quarantine), return_exceptions=True)
+            for res in results:
+                if isinstance(res, BaseException) and state.cleanup_error is None:
+                    state.cleanup_error = res
         if state.cleanup_error is not None:
             raise RuntimeError("late Turn preparation cleanup failed") from state.cleanup_error
 
     async def _handoff_preparation_cleanup(self, run: ClaimedRun, state: _PreparationState) -> None:
-        cleanup = self._drain_preparation_and_complete_settling(run, state)
+        async def _drain_and_settle() -> None:
+            await self._drain_preparation_quarantine(state)
+            await self._lifecycle.complete_settling(run)
+
+        cleanup = _drain_and_settle()
         try:
             self._cleanup.submit(cleanup)
         except BaseException:
             cleanup.close()
-            await shield_cleanup(self._drain_preparation_and_complete_settling(run, state))
-
-    async def _drain_preparation_and_complete_settling(
-        self,
-        run: ClaimedRun,
-        state: _PreparationState,
-    ) -> None:
-        await self._drain_preparation_quarantine(state)
-        await self._lifecycle.complete_settling(run)
+            await shield_cleanup(_drain_and_settle())
 
     async def _stop_preparation_claim_waiter(self, state: _PreparationState) -> None:
         waiter = state.heartbeat_lost
-        if waiter is None:
-            return
-        waiter.cancel()
-        await asyncio.gather(waiter, return_exceptions=True)
-        state.heartbeat_lost = None
+        if waiter is not None:
+            waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
+            state.heartbeat_lost = None
 
     def open_owned(self, command: OpenTurnCommand) -> OpenedTurnStream:
         """Start claim-to-cleanup ownership without exposing a second owner object."""
@@ -1157,29 +1138,6 @@ class TurnRuntime:
         except Exception:
             return None
 
-    async def _handoff_cleanup(
-        self,
-        run: ClaimedRun,
-        prepared: PreparedTurn,
-        state: _ExecutionState,
-        *,
-        claim_lost: bool = False,
-        claim_loss_usage: RLMUsage | None = None,
-        finalization_task: asyncio.Task[RunSettlement] | None = None,
-    ) -> None:
-        state.cleanup_task = self._submit_cleanup(
-            run,
-            state.stream,
-            prepared,
-            state.heartbeat,
-            finalization_task,
-            claim_lost=claim_lost,
-            claim_loss_usage=claim_loss_usage,
-        )
-        state.cleanup_handed_off = True
-        await self._stop_claim_waiter(state)
-        state.heartbeat = None
-
     async def _handoff_cleanup_or_drain(
         self,
         run: ClaimedRun,
@@ -1190,30 +1148,28 @@ class TurnRuntime:
         claim_loss_usage: RLMUsage | None = None,
         finalization_task: asyncio.Task[RunSettlement] | None = None,
     ) -> None:
+        if state.cleanup_handed_off:
+            return
+        state.cleanup_handed_off = True
+        owned_heartbeat = state.heartbeat
+        state.heartbeat = None
         try:
-            await self._handoff_cleanup(
+            state.cleanup_task = self._submit_cleanup(
                 run,
+                state.stream,
                 prepared,
-                state,
+                owned_heartbeat,
+                finalization_task,
                 claim_lost=claim_lost,
                 claim_loss_usage=claim_loss_usage,
-                finalization_task=finalization_task,
             )
-            return
+            await self._stop_claim_waiter(state)
         except BaseException:
-            if state.cleanup_handed_off:
-                return
-            state.cleanup_handed_off = True
-            owned_heartbeat = state.heartbeat
-
-            async def inline_cleanup() -> None:
-                try:
-                    with contextlib.suppress(BaseException):
-                        await self._stop_claim_waiter(state)
-                    with contextlib.suppress(BaseException):
-                        await stop_heartbeat(owned_heartbeat)
-                    state.heartbeat = None
-                    await self._drain_owned_execution(
+            try:
+                await self._stop_claim_waiter(state)
+            finally:
+                await shield_cleanup(
+                    self._drain_owned_execution(
                         run,
                         prepared,
                         state.stream,
@@ -1223,14 +1179,7 @@ class TurnRuntime:
                         claim_loss_usage=claim_loss_usage,
                         late_claim_loss_window=False,
                     )
-                finally:
-                    with contextlib.suppress(BaseException):
-                        await self._stop_claim_waiter(state)
-                    with contextlib.suppress(BaseException):
-                        await stop_heartbeat(owned_heartbeat)
-                    state.heartbeat = None
-
-            await shield_cleanup(inline_cleanup())
+                )
 
     async def _close_execution(self, prepared: PreparedTurn, state: _ExecutionState) -> None:
         """

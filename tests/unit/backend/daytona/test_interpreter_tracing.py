@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
-from fleet_rlm.daytona.models import _EXECUTION_STAT_KEYS
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, TurnBudgetExhausted
 

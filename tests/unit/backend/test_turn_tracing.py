@@ -378,7 +378,23 @@ def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
 def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+    class DaytonaHttpToolBroker:
+        def __init__(self, sandbox: Any) -> None:
+            self.sandbox = sandbox
+            self._client: httpx.Client | None = None
+            self._broker_url: str | None = None
+            self._broker_secret: str | None = None
+
+        def _preview_headers(self) -> dict[str, str]:
+            return {"Authorization": f"Bearer {self._broker_secret}"} if self._broker_secret else {}
+
+        def _poll_once(self, tool_executor: Any) -> bool:
+            if self._client is None:
+                return False
+            resp = self._client.get("/pending")
+            for item in resp.json().get("requests", []):
+                tool_executor(item["tool_name"], item.get("args", []), item.get("kwargs", {}))
+            return True
 
     calls = _install_fake_mlflow(monkeypatch)
     observed: list[Any] = []

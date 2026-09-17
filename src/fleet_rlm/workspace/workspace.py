@@ -244,7 +244,9 @@ def translate_fs_tool_errors(
     """Map storage failures to a closed model-facing error vocabulary."""
     if isinstance(exc, FilesystemToolError):
         raise exc
-    if getattr(exc, "code", None) == "unsupported_storage":
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
+
+    if isinstance(exc, WorkspaceStorageError) or getattr(exc, "code", None) == "unsupported_storage":
         raise error_type("unsupported_storage", f"{domain} storage does not support this mutation") from None
     if isinstance(exc, FileNotFoundError):
         raise error_type("not_found", f"{domain} file was not found") from None

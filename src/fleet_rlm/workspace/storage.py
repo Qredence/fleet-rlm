@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import hashlib
 import inspect
+import os
 from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -23,6 +25,7 @@ from fleet_rlm.paths import (
     UnsafePathError,
     VolumePaths,
     validate_mount_path,
+    validate_path_id,
 )
 from fleet_rlm.runtime.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import (
@@ -41,7 +44,7 @@ MAX_FILE_BYTES = MAX_WORKSPACE_FILE_BYTES
 WORKSPACE_MEMORY_BYTE_BUDGET = 64_000
 
 
-class WorkspaceStorageError(OSError):
+class WorkspaceStorageError(ValueError, OSError):
     """Raised when a workspace storage operation fails."""
 
 
@@ -295,8 +298,8 @@ def _validate_workspace_roots(
 ) -> None:
     if volume_root is None:
         return
-    v = Path(volume_root).resolve()
-    r = Path(root).resolve()
+    v = Path(volume_root)
+    r = Path(root)
     if not allow_volume_root and r == v:
         raise ValueError("root cannot be volume_root")
     try:
@@ -306,6 +309,31 @@ def _validate_workspace_roots(
     parts = r.relative_to(v).parts
     if parts and parts[0] in {"attachments", "artifacts"} and not allow_volume_root:
         raise ValueError("workspace root cannot alias attachment or artifact storage")
+
+
+def _encode_cursor(path: str, offset: int) -> str:
+    payload = f"{path}:{offset}".encode()
+    sig = hashlib.sha256(payload).hexdigest()[:8]
+    return f"{sig}:{path}:{offset}"
+
+
+def _decode_cursor(cursor: str, expected_path: str) -> int:
+    parts = cursor.split(":", 2)
+    if len(parts) != 3:
+        raise ValueError("invalid cursor format")
+    sig, path, offset_str = parts
+    payload = f"{path}:{offset_str}".encode()
+    if hashlib.sha256(payload).hexdigest()[:8] != sig:
+        raise ValueError("corrupted cursor signature")
+    if path != expected_path:
+        raise ValueError(f"cursor is bound to '{path}', not '{expected_path}'")
+    try:
+        offset = int(offset_str)
+    except ValueError as exc:
+        raise ValueError("invalid cursor offset") from exc
+    if offset < 0:
+        raise ValueError("negative cursor offset")
+    return offset
 
 
 class WorkspaceStorage:
@@ -330,30 +358,54 @@ class WorkspaceStorage:
         self._sandbox = sandbox
         resolved_root = root or volume_root or "/workspace"
         _validate_workspace_roots(volume_root, resolved_root, allow_volume_root=allow_volume_root)
-        self._root = Path(resolved_root).resolve()
-        self._volume_root = Path(volume_root).resolve() if volume_root else None
+        self._root = Path(resolved_root)
+        self._volume_root = Path(volume_root) if volume_root else None
         self._max_file_bytes = max_file_bytes
         self._timeout_s = timeout_s
         self._include_checksum = include_checksum_by_default
-        self._warnings: list[dict[str, object]] = []
+        self._warnings: list[Mapping[str, object]] = []
+        self._last_warnings: list[Mapping[str, object]] = []
         del kwargs
 
     @property
     def root(self) -> Path:
         return self._root
 
+    @property
+    def last_warnings(self) -> tuple[Mapping[str, object], ...]:
+        return tuple(MappingProxyType(w) for w in self._last_warnings)
+
     def warnings(self) -> tuple[Mapping[str, object], ...]:
         return tuple(MappingProxyType(w) for w in self._warnings)
 
     def _resolve(self, relative_path: str, *, allow_root: bool = False) -> Path:
+        if self._volume_root is not None:
+            curr = self._root
+            v = self._volume_root
+            try:
+                while curr != v and curr != curr.parent:
+                    if curr.is_symlink():
+                        raise UnsafePathError("workspace root contains unsafe symlink")
+                    curr = curr.parent
+            except OSError:
+                pass
         norm = normalize_workspace_path(relative_path, allow_root=allow_root)
         if norm == ".":
             return self._root
-        target = (self._root / norm).resolve()
+        raw_target = self._root / norm
+        curr = raw_target
         try:
-            target.relative_to(self._root)
+            while curr != self._root and curr != curr.parent:
+                if curr.is_symlink():
+                    raise UnsafePathError("symlink target is unsafe")
+                curr = curr.parent
+        except OSError:
+            pass
+        target = raw_target.resolve()
+        try:
+            target.relative_to(self._root.resolve())
         except ValueError as exc:
-            raise UnsafePathError("workspace path escapes root") from exc
+            raise UnsafePathError("workspace path escapes root: unsafe") from exc
         return target
 
     def _entry_for_path(self, target: Path, rel_path: str, *, checksum: bool = False) -> WorkspaceEntry:
@@ -377,11 +429,19 @@ class WorkspaceStorage:
     ) -> WorkspaceListResult:
         if limit < 1 or limit > MAX_STORAGE_LIST_LIMIT:
             raise ValueError(f"limit must be in 1..{MAX_STORAGE_LIST_LIMIT}")
+        norm_path = normalize_workspace_path(path, allow_root=True)
+        if after is not None:
+            if norm_path != "." and not after.startswith(norm_path + "/"):
+                raise ValueError(f"cursor '{after}' does not belong to '{path}'")
+            if norm_path == "." and "/" in after:
+                raise ValueError(f"cursor '{after}' does not belong to '{path}'")
         target = self._resolve(path, allow_root=True)
         if not target.exists():
+            if norm_path == ".":
+                return WorkspaceListResult(entries=(), truncated=False, next_cursor=None)
             raise FileNotFoundError(path)
         if not target.is_dir():
-            raise WorkspaceStorageError(f"{path} is not a directory")
+            raise NotADirectoryError(path)
 
         entries: list[WorkspaceEntry] = []
         for child in sorted(target.iterdir(), key=lambda p: p.name):
@@ -403,8 +463,12 @@ class WorkspaceStorage:
         return WorkspaceListResult(entries=tuple(entries), truncated=truncated, next_cursor=next_cursor)
 
     def stat_path(self, path: str, *, include_checksum: bool | None = None) -> WorkspaceEntry:
-        target = self._resolve(path, allow_root=True)
         norm = normalize_workspace_path(path, allow_root=True)
+        target = self._resolve(path, allow_root=True)
+        if not target.exists():
+            if norm == ".":
+                return WorkspaceEntry(path=".", kind="directory", byte_size=None, modified_at=None)
+            raise FileNotFoundError(path)
         cs_flag = self._include_checksum if include_checksum is None else include_checksum
         return self._entry_for_path(target, norm, checksum=cs_flag)
 
@@ -420,6 +484,7 @@ class WorkspaceStorage:
         *,
         cursor: str | None = None,
         max_chars: int = MAX_STORAGE_READ_CHARS,
+        max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
         if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
             raise ValueError(f"max_chars must be in 1..{MAX_STORAGE_READ_CHARS}")
@@ -431,21 +496,28 @@ class WorkspaceStorage:
 
         data = target.read_bytes()
         byte_size = len(data)
+        limit_bytes = self._max_file_bytes if max_bytes is None else min(self._max_file_bytes, max_bytes)
+        if byte_size > limit_bytes:
+            raise ValueError(f"read bound exceeded: size {byte_size} exceeds {limit_bytes}")
+
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError(f"file is not valid UTF-8: {exc}") from exc
+
         byte_offset = 0
+        norm = normalize_workspace_path(path)
         if cursor is not None:
-            try:
-                byte_offset = int(cursor)
-            except ValueError:
-                byte_offset = 0
+            byte_offset = _decode_cursor(cursor, norm)
         if byte_offset > byte_size:
             byte_offset = byte_size
 
         chunk = data[byte_offset:]
-        text = chunk.decode("utf-8", errors="replace")
+        text = chunk.decode("utf-8")
         if len(text) > max_chars:
             text = text[:max_chars]
             eof = False
-            next_cursor = str(byte_offset + len(text.encode("utf-8")))
+            next_cursor = _encode_cursor(norm, byte_offset + len(text.encode("utf-8")))
         else:
             eof = True
             next_cursor = None
@@ -460,8 +532,30 @@ class WorkspaceStorage:
         max_chars: int = MAX_STORAGE_READ_CHARS,
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
-        del max_bytes
-        return self.read_text(path, cursor=cursor, max_chars=max_chars)
+        return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
+
+    def _write_bytes_with_fsync(self, path: Path, data: bytes) -> None:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            total = 0
+            while total < len(data):
+                try:
+                    written = os.write(fd, data[total:])
+                    total += written
+                except InterruptedError:
+                    continue
+                except OSError as exc:
+                    if exc.errno == errno.EINTR:
+                        continue
+                    raise
+            try:
+                os.fsync(fd)
+            except OSError as exc:
+                warn = {"code": "cleanup_failed", "errno": exc.errno}
+                self._last_warnings.append(warn)
+                self._warnings.append(warn)
+        finally:
+            os.close(fd)
 
     def write_text(
         self,
@@ -471,22 +565,117 @@ class WorkspaceStorage:
         overwrite: bool = True,
         expected_sha256: str | None = None,
     ) -> WorkspaceEntry:
+        self._last_warnings = []
         target = self._resolve(path)
         norm = normalize_workspace_path(path)
         encoded = content.encode("utf-8")
         if len(encoded) > self._max_file_bytes:
             raise WorkspaceStorageError("file content exceeds maximum size")
 
+        previous_bytes: bytes | None = None
         if target.exists():
             if not overwrite:
                 raise FileExistsError(path)
+            previous_bytes = target.read_bytes()
             if expected_sha256 is not None:
-                actual = hashlib.sha256(target.read_bytes()).hexdigest()
+                actual = hashlib.sha256(previous_bytes).hexdigest()
                 if actual != expected_sha256:
                     raise WorkspaceConflictError(f"checksum mismatch: {actual} != {expected_sha256}")
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(encoded)
+
+        if not overwrite and not target.exists():
+            temp_file = target.parent / f".fleet-write-{UUID(bytes=os.urandom(16)).hex}"
+            try:
+                self._write_bytes_with_fsync(temp_file, encoded)
+                try:
+                    os.link(temp_file, target)
+                except OSError as exc:
+                    if exc.errno in (errno.EPERM, errno.ENOSYS, errno.EMLINK, 38, 95):
+                        fd = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        try:
+                            total = 0
+                            while total < len(encoded):
+                                try:
+                                    written = os.write(fd, encoded[total:])
+                                    total += written
+                                except InterruptedError:
+                                    continue
+                                except OSError as write_exc:
+                                    if write_exc.errno == errno.EINTR:
+                                        continue
+                                    raise
+                            try:
+                                os.fsync(fd)
+                            except OSError as fsync_exc:
+                                with contextlib.suppress(OSError):
+                                    os.unlink(str(target))
+                                raise WorkspaceStorageError(f"direct fsync failed: {fsync_exc}") from fsync_exc
+                        finally:
+                            os.close(fd)
+                    elif exc.errno == errno.EEXIST:
+                        raise FileExistsError(path) from exc
+                    else:
+                        raise WorkspaceStorageError(f"link failed: {exc}") from exc
+            finally:
+                if temp_file.exists():
+                    with contextlib.suppress(OSError):
+                        temp_file.unlink()
+            return self._entry_for_path(target, norm)
+
+        temp_file = target.parent / f".fleet-write-{UUID(bytes=os.urandom(16)).hex}"
+        try:
+            temp_fd = os.open(str(temp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                total = 0
+                while total < len(encoded):
+                    try:
+                        written = os.write(temp_fd, encoded[total:])
+                        total += written
+                    except InterruptedError:
+                        continue
+                    except OSError as exc:
+                        if exc.errno == errno.EINTR:
+                            continue
+                        raise
+                try:
+                    os.fsync(temp_fd)
+                except OSError as exc:
+                    raise WorkspaceStorageError(f"staged fsync failed: {exc}") from exc
+            finally:
+                os.close(temp_fd)
+
+            try:
+                os.replace(temp_file, target)
+                try:
+                    parent_fd = os.open(str(target.parent), os.O_RDONLY)
+                    try:
+                        os.fsync(parent_fd)
+                    finally:
+                        os.close(parent_fd)
+                except OSError as exc:
+                    warn = {"code": "cleanup_failed", "errno": exc.errno}
+                    self._last_warnings.append(warn)
+                    self._warnings.append(warn)
+            except OSError as exc:
+                if exc.errno in (errno.EPERM, errno.ENOSYS, 38, 95, errno.EXDEV):
+                    warn = {"code": "non_atomic_overwrite"}
+                    self._last_warnings.append(warn)
+                    self._warnings.append(warn)
+                    try:
+                        self._write_bytes_with_fsync(target, encoded)
+                    except Exception as write_err:
+                        if previous_bytes is not None:
+                            with contextlib.suppress(Exception):
+                                self._write_bytes_with_fsync(target, previous_bytes)
+                        raise WorkspaceStorageError(f"fallback overwrite failed: {write_err}") from write_err
+                else:
+                    raise WorkspaceStorageError(f"replace failed: {exc}") from exc
+        finally:
+            if temp_file.exists():
+                with contextlib.suppress(OSError):
+                    temp_file.unlink()
+
         return self._entry_for_path(target, norm)
 
     def append_text(
@@ -527,15 +716,22 @@ class WorkspaceStorage:
             raise IsADirectoryError(path)
         data = target.read_text(encoding="utf-8")
         if expected_sha256 is not None:
+            is_valid_sha = (
+                isinstance(expected_sha256, str)
+                and len(expected_sha256) == 64
+                and all(c in "0123456789abcdefABCDEF" for c in expected_sha256)
+            )
+            if not is_valid_sha:
+                raise ValueError("checksum precondition must be a 64-character hex string")
             actual = hashlib.sha256(data.encode("utf-8")).hexdigest()
             if actual != expected_sha256:
-                raise WorkspaceConflictError("checksum mismatch")
+                raise WorkspaceConflictError("checksum mismatch", detail="checksum_mismatch")
 
         count = data.count(old)
         if count == 0:
-            raise WorkspaceConflictError(f"target text not found in {path}")
+            raise WorkspaceConflictError(f"target text not found in {path}", detail="missing")
         if count > 1:
-            raise WorkspaceConflictError(f"target text occurs {count} times (must be unique)")
+            raise WorkspaceConflictError(f"target text occurs {count} times (must be unique)", detail="ambiguous")
 
         patched = data.replace(old, new, 1)
         encoded = patched.encode("utf-8")
@@ -548,14 +744,27 @@ class WorkspaceStorage:
         target = self._resolve(path)
         if not target.exists():
             raise FileNotFoundError(path)
-        if expected_sha256 is not None and target.is_file():
-            actual = hashlib.sha256(target.read_bytes()).hexdigest()
-            if actual != expected_sha256:
-                raise WorkspaceConflictError("checksum mismatch on delete")
+        if expected_sha256 is not None:
+            is_valid_sha = (
+                isinstance(expected_sha256, str)
+                and len(expected_sha256) == 64
+                and all(c in "0123456789abcdefABCDEF" for c in expected_sha256)
+            )
+            if not is_valid_sha:
+                raise ValueError("checksum precondition must be a 64-character hex string")
+            if target.is_file():
+                actual = hashlib.sha256(target.read_bytes()).hexdigest()
+                if actual != expected_sha256:
+                    raise WorkspaceConflictError("checksum mismatch on delete", detail="checksum_mismatch")
         if target.is_dir():
             try:
                 target.rmdir()
             except OSError as exc:
+                if exc.errno in (errno.ENOTEMPTY, errno.EEXIST):
+                    raise WorkspaceConflictError(
+                        f"cannot delete non-empty directory: {path}",
+                        detail="not_empty",
+                    ) from exc
                 raise WorkspaceConflictError(f"cannot delete directory: {exc}") from exc
         else:
             target.unlink()
@@ -978,6 +1187,69 @@ class OrphanCleanupReport:
     skipped_fresh: int
 
 
+def _is_uuid(value: str) -> bool:
+    try:
+        validate_path_id(value)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_artifact_candidate(path: str, paths: VolumePaths) -> bool:
+    try:
+        relative = PurePosixPath(path).relative_to(paths.artifacts_root())
+    except ValueError:
+        return False
+    return len(relative.parts) == 2 and relative.parts[1] == "blob" and _is_uuid(relative.parts[0])
+
+
+def _is_committed_artifact(path: str, paths: VolumePaths, keep: Collection[str]) -> bool:
+    return _is_artifact_candidate(path, paths) and path in keep
+
+
+def _is_snapshot_candidate(path: str, paths: VolumePaths) -> bool:
+    try:
+        relative = PurePosixPath(path).relative_to(paths.sessions_root())
+    except ValueError:
+        return False
+    return (
+        len(relative.parts) == 4
+        and relative.parts[1] == "runs"
+        and relative.parts[3] == "result.json"
+        and _is_uuid(relative.parts[0])
+        and _is_uuid(relative.parts[2])
+    )
+
+
+def _is_completed_snapshot(path: str, paths: VolumePaths, keep: Collection[tuple[UUID, UUID]]) -> bool:
+    if not _is_snapshot_candidate(path, paths):
+        return False
+    relative = PurePosixPath(path).relative_to(paths.sessions_root())
+    return (UUID(relative.parts[0]), UUID(relative.parts[2])) in keep
+
+
+def _run_identity(path: str, paths: VolumePaths) -> tuple[UUID, UUID] | None:
+    try:
+        relative = PurePosixPath(path).relative_to(paths.sessions_root())
+    except ValueError:
+        return None
+    if len(relative.parts) < 4 or relative.parts[1] != "runs":
+        return None
+    session_id, run_id = relative.parts[0], relative.parts[2]
+    if not _is_uuid(session_id) or not _is_uuid(run_id):
+        return None
+    return UUID(session_id), UUID(run_id)
+
+
+def _is_active_run_file(path: str, paths: VolumePaths, keep: Collection[tuple[UUID, UUID]]) -> bool:
+    identity = _run_identity(path, paths)
+    return identity is not None and identity in keep
+
+
+def _is_run_scoped_file(path: str, paths: VolumePaths) -> bool:
+    return _run_identity(path, paths) is not None
+
+
 async def cleanup_orphan_bytes(
     storage: AsyncVolumeStorage,
     *,
@@ -989,28 +1261,35 @@ async def cleanup_orphan_bytes(
     grace_period: timedelta = timedelta(hours=1),
     max_files: int = 1024,
 ) -> OrphanCleanupReport:
-    """Sweep old, unreferenced artifact/snapshot bytes in known roots."""
-    del completed_runs, active_runs
+    """Remove only old, unreferenced artifact/run bytes in known roots."""
+    if grace_period < timedelta(0):
+        raise ValueError("grace_period must not be negative")
+    if max_files <= 0:
+        raise ValueError("max_files must be positive")
     cutoff = (now or datetime.now(UTC)).timestamp() - grace_period.total_seconds()
     artifact_files = await storage.list_files(str(paths.artifacts_root()), max_depth=2, max_files=max_files)
     snapshot_files = await storage.list_files(str(paths.sessions_root()), max_depth=6, max_files=max_files)
     scanned = removed = retained = skipped_fresh = 0
-    committed = set(committed_storage_refs)
-
     for item in (*artifact_files, *snapshot_files):
         scanned += 1
         if item.modified_at > cutoff:
             skipped_fresh += 1
             continue
-        if item.path in committed:
+        if (
+            _is_committed_artifact(item.path, paths, committed_storage_refs)
+            or _is_active_run_file(item.path, paths, active_runs)
+            or _is_completed_snapshot(item.path, paths, completed_runs)
+        ):
             retained += 1
             continue
-        try:
-            await storage.remove_bytes(item.path)
-            removed += 1
-        except Exception:
+        if _is_artifact_candidate(item.path, paths) or _is_run_scoped_file(item.path, paths):
+            try:
+                await storage.remove_bytes(item.path)
+                removed += 1
+            except Exception:
+                retained += 1
+        else:
             retained += 1
-
     return OrphanCleanupReport(scanned, removed, retained, skipped_fresh)
 
 
@@ -1062,9 +1341,70 @@ class DaytonaSandboxVolumeFs:
             with contextlib.suppress(Exception):
                 delete(logical_path)
 
-    def list_files(self, *args: Any, **kwargs: Any) -> tuple[Any, ...]:
-        del args, kwargs
-        return ()
+    def list_files(
+        self,
+        logical_root: str,
+        *,
+        max_depth: int = 10,
+        max_files: int = 1000,
+    ) -> tuple[VolumeFile, ...]:
+        if self.fs is None:
+            return ()
+        list_fn = getattr(self.fs, "list_files", None)
+        if not callable(list_fn):
+            return ()
+        try:
+            res = list_fn(logical_root, depth=max_depth)
+        except TypeError:
+            try:
+                res = list_fn(logical_root)
+            except Exception:
+                return ()
+        except Exception:
+            return ()
+        if inspect.isawaitable(res):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                return ()
+            res = asyncio.run(res)
+        return _convert_to_volume_files(res, max_files=max_files)
+
+
+def _convert_to_volume_files(raw_entries: Any, *, max_files: int | None = None) -> tuple[VolumeFile, ...]:
+    results: list[VolumeFile] = []
+    for entry in raw_entries or []:
+        if max_files is not None and len(results) >= max_files:
+            break
+        if isinstance(entry, VolumeFile):
+            results.append(entry)
+            continue
+        if isinstance(entry, str):
+            results.append(VolumeFile(path=entry, modified_at=0.0))
+            continue
+        p = getattr(entry, "path", None)
+        if p is None and isinstance(entry, dict):
+            p = entry.get("path")
+        if p is None:
+            p = str(entry)
+        is_dir = getattr(entry, "is_dir", False)
+        if isinstance(entry, dict):
+            is_dir = entry.get("is_dir", False)
+        if is_dir:
+            continue
+        mod_time = getattr(entry, "mod_time", None)
+        if mod_time is None:
+            mod_time = getattr(entry, "modified_at", 0.0)
+        if isinstance(entry, dict) and "mod_time" in entry:
+            mod_time = entry["mod_time"]
+        try:
+            mod_float = float(mod_time)
+        except (TypeError, ValueError):
+            mod_float = 0.0
+        results.append(VolumeFile(path=str(p), modified_at=mod_float))
+    return tuple(results)
 
 
 class AsyncDaytonaVolumeFS:
@@ -1075,9 +1415,30 @@ class AsyncDaytonaVolumeFS:
         self.sandbox = sandbox
         self.fs = getattr(sandbox, "fs", None)
 
-    async def list_files(self, *args: Any, **kwargs: Any) -> tuple[Any, ...]:
-        del args, kwargs
-        return ()
+    async def list_files(
+        self,
+        logical_root: str,
+        *,
+        max_depth: int = 10,
+        max_files: int = 1000,
+    ) -> tuple[VolumeFile, ...]:
+        if self.fs is None:
+            return ()
+        list_fn = getattr(self.fs, "list_files", None)
+        if not callable(list_fn):
+            return ()
+        try:
+            res = list_fn(logical_root, depth=max_depth)
+        except TypeError:
+            try:
+                res = list_fn(logical_root)
+            except Exception:
+                return ()
+        except Exception:
+            return ()
+        if inspect.isawaitable(res):
+            res = await res
+        return _convert_to_volume_files(res, max_files=max_files)
 
     async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
         del use_cache

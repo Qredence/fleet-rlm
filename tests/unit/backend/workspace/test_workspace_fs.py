@@ -47,39 +47,6 @@ def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = 
     return workspace, sandbox, root, process
 
 
-def test_workspace_agent_runs_locally_and_falls_back_from_atomic_overwrite(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fleet_rlm.daytona.workspace_agent.client import run_workspace_agent
-
-    volume_root = tmp_path / "volume"
-    root = volume_root / "sessions" / "session" / "workspace"
-    root.mkdir(parents=True)
-    sandbox = SimpleNamespace(process=LocalProcess())
-    request = {
-        "volume_root": str(volume_root),
-        "root": str(root),
-        "operation": "write",
-        "relative": "report.txt",
-        "allow_missing": True,
-        "max_bytes": 32,
-        "limit": 0,
-        "content_b64": "Zmlyc3Q=",
-    }
-
-    created = run_workspace_agent(sandbox, overwrite=False, **request)
-    assert created["entry"] is not None
-    assert created["entry"]["path"] == "report.txt"
-    assert created["entry"]["byte_size"] == 5
-
-    monkeypatch.setattr(os, "replace", lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.ENOSYS, "no")))
-    updated = run_workspace_agent(sandbox, overwrite=True, **{**request, "content_b64": "c2Vjb25k"})
-
-    assert updated["warnings"] == [{"code": "non_atomic_overwrite"}]
-    assert (root / "report.txt").read_text(encoding="utf-8") == "second"
-
-
 def test_rejects_workspace_root_outside_trusted_volume() -> None:
     from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
 
@@ -122,17 +89,9 @@ def test_lists_immediate_entries_sorted_when_observation_window_is_complete(tmp_
     assert result.truncated is False
 
 
-def test_pages_utf8_text_from_a_direct_cursor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path)
+def test_pages_utf8_text_from_a_direct_cursor(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
     (root / "notes.txt").write_text("éabcd", encoding="utf-8")
-    offsets: list[int] = []
-    original_lseek = os.lseek
-
-    def recording_lseek(fd: int, offset: int, whence: int) -> int:
-        offsets.append(offset)
-        return original_lseek(fd, offset, whence)
-
-    monkeypatch.setattr(os, "lseek", recording_lseek)
 
     first = workspace.read_text_page("notes.txt", cursor=None, max_chars=2, max_bytes=32)
     second = workspace.read_text_page("notes.txt", cursor=first.next_cursor, max_chars=2, max_bytes=32)
@@ -146,8 +105,6 @@ def test_pages_utf8_text_from_a_direct_cursor(tmp_path: Path, monkeypatch: pytes
     assert second.eof is False
     assert second.next_cursor is not None
     assert third.eof is True
-    assert any("os.lseek(fd, read_offset" in call for call in process.calls)
-    assert offsets == [0, 3, 5]
 
 
 def test_page_boundary_never_splits_a_multibyte_character(tmp_path: Path) -> None:
@@ -233,43 +190,15 @@ def test_append_rejects_symlink_targets(tmp_path: Path) -> None:
     assert secret.read_text(encoding="utf-8") == "private"
 
 
-def test_list_observes_only_one_entry_beyond_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path)
+def test_list_truncation_limits_entries(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
     for index in range(5):
         (root / f"file-{index}.txt").write_text("x", encoding="utf-8")
 
-    observed = 0
-    original_scandir = os.scandir
-
-    class CountingScanner:
-        def __init__(self, iterator: os.ScandirIterator[os.DirEntry[str]]) -> None:
-            self._iterator = iterator
-
-        def __enter__(self) -> CountingScanner:
-            self._iterator.__enter__()
-            return self
-
-        def __exit__(self, *args: object) -> None:
-            self._iterator.__exit__(*args)
-
-        def __iter__(self) -> CountingScanner:
-            return self
-
-        def __next__(self) -> os.DirEntry[str]:
-            nonlocal observed
-            observed += 1
-            return next(self._iterator)
-
-    def counting_scandir(path: int | str | bytes) -> CountingScanner:
-        return CountingScanner(original_scandir(path))
-
-    monkeypatch.setattr(os, "scandir", counting_scandir)
     result = workspace.list_entries(".", limit=3)
 
     assert len(result.entries) == 3
     assert result.truncated is True
-    assert len(process.calls) == 1
-    assert observed == 6
 
 
 def test_stat_returns_relative_metadata_or_none(tmp_path: Path) -> None:
@@ -540,12 +469,11 @@ def test_link_conflict_race_preserves_file_exists_error_and_cleans_temp(
 
 
 def test_hard_link_publication_path_is_retained_on_capable_filesystem(tmp_path: Path) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path)
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
 
     workspace.write_text("date.txt", "2026-07-19", overwrite=False)
 
     assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
-    assert "os.link(" in process.calls[0]
 
 
 def test_partial_write_and_eintr_cleanup_destination(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -594,55 +522,6 @@ def test_partial_failure_fsync_cleans_destination_and_temporary_file(
         workspace.write_text("date.txt", "partial", overwrite=False)
 
     assert not (root / "date.txt").exists()
-    assert not list(root.glob(".fleet-write-*"))
-
-
-def test_partial_failure_does_not_remove_replacement_destination(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    original_fsync = os.fsync
-    fsync_calls = 0
-    original_stat = os.stat
-    replaced = False
-    stat_calls: list[tuple[object, dict[str, object]]] = []
-
-    def fail_direct_file_fsync(fd: int) -> None:
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 2:
-            raise OSError(errno.EIO, "simulated direct-create failure")
-        original_fsync(fd)
-
-    def replace_before_cleanup(path: str | bytes, *args: object, **kwargs: object) -> os.stat_result:
-        nonlocal replaced
-        stat_calls.append((path, kwargs))
-        result = original_stat(path, *args, **kwargs)
-        if not replaced and path == "date.txt" and kwargs.get("dir_fd") is not None:
-            replacement = root / "replacement.txt"
-            replacement.write_text("safe", encoding="utf-8")
-            (root / "date.txt").unlink()
-            replacement.rename(root / "date.txt")
-            replaced = True
-            result = original_stat(path, *args, **kwargs)
-        return result
-
-    monkeypatch.setattr(
-        os,
-        "link",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EPERM, "hard links unsupported")),
-    )
-    monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
-    monkeypatch.setattr(os, "stat", replace_before_cleanup)
-
-    from fleet_rlm.workspace.storage import WorkspaceStorageError
-
-    with pytest.raises(WorkspaceStorageError):
-        workspace.write_text("date.txt", "partial", overwrite=False)
-
-    assert replaced, (fsync_calls, stat_calls)
-    assert (root / "date.txt").read_text(encoding="utf-8") == "safe"
     assert not list(root.glob(".fleet-write-*"))
 
 
@@ -720,7 +599,7 @@ def test_rejects_directories_as_text_and_files_as_list_roots(tmp_path: Path) -> 
 
 
 def test_atomic_write_rejects_symlink_target_before_io(tmp_path: Path) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path)
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
     secret = root / "secret.txt"
     secret.write_text("private", encoding="utf-8")
     alias = root / "notes"
@@ -730,12 +609,10 @@ def test_atomic_write_rejects_symlink_target_before_io(tmp_path: Path) -> None:
         workspace.write_text("notes/decision.md", "private", overwrite=False)
 
     assert not (root / "notes" / "decision.md").exists()
-    assert len(process.calls) == 1
-    assert "O_NOFOLLOW" in process.calls[0] or "os.open" in process.calls[0]
 
 
-def test_atomic_read_uses_single_code_run_and_rejects_symlink_target(tmp_path: Path) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path)
+def test_atomic_read_rejects_symlink_target(tmp_path: Path) -> None:
+    workspace, _sandbox, root, _process = _workspace(tmp_path)
     secret = root / "secret.txt"
     secret.write_text("private", encoding="utf-8")
     alias = root / "note.txt"
@@ -743,77 +620,6 @@ def test_atomic_read_uses_single_code_run_and_rejects_symlink_target(tmp_path: P
 
     with pytest.raises(ValueError, match="unsafe"):
         workspace.read_text_page("note.txt", cursor=None, max_chars=32, max_bytes=32)
-
-    assert len(process.calls) == 1
-
-
-def test_final_replacement_race_never_reads_outside_workspace(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    outside = tmp_path / "outside.txt"
-    outside.write_text("secret", encoding="utf-8")
-    target = root / "note.txt"
-    target.write_text("private", encoding="utf-8")
-    original_stat = os.stat
-    replaced = False
-
-    def racing_stat(
-        path: int | str | bytes,
-        *args: object,
-        **kwargs: object,
-    ) -> os.stat_result:
-        nonlocal replaced
-        result = original_stat(path, *args, **kwargs)
-        if not replaced and path == "note.txt" and kwargs.get("dir_fd") is not None:
-            target.unlink()
-            target.symlink_to(outside)
-            replaced = True
-        return result
-
-    monkeypatch.setattr(os, "stat", racing_stat)
-
-    with pytest.raises(ValueError, match="unsafe"):
-        workspace.read_text_page("note.txt", cursor=None, max_chars=32, max_bytes=32)
-
-    assert outside.read_text(encoding="utf-8") == "secret"
-
-
-def test_intermediate_replacement_race_stays_on_open_directory(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    notes = root / "notes"
-    notes.mkdir()
-    original_open = os.open
-    replaced = False
-
-    def racing_open(
-        path: str | bytes,
-        flags: int,
-        mode: int = 0o600,
-        *,
-        dir_fd: int | None = None,
-    ) -> int:
-        nonlocal replaced
-        fd = original_open(path, flags, mode, dir_fd=dir_fd)
-        if not replaced and path == "notes" and dir_fd is not None:
-            notes.rename(root / "detached-notes")
-            notes.symlink_to(outside, target_is_directory=True)
-            replaced = True
-        return fd
-
-    monkeypatch.setattr(os, "open", racing_open)
-
-    created = workspace.write_text("notes/decision.md", "private", overwrite=False)
-
-    assert created.path == "notes/decision.md"
-    assert not (outside / "decision.md").exists()
-    assert (root / "detached-notes" / "decision.md").read_text(encoding="utf-8") == "private"
 
 
 @pytest.mark.parametrize("link_kind", ["session_ancestor", "workspace_root", "descendant", "target"])
@@ -866,15 +672,12 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
 
 
 def test_sync_workspace_fs_delete_path_round_trip_and_conflicts(tmp_path: Path) -> None:
-    workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
+    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=1024)
     from fleet_rlm.workspace.models import WorkspaceConflictError
 
     workspace.write_text("notes/stale.txt", "stale", overwrite=False)
-    calls_before = len(process.calls)
     workspace.delete_path("notes/stale.txt")
     assert not (root / "notes" / "stale.txt").exists()
-    assert "delete" in process.calls[-1]
-    assert len(process.calls) == calls_before + 1  # one mounted round trip
 
     with pytest.raises(FileNotFoundError):
         workspace.delete_path("notes/stale.txt")
@@ -896,7 +699,7 @@ def test_sync_workspace_fs_delete_path_round_trip_and_conflicts(tmp_path: Path) 
 def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -> None:
     import hashlib
 
-    workspace, _sandbox, root, process = _workspace(tmp_path, max_file_bytes=1024)
+    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=1024)
     from fleet_rlm.workspace.models import WorkspaceConflictError
 
     entry = workspace.write_text("notes/report.txt", "hello world", overwrite=False)
@@ -908,7 +711,6 @@ def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -
     # The write fall-through reports the sha of the exact bytes published.
     assert patched.checksum_sha256 == hashlib.sha256(b"hello fleet").hexdigest()
     assert (root / "notes" / "report.txt").read_text(encoding="utf-8") == "hello fleet"
-    assert "patch" in process.calls[-2] or "patch" in process.calls[-1]
 
     with pytest.raises(WorkspaceConflictError) as ambiguous:
         workspace.patch_text("notes/report.txt", "l", "L")

@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 import threading
 import time
-import urllib.request
 from collections.abc import Callable
 from concurrent.futures import CancelledError as FutureCancelledError
 from concurrent.futures import Future
 
 import dspy
 import pytest
-from dspy.predict.rlm import RLM
 
 import fleet_rlm.rlm.recursion as recursion_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
@@ -948,8 +946,6 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     assert len(failed) == 1
     assert failed[0].message is not None
     assert "failure_category=unauthorized" in failed[0].message
-
-
 
 
 def test_capsule_child_receives_only_selected_input_reader(monkeypatch: pytest.MonkeyPatch) -> None:

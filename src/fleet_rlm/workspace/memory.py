@@ -6,6 +6,7 @@ commit-gated candidate proposals, and tool events.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import math
@@ -18,7 +19,7 @@ from enum import StrEnum
 from threading import Lock
 from types import MappingProxyType
 from typing import Any, Protocol, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import dspy
 
@@ -28,8 +29,12 @@ from fleet_rlm.workspace.models import (
     OUTCOME_DEADLINE_EXCEEDED,
     OUTCOME_DUPLICATE,
     OUTCOME_INTERRUPTED,
+    OUTCOME_MEMORY_ID_COLLISION,
+    OUTCOME_POLICY_DENIED,
     OUTCOME_PROMOTED,
     OUTCOME_PROMOTION_FAILED,
+    OUTCOME_STORE_UNAVAILABLE,
+    OUTCOME_SUPERSEDES_NOT_ACTIVE,
     TERMINAL_OUTCOMES,
     WORKSPACE_MEMORY_BYTE_BUDGET,
     WORKSPACE_MEMORY_CANDIDATE_ENVELOPE_RESERVE_BYTES,
@@ -73,10 +78,10 @@ from fleet_rlm.workspace.models import (
 logger = logging.getLogger(__name__)
 
 WORKSPACE_MEMORY_NAMESPACE = "workspace_memory"
-SEARCH_MEMORIES_MAX_LIMIT = 50
-_SEARCH_QUERY_MAX_BYTES = 512
-_SEARCH_PAGE_LIMIT = 50
-_LIST_MEMORIES_DEFAULT_LIMIT = 10
+SEARCH_MEMORIES_MAX_LIMIT = 32
+_SEARCH_QUERY_MAX_BYTES = 256
+_SEARCH_PAGE_LIMIT = WORKSPACE_MEMORY_MAX_LIST_LIMIT
+_LIST_MEMORIES_DEFAULT_LIMIT = 50
 _MEMORY_PATH = "memory/MEMORIES.md"
 _LEGACY_MEMORY_PATH = "MEMORIES.md"
 _HEADER_BYTES = WORKSPACE_MEMORY_HEADER.encode("utf-8")
@@ -102,7 +107,7 @@ def _invalid_id() -> MemoryToolError:
 
 
 def _not_found() -> MemoryToolError:
-    return MemoryToolError("not_found", "Workspace Memory entry not found")
+    return MemoryToolError("not_found", "Workspace Memory entry was not found")
 
 
 def _unavailable() -> MemoryToolError:
@@ -111,6 +116,22 @@ def _unavailable() -> MemoryToolError:
 
 def _full() -> MemoryToolError:
     return MemoryToolError("full", "Workspace Memory is full")
+
+
+def _event_category(value: object) -> str:
+    """Project a category without ever reflecting an invalid caller string."""
+    try:
+        return normalize_workspace_memory_category(value)
+    except WorkspaceMemoryCategoryError:
+        return "invalid"
+
+
+def _event_id(value: object) -> str:
+    """Project a memory id without ever reflecting an invalid caller string."""
+    try:
+        return normalize_workspace_memory_id(value)
+    except WorkspaceMemoryIdError:
+        return "invalid"
 
 
 class MemoryCandidateToolError(RuntimeError):
@@ -273,15 +294,13 @@ def search_workspace_memory_entries(
 
 
 def normalize_memory_candidate_categories(categories: Sequence[str]) -> tuple[str, ...]:
-    out: list[str] = []
-    for c in categories:
-        try:
-            norm = normalize_workspace_memory_category(c)
-            if norm not in out:
-                out.append(norm)
-        except WorkspaceMemoryCategoryError:
-            continue
-    return tuple(out)
+    """Normalize and deduplicate an operator's autonomous category allowlist."""
+    if type(categories) not in (list, tuple):
+        raise WorkspaceMemoryCategoryError
+    if len(categories) > WORKSPACE_MEMORY_CANDIDATE_MAX_CATEGORIES:
+        raise WorkspaceMemoryCategoryError
+    normalized = tuple(normalize_workspace_memory_category(category) for category in categories)
+    return tuple(dict.fromkeys(normalized))
 
 
 class WorkspaceMemory:
@@ -436,10 +455,10 @@ class WorkspaceMemory:
         lines: list[str] = []
         for e in active:
             if getattr(e, "source", None) and e.source != "legacy_unknown":
-                lines.append(f"- ({e.category}) <!-- source:{e.source} --> {e.learning}")
+                lines.append(f"- ({e.category}) <!-- source:{e.source} -->: {e.learning}\n")
             else:
-                lines.append(f"- ({e.category}) {e.learning}")
-        return "\n".join(lines)
+                lines.append(f"- ({e.category}): {e.learning}\n")
+        return "".join(lines)
 
 
 def build_workspace_memory(storage: object, **kwargs: Any) -> WorkspaceMemory:
@@ -461,10 +480,10 @@ def read_workspace_memory_injection_digest(store: Any, *, request: str = "") -> 
         lines: list[str] = []
         for e in active:
             if getattr(e, "source", None) and e.source != "legacy_unknown":
-                lines.append(f"- ({e.category}) <!-- source:{e.source} --> {e.learning}")
+                lines.append(f"- ({e.category}) <!-- source:{e.source} -->: {e.learning}\n")
             else:
-                lines.append(f"- ({e.category}) {e.learning}")
-        return "\n".join(lines)
+                lines.append(f"- ({e.category}): {e.learning}\n")
+        return "".join(lines)
     return ""
 
 
@@ -789,37 +808,153 @@ def _active_memory_entries(store: Any) -> tuple[WorkspaceMemoryEntry, ...]:
     raise RuntimeError("active Workspace Memory enumeration exceeded its safety bound")
 
 
+class MemoryPromotionOutbox(Protocol):
+    async def claim_due(self, *, now: datetime, claim_owner: str, limit: int = 100) -> tuple[Any, ...]: ...
+
+    async def complete(
+        self,
+        intent_ids: tuple[UUID, ...],
+        *,
+        completion_reason: str,
+        promoted_memory_id: str | None = None,
+        now: datetime | None = None,
+    ) -> int: ...
+
+    async def requeue(self, intent_id: UUID, *, reason: str, now: datetime, attempts: int) -> str: ...
+
+
 class MemoryOutboxReconciler:
+    """Deliver pinned intents through an injected ``open_memory`` callback.
+
+    ``open_memory(workspace_id)`` returns an async context manager yielding a
+    provider-neutral ``WorkspaceMemoryStore``.  The reconciler performs no
+    Sandbox/gateway construction and preserves claim order, workspace grouping,
+    terminal conflict outcomes, bounded retries, and provider fail-softness.
+    """
+
     def __init__(
         self,
-        outbox: Any,
-        storage_gateway: Any = None,
+        outbox: MemoryPromotionOutbox,
         *,
-        open_memory: Any = None,
-        allowed_categories: Any = None,
-        **kwargs: Any,
+        open_memory: Callable[[UUID], Any],
+        allowed_categories: Callable[[], Sequence[str]],
+        batch_size: int = 100,
     ) -> None:
         self._outbox = outbox
-        self._storage_gateway = storage_gateway
         self._open_memory = open_memory
         self._allowed_categories = allowed_categories
-        del kwargs
+        self.batch_size = batch_size
 
-    async def reconcile_once(self, batch_size: int = 64) -> MemoryOutboxReconcileReceipt:
-        return await self.reconcile_workspace_memories(batch_size=batch_size)
-
-    async def reconcile_workspace_memories(self, batch_size: int = 64) -> MemoryOutboxReconcileReceipt:
-        claimed = await self._outbox.claim_intents(limit=batch_size)
+    async def reconcile_once(
+        self,
+        *,
+        now: datetime | None = None,
+        claim_owner: str | None = None,
+    ) -> MemoryOutboxReconcileReceipt:
+        stamp = now or datetime.now(UTC)
+        owner = claim_owner or f"memory-reconcile:{uuid4()}"
+        claimed = await self._outbox.claim_due(now=stamp, claim_owner=owner, limit=self.batch_size)
         if not claimed:
             return MemoryOutboxReconcileReceipt()
-        promoted = 0
+        by_workspace: dict[UUID, list[Any]] = {}
         for intent in claimed:
+            by_workspace.setdefault(intent.workspace_id, []).append(intent)
+        promoted = dropped = retried = dead_lettered = 0
+        provider_unavailable = False
+        allowed = set(self._allowed_categories())
+        for workspace_id, intents in by_workspace.items():
+            policy_done = tuple(intent.intent_id for intent in intents if intent.category not in allowed)
+            if policy_done:
+                await self._outbox.complete(policy_done, completion_reason=OUTCOME_POLICY_DENIED)
+                dropped += len(policy_done)
+            deliver = [intent for intent in intents if intent.category in allowed]
+            if not deliver:
+                continue
             try:
-                await self._outbox.complete((intent.intent_id,), completion_reason=OUTCOME_PROMOTED)
+                context = self._open_memory(workspace_id)
+                async with context as store:
+                    p, d, r, f = await self._deliver_batch(store, deliver, stamp)
+                    promoted += p
+                    dropped += d
+                    retried += r
+                    dead_lettered += f
+            except Exception as exc:
+                provider_unavailable = True
+                for intent in deliver:
+                    outcome = await self._outbox.requeue(
+                        intent.intent_id,
+                        reason=OUTCOME_STORE_UNAVAILABLE,
+                        now=stamp,
+                        attempts=intent.attempts,
+                    )
+                    if outcome == "failed":
+                        dead_lettered += 1
+                    else:
+                        retried += 1
+                logger.warning(
+                    "Memory outbox reconcile deferred for one workspace (%s)",
+                    type(exc).__name__,
+                    exc_info=exc,
+                )
+        return MemoryOutboxReconcileReceipt(
+            claimed=len(claimed),
+            promoted=promoted,
+            dropped=dropped,
+            retried=retried,
+            dead_lettered=dead_lettered,
+            workspaces=len(by_workspace),
+            provider_unavailable=provider_unavailable,
+        )
+
+    async def _deliver_batch(
+        self,
+        store: WorkspaceMemoryStore,
+        intents: list[Any],
+        now: datetime,
+    ) -> tuple[int, int, int, int]:
+        promoted = dropped = retried = dead_lettered = 0
+        for intent in intents:
+            try:
+                await asyncio.to_thread(store.append_record, intent.record_text)
+            except WorkspaceMemoryConflictError as exc:
+                reason = (
+                    OUTCOME_SUPERSEDES_NOT_ACTIVE
+                    if getattr(exc, "detail", None) == OUTCOME_SUPERSEDES_NOT_ACTIVE
+                    else OUTCOME_MEMORY_ID_COLLISION
+                )
+                await self._outbox.complete((intent.intent_id,), completion_reason=reason)
+                dropped += 1
+            except (WorkspaceMemoryStoreFullError, WorkspaceMemoryStoreUnavailableError):
+                outcome = await self._outbox.requeue(
+                    intent.intent_id,
+                    reason=OUTCOME_STORE_UNAVAILABLE,
+                    now=now,
+                    attempts=intent.attempts,
+                )
+                if outcome == "failed":
+                    dead_lettered += 1
+                else:
+                    retried += 1
+            except Exception as exc:
+                outcome = await self._outbox.requeue(
+                    intent.intent_id,
+                    reason=OUTCOME_PROMOTION_FAILED,
+                    now=now,
+                    attempts=intent.attempts,
+                )
+                if outcome == "failed":
+                    dead_lettered += 1
+                else:
+                    retried += 1
+                logger.warning("Memory outbox intent delivery failed (%s)", type(exc).__name__, exc_info=exc)
+            else:
+                await self._outbox.complete(
+                    (intent.intent_id,),
+                    completion_reason=OUTCOME_PROMOTED,
+                    promoted_memory_id=intent.memory_id,
+                )
                 promoted += 1
-            except Exception:
-                pass
-        return MemoryOutboxReconcileReceipt(claimed=len(claimed), promoted=promoted)
+        return promoted, dropped, retried, dead_lettered
 
 
 class WorkspaceMemoryToolHost:
@@ -872,12 +1007,21 @@ class WorkspaceMemoryToolHost:
             category: str | None = None,
         ) -> dict[str, object]:
             """List Workspace Memory entries chronologically with bounded pages."""
-            norm_after = normalize_workspace_memory_id(after) if after else None
+            normalized_after = self._normalize_id(after) if after else None
             if type(limit) is not int or not 1 <= limit <= WORKSPACE_MEMORY_MAX_LIST_LIMIT:
                 raise _invalid_entry()
-            norm_cat = normalize_workspace_memory_category(category) if category else None
+            normalized_category: str | None
+            if category is None:
+                normalized_category = None
+            else:
+                try:
+                    normalized_category = normalize_workspace_memory_category(category)
+                except WorkspaceMemoryCategoryError as exc:
+                    raise _invalid_category() from exc
             try:
-                res = self._store.list_entries(after=norm_after, limit=limit, category=norm_cat)
+                res = self._store.list_entries(after=normalized_after, limit=limit, category=normalized_category)
+            except WorkspaceMemoryEntryNotFoundError as exc:
+                raise _not_found() from exc
             except Exception as exc:
                 raise _unavailable() from exc
             return {
@@ -899,10 +1043,17 @@ class WorkspaceMemoryToolHost:
             norm_q = normalize_memory_search_query(query)
             if type(limit) is not int or not 1 <= limit <= SEARCH_MEMORIES_MAX_LIMIT:
                 raise _invalid_entry()
-            norm_cat = normalize_workspace_memory_category(category) if category else None
+            normalized_category: str | None
+            if category is None:
+                normalized_category = None
+            else:
+                try:
+                    normalized_category = normalize_workspace_memory_category(category)
+                except WorkspaceMemoryCategoryError as exc:
+                    raise _invalid_category() from exc
             try:
                 scored, warnings = search_workspace_memory_entries(
-                    self._store, normalized_query=norm_q, category=norm_cat
+                    self._store, normalized_query=norm_q, category=normalized_category
                 )
             except Exception as exc:
                 raise _unavailable() from exc
@@ -911,7 +1062,7 @@ class WorkspaceMemoryToolHost:
                 "ok": True,
                 "namespace": WORKSPACE_MEMORY_NAMESPACE,
                 "query": " ".join(query.split()),
-                "category": norm_cat,
+                "category": normalized_category,
                 "entries": [
                     {**_entry_payload(item.entry), "score": item.score, "rank": idx + 1}
                     for idx, item in enumerate(selected)
@@ -927,18 +1078,26 @@ class WorkspaceMemoryToolHost:
             category: str | None = None,
         ) -> dict[str, object]:
             """Replace one Workspace Memory entry's learning, preserving id and timestamp."""
-            norm_id = normalize_workspace_memory_id(memory_id)
+            normalized_id = self._normalize_id(memory_id)
+            norm_cat: str | None = None
+            if category is not None:
+                try:
+                    norm_cat = normalize_workspace_memory_category(category)
+                except WorkspaceMemoryCategoryError as exc:
+                    raise _invalid_category() from exc
             try:
-                record = self._store.edit_entry(norm_id, key_learning, category=category)
+                record = self._store.edit_entry(normalized_id, key_learning, category=norm_cat)
             except WorkspaceMemoryEntryNotFoundError as exc:
                 raise _not_found() from exc
+            except (WorkspaceMemoryRecordError, UnicodeError, ValueError, OverflowError) as exc:
+                raise _invalid_entry() from exc
             except Exception as exc:
                 raise _unavailable() from exc
             entry = parse_workspace_memory_lines(record)[0].entry
             return {
                 "ok": True,
                 "namespace": WORKSPACE_MEMORY_NAMESPACE,
-                "memory_id": norm_id,
+                "memory_id": normalized_id,
                 "category": entry.category if entry else category,
                 "source": entry.source if entry else "legacy_unknown",
                 "record_version": entry.record_version if entry else 3,
@@ -948,14 +1107,14 @@ class WorkspaceMemoryToolHost:
 
         def forget(memory_id: str) -> dict[str, object]:
             """Remove exactly one Workspace Memory entry by id."""
-            norm_id = normalize_workspace_memory_id(memory_id)
+            normalized_id = self._normalize_id(memory_id)
             try:
-                removed = self._store.delete_entry(norm_id)
+                removed = self._store.delete_entry(normalized_id)
             except Exception as exc:
                 raise _unavailable() from exc
             if not removed:
                 raise _not_found()
-            return {"ok": True, "namespace": WORKSPACE_MEMORY_NAMESPACE, "memory_id": norm_id, "removed": True}
+            return {"ok": True, "namespace": WORKSPACE_MEMORY_NAMESPACE, "memory_id": normalized_id, "removed": True}
 
         return (
             dspy.Tool(
@@ -1039,20 +1198,40 @@ class WorkspaceMemoryToolHost:
         )
 
     def _remember(self, key_learning: str, category: str) -> dict[str, object]:
+        record, normalized_category = self._record(key_learning, category)
+        entry = parse_workspace_memory_lines(record)[0].entry
         try:
-            record, norm_cat = format_workspace_memory_record(key_learning, category, timestamp=self._clock())
-            entry = parse_workspace_memory_lines(record)[0].entry
-            res = self._store.append_record(record)
-            return {
-                "ok": True,
-                "namespace": WORKSPACE_MEMORY_NAMESPACE,
-                "memory_id": entry.memory_id if entry else None,
-                "category": norm_cat,
-                "entry_bytes": res.entry_bytes,
-                "total_bytes": res.total_bytes,
-            }
+            result = self._store.append_record(record)
+        except WorkspaceMemoryStoreFullError as exc:
+            raise _full() from exc
         except Exception as exc:
             raise _unavailable() from exc
+        return {
+            "ok": True,
+            "namespace": WORKSPACE_MEMORY_NAMESPACE,
+            "memory_id": entry.memory_id if entry is not None else None,
+            "category": normalized_category,
+            "entry_bytes": result.entry_bytes,
+            "total_bytes": result.total_bytes,
+        }
+
+    def _normalize_id(self, memory_id: str) -> str:
+        try:
+            return normalize_workspace_memory_id(memory_id)
+        except WorkspaceMemoryIdError as exc:
+            raise _invalid_id() from exc
+
+    def _record(self, key_learning: str, category: str) -> tuple[str, str]:
+        try:
+            return format_workspace_memory_record(
+                key_learning,
+                category,
+                timestamp=self._clock(),
+            )
+        except WorkspaceMemoryCategoryError as exc:
+            raise _invalid_category() from exc
+        except (WorkspaceMemoryRecordError, UnicodeError, ValueError, OverflowError) as exc:
+            raise _invalid_entry() from exc
 
     def event_views(self) -> Mapping[str, ToolEventView]:
         def read_output(result: object) -> JsonValue:
@@ -1070,40 +1249,68 @@ class WorkspaceMemoryToolHost:
             )
 
         def remember_input(arguments: Mapping[str, Any]) -> JsonValue:
-            lrn = arguments.get("key_learning")
+            learning = arguments.get("key_learning")
+            category = _event_category(arguments.get("category", "General"))
             return {
-                "category": str(arguments.get("category", "General")),
-                "key_learning_bytes": len(str(lrn or "").encode("utf-8")),
+                "category": category,
+                "key_learning_bytes": len(learning.encode("utf-8")) if isinstance(learning, str) else 0,
             }
 
         def remember_output(result: object) -> JsonValue:
             return _output(result, ("ok", "namespace", "memory_id", "category", "entry_bytes", "total_bytes"))
 
         def list_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {
-                "after": arguments.get("after"),
-                "limit": arguments.get("limit"),
-                "category": arguments.get("category"),
-            }
+            projected: dict[str, JsonValue] = {}
+            if arguments.get("after") is not None:
+                projected["after"] = _event_id(arguments.get("after"))
+            limit = arguments.get("limit")
+            projected["limit"] = limit if type(limit) is int else None
+            if arguments.get("category") is not None:
+                projected["category"] = _event_category(arguments.get("category"))
+            return projected
 
         def list_output(result: object) -> JsonValue:
             return _output(
-                result, ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records")
+                result,
+                ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records"),
             )
 
         def search_input(arguments: Mapping[str, Any]) -> JsonValue:
-            q = str(arguments.get("query") or "")
-            return {
-                "query_bytes": len(q.encode("utf-8")),
-                "limit": arguments.get("limit"),
-                "category": arguments.get("category"),
+            query = arguments.get("query")
+            projected: dict[str, JsonValue] = {
+                "query_bytes": len(query.encode("utf-8")) if isinstance(query, str) else 0,
+                "limit": arguments.get("limit") if type(arguments.get("limit")) is int else None,
             }
+            if arguments.get("category") is not None:
+                projected["category"] = _event_category(arguments.get("category"))
+            return projected
 
         def search_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "count", "truncated", "skipped_malformed_records"))
+            if not isinstance(result, Mapping):
+                return {}
+            entries = result.get("entries")
+            top_ids: list[str] = []
+            if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray)):
+                for item in list(entries)[:8]:
+                    if isinstance(item, Mapping):
+                        raw_id = item.get("id")
+                        if isinstance(raw_id, str):
+                            top_ids.append(raw_id)
+            projected = cast(
+                Mapping[str, JsonValue],
+                _output(result, ("ok", "namespace", "count", "truncated", "skipped_malformed_records")),
+            )
+            return {**dict(projected), "top_memory_ids": tuple(top_ids)}
 
         def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"memory_id": arguments.get("memory_id"), "category": arguments.get("category")}
+            learning = arguments.get("key_learning")
+            projected: dict[str, JsonValue] = {
+                "memory_id": _event_id(arguments.get("memory_id")),
+                "key_learning_bytes": len(learning.encode("utf-8")) if isinstance(learning, str) else 0,
+            }
+            if arguments.get("category") is not None:
+                projected["category"] = _event_category(arguments.get("category"))
+            return projected
 
         def edit_output(result: object) -> JsonValue:
             return _output(
@@ -1112,7 +1319,7 @@ class WorkspaceMemoryToolHost:
             )
 
         def forget_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"memory_id": arguments.get("memory_id")}
+            return {"memory_id": _event_id(arguments.get("memory_id"))}
 
         def forget_output(result: object) -> JsonValue:
             return _output(result, ("ok", "namespace", "memory_id", "removed"))

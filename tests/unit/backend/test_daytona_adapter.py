@@ -151,9 +151,7 @@ async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
         asyncio.get_running_loop(),
     )
 
-    assert await asyncio.to_thread(sandbox.fs.download_file, "file.txt") == (
-        b"file.txt"
-    )
+    assert await asyncio.to_thread(sandbox.fs.download_file, "file.txt") == (b"file.txt")
 
 
 @pytest.mark.asyncio
@@ -227,8 +225,8 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
-    from fleet_rlm.daytona.sync_bridge import sync_sandbox
     from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
     class Fs:
         async def download_file(self, path: str) -> bytes:

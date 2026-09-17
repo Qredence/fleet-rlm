@@ -1413,8 +1413,6 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
     ]
 
 
-
-
 def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None:
     options = RLMOptions(max_iters=3, max_llm_calls=5, max_output_chars=17)
     root = SimpleNamespace(copy=lambda **_kwargs: root)

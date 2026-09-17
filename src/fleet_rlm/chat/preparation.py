@@ -326,27 +326,15 @@ class DefaultRunPreparer:
         self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
         self._budget_limits = budget_limits or BudgetLimits()
 
-    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
-        """
-        Prepare the execution context and resources required to run a Run.
-
-        Parameters:
-            run (ClaimedRun): Run request and execution metadata.
-            deadline (float): Absolute deadline for Run preparation.
-
-        Returns:
-            PreparedTurn: Prepared execution context, artifact sinks, and managed resources.
-
-        Raises:
-            RunPreparationCancelledError: If the Run is cancelled.
-            RunPreparationTimeoutError: If Run preparation exceeds the deadline.
-            RunPreparationUnavailableError: If required preparation services or resources are unavailable.
-        """
+    async def _check_cancellation(self, run: ClaimedRun) -> None:
         try:
             if await run.cancellation_requested():
                 raise RunPreparationCancelledError("Turn cancelled")
         except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
             raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
+
+    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
+        await self._check_cancellation(run)
 
         with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
             try:
@@ -362,11 +350,6 @@ class DefaultRunPreparer:
                 }
             )
 
-        # ``resident_release`` owns a provider root that may outlive this
-        # prepared Turn.  ``release`` remains the per-preparation ownership
-        # boundary (for Daytona, it releases the Session preparation gate).
-        # A reused Daytona root has no resident callback and must not retain
-        # that per-Turn gate wrapper in the Session state.
         if environment.resident_release is not None:
             environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
                 environment.resident_release,
@@ -384,11 +367,23 @@ class DefaultRunPreparer:
         else:
             environment_release = None
             turn_environment_release = RetainableEnvironmentRelease(environment.release)
+
         staged = PreparedAttachments((), ())
         capabilities: PreparedCapabilities | None = None
 
         async def remove_staged() -> None:
             await self._remove_staged(environment.attachment_sink, staged)
+
+        def _build_resources() -> _PreparedTurnResources:
+            cleanups: list[AsyncCleanup] = []
+            if environment_release is not None:
+                cleanups.append(environment_release.release)
+            if turn_environment_release is not None:
+                cleanups.append(turn_environment_release.release)
+            if capabilities is not None:
+                cleanups.append(capabilities.aclose)
+            cleanups.append(remove_staged)
+            return _PreparedTurnResources(tuple(cleanups))
 
         try:
             self._check_deadline(deadline)
@@ -411,6 +406,7 @@ class DefaultRunPreparer:
                         "staged_bytes": sum(ref.byte_size for ref in staged.refs),
                     }
                 )
+
             with turn_phase_span(
                 "Turn.prepare_capabilities",
                 inputs={"skill_selection_count": len(run.input.skill_selections)},
@@ -423,11 +419,8 @@ class DefaultRunPreparer:
                 except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
                     raise RunPreparationUnavailableError("Turn capabilities are unavailable") from exc
                 capabilities_phase.set_outputs({"notice_count": len(getattr(capabilities, "preparation_notices", ()))})
-            try:
-                if await run.cancellation_requested():
-                    raise RunPreparationCancelledError("Turn cancelled")
-            except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
-                raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
+
+            await self._check_cancellation(run)
             self._check_deadline(deadline)
 
             staged_by_id = {item.attachment_id: item for item in staged.staged}
@@ -448,26 +441,11 @@ class DefaultRunPreparer:
                     mount_root=environment.context_mount_path,
                 )
         except BaseException:
-            cleanups: list[AsyncCleanup] = []
-            if environment_release is not None:
-                cleanups.append(environment_release.release)
-            if turn_environment_release is not None:
-                cleanups.append(turn_environment_release.release)
-            if capabilities is not None:
-                cleanups.append(capabilities.aclose)
-            cleanups.append(remove_staged)
-            await asyncio.shield(_PreparedTurnResources(tuple(cleanups)).aclose())
+            await asyncio.shield(_build_resources().aclose())
             raise
 
         assert capabilities is not None
-
-        cleanups: list[AsyncCleanup] = []
-        if environment_release is not None:
-            cleanups.append(environment_release.release)
-        if turn_environment_release is not None:
-            cleanups.append(turn_environment_release.release)
-        cleanups.extend((capabilities.aclose, remove_staged))
-        resources = _PreparedTurnResources(tuple(cleanups))
+        resources = _build_resources()
         try:
             turn_budget = TurnBudget(
                 deadline=deadline if math.isfinite(deadline) else None,
@@ -479,11 +457,9 @@ class DefaultRunPreparer:
                 budget=turn_budget,
             )
         except BaseException:
-            # LM copies are part of preparation ownership. If a provider
-            # runtime cannot be copied, release every resource acquired above
-            # before surfacing the preparation failure.
             await asyncio.shield(resources.aclose())
             raise
+
         execution = RLMExecutionContext(
             identity=RunIdentity(
                 run_id=run.run_id,
@@ -511,10 +487,6 @@ class DefaultRunPreparer:
                 attachment_context=attachment_context,
                 preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
                 workspace_memory_digest=_workspace_memory_digest(capabilities),
-                # Canonical committed Session conversation materialized from
-                # the claimed checkpoint. Providers may select a typed
-                # transport at their adapter boundary; otherwise the in-process
-                # composition reuses the exact dspy.History instance.
                 history=(
                     environment.history_transport
                     if environment.history_transport is not None
@@ -538,18 +510,16 @@ class DefaultRunPreparer:
             ),
             selected_skill_count=len(run.input.skill_selections),
         )
-        history = execution.session.history
         return PreparedTurn(
             execution=execution,
             artifact_sink=environment.artifact_sink,
             _resources=resources,
             claim=run,
-            history=history,
+            history=execution.session.history,
             session_context=execution.session.session_context,
             attachments=execution.session.attachments,
             capabilities=capabilities,
             program=capabilities.spec,
-            # The runner calls the same helper again with its observed and
             authorization=run.authority,
             result_snapshot_sink=environment.result_snapshot_sink,
             post_commit_memory_promotion=environment.post_commit_memory_promotion,
@@ -558,12 +528,8 @@ class DefaultRunPreparer:
         )
 
     async def aclose(self) -> bool:
-        """Close provider-owned resident root leases during composition shutdown."""
         close = getattr(self._environments, "aclose", None)
-        if callable(close):
-            result = await close()
-            return result is not False
-        return True
+        return bool(await close()) if callable(close) else True
 
     async def wait_for_session_idle(
         self,
@@ -572,7 +538,6 @@ class DefaultRunPreparer:
         *,
         deadline: float,
     ) -> None:
-        """Wait for provider preparation claims before retiring a Session root."""
         wait = getattr(self._environments, "wait_for_session_idle", None)
         if callable(wait):
             await wait(workspace_id, session_id, deadline=deadline)
@@ -607,10 +572,7 @@ class DefaultRunPreparer:
             raise RunPreparationTimeoutError("Turn preparation timed out")
 
     @staticmethod
-    async def _remove_staged(
-        sink: RunAttachmentSink,
-        prepared: PreparedAttachments,
-    ) -> None:
+    async def _remove_staged(sink: RunAttachmentSink, prepared: PreparedAttachments) -> None:
         for item in reversed(prepared.staged):
             try:
                 await sink.remove_private(item.sandbox_path)
