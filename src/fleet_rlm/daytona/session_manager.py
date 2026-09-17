@@ -1127,7 +1127,7 @@ class ActiveLeaseRegistry:
         with self._lock:
             key = self._key(session_id, workspace_id)
             existing = self._holders.get(key)
-            if existing is not None and existing != run_id:
+            if existing is not None and (existing != run_id or run_id == PREWARM_RUN_ID):
                 raise ActiveLeaseConflictError(session_id, holder_run_id=existing)
             self._holders[key] = run_id
 

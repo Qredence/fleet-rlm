@@ -17,7 +17,6 @@ EXPECTED_DAYTONA_MODULES = {
     "errors.py",
     "fs.py",
     "interpreter.py",
-    "interpreter_output.py",
     "lifecycle.py",
     "models.py",
     "platform.py",
