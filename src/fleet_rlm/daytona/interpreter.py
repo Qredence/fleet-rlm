@@ -24,6 +24,7 @@ import inspect
 import io
 import json
 import logging
+import shlex
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -34,16 +35,6 @@ from uuid import uuid4
 import dspy
 from dspy.utils.callback import BaseCallback, with_callbacks
 
-from fleet_rlm.daytona.broker import (
-    DEFAULT_BROKER_PORT,
-    FINAL_OUTPUT_MARKER,
-    FleetFinalOutputError,
-    SyncBridgeDispatcher,
-    build_submit_setup_code,
-    extract_final_payload,
-    sync_sandbox,
-    tombstone_sync_sandbox,
-)
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
@@ -56,6 +47,17 @@ from fleet_rlm.daytona.interpreter_output import (
     _flush_step_output,
     _OutputStreamState,
     _PublicStdoutProjector,
+)
+from fleet_rlm.daytona.models import (
+    FINAL_OUTPUT_MARKER,
+    FleetFinalOutputError,
+    build_submit_setup_code,
+    extract_final_payload,
+)
+from fleet_rlm.daytona.sync_bridge import (
+    SyncBridgeDispatcher,
+    sync_sandbox,
+    tombstone_sync_sandbox,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
@@ -87,7 +89,6 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
-from fleet_rlm.rlm.specified_prompt_rewrite import SpecifiedPromptRewriteState, apply_specified_sub_lm_prompts
 from fleet_rlm.runtime.errors import FilesystemToolError
 
 if TYPE_CHECKING:
@@ -98,6 +99,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
+DEFAULT_BROKER_PORT = 8765
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
 _MISSING = object()
 _UNSET = object()
@@ -489,14 +491,24 @@ def _terminal_error(message: str, *, category: str) -> CodeInterpreterError:
 
 def _repair_category(error: str) -> str:
     """Return a bounded runtime-error category without retaining generated details."""
-    prefix = error.split(":", 1)[0].strip()
-    return prefix if prefix in _REPAIR_CATEGORIES else "execution_error"
+    lines = [line.strip() for line in error.strip().splitlines() if line.strip()]
+    for line in reversed(lines):
+        prefix = line.split(":", 1)[0].strip()
+        if prefix in _REPAIR_CATEGORIES:
+            return prefix
+    return "execution_error"
 
 
 class _SandboxProcessBackend:
-    """Live sandbox handle whose persistent namespace is owned by the broker."""
+    """Direct execution backend on a live Daytona sandbox (code_interpreter/process/fs)."""
 
-    def __init__(self, sandbox: Any, *, timeout_s: int | None = None) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        timeout_s: int | None = None,
+        workdir: str = "/workspace",
+    ) -> None:
         self._sandbox = sandbox
         if timeout_s is not None and int(timeout_s) <= 0:
             raise DaytonaAdapterError(
@@ -504,6 +516,13 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
+        self._workdir = workdir
+        self._output_fields: list[dict[str, Any]] | None = None
+        self._bound_tools: dict[str, Callable[..., Any]] = {}
+        self._context_binding: tuple[str, str] | None = None
+        self._context_accesses: list[str] = []
+        self._closed = False
+        self._interpreter_context: Any = None
 
     @property
     def sandbox(self) -> Any:
@@ -513,6 +532,24 @@ class _SandboxProcessBackend:
     def timeout_s(self) -> int | None:
         return self._timeout_s
 
+    def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
+        """Bind host tools available during execution."""
+        self._bound_tools = dict(tools)
+
+    def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
+        """Store or update output fields contract for SUBMIT serialization."""
+        self._output_fields = output_fields
+
+    def bind_context_manifest(self, *, trusted_mount_root: str, expected_manifest_sha256: str) -> None:
+        """Bind context capsule manifest root and checksum."""
+        binding = (str(trusted_mount_root), str(expected_manifest_sha256))
+        if self._context_binding is not None and self._context_binding != binding:
+            raise DaytonaAdapterError(
+                message="context manifest binding cannot be replaced",
+                cause_type="ContextIntegrityError",
+            )
+        self._context_binding = binding
+
     def run(
         self,
         code: str,
@@ -520,17 +557,162 @@ class _SandboxProcessBackend:
         *,
         on_stdout: OutputCallback | None = None,
     ) -> BackendExecutionResult:
-        del code, variables, on_stdout
-        raise DaytonaAdapterError(
-            message="live execution requires the co-located broker",
-            cause_type="InterpreterConfigurationError",
+        if self._closed:
+            raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
+
+        submit_code = build_submit_setup_code(self._output_fields)
+
+        var_lines: list[str] = []
+        if variables:
+            for k, v in variables.items():
+                if isinstance(v, (str, int, float, bool, list, dict)) or v is None:
+                    var_lines.append(f"{k} = {json.dumps(v)}")
+        var_code = ("\n".join(var_lines) + "\n") if var_lines else ""
+
+        context_lines = ["if 'context' not in globals(): context = []"]
+        if self._context_binding is not None:
+            mount_root, manifest_sha = self._context_binding
+            context_lines.append(f"""
+import hashlib as _hashlib
+import json as _json_ctx
+import os as _os_ctx
+
+_CONTEXT_MOUNT_ROOT = {mount_root!r}
+_CONTEXT_MANIFEST_SHA256 = {manifest_sha!r}
+
+def _fleet_load_context_manifest(raw_manifest):
+    if isinstance(raw_manifest, str):
+        raw_manifest = raw_manifest.encode("utf-8")
+    if _hashlib.sha256(bytes(raw_manifest)).hexdigest() != _CONTEXT_MANIFEST_SHA256:
+        raise ValueError("manifest checksum mismatch")
+    manifest = _json_ctx.loads(bytes(raw_manifest).decode("utf-8"))
+    mount_root = _os_ctx.path.realpath(str(_CONTEXT_MOUNT_ROOT))
+    values = []
+    for entry in manifest.get("entries", []):
+        path = _os_ctx.path.realpath(str(entry["sandbox_path"]))
+        expected_size = int(entry["byte_size"])
+        expected_sha = str(entry["checksum_sha256"])
+        with open(path, "rb") as f:
+            data = f.read(expected_size + 1)
+        if len(data) != expected_size or _hashlib.sha256(data).hexdigest() != expected_sha:
+            raise ValueError("attachment checksum mismatch")
+        enc = entry.get("encoding", "utf-8")
+        att_id = entry.get("attachment_id")
+        if enc == "utf-8":
+            values.append({{"data": data.decode("utf-8"), "encoding": "utf-8", "attachment_id": att_id}})
+        else:
+            values.append({{"data": data, "encoding": "bytes", "attachment_id": att_id}})
+    return values
+""")
+        context_code = "\n".join(context_lines) + "\n"
+
+        full_code = f"{submit_code}\n\n{context_code}\n{var_code}\n{code}"
+
+        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        stdout = ""
+        stderr = ""
+        exit_code = 0
+        exec_error: Any = None
+
+        sandbox = self._sandbox
+        try:
+            if hasattr(sandbox, "code_interpreter") and hasattr(sandbox.code_interpreter, "run_code"):
+                kwargs: dict[str, Any] = {"timeout": timeout}
+                if self._interpreter_context is None and hasattr(sandbox.code_interpreter, "create_context"):
+                    with contextlib.suppress(Exception):
+                        self._interpreter_context = sandbox.code_interpreter.create_context()
+                if self._interpreter_context is not None:
+                    kwargs["context"] = self._interpreter_context
+                if on_stdout is not None:
+
+                    def _stream_stdout(msg: Any) -> None:
+                        chunk = getattr(msg, "output", getattr(msg, "text", str(msg)))
+                        if chunk:
+                            on_stdout(chunk)
+
+                    kwargs["on_stdout"] = _stream_stdout
+
+                res = sandbox.code_interpreter.run_code(full_code, **kwargs)
+                stdout = getattr(res, "stdout", "") or ""
+                stderr = getattr(res, "stderr", "") or ""
+                exec_error = getattr(res, "error", None)
+                exit_code = 0 if not exec_error else 1
+
+            elif hasattr(sandbox, "process"):
+                process = sandbox.process
+                if hasattr(process, "code_run"):
+                    res = process.code_run(full_code, timeout=timeout)
+                    stdout = getattr(res, "result", "") or ""
+                    exit_code = getattr(res, "exit_code", 0)
+                elif hasattr(process, "exec"):
+                    res = process.exec(
+                        f"python3 -c {shlex.quote(full_code)}",
+                        timeout=timeout,
+                        cwd=self._workdir,
+                    )
+                    stdout = getattr(res, "result", "") or ""
+                    exit_code = getattr(res, "exit_code", 0)
+                else:
+                    raise DaytonaAdapterError(
+                        message="Sandbox process has no code_run or exec capability",
+                        cause_type="InterpreterConfigurationError",
+                    )
+            else:
+                raise DaytonaAdapterError(
+                    message="Sandbox has neither code_interpreter nor process execution capability",
+                    cause_type="InterpreterConfigurationError",
+                )
+        except Exception as exc:
+            if isinstance(exc, DaytonaAdapterError):
+                raise
+            mapped = map_provider_error(exc)
+            raise mapped from exc
+
+        if on_stdout is not None and stdout:
+            on_stdout(stdout)
+
+        final = extract_final_payload(stdout)
+        if final is not None:
+            return BackendExecutionResult(
+                stdout=stdout,
+                stderr=stderr,
+                final=final,
+                context_accesses=self._drain_context_accesses(),
+            )
+
+        if exit_code != 0 or exec_error:
+            err_msg = str(exec_error) if exec_error else (stderr or stdout or "Execution failed")
+            category = _repair_category(err_msg)
+            return BackendExecutionResult(
+                stdout=stdout,
+                stderr=stderr,
+                error=err_msg,
+                error_category=category,
+                context_accesses=self._drain_context_accesses(),
+            )
+
+        return BackendExecutionResult(
+            stdout=stdout,
+            stderr=stderr,
+            context_accesses=self._drain_context_accesses(),
         )
 
+    def _drain_context_accesses(self) -> tuple[str, ...]:
+        values = tuple(self._context_accesses)
+        self._context_accesses.clear()
+        return values
+
     def close(self) -> None:
-        # Tombstone the sync view so late calls fail typed-fast after lease
-        # release; the shared service loop outlives individual Turns.
+        self._closed = True
+        if (
+            self._interpreter_context is not None
+            and hasattr(self._sandbox, "code_interpreter")
+            and hasattr(self._sandbox.code_interpreter, "delete_context")
+        ):
+            with contextlib.suppress(Exception):
+                self._sandbox.code_interpreter.delete_context(self._interpreter_context)
+        self._interpreter_context = None
         tombstone_sync_sandbox(self._sandbox)
-        return None
 
 
 class DaytonaCodeInterpreter:
@@ -585,7 +767,6 @@ class DaytonaCodeInterpreter:
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
         self._turn_request: str | None = None
-        self._specified_prompt_rewrite_state = SpecifiedPromptRewriteState()
         self._output_budget_exhausted = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
@@ -794,7 +975,6 @@ class DaytonaCodeInterpreter:
             self._turn_request = request
         else:
             self._turn_request = None
-        self._specified_prompt_rewrite_state.bind(self._turn_request)
 
     def bind_context_capsule(self, capsule: Any) -> None:
         """
@@ -958,11 +1138,6 @@ class DaytonaCodeInterpreter:
         if self._backend is None:
             msg = "interpreter backend is not configured"
             raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
-        code = apply_specified_sub_lm_prompts(
-            self._turn_request,
-            code,
-            state=self._specified_prompt_rewrite_state,
-        )
         public = not is_host_setup_action(code)
         self._public_observation = public
         if public:
@@ -1270,7 +1445,11 @@ class DaytonaCodeInterpreter:
         self._bound_tools = tools
         bind_tools = getattr(backend, "bind_host_tools", None)
         ensure_submit = getattr(backend, "ensure_submit", None)
-        if callable(bind_tools) and callable(ensure_submit):
+        can_handle_directly = callable(bind_tools) and callable(ensure_submit)
+        if isinstance(backend, _SandboxProcessBackend) and bool(tools):
+            can_handle_directly = False
+
+        if can_handle_directly:
             if not needs_binding_refresh(
                 desired_generation=self._binding_generation,
                 installed_generation=self._installed_binding_generation,
@@ -1294,6 +1473,7 @@ class DaytonaCodeInterpreter:
                     object.__setattr__(invoke, "__signature__", inspect.signature(source))
                 return invoke
 
+            assert bind_tools is not None and ensure_submit is not None
             bind_tools({name: host_binding(name, source) for name, source in tools.items()})
             ensure_submit(self.output_fields)
             self._installed_binding_generation = self._binding_generation
@@ -1301,6 +1481,11 @@ class DaytonaCodeInterpreter:
         if not isinstance(backend, _SandboxProcessBackend):
             self._installed_binding_generation = self._binding_generation
             return
+        if self._broker_port <= 0 and bool(tools):
+            raise DaytonaAdapterError(
+                message="brokerless mode cannot dispatch host tools",
+                cause_type="InterpreterConfigurationError",
+            )
         broker_ready = self._http_broker is not None and not bool(getattr(self._http_broker, "_stopped", False))
         if not needs_binding_refresh(
             desired_generation=self._binding_generation,

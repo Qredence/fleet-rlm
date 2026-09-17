@@ -218,6 +218,7 @@ class LiveDaytonaPlatform:
             if volume_id or mount_path or volume_subpath:
                 raise ValueError("SemanticChild sandboxes cannot mount a Workspace Volume")
             with_volume = False
+            network_block_all = True
 
         volumes = None
         if with_volume:

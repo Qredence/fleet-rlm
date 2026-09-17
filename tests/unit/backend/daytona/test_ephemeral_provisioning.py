@@ -64,6 +64,36 @@ async def test_acquire_ephemeral_interpreter_does_not_probe_execute() -> None:
 
 
 @pytest.mark.asyncio
+async def test_acquire_ephemeral_interpreter_uses_configured_execution_timeout() -> None:
+    """The ephemeral lease must honor rlm.execution_timeout_s, not the 120s default."""
+    settings = MagicMock()
+    settings.rlm_execution_timeout_s = 300
+    sandbox = MagicMock(id="sandbox-3")
+    platform = MagicMock()
+    platform.start = AsyncMock()
+    platform.get = AsyncMock(return_value=sandbox)
+    provisioner = MagicMock()
+    provisioner.create = AsyncMock(return_value=sandbox)
+    provisioner.expected_mount = MagicMock(return_value=MagicMock())
+    provisioner.verify_run_layout = AsyncMock()
+    backend_calls: list[dict[str, object]] = []
+
+    patches = _patch_acquire_dependencies(platform=platform, provisioner=provisioner)
+    with ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
+        stack.enter_context(
+            patch(
+                "fleet_rlm.daytona.interpreter.sandbox_backend",
+                side_effect=lambda *_args, **kwargs: backend_calls.append(kwargs) or MagicMock(),
+            )
+        )
+        await acquire_ephemeral_interpreter(settings, purpose="test", workspace_id=uuid4())
+
+    assert backend_calls and backend_calls[0]["timeout_s"] == 300
+
+
+@pytest.mark.asyncio
 async def test_acquire_ephemeral_interpreter_retires_sandbox_when_layout_fails() -> None:
     settings = MagicMock()
     sandbox = MagicMock(id="sandbox-2")

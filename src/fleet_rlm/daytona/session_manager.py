@@ -22,7 +22,6 @@ from fleet_rlm.daytona.admission import (
     DaytonaAdmission,
     DaytonaAdmissionPermit,
 )
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     ProviderRequestError,
@@ -51,6 +50,7 @@ from fleet_rlm.daytona.sandbox_lease import (
     SandboxLeaseReceipt,
     schedule_owned_close,
 )
+from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.runtime.bindings import (
     BindingGenerationAuthority,
     SandboxBinding,

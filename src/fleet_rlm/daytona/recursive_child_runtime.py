@@ -41,7 +41,6 @@ from fleet_rlm.daytona.admission import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
 )
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import (
@@ -50,6 +49,7 @@ from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
 )
 from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
+from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
@@ -708,15 +708,18 @@ async def acquire_child_runtime(
             labels = {"fleet.runtime": "recursive-child"}
             if semantic:
                 labels["fleet.profile"] = profile.value
-            sandbox = await platform.create(
-                profile=profile,
-                volume_id=None if semantic else volume_id,
-                mount_path=None if semantic else mount_path,
-                volume_subpath=None if semantic else subpath,
-                labels=labels,
-                with_volume=not semantic,
-                ephemeral=True,
-            )
+            create_kwargs: dict[str, Any] = {
+                "profile": profile,
+                "volume_id": None if semantic else volume_id,
+                "mount_path": None if semantic else mount_path,
+                "volume_subpath": None if semantic else subpath,
+                "labels": labels,
+                "with_volume": not semantic,
+                "ephemeral": True,
+            }
+            if semantic:
+                create_kwargs["network_block_all"] = True
+            sandbox = await platform.create(**create_kwargs)
         sandbox_id = sandbox_id_resolver(sandbox)
         child_sandbox_id = sandbox_id
         authorization_check(is_authorized)

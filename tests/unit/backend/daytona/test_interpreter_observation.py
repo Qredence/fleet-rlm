@@ -372,7 +372,7 @@ def test_f_string_backslash_syntax_error_gets_focused_native_repair_feedback() -
     assert "Build the escaped fragment before the f-string expression" in result
 
 
-def test_sandbox_backend_requires_co_located_broker_and_ignores_code_interpreter() -> None:
+def test_sandbox_backend_executes_directly_via_code_interpreter() -> None:
     class CodeInterpreter:
         def __init__(self) -> None:
             self.created: list[object] = []
@@ -383,7 +383,7 @@ def test_sandbox_backend_requires_co_located_broker_and_ignores_code_interpreter
             self.created.append(context)
             return context
 
-        def run_code(self, code: str, *, context: object, timeout: int | None = None):
+        def run_code(self, code: str, *, context: object | None = None, timeout: int | None = None, **_kwargs: object):
             del code, timeout
             assert context is self.created[-1]
             return type("Result", (), {"stdout": "ok", "stderr": "", "error": None})()
@@ -395,12 +395,12 @@ def test_sandbox_backend_requires_co_located_broker_and_ignores_code_interpreter
     sandbox = type("Sandbox", (), {"code_interpreter": code_interpreter})()
     backend = sandbox_backend(sandbox)
 
-    with pytest.raises(DaytonaAdapterError, match="co-located broker"):
-        backend.run("print('must use broker')")
+    res = backend.run("print('direct execution')")
+    assert res.stdout == "ok"
     backend.close()
 
-    assert code_interpreter.created == []
-    assert code_interpreter.deleted == []
+    assert len(code_interpreter.created) == 1
+    assert code_interpreter.deleted == code_interpreter.created
 
 
 def test_context_defaults_to_empty_list_without_capsule() -> None:
