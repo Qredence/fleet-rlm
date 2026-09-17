@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -1013,15 +1014,126 @@ async def cleanup_orphan_bytes(
     return OrphanCleanupReport(scanned, removed, retained, skipped_fresh)
 
 
+class DaytonaSandboxVolumeFs:
+    """Sandbox filesystem adapter forwarding volume storage calls directly to sandbox.fs."""
+
+    def __init__(self, sandbox: Any, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        self.sandbox = sandbox
+        self.fs = getattr(sandbox, "fs", None)
+
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
+        del use_cache
+        if self.fs is None:
+            raise FileNotFoundError(logical_path)
+        download = getattr(self.fs, "download_file", None)
+        if not callable(download):
+            raise FileNotFoundError(logical_path)
+        data = download(logical_path)
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        if max_bytes is not None and len(data) > max_bytes:
+            data = data[:max_bytes]
+        return data
+
+    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+        del max_bytes
+        if self.fs is None:
+            return
+        upload = getattr(self.fs, "upload_file", None)
+        if callable(upload):
+            upload(data, logical_path)
+
+    def exists(self, logical_path: str) -> bool:
+        try:
+            self.read_bytes(logical_path)
+            return True
+        except Exception:
+            return False
+
+    def remove(self, logical_path: str) -> None:
+        self.remove_bytes(logical_path)
+
+    def remove_bytes(self, logical_path: str) -> None:
+        if self.fs is None:
+            return
+        delete = getattr(self.fs, "delete_file", None)
+        if callable(delete):
+            with contextlib.suppress(Exception):
+                delete(logical_path)
+
+    def list_files(self, *args: Any, **kwargs: Any) -> tuple[Any, ...]:
+        del args, kwargs
+        return ()
+
+
+class AsyncDaytonaVolumeFS:
+    """Async adapter forwarding volume storage calls to sandbox.fs."""
+
+    def __init__(self, sandbox: Any, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+        self.sandbox = sandbox
+        self.fs = getattr(sandbox, "fs", None)
+
+    async def list_files(self, *args: Any, **kwargs: Any) -> tuple[Any, ...]:
+        del args, kwargs
+        return ()
+
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
+        del use_cache
+        if self.fs is None:
+            raise FileNotFoundError(logical_path)
+        download = getattr(self.fs, "download_file", None)
+        if not callable(download):
+            raise FileNotFoundError(logical_path)
+        res = download(logical_path)
+        if inspect.isawaitable(res):
+            res = await res
+        if isinstance(res, str):
+            res = res.encode("utf-8")
+        if max_bytes is not None and len(res) > max_bytes:
+            res = res[:max_bytes]
+        return res
+
+    async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+        del max_bytes
+        if self.fs is None:
+            return
+        upload = getattr(self.fs, "upload_file", None)
+        if callable(upload):
+            res = upload(data, logical_path)
+            if inspect.isawaitable(res):
+                await res
+
+    async def exists(self, logical_path: str) -> bool:
+        try:
+            await self.read_bytes(logical_path)
+            return True
+        except Exception:
+            return False
+
+    async def remove(self, logical_path: str) -> None:
+        await self.remove_bytes(logical_path)
+
+    async def remove_bytes(self, logical_path: str) -> None:
+        if self.fs is None:
+            return
+        delete = getattr(self.fs, "delete_file", None)
+        if callable(delete):
+            with contextlib.suppress(Exception):
+                res = delete(logical_path)
+                if inspect.isawaitable(res):
+                    await res
+
+
 # Compatibility aliases for callers and test mocks
 AgentStorageSession = WorkspaceStorage
 AgentAsyncStorageSession = AsyncWorkspaceStorage
-AgentVolumeStorage = WorkspaceStorage
-AgentAsyncVolumeStorage = AsyncWorkspaceStorage
-DaytonaSandboxVolumeFs = WorkspaceStorage
+AgentVolumeStorage = DaytonaSandboxVolumeFs
+AgentAsyncVolumeStorage = AsyncDaytonaVolumeFS
+
 DaytonaSessionWorkspaceFS = WorkspaceStorage
 AsyncDaytonaSessionWorkspaceFS = AsyncWorkspaceStorage
-AsyncDaytonaVolumeFS = AsyncWorkspaceStorage
 
 __all__ = [
     "MAX_FILE_BYTES",

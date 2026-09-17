@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.daytona.warm_pool import WarmPoolOwnership
 from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
 from fleet_rlm.persistence.models import WarmPoolOwnershipRow
-from fleet_rlm.persistence.repositories.warm_pool import SqlAlchemyWarmPoolOwnershipStore
+from fleet_rlm.persistence.repositories.warm_pool import SqlAlchemyWarmPoolOwnershipStore, WarmPoolOwnership
 
 
 @pytest.mark.asyncio

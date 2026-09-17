@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import threading
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Future
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from uuid import UUID, uuid4
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 
 DEFAULT_IDLE_STOP_SECONDS = 300
+PREWARM_RUN_ID = UUID("00000000-0000-0000-0000-000000000000")
 
 
 class LeaseState(StrEnum):
@@ -25,6 +27,86 @@ class LeaseState(StrEnum):
     CLOSING = "CLOSING"
     CLOSED = "CLOSED"
     FAILED = "FAILED"
+
+
+class ActiveLeaseConflictError(DaytonaAdapterError):
+    """Raised when an active lease conflict occurs for a session."""
+
+    pass
+
+
+class ActiveLeaseRegistry:
+    """Registry tracking active leases scoped by (workspace_id, session_id)."""
+
+    def __init__(self) -> None:
+        self._holders: dict[tuple[UUID | None, UUID], UUID] = {}
+        self._lock = threading.Lock()
+
+    def acquire(self, session_id: UUID, run_id: UUID, *, workspace_id: UUID | None = None) -> None:
+        with self._lock:
+            key = (workspace_id, session_id)
+            if key in self._holders and self._holders[key] != run_id:
+                raise ActiveLeaseConflictError(f"Session {session_id} is already leased by run {self._holders[key]}")
+            self._holders[key] = run_id
+
+    def release(self, session_id: UUID, run_id: UUID, *, workspace_id: UUID | None = None) -> None:
+        with self._lock:
+            key = (workspace_id, session_id)
+            if self._holders.get(key) == run_id:
+                del self._holders[key]
+
+    def holder(self, session_id: UUID, *, workspace_id: UUID | None = None) -> UUID | None:
+        with self._lock:
+            if workspace_id is not None:
+                return self._holders.get((workspace_id, session_id))
+            matches = [run for (ws, sid), run in self._holders.items() if sid == session_id]
+            return matches[0] if len(matches) == 1 else None
+
+    def has_session(self, session_id: UUID) -> bool:
+        with self._lock:
+            return any(sid == session_id for _ws, sid in self._holders)
+
+
+@dataclass(slots=True)
+class InterpreterLease:
+    """Acquired interpreter binding for one Run with an explicit close state."""
+
+    sandbox_id: str
+    interpreter_id: str
+    volume_id: str
+    mount_path: str
+    interpreter: Any
+    session_id: str | None = None
+    run_id: str | None = None
+    workspace_id: str | None = None
+    volume_subpath: str | None = None
+    created_sandbox: bool = False
+    sandbox: Any | None = None
+    user_id: str | None = None
+    requires_sandbox_deletion: bool = False
+    binding_generation: int = 1
+    _released: bool = False
+    _state: LeaseState = LeaseState.OPEN
+    _on_release: Callable[[], None] | None = None
+
+    @property
+    def state(self) -> LeaseState:
+        return self._state
+
+    def release(self) -> None:
+        if self._released:
+            return
+        self._state = LeaseState.CLOSING
+        if self.interpreter is not None:
+            shutdown = getattr(self.interpreter, "shutdown", None)
+            if callable(shutdown):
+                with contextlib.suppress(Exception):
+                    shutdown(strict_broker_cleanup=True)
+        self._released = True
+        self._state = LeaseState.CLOSED
+        if self._on_release is not None:
+            with contextlib.suppress(BaseException):
+                self._on_release()
 
 
 class DaytonaLeaseAcquisitionTimeoutError(DaytonaAdapterError):
@@ -370,3 +452,17 @@ class DaytonaSessionManager:
             for session_id in list(self._active_sandboxes.keys()):
                 await self.delete_session(session_id)
         return True
+
+
+__all__ = [
+    "DEFAULT_IDLE_STOP_SECONDS",
+    "PREWARM_RUN_ID",
+    "ActiveLeaseConflictError",
+    "ActiveLeaseRegistry",
+    "BindingStoreLike",
+    "DaytonaSessionManager",
+    "InterpreterLease",
+    "LeaseRequest",
+    "LeaseState",
+    "SandboxLease",
+]
