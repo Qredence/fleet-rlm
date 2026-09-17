@@ -228,23 +228,6 @@ class AsyncStorageSession(Protocol):
     def warnings(self) -> tuple[Mapping[str, object], ...]: ...
 
 
-class MemoryStorageSession(Protocol):
-    def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> Mapping[str, object]: ...
-
-    def write_text(
-        self,
-        path: str,
-        content: str,
-        *,
-        overwrite: bool = True,
-        expected_sha256: str | None = None,
-    ) -> WorkspaceEntry: ...
-
-    def append_text(self, path: str, content: str) -> WorkspaceEntry: ...
-
-    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None: ...
-
-
 class WorkspaceVolumeSession(AsyncVolumeStorage, Protocol):
     pass
 
@@ -1515,7 +1498,6 @@ __all__ = [
     "DaytonaSessionWorkspaceFS",
     "HostVolumeMirror",
     "HostWorkspaceAccessGateway",
-    "MemoryStorageSession",
     "OfflineHostVolumeGateway",
     "OrphanCleanupReport",
     "StorageSession",
