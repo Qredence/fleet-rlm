@@ -1,16 +1,14 @@
-"""Canonical Daytona broker boundary.
+"""Canonical Daytona broker boundary (DEPRECATED).
 
-This module owns the source protocol, HTTP-in-sandbox host-tool transport,
-and synchronous DSPy bridge.  It deliberately contains no process-global
-service loop or provider lifecycle policy; composition injects a
-``SyncBridgeDispatcher`` for each runtime.
+.. deprecated:: Phase 1
+    Use direct `AsyncDaytona` client, `fleet_rlm.daytona.models`, and
+    `fleet_rlm.daytona.sync_bridge` instead of the in-sandbox HTTP broker.
+    This module is retained for backward compatibility with existing tests.
 """
 
 from __future__ import annotations
 
-import asyncio
 import base64
-import contextlib
 import hashlib
 import hmac
 import inspect
@@ -37,9 +35,21 @@ from fleet_rlm.daytona.errors import (
     is_transient_provider_failure,
     map_provider_error,
     provider_status_code,
+    sanitize_failure_text,
     sanitize_provider_message,
 )
 from fleet_rlm.daytona.platform import sandbox_state
+from fleet_rlm.daytona.sync_bridge import (
+    SyncBridgeDispatcher,
+    _DSPySyncSandboxView,
+    _sync_await,
+    _SyncBridgeLoop,
+    _SyncCodeInterpreter,
+    _SyncFileSystem,
+    _SyncProcess,
+    sync_sandbox,
+    tombstone_sync_sandbox,
+)
 from fleet_rlm.json_types import validate_json_value
 
 if TYPE_CHECKING:
@@ -730,6 +740,14 @@ def {tool_name}({signature}):
 """.strip()
 logger = logging.getLogger(__name__)
 
+
+def _broker_host(url: str | None) -> str:
+    """Return the broker host for diagnostics without leaking credentials or paths."""
+    if not url:
+        return "unset"
+    return str(url).split("//")[-1].split("/")[0].split("@")[-1] or "unset"
+
+
 DEFAULT_BROKER_PORT = 3000
 
 _PREVIEW_LINK_RETRY_DELAYS = (0.25, 0.5)
@@ -861,6 +879,9 @@ class DaytonaHttpToolBroker:
         self._retryable_tool_names: frozenset[str] = frozenset()
         self._pending_wrappers: list[str] = []
         self._stopped = False
+        # Set when a client-side timeout abandons a cell that may still be
+        # running sandbox-side (it keeps holding the sandbox execution lock).
+        self._abandoned_execution = False
         # One pooled client for the whole broker lifetime: the preview proxy
         # sits behind TLS, so per-request urllib connections paid a handshake
         # on every 50 ms poll tick. Stats are per execute_with_callbacks call.
@@ -1191,6 +1212,18 @@ class DaytonaHttpToolBroker:
         self.ensure_started()
         if self._stopped:
             raise DaytonaAdapterError(message="broker already stopped", cause_type="InterpreterLifecycleError")
+        if self._abandoned_execution:
+            # A previous cell timed out client-side but is very likely still running
+            # sandbox-side, holding the sandbox execution lock. Submitting another cell
+            # would interleave against unsettled namespace state and burn a second full
+            # timeout behind that lock, so fail fast with the real reason instead.
+            raise DaytonaAdapterError(
+                message=(
+                    "sandbox execution refused: a previous execution timed out client-side and may "
+                    "still be running in the sandbox; interpreter state is unsettled"
+                ),
+                cause_type="AbandonedExecutionError",
+            )
         execution_id = uuid.uuid4().hex if on_stdout is not None else None
         raw_variables = variables or {}
         if any(not isinstance(key, str) for key in raw_variables):
@@ -1204,6 +1237,18 @@ class DaytonaHttpToolBroker:
         }
         if execution_id is not None:
             payload["execution_id"] = execution_id
+        payload_bytes = len(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+        if payload_bytes > _MAX_EXECUTE_REQUEST_BYTES:
+            # The sandbox server enforces this cap itself and closes the connection
+            # without a status line, which surfaces to callers as an opaque protocol
+            # error. Refuse locally so the cause is classified as a request problem.
+            raise DaytonaAdapterError(
+                message=(
+                    f"sandbox execution request rejected: {payload_bytes} bytes exceeds the "
+                    f"{_MAX_EXECUTE_REQUEST_BYTES}-byte limit"
+                ),
+                cause_type="ExecuteRequestTooLargeError",
+            )
         self._http()
         stats, stats_owner = self._begin_execution_stats()
         wall_started_ns = time.perf_counter_ns()
@@ -1259,10 +1304,24 @@ class DaytonaHttpToolBroker:
                 self._poll_output(execution_id, offset, on_stdout, release=True)
 
             if request_errors:
+                cause = request_errors[0]
+                if isinstance(cause, httpx.TimeoutException):
+                    # The request reached the sandbox; the cell may still be executing.
+                    self._abandoned_execution = True
+                logger.warning(
+                    "sandbox execution transport failure: cause=%s execution_id=%s timeout_s=%s "
+                    "payload_bytes=%s broker_host=%s",
+                    type(cause).__name__,
+                    execution_id,
+                    timeout_s,
+                    payload_bytes,
+                    _broker_host(self._broker_url),
+                )
                 raise DaytonaAdapterError(
-                    message="sandbox execution request failed",
-                    cause_type="BrokerExecutionError",
-                ) from request_errors[0]
+                    message=f"sandbox execution request failed: {sanitize_failure_text(cause)}",
+                    cause_type=type(cause).__name__,
+                    status_code=provider_status_code(cause),
+                ) from cause
             if not response_box:
                 raise DaytonaAdapterError(
                     message="sandbox execution produced no response", cause_type="BrokerExecutionError"
@@ -1951,352 +2010,6 @@ def _is_session_delete_settled(exc: BaseException) -> bool:
 
 
 _BRIDGE_SERVICE_POLL_S = 0.5
-
-
-async def _await_bridge_value(awaitable: Any) -> Any:
-    """Adapt a non-coroutine awaitable for ``run_coroutine_threadsafe``."""
-    return await awaitable
-
-
-class SyncBridgeDispatcher:
-    """Composition-owned routing authority for sync-view SDK coroutines.
-
-    Each Daytona composition owns exactly one dispatcher and injects it into
-    every :func:`sync_sandbox` view it creates, so multiple app/test
-    compositions in one process cannot overwrite each other's bridge
-    authority. The dispatcher carries the same RC-7 guarantee as the legacy
-    module-global: its registered loop never performs nested synchronous
-    waits, so posted coroutines are always serviced. Closing a view
-    tombstones only that view's ``_SyncBridgeLoop``; the dispatcher itself is
-    shared composition state and must never be tombstoned per-view.
-    """
-
-    def __init__(self) -> None:
-        self._service_loop: asyncio.AbstractEventLoop | None = None
-
-    def set_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
-        """Register the loop servicing sync-view SDK coroutines for this composition."""
-        self._service_loop = loop
-
-    def clear_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
-        """Unregister only when this dispatcher still routes onto ``loop``.
-
-        A disposing composition can never clear another composition's loop:
-        the identity check makes retreat behaviorally safe under overlapping
-        lifespans.
-        """
-        if loop is not None and self._service_loop is not loop:
-            return
-        self._service_loop = None
-
-    def service_loop(self) -> asyncio.AbstractEventLoop | None:
-        """Return the registered composition loop, if any."""
-        return self._service_loop
-
-    def run(
-        self,
-        awaitable: Any,
-        *,
-        deadline: float | None = None,
-        check_authority: Callable[[], None] | None = None,
-    ) -> Any:
-        """Run an awaitable on the composition-owned event loop.
-
-        Args:
-            awaitable: The host operation to execute.
-
-        Returns:
-            The awaitable's result.
-        """
-        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(
-            awaitable, deadline=deadline, check_authority=check_authority
-        )
-
-
-class _SyncBridgeLoop:
-    """Service-loop routing and close state for one synchronous Daytona bridge.
-
-    Posted SDK coroutines run on the composition-owned service loop exposed by
-    the injected dispatcher; when no dispatcher is injected (e.g. private-test
-    compositions that never install the Daytona inventory) the bridge falls
-    back to its caller-captured loop. The bridge owns no threads, so Turns cannot leak daemon threads;
-    :meth:`close` tombstones the bridge so late calls fail typed-fast instead
-    of posting to a service loop after lease release.
-    """
-
-    def __init__(
-        self,
-        *,
-        caller_loop: asyncio.AbstractEventLoop | None,
-        dispatcher: SyncBridgeDispatcher | None = None,
-    ) -> None:
-        self._caller_loop = caller_loop
-        self._dispatcher = dispatcher
-        self._closed = False
-
-    def _bridge_error(self, message: str) -> DaytonaAdapterError:
-        return DaytonaAdapterError(message=message, cause_type="InterpreterBridgeError")
-
-    def close(self) -> None:
-        """Tombstone the bridge; further calls fail fast until start()."""
-        self._closed = True
-
-    def start(self) -> None:
-        """Clear the close tombstone (survives close/reopen)."""
-        self._closed = False
-
-    def service_loop(self) -> asyncio.AbstractEventLoop | None:
-        """Resolve the loop servicing this bridge: injected dispatcher first.
-
-        Resolution order pins authority at view creation: an explicitly
-        injected composition dispatcher, then the legacy process-default
-        dispatcher, then the caller-captured loop (legacy/test fallback).
-        """
-        if self._dispatcher is not None:
-            registered = self._dispatcher.service_loop()
-            if registered is not None:
-                return registered
-        return self._caller_loop
-
-    def run(
-        self,
-        awaitable: Any,
-        *,
-        deadline: float | None = None,
-        check_authority: Callable[[], None] | None = None,
-    ) -> Any:
-        """
-        Execute an awaitable on the service event loop and wait for its result.
-
-        Parameters:
-                awaitable (Any): The awaitable to execute.
-
-        Returns:
-                Any: The awaitable's result.
-        """
-        if self._closed:
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            raise self._bridge_error("synchronous Daytona bridge is closed")
-        loop = self.service_loop()
-        if loop is None or loop.is_closed():
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable")
-        try:
-            current_loop = asyncio.get_running_loop()
-        except RuntimeError:
-            current_loop = None
-        if current_loop is loop:
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            raise self._bridge_error("synchronous Daytona bridge called from its owning event loop")
-        bridge_awaitable: Any | None = None
-        try:
-            bridge_awaitable = awaitable if inspect.iscoroutine(awaitable) else _await_bridge_value(awaitable)
-            future = asyncio.run_coroutine_threadsafe(bridge_awaitable, loop)
-        except (RuntimeError, TypeError) as exc:
-            if bridge_awaitable is not None:
-                bridge_awaitable.close()
-            if inspect.iscoroutine(awaitable):
-                awaitable.close()
-            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable") from exc
-        while True:
-            try:
-                timeout = _BRIDGE_SERVICE_POLL_S
-                if deadline is not None:
-                    timeout = min(timeout, max(0.0, deadline - time.monotonic()))
-                if check_authority is not None:
-                    check_authority()
-                if deadline is not None and timeout <= 0:
-                    future.cancel()
-                    raise TimeoutError("async host Tool exceeded its Turn deadline")
-                return future.result(timeout=timeout)
-            except TimeoutError:
-                if check_authority is not None:
-                    check_authority()
-                if deadline is not None and time.monotonic() >= deadline:
-                    future.cancel()
-                    raise TimeoutError("async host Tool exceeded its Turn deadline") from None
-                if loop.is_closed() or not loop.is_running():
-                    future.cancel()
-                    if inspect.iscoroutine(awaitable):
-                        with contextlib.suppress(Exception):
-                            awaitable.close()
-                    raise self._bridge_error("synchronous Daytona bridge service loop stopped") from None
-
-
-def _sync_await(
-    awaitable: Any,
-    owner: _SyncBridgeLoop,
-    guard_loop: asyncio.AbstractEventLoop | None = None,
-) -> Any:
-    """Run one async SDK operation on the composition-wide bridge service loop.
-
-    ``guard_loop`` anchors the legacy fail-fast contract: the loop a bridge
-    was declared against (and the resolved service loop itself) may never call
-    the bridge synchronously, because that loop's thread is the one that would
-    have to service the call.
-    """
-    try:
-        current_loop = asyncio.get_running_loop()
-    except RuntimeError:
-        current_loop = None
-    if current_loop is not None and (current_loop is guard_loop or current_loop is owner.service_loop()):
-        if inspect.iscoroutine(awaitable):
-            awaitable.close()
-        raise DaytonaAdapterError(
-            message="synchronous Daytona bridge called from its owning event loop",
-            cause_type="InterpreterThreadError",
-        )
-    if not inspect.isawaitable(awaitable):
-        raise DaytonaAdapterError(
-            message="synchronous Daytona bridge requires an async SDK operation",
-            cause_type="InterpreterBridgeContractError",
-        )
-    return owner.run(awaitable)
-
-
-class _SyncCodeInterpreter:
-    def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
-
-    def create_context(self, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_context(**kwargs), self._owner, self._guard_loop)
-
-    def run_code(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.run_code(code, **kwargs), self._owner, self._guard_loop)
-
-    def delete_context(self, context: Any, **kwargs: Any) -> None:
-        _sync_await(self._service.delete_context(context, **kwargs), self._owner, self._guard_loop)
-
-
-class _SyncProcess:
-    def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
-
-    def code_run(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.code_run(code, **kwargs), self._owner, self._guard_loop)
-
-    def create_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_session(session_id, **kwargs), self._owner, self._guard_loop)
-
-    def execute_session_command(self, session_id: str, request: Any, **kwargs: Any) -> Any:
-        return _sync_await(
-            self._service.execute_session_command(session_id, request, **kwargs), self._owner, self._guard_loop
-        )
-
-    def delete_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_session(session_id, **kwargs), self._owner, self._guard_loop)
-
-
-class _SyncFileSystem:
-    def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
-
-    def upload_file(self, content: bytes, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.upload_file(content, path, **kwargs), self._owner, self._guard_loop)
-
-    def download_file(self, path: str, **kwargs: Any) -> bytes:
-        return _sync_await(self._service.download_file(path, **kwargs), self._owner, self._guard_loop)
-
-    def delete_file(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_file(path, **kwargs), self._owner, self._guard_loop)
-
-    def list_files(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.list_files(path, **kwargs), self._owner, self._guard_loop)
-
-
-class _DSPySyncSandboxView:
-    """Explicit synchronous Daytona view used only by DSPy worker execution.
-
-    Routes SDK coroutines through the composition-wide bridge service loop
-    exposed by the injected dispatcher; the ``loop`` constructor argument
-    anchors the fail-fast owning-loop guard and is the fallback target when
-    no dispatcher is injected.
-    """
-
-    def __init__(
-        self,
-        sandbox: Any,
-        loop: asyncio.AbstractEventLoop,
-        dispatcher: SyncBridgeDispatcher | None = None,
-    ) -> None:
-        owner = _SyncBridgeLoop(caller_loop=loop, dispatcher=dispatcher)
-        if hasattr(sandbox, "code_interpreter"):
-            self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
-        if hasattr(sandbox, "process"):
-            self.process = _SyncProcess(sandbox.process, owner, loop)
-        if hasattr(sandbox, "fs"):
-            self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
-        self._sandbox = sandbox
-        self._loop = loop
-        self._owner = owner
-
-    @property
-    def id(self) -> object:
-        """Expose the wrapped provider identity to per-Sandbox host caches."""
-        return getattr(self._sandbox, "id", None)
-
-    def get_preview_link(self, port: int, **kwargs: Any) -> Any:
-        return _sync_await(self._sandbox.get_preview_link(port, **kwargs), self._owner, self._loop)
-
-    def close(self) -> None:
-        """Tombstone the bridge; further calls fail fast until start()."""
-        self._owner.close()
-
-    def start(self) -> None:
-        """Clear the close tombstone after close()."""
-        self._owner.start()
-
-
-def sync_sandbox(
-    sandbox: Any,
-    loop: asyncio.AbstractEventLoop,
-    dispatcher: SyncBridgeDispatcher | None = None,
-) -> Any:
-    """Return a synchronous sandbox view for DSPy worker-thread execution.
-
-    ``dispatcher`` injects the composition-owned bridge authority (QRE-154);
-    when omitted, the view falls back to its caller-captured loop. The
-    concrete view type is private to this module. Callers that
-    need to invalidate a view after lease release should use
-    :func:`tombstone_sync_sandbox`.
-    """
-    if isinstance(sandbox, _DSPySyncSandboxView):
-        return sandbox
-    return _DSPySyncSandboxView(sandbox, loop, dispatcher)
-
-
-def tombstone_sync_sandbox(sandbox: Any) -> None:
-    """Tombstone a sync sandbox view so late calls fail typed-fast.
-
-    No-op when ``sandbox`` is not a view created by :func:`sync_sandbox`.
-    The shared bridge service loop outlives individual Turns.
-    """
-    if isinstance(sandbox, _DSPySyncSandboxView):
-        sandbox.close()
 
 
 __all__ = [

@@ -1642,14 +1642,22 @@ class RecursiveRLMExecutor:
     @staticmethod
     def _start_call(reservation: RecursiveCallReservation) -> _RecursiveCall:
         started_at = time.monotonic()
-        span = start_turn_span(
-            "RLM.recursive_call",
-            inputs={
-                "recursive_depth": reservation.child_depth,
-                "call_index": reservation.call_index,
-                "prompt_chars": len(reservation.prompt),
-            },
-        )
+        inputs = {
+            "recursive_depth": reservation.child_depth,
+            "call_index": reservation.call_index,
+            "prompt_chars": len(reservation.prompt),
+        }
+        try:
+            span = start_turn_span(
+                "RLM.recursive_call",
+                span_type="AGENT",
+                inputs=inputs,
+            )
+        except TypeError:
+            span = start_turn_span(
+                "RLM.recursive_call",
+                inputs=inputs,
+            )
         return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
 
     def _acquire_child_lease(self, call_index: int, *, profile: str) -> ChildRuntimeLease:

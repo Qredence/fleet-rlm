@@ -13,6 +13,7 @@ from pathlib import Path
 from threading import Event, Thread
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -1362,3 +1363,85 @@ def test_stop_closes_pooled_client() -> None:
     broker.stop()
 
     assert broker._client is None
+
+
+def _transport_broker(handler: object) -> object:
+    """Broker over a MockTransport so transport failures can be injected deterministically."""
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+
+    broker = DaytonaHttpToolBroker(sandbox=object())
+    broker._broker_url = "http://example.test"
+    broker._broker_secret = "secret"
+    broker._client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://example.test")
+    broker._require_running_sandbox = lambda: None
+    broker.ensure_started = lambda: None
+    return broker
+
+
+def test_execute_code_transport_failure_preserves_cause_and_status() -> None:
+    """The previously opaque one-liner must carry the real transport cause."""
+    from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timed out")
+
+    broker = _transport_broker(handler)
+    with pytest.raises(DaytonaAdapterError) as exc_info:
+        broker.execute_code("print(1)", timeout_s=5)
+
+    assert exc_info.value.cause_type == "ReadTimeout"
+    assert "ReadTimeout" in exc_info.value.message
+    assert classify_provider_error(exc_info.value) == "timeout"
+
+
+def test_execute_code_rejects_oversize_payload_before_posting() -> None:
+    """The 2 MiB server cap must be caught locally, not as an opaque protocol error."""
+    from fleet_rlm.daytona import broker as broker_module
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    posted: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        posted.append(str(request.url.path))
+        return httpx.Response(200, json={"stdout": "", "final": None})
+
+    broker = _transport_broker(handler)
+    with (
+        patch.object(broker_module, "_MAX_EXECUTE_REQUEST_BYTES", 16),
+        pytest.raises(DaytonaAdapterError) as exc_info,
+    ):
+        broker.execute_code("print('a very long program')", timeout_s=5)
+
+    assert exc_info.value.cause_type == "ExecuteRequestTooLargeError"
+    assert posted == []
+
+
+def test_execute_code_refuses_after_abandoned_timeout_execution() -> None:
+    """A timed-out cell may still hold the sandbox lock; do not interleave a second cell."""
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timed out")
+
+    broker = _transport_broker(handler)
+    with pytest.raises(DaytonaAdapterError):
+        broker.execute_code("print(1)", timeout_s=5)
+
+    with pytest.raises(DaytonaAdapterError) as exc_info:
+        broker.execute_code("print(2)", timeout_s=5)
+
+    assert exc_info.value.cause_type == "AbandonedExecutionError"
+
+
+def test_execute_code_keeps_retrying_after_connect_failure() -> None:
+    """A request that never reached the sandbox cannot have left a cell running."""
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused")
+
+    broker = _transport_broker(handler)
+    for _ in range(2):
+        with pytest.raises(DaytonaAdapterError) as exc_info:
+            broker.execute_code("print(1)", timeout_s=5)
+        assert exc_info.value.cause_type != "AbandonedExecutionError"

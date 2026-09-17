@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from fleet_rlm.daytona.broker import FINAL_OUTPUT_MARKER, final_output_frame
+from fleet_rlm.daytona.models import FINAL_OUTPUT_MARKER, final_output_frame
 from fleet_rlm.rlm.compat_3_3_1 import is_final_output
 from fleet_rlm.rlm.events import RLMOutput
 

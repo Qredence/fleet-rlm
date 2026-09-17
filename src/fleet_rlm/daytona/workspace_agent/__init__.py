@@ -1,8 +1,9 @@
-"""Workspace Agent host/protocol boundary.
+"""Workspace Agent host/protocol boundary (DEPRECATED).
 
-The nested ``runtime`` module is a packaged stdlib-only artifact executed only
-inside Daytona.  Host code should import transport helpers from ``client`` and
-source/checksum helpers from ``protocol``.
+.. deprecated:: Phase 1
+    Use native Daytona sandbox filesystem operations (:mod:`fleet_rlm.daytona.fs`)
+    instead of the in-sandbox workspace agent.
+    This module is retained for backward compatibility with existing tests and callers.
 """
 
 from __future__ import annotations

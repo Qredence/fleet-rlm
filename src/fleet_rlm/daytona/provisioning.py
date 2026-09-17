@@ -352,6 +352,22 @@ def volume_config_from_settings(settings: Any) -> VolumeConfig:
     return VolumeConfig.from_settings(settings)
 
 
+def execution_timeout_s_from_settings(settings: Any) -> int:
+    """Resolve the configured sandbox execution timeout for an ephemeral interpreter.
+
+    The service path threads ``rlm.execution_timeout_s`` explicitly
+    (``composition/daytona_run_preparation.py``). Ephemeral leases must use the same
+    configured value; omitting it silently fell back to the 120s default, which a
+    long-context cell can exceed.
+    """
+    from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_TIMEOUT_S
+
+    configured = getattr(settings, "rlm_execution_timeout_s", DEFAULT_EXECUTION_TIMEOUT_S)
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured
+    return DEFAULT_EXECUTION_TIMEOUT_S
+
+
 def snapshot_execution_dependencies(
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
 ) -> tuple[str, ...]:
@@ -912,7 +928,13 @@ async def acquire_ephemeral_interpreter(
             run_id=run_id,
         )
         loop = asyncio.get_running_loop()
-        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
+        interpreter = DaytonaCodeInterpreter(
+            backend=sandbox_backend(
+                sandbox,
+                loop=loop,
+                timeout_s=execution_timeout_s_from_settings(settings),
+            )
+        )
     except BaseException:
         await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
         raise
