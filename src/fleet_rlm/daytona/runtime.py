@@ -19,8 +19,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from fleet_rlm.daytona._lease import LeaseState, RootSessionLease
 from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile
+from fleet_rlm.daytona.session_manager import LeaseState, RootSessionLease
 
 
 class DaytonaRuntimeState(StrEnum):

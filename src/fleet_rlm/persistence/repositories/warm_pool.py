@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.daytona.warm_pool import WarmPoolOwnership
 from fleet_rlm.persistence.models import WarmPoolOwnershipRow
+
+
+@dataclass(frozen=True, slots=True)
+class WarmPoolOwnership:
+    pool_id: str
+    campaign: str
+    snapshot: str
+    target: str | None
+    manifest_sha256: str
+    candidate_sha: str
+    reconciliation_generation: int = 1
+    status: str = "owned"
 
 
 class SqlAlchemyWarmPoolOwnershipStore:

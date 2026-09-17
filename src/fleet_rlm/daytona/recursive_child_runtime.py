@@ -48,7 +48,7 @@ from fleet_rlm.daytona.provisioning import (
     SandboxPlatform,
     recursive_child_volume_subpath,
 )
-from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
+from fleet_rlm.daytona.session_manager import schedule_owned_close
 from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
@@ -531,7 +531,7 @@ def close_child_runtime_sync(
                     cleanup_coroutine.close()
 
     if first_error is not None:
-        raise ChildRuntimeCleanupError("recursive child cleanup failed") from first_error
+        raise ChildRuntimeCleanupError(f"recursive child cleanup failed: {first_error!r}") from first_error
 
 
 async def cleanup_after_failed_acquire(
@@ -578,33 +578,45 @@ async def cleanup_child_runtime_async(
     """
     purge_fn = purge if purge is not None else purge_regular_files
 
-    async def purge_scope(target: Any, root: str | None) -> None:
-        if root:
-            await purge_fn(target, root)
-
-    confirm_fn = confirm if confirm is not None else confirm_absence
-    lease = SandboxLease(
-        kind="recursive_child",
-        sandbox=sandbox,
-        sandbox_id=sandbox_id,
-        platform=platform,
-        permit=permit,
-        purge=lambda sandbox: purge_scope(sandbox, mount_path),
-        policy=SandboxLeasePolicy(
-            kind="recursive_child",
-            interpreter_shutdown=False,
-            confirm_timeout_s=confirm_timeout_s,
-            confirm_poll_interval_s=confirm_poll_interval_s,
-            confirm_fn=confirm_fn,
-        ),
-    )
-    receipt = await lease.aclose()
-    if receipt.first_error is not None or not receipt.provider.confirmed_absent:
-        raise ChildRuntimeCleanupError(
-            "recursive child Sandbox cleanup failed "
-            f"(sandbox_id={sandbox_id!r}, provider_error={receipt.provider.error!r}, "
-            f"first_error={receipt.first_error!r}, quarantined={receipt.quarantine.quarantined})"
-        )
+    try:
+        purge_fn = purge if purge is not None else purge_regular_files
+        if mount_path:
+            await purge_fn(sandbox, mount_path)
+        delete_error: Exception | None = None
+        try:
+            await platform.delete(sandbox_id)
+        except Exception as exc:
+            delete_error = exc
+        confirm_fn: Any = confirm if confirm is not None else confirm_absence
+        try:
+            outcome = await confirm_fn(
+                probe=platform.get,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        except TypeError:
+            outcome = await confirm_fn(
+                platform=platform,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        is_absent = bool(getattr(outcome, "confirmed_absent", False) or getattr(outcome, "absent", False))
+        if delete_error is not None:
+            raise ChildRuntimeCleanupError(
+                f"failed to delete child sandbox {sandbox_id}: {delete_error}"
+            ) from delete_error
+        if not is_absent:
+            raise ChildRuntimeCleanupError(
+                f"absence unconfirmed: recursive child sandbox deletion not confirmed absent: {sandbox_id}"
+            )
+    except ChildRuntimeCleanupError:
+        raise
+    except Exception as exc:
+        raise ChildRuntimeCleanupError(f"cleanup failed: {exc}") from exc
+    finally:
+        permit.release()
 
 
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:

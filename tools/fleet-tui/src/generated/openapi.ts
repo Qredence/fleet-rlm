@@ -164,19 +164,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * Download Artifact
-         * @description Download an artifact within the caller's workspace scope.
-         *
-         *     Parameters:
-         *         artifact_id (UUID): Identifier of the artifact to download.
-         *
-         *     Returns:
-         *         Response: The artifact content with its media type and download filename.
-         *
-         *     Raises:
-         *         HTTPException: If the artifact is missing or artifact storage is unavailable.
-         */
+        /** Download Artifact */
         get: operations["download_artifact"];
         put?: never;
         post?: never;
@@ -193,16 +181,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List Skills
-         * @description List skill metadata available to the caller, optionally ranked by a search query.
-         *
-         *     Parameters:
-         *         q (str | None): Optional query used to rank skills by matching terms in their names or descriptions.
-         *
-         *     Returns:
-         *         list[SkillCardResponse]: Response-formatted skill cards.
-         */
+        /** List Skills */
         get: operations["list_skills"];
         put?: never;
         post?: never;
@@ -240,14 +219,6 @@ export interface paths {
         /**
          * Request Run Cancellation
          * @description Request cancellation for a run.
-         *
-         *     Parameters:
-         *         run_id (UUID): The identifier of the run to cancel.
-         *         identity (LocalScopeDep): The deterministic local User and Workspace scope.
-         *         lifecycle (RunLifecycleDep): The run lifecycle service.
-         *
-         *     Returns:
-         *         CancellationResponse: The run identifier and resulting cancellation state.
          */
         put: operations["request_run_cancellation"];
         post?: never;
@@ -271,20 +242,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /**
-         * Patch Settings Policy
-         * @description Update the settings policy's default profile or one atomic batch of fields.
-         *
-         *     Parameters:
-         *         body (SettingsPolicyPatchRequest): The requested profile, legacy field, or
-         *             batch update, including the expected revision.
-         *
-         *     Returns:
-         *         SettingsPolicyResponse: The updated settings policy.
-         *
-         *     Raises:
-         *         HTTPException: If the revision conflicts, the update is invalid, or the policy is unavailable.
-         */
+        /** Patch Settings Policy */
         patch: operations["update_settings_policy"];
         trace?: never;
     };

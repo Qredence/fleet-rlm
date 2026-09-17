@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.lifecycle import AttachmentLifecycle

@@ -36,9 +36,7 @@ from fleet_rlm.chat.preparation import (
     claim_history_records,
 )
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona._lease import RootSessionLease
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.errors import is_sandbox_not_found
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
@@ -54,14 +52,17 @@ from fleet_rlm.daytona.provisioning import (
 )
 from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory
 from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
-from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     BindingStoreLike,
     DaytonaLeaseAcquisitionTimeoutError,
     DaytonaSessionManager,
     LeaseRequest,
+    RootSessionLease,
+    has_pending_lease_ownership,
+    wait_lease_ownership,
 )
+from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
@@ -227,7 +228,7 @@ class _DaytonaRunSink:
         await self._files.write_bytes(location, data)
 
     async def remove(self, location: str) -> None:
-        await self._files.remove(location)
+        await self._files.remove_bytes(location)
 
     async def write_private(self, logical_path: str, data: bytes) -> None:
         await self.write(logical_path, data)

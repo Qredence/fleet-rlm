@@ -29,7 +29,7 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
@@ -89,10 +89,6 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
-from fleet_rlm.runtime.errors import FilesystemToolError
-
-if TYPE_CHECKING:
-    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
 logger = logging.getLogger(__name__)
 
@@ -762,7 +758,7 @@ class DaytonaCodeInterpreter:
         self._started = False
         self._shutdown = False
         self._broker_port = broker_port
-        self._http_broker: DaytonaHttpToolBroker | None = None
+        self._http_broker: Any | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
@@ -795,9 +791,9 @@ class DaytonaCodeInterpreter:
         )
 
     @property
-    def broker(self) -> DaytonaHttpToolBroker | None:
+    def broker(self) -> Any:
         """Return the broker context owned by this interpreter, when started."""
-        return self._http_broker
+        return None
 
     @property
     def output_fields(self) -> list[dict[str, Any]] | None:
@@ -1195,18 +1191,11 @@ class DaytonaCodeInterpreter:
                 else:
                     self._ensure_bindings()
                     ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
-                    if self._http_broker is not None:
-                        result = self._execute_with_http_broker(
-                            code,
-                            variables,
-                            on_stdout=stdout_projector.feed,
-                        )
-                    else:
-                        raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
-                        if isinstance(raw, BackendExecutionResult):
-                            self._context_accesses.extend(raw.context_accesses)
-                            self._raise_context_injection_error(code, raw)
-                        result = self._finalize(raw)
+                    raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
+                    if isinstance(raw, BackendExecutionResult):
+                        self._context_accesses.extend(raw.context_accesses)
+                        self._raise_context_injection_error(code, raw)
+                    result = self._finalize(raw)
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
                 repair = self._reject_repeated_no_progress(normalized_code, result)
                 if repair is not None:
@@ -1221,23 +1210,13 @@ class DaytonaCodeInterpreter:
                     observe=self._observe,
                 )
                 outputs: dict[str, Any] = {
-                    "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
+                    "path": type(self._backend).__name__,
                     "result_kind": _result_kind(result),
                     "stdout_chars": len(str(result)),
                     "output_preview": sanitize_trace_text(str(result), max_len=trace_chars),
+                    "ensure_bindings_ms": ensure_bindings_ms,
+                    "execute_ms": execute_ms,
                 }
-                if self._http_broker is not None:
-                    outputs["ensure_bindings_ms"] = ensure_bindings_ms
-                    outputs["execute_ms"] = execute_ms
-                    broker_metrics = dict(self._http_broker.last_execution_stats)
-                    # Keep the flat keys for existing trace consumers, but put
-                    # the complete broker breakdown under one bounded mapping.
-                    # The generic trace projection caps a mapping at 32 keys;
-                    # placing these metrics together prevents the six
-                    # human-readable fields above from hiding the tail of the
-                    # execution statistics.
-                    outputs["broker_metrics"] = broker_metrics
-                    outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
             except TurnBudgetExhausted as exc:
@@ -1356,6 +1335,7 @@ class DaytonaCodeInterpreter:
             strict_broker_cleanup (bool): Whether broker cleanup errors should be
                 propagated. When false, broker cleanup errors are suppressed.
         """
+        del strict_broker_cleanup
         # Shutdown may be requested by both the owner-loop close path and a
         # worker-thread release callback.  Single-flight it, and only mark the
         # interpreter closed after every owned resource has settled so a
@@ -1383,35 +1363,18 @@ class DaytonaCodeInterpreter:
                     self._execution_lock.acquire()
                     self._execution_lock.release()
             first_error: BaseException | None = None
-            broker = self._http_broker
-            broker_settled = True
-            if broker is not None:
-                try:
-                    broker_result = broker.stop(strict=strict_broker_cleanup)
-                    # Older injected broker doubles returned None; treat that
-                    # as the historical successful-stop result.
-                    broker_settled = broker_result is not False
-                except BaseException as exc:
-                    first_error = exc
-                if broker_settled:
-                    self._http_broker = None
-                else:
-                    # Non-strict shutdown may suppress a provider cleanup
-                    # error, but the broker remains owned and retryable. Do
-                    # not publish interpreter shutdown until it settles.
-                    logger.warning("broker cleanup remains pending during interpreter shutdown")
             backend = self._backend
             if backend is not None:
                 try:
                     backend.close()
                 except BaseException as exc:
-                    first_error = first_error or exc
+                    first_error = exc
                 else:
                     self._backend = None
             if first_error is not None:
                 raise first_error
             self._turn_request = None
-            self._shutdown = broker_settled
+            self._shutdown = True
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any]) -> Any:
@@ -1443,13 +1406,15 @@ class DaytonaCodeInterpreter:
             return
         tools = self._execution_tools()
         self._bound_tools = tools
+        if self._broker_port is not None and self._broker_port <= 0 and bool(tools):
+            raise DaytonaAdapterError(
+                message="brokerless mode cannot dispatch host tools",
+                cause_type="InterpreterConfigurationError",
+            )
         bind_tools = getattr(backend, "bind_host_tools", None)
         ensure_submit = getattr(backend, "ensure_submit", None)
-        can_handle_directly = callable(bind_tools) and callable(ensure_submit)
-        if isinstance(backend, _SandboxProcessBackend) and bool(tools):
-            can_handle_directly = False
 
-        if can_handle_directly:
+        if callable(bind_tools) and callable(ensure_submit):
             if not needs_binding_refresh(
                 desired_generation=self._binding_generation,
                 installed_generation=self._installed_binding_generation,
@@ -1464,107 +1429,21 @@ class DaytonaCodeInterpreter:
                     return self._invoke_tool_with_args(name, args, kwargs)
 
                 invoke.__name__ = name
-                # The Daytona broker derives its remote wrapper from the
-                # callable signature. Preserve the source Tool's signature,
-                # but never leak the old ``_name`` closure default as a user
-                # argument (which would turn ``tool('value')`` into a lookup
-                # for a tool literally named ``value``).
                 with contextlib.suppress(TypeError, ValueError):
                     object.__setattr__(invoke, "__signature__", inspect.signature(source))
                 return invoke
 
-            assert bind_tools is not None and ensure_submit is not None
             bind_tools({name: host_binding(name, source) for name, source in tools.items()})
             ensure_submit(self.output_fields)
-            self._installed_binding_generation = self._binding_generation
-            return
-        if not isinstance(backend, _SandboxProcessBackend):
-            self._installed_binding_generation = self._binding_generation
-            return
-        if self._broker_port <= 0 and bool(tools):
-            raise DaytonaAdapterError(
-                message="brokerless mode cannot dispatch host tools",
-                cause_type="InterpreterConfigurationError",
-            )
-        broker_ready = self._http_broker is not None and not bool(getattr(self._http_broker, "_stopped", False))
-        if not needs_binding_refresh(
-            desired_generation=self._binding_generation,
-            installed_generation=self._installed_binding_generation,
-            broker_ready=broker_ready,
-        ):
-            return
-        if not broker_ready:
-            from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-
-            context_binding = self._context_binding
-            if self._http_broker is None or bool(getattr(self._http_broker, "_stopped", False)):
-                self._http_broker = DaytonaHttpToolBroker(
-                    sandbox=backend.sandbox,
-                    broker_port=self._broker_port,
-                    context_mount_root=context_binding[0] if context_binding is not None else None,
-                    context_manifest_sha256=context_binding[1] if context_binding is not None else None,
+            bind_manifest = getattr(backend, "bind_context_manifest", None)
+            if self._context_binding is not None and callable(bind_manifest):
+                bind_manifest(
+                    trusted_mount_root=self._context_binding[0],
+                    expected_manifest_sha256=self._context_binding[1],
                 )
-            self._http_broker.ensure_started()
-        self._http_broker.register_tools(tools)
-        self._http_broker.execute_code(
-            self._http_broker.submit_setup_code(self.output_fields),
-            timeout_s=float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S),
-        )
+            self._installed_binding_generation = self._binding_generation
+            return
         self._installed_binding_generation = self._binding_generation
-
-    def _execute_with_http_broker(
-        self,
-        code: str,
-        variables: dict[str, Any] | None,
-        *,
-        on_stdout: OutputCallback,
-    ) -> Any:
-        broker = self._http_broker
-        backend = self._backend
-        if broker is None or backend is None:
-            msg = "http broker is not configured"
-            raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
-
-        def tool_executor(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-            if name not in self._bound_tools:
-                msg = f"unknown tool: {name}"
-                raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
-            try:
-                # Host contract is kwargs-only: DSPy 3.3.x interpreter tools are
-                # ``def invoke(**kwargs)`` callables behind spoofed signatures,
-                # so broker payloads forward every parameter by name. ``args``
-                # is retained only for POSITIONAL_ONLY completeness.
-                return self._invoke_tool_with_args(name, tuple(args), kwargs)
-            except FilesystemToolError as exc:
-                return {
-                    "ok": False,
-                    "error": exc.code,
-                    "message": exc.public_message,
-                }
-            except Exception as exc:
-                raise DaytonaAdapterError(
-                    message=sanitize_provider_message(str(exc)),
-                    cause_type=type(exc).__name__,
-                ) from exc
-
-        if isinstance(backend, _SandboxProcessBackend):
-            timeout_s = float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S)
-
-            def run_code() -> str | BackendExecutionResult:
-                return broker.execute_code(code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
-
-        else:
-
-            def run_code() -> str | BackendExecutionResult:
-                return self._run_backend(code, variables, on_stdout=on_stdout)
-
-        raw = broker.execute_with_callbacks(
-            run_code=run_code,
-            tool_executor=tool_executor,
-        )
-        self._context_accesses.extend(raw.context_accesses)
-        self._raise_context_injection_error(code, raw)
-        return self._finalize(raw)
 
     def drain_context_accesses(self) -> tuple[str, ...]:
         """Return and clear sanitized attachment IDs read during capsule injection."""

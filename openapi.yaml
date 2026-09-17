@@ -491,11 +491,6 @@ paths:
       tags:
       - artifacts
       summary: Download Artifact
-      description: "Download an artifact within the caller's workspace scope.\n\n\
-        Parameters:\n    artifact_id (UUID): Identifier of the artifact to download.\n\
-        \nReturns:\n    Response: The artifact content with its media type and download\
-        \ filename.\n\nRaises:\n    HTTPException: If the artifact is missing or artifact\
-        \ storage is unavailable."
       operationId: download_artifact
       parameters:
       - name: artifact_id
@@ -545,10 +540,6 @@ paths:
       tags:
       - skills
       summary: List Skills
-      description: "List skill metadata available to the caller, optionally ranked\
-        \ by a search query.\n\nParameters:\n    q (str | None): Optional query used\
-        \ to rank skills by matching terms in their names or descriptions.\n\nReturns:\n\
-        \    list[SkillCardResponse]: Response-formatted skill cards."
       operationId: list_skills
       parameters:
       - name: q
@@ -627,11 +618,7 @@ paths:
       tags:
       - runs
       summary: Request Run Cancellation
-      description: "Request cancellation for a run.\n\nParameters:\n    run_id (UUID):\
-        \ The identifier of the run to cancel.\n    identity (LocalScopeDep): The\
-        \ deterministic local User and Workspace scope.\n    lifecycle (RunLifecycleDep):\
-        \ The run lifecycle service.\n\nReturns:\n    CancellationResponse: The run\
-        \ identifier and resulting cancellation state."
+      description: Request cancellation for a run.
       operationId: request_run_cancellation
       parameters:
       - name: run_id
@@ -689,12 +676,6 @@ paths:
       tags:
       - settings
       summary: Patch Settings Policy
-      description: "Update the settings policy's default profile or one atomic batch\
-        \ of fields.\n\nParameters:\n    body (SettingsPolicyPatchRequest): The requested\
-        \ profile, legacy field, or\n        batch update, including the expected\
-        \ revision.\n\nReturns:\n    SettingsPolicyResponse: The updated settings\
-        \ policy.\n\nRaises:\n    HTTPException: If the revision conflicts, the update\
-        \ is invalid, or the policy is unavailable."
       operationId: update_settings_policy
       requestBody:
         content:

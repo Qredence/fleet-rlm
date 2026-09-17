@@ -1413,17 +1413,6 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
     ]
 
 
-def test_broker_value_encoding_is_strict_and_preserves_supported_values() -> None:
-    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-    from fleet_rlm.daytona.errors import DaytonaAdapterError
-
-    assert DaytonaHttpToolBroker._encode_value({"nested": [True, None, 1.5]}) == {"nested": [True, None, 1.5]}
-    with pytest.raises(DaytonaAdapterError, match="unsupported"):
-        DaytonaHttpToolBroker._encode_value({1: "coercion is forbidden"})
-    with pytest.raises(DaytonaAdapterError, match="unsupported"):
-        DaytonaHttpToolBroker._encode_value(float("nan"))
-    with pytest.raises(DaytonaAdapterError, match="unsupported"):
-        DaytonaHttpToolBroker._encode_value({1, 2})
 
 
 def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None:

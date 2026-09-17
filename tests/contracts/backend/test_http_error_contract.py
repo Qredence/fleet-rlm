@@ -18,7 +18,7 @@ from fastapi.testclient import TestClient
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fleet_rlm.api.errors import http_error, install_error_handlers
-from fleet_rlm.api.routes.workspace_files import _READ_ERRORS, _WRITE_ERRORS
+from fleet_rlm.api.routes.files import _READ_ERRORS, _WRITE_ERRORS
 from fleet_rlm.composition.testing import create_testing_app
 
 

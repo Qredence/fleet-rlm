@@ -183,17 +183,23 @@ def create_app(
     install_error_handlers(app)
     install_openapi_contract(app)
 
-    from fleet_rlm.api.routes.artifacts import router as artifacts_router
-    from fleet_rlm.api.routes.attachments import router as attachments_router
-    from fleet_rlm.api.routes.health import router as health_router
-    from fleet_rlm.api.routes.runs import router as runs_router
-    from fleet_rlm.api.routes.sessions import router as sessions_router
-    from fleet_rlm.api.routes.settings import router as settings_router
-    from fleet_rlm.api.routes.skills import router as skills_router
-    from fleet_rlm.api.routes.traces import router as traces_router
+    from fleet_rlm.api.routes.files import (
+        artifacts_router,
+        attachments_router,
+        volume_router,
+        workspace_files_router,
+    )
+    from fleet_rlm.api.routes.health import (
+        health_router,
+        settings_router,
+        skills_router,
+    )
+    from fleet_rlm.api.routes.sessions import (
+        runs_router,
+        sessions_router,
+        traces_router,
+    )
     from fleet_rlm.api.routes.turns import router as turns_router
-    from fleet_rlm.api.routes.volume import router as volume_router
-    from fleet_rlm.api.routes.workspace_files import router as workspace_files_router
 
     app.include_router(turns_router)
     app.include_router(traces_router)

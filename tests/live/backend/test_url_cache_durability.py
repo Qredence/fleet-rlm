@@ -14,7 +14,7 @@ import pytest
 from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.broker import sync_sandbox
+from fleet_rlm.daytona.sync_bridge import sync_sandbox
 from fleet_rlm.daytona.session_manager import LeaseRequest
 from fleet_rlm.observability.tracing import turn_trace
 from fleet_rlm.rlm.events import ToolCompleted, observe_tool

@@ -267,3 +267,24 @@ class FleetFinalOutputError(Exception):
 
 {build_submit_setup_code(output_fields)}
 """.strip()
+
+
+_EXECUTION_STAT_KEYS: tuple[str, ...] = (
+    "poll_count",
+    "empty_poll_count",
+    "poll_error_count",
+    "poll_latency_ms",
+    "poll_latency_max_ms",
+    "pending_batch_count",
+    "pending_request_count",
+    "callback_dispatch_count",
+    "callback_dispatch_ms",
+    "callback_dispatch_max_ms",
+    "tool_execution_ms",
+    "tool_execution_max_ms",
+    "result_post_count",
+    "result_post_failures",
+    "result_post_ms",
+    "result_post_max_ms",
+    "pending_wait_requested_ms",
+)

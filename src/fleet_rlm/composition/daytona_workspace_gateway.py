@@ -28,7 +28,7 @@ from fleet_rlm.daytona.provisioning import (
     ensure_shared_volume_layout,
     get_or_create_volume_id,
 )
-from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy
+from fleet_rlm.daytona.session_manager import SandboxLease, SandboxLeasePolicy
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceTextPage
 from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.storage import (
@@ -78,7 +78,22 @@ class _DaytonaWorkspaceFileSession:
 
     @property
     def last_warnings(self) -> tuple[Mapping[str, object], ...]:
-        return self._workspace.last_warnings
+        return self._workspace.warnings()
+
+    def warnings(self) -> tuple[Mapping[str, object], ...]:
+        return self._workspace.warnings()
+
+    async def stat_path(self, path: str, *, include_checksum: bool | None = None) -> WorkspaceEntry:
+        return await self._workspace.stat_path(path, include_checksum=include_checksum)
+
+    async def read_text(
+        self,
+        path: str,
+        *,
+        cursor: str | None = None,
+        max_chars: int = 64_000,
+    ) -> WorkspaceTextPage:
+        return await self._workspace.read_text(path, cursor=cursor, max_chars=max_chars)
 
     async def list_entries(
         self,
@@ -94,7 +109,7 @@ class _DaytonaWorkspaceFileSession:
             listing.next_cursor,
         )
 
-    async def stat(self, path: str, *, include_checksum: bool = False) -> WorkspaceFileEntry | None:
+    async def stat(self, path: str, *, include_checksum: bool | None = False) -> WorkspaceFileEntry | None:
         entry = await self._workspace.stat(path, include_checksum=include_checksum or True)
         if entry is None:
             return None
@@ -105,8 +120,8 @@ class _DaytonaWorkspaceFileSession:
         self,
         path: str,
         *,
-        cursor: str | None,
-        max_chars: int,
+        cursor: str | None = None,
+        max_chars: int = 64_000,
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
         return await self._workspace.read_text_page(
@@ -121,7 +136,7 @@ class _DaytonaWorkspaceFileSession:
         path: str,
         content: str,
         *,
-        overwrite: bool,
+        overwrite: bool = True,
         expected_sha256: str | None = None,
     ) -> WorkspaceFileEntry:
         # The provider-side agent compares and mutates in one mounted
@@ -217,14 +232,14 @@ class _DaytonaWorkspaceVolumeSession:
         return await self._files.exists(self._path(logical_path))
 
     async def remove_bytes(self, logical_path: str) -> None:
-        await self._files.remove(self._path(logical_path))
+        await self._files.remove_bytes(self._path(logical_path))
 
     async def list_files(
         self,
         logical_root: str,
         *,
-        max_depth: int,
-        max_files: int,
+        max_depth: int = 10,
+        max_files: int = 1000,
     ) -> tuple[VolumeFile, ...]:
         path = PurePosixPath(logical_root)
         # Listing the mount root is valid even though byte operations require
@@ -367,10 +382,15 @@ class DaytonaWorkspaceVolumeGateway:
         self._mount_path = str(validate_mount_path(mount_path))
 
     @asynccontextmanager
-    async def open_workspace(self, workspace_id: UUID) -> AsyncIterator[WorkspaceVolumeSession]:
+    async def open_workspace(
+        self,
+        workspace_id: UUID,
+        *,
+        purpose: str | None = None,
+    ) -> AsyncIterator[WorkspaceVolumeSession]:
         async with self._gateway.open_sandbox(
             workspace_id,
-            purpose="workspace-volume-io",
+            purpose=purpose or "workspace-volume-io",
         ) as sandbox:
             yield _DaytonaWorkspaceVolumeSession(
                 sandbox,
@@ -407,8 +427,8 @@ class DaytonaWorkspaceVolumeGateway:
         workspace_id: UUID,
         logical_root: str,
         *,
-        max_depth: int,
-        max_files: int,
+        max_depth: int = 10,
+        max_files: int = 1000,
     ) -> tuple[VolumeFile, ...]:
         async with self.open_workspace(workspace_id) as volume:
             return await volume.list_files(
