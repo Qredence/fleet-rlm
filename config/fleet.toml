@@ -74,10 +74,6 @@ child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 org_id_env = "FLEET_DAYTONA_ORG_ID"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
-warm_pool_enabled = true
-warm_pool_size = 1
-# Explicit operator-selected clean SemanticChild capacity; reconciled separately.
-warm_pool_region = "us"
 
 [defaults.logging]
 level = "INFO"
