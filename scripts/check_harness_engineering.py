@@ -195,7 +195,6 @@ class HarnessChecker:
             "tools/fleet-tui/AGENTS.md",
             "CONTRIBUTING.md",
             "Makefile",
-            "PRODUCT.md",
             "pyproject.toml",
             ".pre-commit-config.yaml",
             ".circleci/config.yml",

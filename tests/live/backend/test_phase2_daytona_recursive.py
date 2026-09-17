@@ -130,7 +130,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         Settings: Validated settings configured for the Daytona recursive canary.
     """
     if not os.environ.get(_EVIDENCE_ENV):
-        pytest.skip("Run this credentialed canary via scripts/live_phase2_recursive_verify.py")
+        pytest.skip("Run this credentialed canary with live Daytona credentials")
     load_dotenv(_REPO_ROOT / ".env", override=False)
     import fleet_rlm.config.loader as configuration
 

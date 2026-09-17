@@ -7,7 +7,7 @@ import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, Self, TypeAlias
+from typing import Any, Protocol, Self, TypeAlias, TypeVar
 from uuid import UUID
 
 from fleet_rlm.chat.commands import OpenTurnCommand
@@ -19,11 +19,6 @@ from fleet_rlm.chat.preparation import (
     RunPreparationTimeoutError,
 )
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
-from fleet_rlm.chat.run_ownership import (
-    ClaimHeartbeat,
-    shield_cleanup,
-    stop_heartbeat,
-)
 from fleet_rlm.observability.tracing import annotate_trace_io, record_settlement_status, turn_phase_span, turn_trace
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
@@ -41,6 +36,7 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.rlm.result import RLMOutcome, RLMUsage, empty_rlm_usage
 from fleet_rlm.rlm.runtime import RLMExecutionContext
 from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     CommittedRunReplay,
@@ -53,6 +49,32 @@ from fleet_rlm.sessions.run_state import (
     RunSettlement,
     RunStateError,
 )
+
+T = TypeVar("T")
+
+
+@dataclass(slots=True)
+class ClaimHeartbeat:
+    task: asyncio.Task[None]
+    lost: asyncio.Event
+    definitive_loss: bool = False
+
+
+async def shield_cleanup(awaitable: Awaitable[T]) -> T:
+    """Complete an awaitable despite caller cancellation."""
+    effect = OwnedEffect.start(awaitable)
+    settled = await effect.settle()
+    if settled.caller_cancelled:
+        raise asyncio.CancelledError
+    return settled.result()
+
+
+async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
+    if heartbeat is None:
+        return
+    heartbeat.task.cancel()
+    await asyncio.gather(heartbeat.task, return_exceptions=True)
+
 
 logger = logging.getLogger(__name__)
 

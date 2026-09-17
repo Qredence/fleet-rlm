@@ -195,7 +195,7 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         Settings: Validated settings using an upgraded temporary database and bounded execution limits.
     """
     if not os.environ.get(_EVIDENCE_ENV):
-        pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")
+        pytest.skip("Run this credentialed canary with live Daytona credentials")
     load_dotenv(_REPO_ROOT / ".env", override=False)
     try:
         policy = require_live_execution()

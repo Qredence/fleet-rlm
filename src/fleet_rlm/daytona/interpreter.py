@@ -17,7 +17,7 @@ import logging
 import shlex
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Protocol, cast
 from uuid import uuid4
@@ -30,19 +30,12 @@ from fleet_rlm.daytona.errors import (
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.interpreter_output import (
-    OutputCallback,
-    _close_output_stream,
-    _emit_output_delta,
-    _flush_step_output,
-    _OutputStreamState,
-    _PublicStdoutProjector,
-)
 from fleet_rlm.daytona.models import (
     FINAL_OUTPUT_MARKER,
     FleetFinalOutputError,
     build_submit_setup_code,
     extract_final_payload,
+    final_output_frame,
 )
 from fleet_rlm.daytona.sync_bridge import (
     SyncBridgeDispatcher,
@@ -90,6 +83,134 @@ _BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.Contex
     "fleet_interpreter_binding_reservation",
     default=None,
 )
+
+
+OutputCallback = Callable[[str], None]
+
+
+class _PublicStdoutProjector:
+    """Forward ordinary stdout while hiding the known SUBMIT stdout frame."""
+
+    def __init__(self, emit: OutputCallback) -> None:
+        self._emit = emit
+        self._marker = FINAL_OUTPUT_MARKER
+        self._buffer = ""
+
+    def feed(self, value: str) -> None:
+        if not value:
+            return
+        pending = self._buffer + value
+        self._buffer = ""
+        start = pending.find(self._marker)
+        if start >= 0:
+            if start:
+                self._emit(pending[:start])
+            self._buffer = pending[start:]
+            return
+        suffix = self._marker_prefix_suffix(pending)
+        if suffix:
+            self._emit(pending[: -len(suffix)])
+            self._buffer = suffix
+        else:
+            self._emit(pending)
+
+    def finish(self, *, expected_final: Mapping[str, Any] | None = None) -> None:
+        pending = self._buffer
+        self._buffer = ""
+        if not pending:
+            return
+        if expected_final is None:
+            self._emit(pending)
+            return
+
+        frame = final_output_frame(expected_final, marker=self._marker)
+        offset = 0
+        while True:
+            start = pending.find(frame, offset)
+            if start < 0:
+                self._emit(pending[offset:])
+                return
+            self._emit(pending[offset:start])
+            offset = start + len(frame)
+            if pending.startswith("\r\n", offset):
+                offset += 2
+            elif pending.startswith(("\n", "\r"), offset):
+                offset += 1
+
+    def _marker_prefix_suffix(self, value: str) -> str:
+        for length in range(min(len(value), len(self._marker) - 1), 0, -1):
+            if value.endswith(self._marker[:length]):
+                return value[-length:]
+        return ""
+
+
+@dataclass(slots=True)
+class _OutputStreamState:
+    """Per-step public output-stream tracking."""
+
+    emitted_chars: int = 0
+    streamed_chunks: list[str] = field(default_factory=list)
+    closed: bool = False
+
+
+def _emit_output_delta(
+    value: str,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    max_chars: int,
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    if state.closed or not value:
+        return
+    remaining = max_chars - state.emitted_chars
+    if remaining <= 0:
+        return
+    chunk = value[:remaining]
+    state.emitted_chars += len(chunk)
+    if chunk:
+        state.streamed_chunks.append(chunk)
+        observe(RLMOutput(chunk, step, stream_id, True, False))
+
+
+def _close_output_stream(
+    text: str,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    state.closed = True
+    observe(RLMOutput(text, step, stream_id, False, True))
+
+
+def _flush_step_output(
+    result: Any,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    public_output: Callable[[Any], str],
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    if state.closed:
+        return
+    public = public_output(result)
+    if is_final_output(result):
+        _close_output_stream(public, step=step, stream_id=stream_id, state=state, observe=observe)
+        return
+    streamed = "".join(state.streamed_chunks)
+    if public == streamed:
+        state.closed = True
+        return
+    if public.startswith(streamed):
+        tail = public[len(streamed) :]
+        state.closed = True
+        observe(RLMOutput(tail, step, stream_id, True, True))
+        return
+    _close_output_stream(public, step=step, stream_id=stream_id, state=state, observe=observe)
 
 
 @dataclass(frozen=True, slots=True)

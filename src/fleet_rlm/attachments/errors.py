@@ -1,23 +1,17 @@
-"""Attachment / upload errors."""
+"""Attachment / upload errors (re-exported from service.py)."""
 
-from __future__ import annotations
+from fleet_rlm.attachments.service import (
+    AttachmentError,
+    AttachmentIntegrityError,
+    AttachmentNotFoundError,
+    AttachmentStorageError,
+    AttachmentValidationError,
+)
 
-
-class AttachmentError(RuntimeError):
-    """Base attachment error."""
-
-
-class AttachmentNotFoundError(AttachmentError):
-    """Missing or unauthorized attachment (do not distinguish for clients)."""
-
-
-class AttachmentValidationError(AttachmentError):
-    """Rejected filename, size, or content."""
-
-
-class AttachmentIntegrityError(AttachmentError):
-    """Authorized durable bytes are absent or contradict their metadata."""
-
-
-class AttachmentStorageError(AttachmentError):
-    """A required catalog, durable blob, or Run sink is unavailable."""
+__all__ = [
+    "AttachmentError",
+    "AttachmentIntegrityError",
+    "AttachmentNotFoundError",
+    "AttachmentStorageError",
+    "AttachmentValidationError",
+]

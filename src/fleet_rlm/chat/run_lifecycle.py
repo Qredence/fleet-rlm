@@ -6,13 +6,13 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
 from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
-from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.turn_detail_policy import commit_success
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
@@ -53,6 +53,56 @@ from fleet_rlm.workspace.memory import (
     MemoryCandidate,
     MemoryPromotionIntent,
 )
+
+PostCommitPromotionStatus = Literal["completed", "deadline_exceeded", "interrupted", "failed"]
+
+
+@dataclass(frozen=True, slots=True)
+class PostCommitPromotionAttempt:
+    """One bounded wait outcome for an owned promotion effect."""
+
+    status: PostCommitPromotionStatus
+    result: Any = None
+
+
+class OwnedPostCommitMemoryPromotion:
+    """Keep one synchronous promotion effect owned until its dependency lease closes."""
+
+    def __init__(self, action: Callable[[tuple[Any, ...]], Any]) -> None:
+        self._action = action
+        self._task: asyncio.Task[Any] | None = None
+
+    async def promote(
+        self,
+        candidates: tuple[Any, ...],
+        *,
+        timeout_s: float,
+    ) -> PostCommitPromotionAttempt:
+        """Start the effect once and wait only through the post-commit deadline."""
+        if self._task is not None:
+            raise RuntimeError("post-commit Memory promotion already started")
+        self._task = asyncio.create_task(
+            asyncio.to_thread(self._action, candidates),
+            name="fleet-post-commit-memory-promotion",
+        )
+        try:
+            result = await asyncio.wait_for(asyncio.shield(self._task), timeout=max(0.0, timeout_s))
+        except TimeoutError:
+            return PostCommitPromotionAttempt("deadline_exceeded")
+        except asyncio.CancelledError:
+            return PostCommitPromotionAttempt("interrupted")
+        except BaseException:
+            return PostCommitPromotionAttempt("failed")
+        return PostCommitPromotionAttempt("completed", result)
+
+    async def wait_owned(self) -> None:
+        """Wait for the started promotion task to settle, suppressing any exceptions."""
+        task = self._task
+        if task is None:
+            return
+        with contextlib.suppress(BaseException):
+            await OwnedEffect.from_task(task).settle()
+
 
 MemoryIntentBuilder = Callable[[UUID, tuple[MemoryCandidate, ...]], tuple[MemoryPromotionIntent, ...]]
 
