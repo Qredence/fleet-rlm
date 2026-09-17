@@ -23,17 +23,15 @@ from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.models import (
     PreparedAttachments,
 )
-from fleet_rlm.chat.capability_preparation import (
-    PreparedHostCapabilities,
-    prepare_host_capabilities,
-)
-from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
 from fleet_rlm.chat.preparation import (
+    PreparedHostCapabilities,
     RunEnvironment,
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
     claim_history_records,
+    prepare_host_capabilities,
 )
+from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import is_sandbox_not_found

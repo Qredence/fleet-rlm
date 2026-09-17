@@ -18,13 +18,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
 from fleet_rlm.attachments.models import PreparedAttachments
-from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities, prepare_host_capabilities
 from fleet_rlm.chat.preparation import (
     DefaultRunPreparer,
+    PreparedHostCapabilities,
     PreparedRun,
     RunEnvironment,
     RunEnvironmentProvider,
     RunPreparation,
+    prepare_host_capabilities,
 )
 from fleet_rlm.composition.inventory import (
     CompositionError,

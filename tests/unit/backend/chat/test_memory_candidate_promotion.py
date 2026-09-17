@@ -211,8 +211,7 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
 @pytest.mark.asyncio
 async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> None:
     from fleet_rlm.chat import run_lifecycle as lifecycle_module
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
 
     monkeypatch.setattr(lifecycle_module, "_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S", 0.01)
     started = threading.Event()
@@ -254,8 +253,8 @@ async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_prepared_run_retains_resources_until_timed_out_promotion_settles() -> None:
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
     from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion
 
     started = threading.Event()
     release_promotion = threading.Event()
@@ -434,7 +433,7 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
 

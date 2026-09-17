@@ -308,8 +308,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 @pytest.mark.asyncio
 async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat, TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
@@ -713,8 +712,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     import logging
 
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat, TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
         PredictionResult,

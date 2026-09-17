@@ -311,8 +311,7 @@ async def test_policy_change_at_delivery_completes_without_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_fast_path_success_completes_outbox_rows() -> None:
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.workspace.memory import (
@@ -359,8 +358,7 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None:
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.workspace.memory import (

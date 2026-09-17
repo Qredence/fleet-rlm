@@ -683,8 +683,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
 @pytest.mark.asyncio
 async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_soft() -> None:
 
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -748,8 +747,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
 async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -819,8 +817,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
     import contextlib
     from uuid import uuid4
 
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -899,8 +896,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(terminal: str) -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.post_commit_memory import OwnedPostCommitMemoryPromotion
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
+    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (

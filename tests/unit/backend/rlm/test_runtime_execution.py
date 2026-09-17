@@ -475,7 +475,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
-    from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
+    from fleet_rlm.chat.preparation import PreparedHostCapabilities
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
