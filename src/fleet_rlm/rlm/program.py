@@ -1554,7 +1554,18 @@ class DeadlineLMProxy(dspy.BaseLM):
             now=now,
         )
         if call_deadline is not None:
-            available = min(available, call_deadline - now)
+            attempt_window = call_deadline - now
+            if attempt_window <= 0:
+                # The retry shares the window opened by the first attempt, so a slow first
+                # attempt leaves nothing for it. Say so explicitly: the turn deadline is
+                # usually still far away and blaming it sends operators down the wrong path.
+                role_ceiling = _positive_timeout(self._fleet_role_timeout)
+                ceiling_text = f"{role_ceiling:g}s" if role_ceiling is not None else "configured"
+                raise TimeoutError(
+                    f"LM retry window exhausted: the previous attempt consumed the {ceiling_text} "
+                    "role timeout (llm.<role>.timeout_seconds), leaving no time for a retry"
+                )
+            available = min(available, attempt_window)
         if available <= 0:
             raise TimeoutError(self._deadline_error_message)
         if self.admission is not None:

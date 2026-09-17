@@ -154,3 +154,13 @@ def is_submit_only_code(code: object) -> bool:
     if expression.args or any(keyword.arg is None for keyword in expression.keywords):
         return False
     return all(_is_safe_submit_value(keyword.value) for keyword in expression.keywords)
+
+
+def normalize_action_code(code: object) -> str:
+    """Return parseable action source in a stable ``ast.unparse`` form."""
+    if not isinstance(code, str) or not code:
+        return "" if code is None else str(code)
+    try:
+        return ast.unparse(ast.parse(_strip_action_code_fences(code), mode="exec"))
+    except (SyntaxError, RecursionError):
+        return code

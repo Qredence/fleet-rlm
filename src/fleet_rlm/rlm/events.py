@@ -37,11 +37,7 @@ from fleet_rlm.rlm.result import (
     truncate_public_text,
     validate_rlm_usage,
 )
-from fleet_rlm.rlm.specified_prompt_rewrite import (
-    SpecifiedPromptRewriteState,
-    apply_specified_sub_lm_prompts,
-    normalize_action_code,
-)
+from fleet_rlm.rlm.submit_validation import normalize_action_code
 from fleet_rlm.tool_events import (
     ToolAfterResult,
     ToolEventView,
@@ -831,19 +827,14 @@ def trajectory_details(
     steps: Sequence[TrajectoryStep],
     *,
     max_chars: int,
-    request: str | None = None,
-    rewrite_state: SpecifiedPromptRewriteState | None = None,
 ) -> list[ObservationDetail]:
     """Project strictly normalized DSPy trajectory steps into public details."""
-    state = rewrite_state or SpecifiedPromptRewriteState()
-    if rewrite_state is None:
-        state.bind(request)
     details: list[ObservationDetail] = []
     for step in steps:
         output = step.output
         if output.startswith("FINAL:"):
             output = "FINAL submitted"
-        code = apply_specified_sub_lm_prompts(request, step.code, state=state)
+        code = step.code
         details.extend(
             (
                 StepStarted(step.index),
@@ -1034,6 +1025,7 @@ def reconcile_trajectory(
     insert/delete shifts instead of re-scanning the list per step (P33: one
     derivation per bounded collection).
     """
+    _ = request
     step_starts: dict[int, int] = {}
     step_finishes: dict[int, int] = {}
     reasoning_first: dict[int, int] = {}
@@ -1060,15 +1052,11 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
-    rewrite_state = SpecifiedPromptRewriteState()
-    rewrite_state.bind(request)
     for trajectory_step in trajectory:
         step = trajectory_step.index
         step_details = trajectory_details(
             (trajectory_step,),
             max_chars=max_chars,
-            request=request,
-            rewrite_state=rewrite_state,
         )
         start = step_starts.get(step)
         finish = step_finishes.get(step)

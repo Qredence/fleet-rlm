@@ -101,9 +101,13 @@ def test_provider_retries_share_the_sub_role_timeout_ceiling(monkeypatch: pytest
     sub = _TimeoutThenRetryLM(90.0, clock, num_retries=1)
     bound = RLMModelBundle(_DropTimeoutOnCopyLM(300.0), sub).bind_turn_deadline(deadline=clock[0] + 840)
 
-    with pytest.raises(TimeoutError, match="Turn LM deadline exceeded"):
+    # The exhausted budget is the per-call role window, not the turn deadline: the retry
+    # shares the window the first attempt already spent. The error must say so.
+    with pytest.raises(TimeoutError, match="LM retry window exhausted") as exc_info:
         bound.sub_lm.forward(prompt="sub")
 
+    assert "90s" in str(exc_info.value)
+    assert bound.sub_lm.calls, "first attempt must have been issued"
     assert len(bound.sub_lm.calls) == 1
     first_timeout = bound.sub_lm.calls[0]["timeout"]
     assert isinstance(first_timeout, float)
