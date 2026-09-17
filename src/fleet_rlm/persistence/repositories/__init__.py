@@ -1,27 +1,47 @@
-"""Concrete persistence adapters for Fleet RLM domain interfaces."""
+"""Concrete persistence adapters for Fleet RLM domain interfaces.
 
-from fleet_rlm.persistence.repositories.artifacts import SqlAlchemyArtifactCatalog
-from fleet_rlm.persistence.repositories.attachments import SqlAlchemyAttachmentCatalog
-from fleet_rlm.persistence.repositories.sandbox_bindings import (
-    SqlAlchemySandboxBindingStore,
+Organized into 3 authoritative persistence domains:
+1. `sessions.py`: Session catalog, artifacts, attachments, warm pools, sandbox bindings
+2. `turns.py`: Run/turn lifecycle, CAS claims, settlement, recovery, liveness
+3. `outbox.py`: Memory promotion outbox with CAS claim fencing
+"""
+
+from fleet_rlm.persistence.repositories.outbox import (
+    ClaimedMemoryPromotionIntent,
+    MemoryPromotionOutboxSummary,
+    SqlAlchemyMemoryPromotionOutbox,
 )
-from fleet_rlm.persistence.repositories.session_catalog import (
+from fleet_rlm.persistence.repositories.sessions import (
     InMemorySessionCatalog,
+    SandboxBinding,
+    SessionRecord,
+    SqlAlchemyArtifactCatalog,
+    SqlAlchemyAttachmentCatalog,
+    SqlAlchemySandboxBindingStore,
     SqlAlchemySessionCatalog,
+    SqlAlchemyWarmPoolOwnershipStore,
+    WarmPoolOwnership,
 )
 from fleet_rlm.persistence.repositories.turns import (
     InMemoryRunStateStore,
+    ReconciliationSummary,
     SqlAlchemyRunStateStore,
 )
-from fleet_rlm.persistence.repositories.warm_pool import SqlAlchemyWarmPoolOwnershipStore
 
 __all__ = [
+    "ClaimedMemoryPromotionIntent",
     "InMemoryRunStateStore",
     "InMemorySessionCatalog",
+    "MemoryPromotionOutboxSummary",
+    "ReconciliationSummary",
+    "SandboxBinding",
+    "SessionRecord",
     "SqlAlchemyArtifactCatalog",
     "SqlAlchemyAttachmentCatalog",
+    "SqlAlchemyMemoryPromotionOutbox",
     "SqlAlchemyRunStateStore",
     "SqlAlchemySandboxBindingStore",
     "SqlAlchemySessionCatalog",
     "SqlAlchemyWarmPoolOwnershipStore",
+    "WarmPoolOwnership",
 ]
