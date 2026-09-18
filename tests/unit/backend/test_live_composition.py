@@ -185,7 +185,7 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
 def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
     import fleet_rlm.composition.testing as common
     from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
-    from fleet_rlm.attachments.local_catalog import LocalAttachmentCatalog
+    from fleet_rlm.attachments import LocalAttachmentCatalog
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     builder = getattr(common, "build_local_storage_adapters", None)

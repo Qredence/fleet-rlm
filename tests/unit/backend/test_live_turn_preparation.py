@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.attachments.models import AttachmentRef
+from fleet_rlm.attachments import AttachmentRef
 from fleet_rlm.chat.preparation import RunPreparationUnavailableError
 from fleet_rlm.composition.live import build_run_preparation
 from fleet_rlm.config.settings import Settings
@@ -100,7 +100,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         async def prepare_run(self, _access, _attachment_ids, _run, sink):
             logical_path = str(volume_root / "attachments" / "notes.txt")
             await sink.write_private(logical_path, data)
-            from fleet_rlm.attachments.models import PreparedAttachments, StagedAttachment
+            from fleet_rlm.attachments import PreparedAttachments, StagedAttachment
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
@@ -258,7 +258,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     # injected workspace_memory tail digest without any tool call.
     class NoAttachments:
         async def prepare_run(self, _access, _attachment_ids, _run, _sink):
-            from fleet_rlm.attachments.models import PreparedAttachments
+            from fleet_rlm.attachments import PreparedAttachments
 
             return PreparedAttachments((), ())
 

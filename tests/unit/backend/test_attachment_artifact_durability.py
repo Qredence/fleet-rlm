@@ -10,10 +10,15 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-from fleet_rlm.attachments.local_catalog import LocalAttachmentBlobGateway, LocalAttachmentCatalog
-from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRun, AttachmentUpload
-from fleet_rlm.attachments.paths import LocalAttachmentPathPolicy
+from fleet_rlm.attachments import (
+    AttachmentAccess,
+    AttachmentLifecycleService,
+    AttachmentRun,
+    AttachmentUpload,
+    LocalAttachmentBlobGateway,
+    LocalAttachmentCatalog,
+    LocalAttachmentPathPolicy,
+)
 from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, as_posix
 from fleet_rlm.workspace.storage import HostVolumeMirror
 

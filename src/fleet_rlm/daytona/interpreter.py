@@ -1183,6 +1183,7 @@ class DaytonaCodeInterpreter:
     @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """Shut down the interpreter and release backend resources."""
+        _ = strict_broker_cleanup
         with self._shutdown_lock:
             if self._shutdown:
                 return
