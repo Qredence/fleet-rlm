@@ -1,9 +1,4 @@
-"""DSPy RLM program specification, LMs, Signatures, instructions, and input models.
-
-This module is the P46.1 program entry point. It consolidates model bundle
-construction, signature composition, instruction fragments, DTO input models,
-context capsule staging, and native `dspy.RLM` construction.
-"""
+"""DSPy RLM program specification, LMs, Signatures, instructions, and input models."""
 
 # ruff: noqa: E501
 
@@ -91,15 +86,12 @@ def _append_input_field(
     description: str,
     value: str,
 ) -> tuple[type[Signature], dict[str, Any], str]:
-    """Append one collision-free input field without mutating caller inputs."""
-    field_name = preferred_name
-    suffix = 1
+    field_name, suffix = preferred_name, 1
     while field_name in signature.fields:
         suffix += 1
         field_name = f"{preferred_name}_{suffix}"
     extended = signature.append(field_name, dspy.InputField(desc=description))
-    extended_inputs = dict(inputs)
-    extended_inputs[field_name] = value
+    extended_inputs = {**inputs, field_name: value}
     return extended, extended_inputs, field_name
 
 
@@ -109,7 +101,6 @@ def _retry_call_arguments(
     attempt: int,
     exc: AdapterParseError,
 ) -> tuple[type[Signature], dict[str, Any]]:
-    """Extend one failed action call with a bounded corrective input field."""
     retry_signature, retry_inputs, _ = _append_input_field(
         signature,
         inputs,
@@ -121,7 +112,6 @@ def _retry_call_arguments(
 
 
 def _budget_directive(remaining: float, *, attempts_exhausted: bool = False, final_iteration: bool = False) -> str:
-    """Create a directive requiring immediate submission when exploration must end."""
     seconds = max(0, int(remaining))
     if attempts_exhausted:
         reason = "Exploration attempt budget exhausted"
@@ -226,14 +216,13 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             updated = dict(inputs)
             updated[field_name] = directive
             return signature, updated, field_name
-        extended, extended_inputs, inserted_field = _append_input_field(
+        return _append_input_field(
             signature,
             inputs,
             preferred_name=BUDGET_DIRECTIVE_FIELD,
             description="Mandatory final-answer budget directive; follow it exactly.",
             value=directive,
         )
-        return extended, extended_inputs, inserted_field
 
     def _with_wrap_up_correction(
         self,
@@ -320,11 +309,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ]:
         lm = self._lm_for_request(lm, action=False, wrap_up=False)
         attempt = 0
-        base_signature = signature
-        base_inputs = dict(inputs)
+        base_signature, base_inputs = signature, dict(inputs)
         wrap_up = False
-        request_signature = signature
-        request_inputs = dict(inputs)
+        request_signature, request_inputs = signature, dict(inputs)
         directive_field: str | None = None
         while True:
             remaining = self._remaining()
@@ -335,10 +322,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 self._enter_wrap_up(remaining)
             if wrap_up and remaining is not None:
                 request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                    request_signature,
-                    request_inputs,
-                    remaining,
-                    field_name=directive_field,
+                    request_signature, request_inputs, remaining, field_name=directive_field
                 )
             call_lm = self._lm_for_request(lm, action=action, wrap_up=wrap_up)
             try:
@@ -350,10 +334,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         wrap_up = True
                         self._enter_wrap_up(boundary_remaining)
                         request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
+                            request_signature, request_inputs, boundary_remaining, field_name=directive_field
                         )
                         continue
                 raise
@@ -363,9 +344,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
                     self._budget.set_wrap_up_rejection("unparseable_json")
                     request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="unparseable JSON",
+                        request_signature, request_inputs, reason="unparseable JSON"
                     )
                     continue
                 if action and self._wrap_up_seconds > 0:
@@ -375,26 +354,16 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                         self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
                         self._next_wrap_up_attempt(call_lm)
                         request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature,
-                            request_inputs,
-                            boundary_remaining,
-                            field_name=directive_field,
+                            request_signature, request_inputs, boundary_remaining, field_name=directive_field
                         )
                         request_signature, request_inputs = self._with_wrap_up_correction(
-                            request_signature,
-                            request_inputs,
-                            reason="unparseable JSON",
+                            request_signature, request_inputs, reason="unparseable JSON"
                         )
                         continue
                 if not self._budget.can_repair(attempt):
                     raise
                 attempt += 1
-                request_signature, request_inputs = _retry_call_arguments(
-                    base_signature,
-                    base_inputs,
-                    attempt,
-                    exc,
-                )
+                request_signature, request_inputs = _retry_call_arguments(base_signature, base_inputs, attempt, exc)
                 continue
             if remaining is not None:
                 after_response = self._remaining()
@@ -405,19 +374,14 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     if is_submit_only_code(_action_code(response)):
                         return response
                     request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                        request_signature,
-                        request_inputs,
-                        after_response,
-                        field_name=directive_field,
+                        request_signature, request_inputs, after_response, field_name=directive_field
                     )
                 if wrap_up and action and not is_submit_only_code(_action_code(response)):
                     self._budget.set_wrap_up_rejection("exploration_or_additional_code")
                     if not self._budget.can_finalize():
                         raise TimeoutError("wrap-up action did not submit before the Turn deadline")
                     request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature,
-                        request_inputs,
-                        reason="exploration or additional code",
+                        request_signature, request_inputs, reason="exploration or additional code"
                     )
                     continue
                 return response
@@ -517,7 +481,6 @@ class RLMOptions:
 
 
 def rlm_options(settings: Settings) -> RLMOptions:
-    """Project Settings onto native DSPy RLM options."""
     return RLMOptions(
         max_iters=settings.rlm_max_iters,
         max_llm_calls=settings.rlm_max_llm_calls,
@@ -732,7 +695,7 @@ class AttachmentContextEntry:
             raise ValueError("attachment filename is invalid")
         if self.byte_size <= 0:
             raise ValueError("attachment byte size is invalid")
-        if len(self.checksum_sha256) != 64 or any(value not in "0123456789abcdef" for value in self.checksum_sha256):
+        if len(self.checksum_sha256) != 64 or any(c not in "0123456789abcdef" for c in self.checksum_sha256):
             raise ValueError("attachment checksum is invalid")
         if not PurePosixPath(self.sandbox_path).is_absolute():
             raise ValueError("attachment sandbox path is invalid")
@@ -755,6 +718,7 @@ def _materialize_context_manifest(
         entries = list(manifest["entries"])
     except Exception as exc:
         raise ValueError("context manifest is invalid") from exc
+
     values: list[dict[str, Any]] = []
     accesses: list[str] = []
     for entry in entries:
@@ -965,18 +929,14 @@ def sanitize_base_url(value: str | None) -> str | None:
     text = str(value).strip().strip("'\"")
     if " #" in text:
         text = text.split(" #", 1)[0].rstrip().strip("'\"")
-    if not text or not _URL_RE.match(text):
-        return None
-    return text.rstrip("/")
+    return text.rstrip("/") if text and _URL_RE.match(text) else None
 
 
 def normalize_model_id(model: str) -> str:
     cleaned = (model or "").strip().strip("'\"")
     if not cleaned:
         raise ValueError("model id is required")
-    if "/" in cleaned:
-        return cleaned
-    return f"openai/{cleaned}"
+    return cleaned if "/" in cleaned else f"openai/{cleaned}"
 
 
 def resolve_role_api_key(settings: Settings, role: LLMRoleSettings) -> str | None:
@@ -1065,10 +1025,8 @@ class RLMModelBundle:
             or reserve_seconds < 0
         ):
             raise ValueError("reserve_seconds must be finite and nonnegative")
-        normalized_reserve = float(reserve_seconds)
-        turn_budget = budget
-        if turn_budget is None and math.isfinite(deadline):
-            turn_budget = TurnBudget(deadline=deadline)
+        norm_reserve = float(reserve_seconds)
+        turn_budget = budget or (TurnBudget(deadline=deadline) if math.isfinite(deadline) else None)
         root_lm = (
             _copy_lm_for_deadline(self.root_lm, deadline=deadline, budget=turn_budget)
             if _supports_turn_lm_copy(self.root_lm)
@@ -1078,7 +1036,7 @@ class RLMModelBundle:
             _copy_lm_for_deadline(
                 self.sub_lm,
                 deadline=deadline,
-                reserve_seconds=normalized_reserve,
+                reserve_seconds=norm_reserve,
                 budget=turn_budget,
                 can_finalize=False,
             )
@@ -1090,12 +1048,12 @@ class RLMModelBundle:
             sub_lm=sub_lm,
             utility_lm=self.utility_lm,
             deadline=deadline,
-            reserve_seconds=normalized_reserve,
+            reserve_seconds=norm_reserve,
             budget=turn_budget,
         )
 
     def fork_for_child(self, *, deadline: float) -> RLMModelBundle:
-        reserve_seconds = max(0.0, self.reserve_seconds)
+        reserve = max(0.0, self.reserve_seconds)
         return RLMModelBundle(
             root_lm=_copy_lm_for_deadline(
                 self.root_lm,
@@ -1107,14 +1065,14 @@ class RLMModelBundle:
             sub_lm=_copy_lm_for_deadline(
                 self.sub_lm,
                 deadline=deadline,
-                reserve_seconds=reserve_seconds,
+                reserve_seconds=reserve,
                 error_message="recursive child LM deadline exceeded",
                 budget=self.budget,
                 can_finalize=False,
             ),
             utility_lm=self.utility_lm,
             deadline=deadline,
-            reserve_seconds=reserve_seconds,
+            reserve_seconds=reserve,
             budget=self.budget,
         )
 
@@ -1138,9 +1096,7 @@ def _positive_timeout(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     timeout = float(value)
-    if not math.isfinite(timeout) or timeout <= 0:
-        return None
-    return timeout
+    return timeout if math.isfinite(timeout) and timeout > 0 else None
 
 
 def _configured_lm_timeout(lm: Any) -> float | None:
@@ -1152,11 +1108,8 @@ def _configured_lm_timeout(lm: Any) -> float | None:
 
 
 def _apply_role_timeout(lm: Any, role_timeout: float | None) -> None:
-    if role_timeout is None:
-        return
-    kwargs = getattr(lm, "kwargs", None)
-    if isinstance(kwargs, dict):
-        kwargs["timeout"] = role_timeout
+    if role_timeout is not None and isinstance(getattr(lm, "kwargs", None), dict):
+        lm.kwargs["timeout"] = role_timeout
 
 
 class DeadlineLMProxy(dspy.BaseLM):
@@ -1243,16 +1196,11 @@ class DeadlineLMProxy(dspy.BaseLM):
             if lm.budget is not None and lm.budget is not budget.turn:
                 raise RLMModelBundleError("adapter and LM must share the Turn budget")
             wrapped = lm.wrapped
-            deadline = lm._fleet_deadline
-            reserve = lm._fleet_reserve_seconds
-            retries = lm._fleet_retry_budget
-            can_finalize = lm.can_finalize
+            deadline, reserve = lm._fleet_deadline, lm._fleet_reserve_seconds
+            retries, can_finalize = lm._fleet_retry_budget, lm.can_finalize
         else:
             wrapped = lm.copy(num_retries=0) if isinstance(lm, dspy.LM) else lm
-            deadline = budget.deadline
-            reserve = 0.0
-            retries = getattr(lm, "num_retries", 0)
-            can_finalize = True
+            deadline, reserve, retries, can_finalize = budget.deadline, 0.0, getattr(lm, "num_retries", 0), True
         if type(retries) is not int or retries < 0:
             retries = 0
         view = cls(
@@ -1310,9 +1258,7 @@ class DeadlineLMProxy(dspy.BaseLM):
 
     def _retry_call_deadline(self, now: float, timeout: object) -> float | None:
         bounded = _positive_timeout(timeout)
-        if bounded is None:
-            return None
-        return now + bounded
+        return now + bounded if bounded is not None else None
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         call_deadline: float | None = None
@@ -1408,15 +1354,11 @@ def _remaining_lm_timeout(
     available = remaining - float(reserve_seconds)
     if available <= 0:
         raise TimeoutError(error_message)
-    configured = _positive_timeout(call_kwargs.get("timeout"))
-    if configured is None:
-        configured = _configured_lm_timeout(lm)
+    configured = _positive_timeout(call_kwargs.get("timeout")) or _configured_lm_timeout(lm)
     role_timeout = _configured_lm_timeout(lm)
     if role_timeout is not None:
         configured = role_timeout if configured is None else min(configured, role_timeout)
-    if configured is not None:
-        return min(configured, available)
-    return available
+    return min(configured, available) if configured is not None else available
 
 
 def build_model_bundle(settings: Settings) -> RLMModelBundle:
@@ -1581,7 +1523,6 @@ class FleetProgramSpec:
         object.__setattr__(self, "skill_instructions", tuple(self.skill_instructions))
 
 
-# Retain existing import alias
 RLMProgramSpec = FleetProgramSpec
 
 

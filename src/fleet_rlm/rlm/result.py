@@ -1,9 +1,4 @@
-"""Prediction validation, output character limits, RLM outcomes, and error taxonomy.
-
-This module is the P46.2 result entry point. It consolidates output validation,
-declared Signature field serialization, secret-free sanitization, usage metadata,
-outcome recording, and public failure classifications.
-"""
+"""Prediction validation, output character limits, RLM outcomes, and error taxonomy."""
 
 from __future__ import annotations
 
@@ -12,6 +7,7 @@ import json
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from functools import partial
 from math import isfinite
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
@@ -28,14 +24,13 @@ from fleet_rlm.workspace.memory import MemoryCandidate
 if TYPE_CHECKING:
     pass
 
-
 # ---------------------------------------------------------------------------
 # Error Taxonomy
 # ---------------------------------------------------------------------------
 
 
 class RLMConfigError(ValueError):
-    """Base class for Fleet RLM RLM configuration failures."""
+    """Base class for Fleet RLM configuration failures."""
 
 
 class RLMModelBundleError(RLMConfigError):
@@ -78,10 +73,7 @@ class PredictionOutputError(ValueError):
 
 
 class PredictionOutputTooLargeError(PredictionOutputError):
-    """Declared Prediction JSON exceeds the Turn commit character budget.
-
-    Diagnostics are carried as typed, sanitized attributes (never in the public
-    message, which is a closed Literal surfaced to operators)."""
+    """Declared Prediction JSON exceeds the Turn commit character budget."""
 
     public_message = "Turn output is too large"
 
@@ -100,8 +92,6 @@ class PredictionOutputTooLargeError(PredictionOutputError):
 # Sanitization & Secret Scrubbing
 # ---------------------------------------------------------------------------
 
-
-# Secrets / credentials
 _SECRETISH = re.compile(
     r"(?i)("
     r"api[_-]?key|access[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
@@ -166,7 +156,6 @@ def _is_sensitive_key(key: object) -> bool:
     )
 
 
-# Connection strings / DSNs
 _DSNISH = re.compile(
     r"(?i)("
     r"(?:postgres|postgresql|mysql|mongodb|redis|amqp)(?:\+\w+)?://"
@@ -174,7 +163,6 @@ _DSNISH = re.compile(
     r"jdbc:[^\s\"']+"
     r")"
 )
-# Host paths
 _PATHISH = re.compile(
     r"(?i)("
     r"/(?:home|Users|Volumes|private|var|tmp|etc|opt|root|mnt|srv)/\S+|"
@@ -182,18 +170,13 @@ _PATHISH = re.compile(
     r"/home/daytona/\S+"
     r")"
 )
-# Stack / exception noise
 _STACKISH = re.compile(r"(?i)(traceback \(most recent call last\)|File \"[^\"]+\", line \d+)")
-# Prompt-ish dumps
 _PROMPTISH = re.compile(r"(?i)(system prompt|you are a helpful|<<<instructions>>>|BEGIN SYSTEM)")
 _ANSI_ESCAPE = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\)|.)")
 _PRIVATE_MARKER = re.compile(r"__FLEET_[A-Z0-9_]+__")
 _URLISH = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+")
 _UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
-# Declared model outputs are never rewritten. These patterns therefore live apart
-# from the error/tool-detail redactors above and only identify concrete disclosure
-# shapes. Bare credential names and security terminology are deliberately safe.
 _DECLARED_SECRET_ASSIGNMENT = re.compile(
     r"(?i)(?<![a-z0-9])(?:[a-z0-9]+[_-])*"
     r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key)\b"
@@ -257,7 +240,6 @@ def _sanitize_text(
     redact_urls: bool,
     strip_control: bool,
 ) -> str:
-    """Apply the shared secret/path redaction policy with caller-specific content rules."""
     cleaned = _TOKENISH.sub("[redacted]", text)
     cleaned = _PROVIDER_TOKENISH.sub("[redacted]", cleaned)
     cleaned = _SECRETISH.sub("[redacted]", cleaned)
@@ -277,35 +259,14 @@ def _sanitize_text(
 
 
 def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
-    """Bound and redact model-authored text intended for public detail or answers."""
-    return _sanitize_text(
-        text,
-        max_len=max_len,
-        redact_prompt_markers=True,
-        redact_urls=False,
-        strip_control=False,
-    )
+    return _sanitize_text(text, max_len=max_len, redact_prompt_markers=True, redact_urls=False, strip_control=False)
 
 
 def sanitize_trace_text(text: str, *, max_len: int = 10_000) -> str:
-    """Bound trace content while preserving authorized prompts and reasoning."""
-    return _sanitize_text(
-        text,
-        max_len=max_len,
-        redact_prompt_markers=False,
-        redact_urls=True,
-        strip_control=True,
-    )
+    return _sanitize_text(text, max_len=max_len, redact_prompt_markers=False, redact_urls=True, strip_control=True)
 
 
 def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:
-    """Bound repair context while removing private and control-plane content.
-
-    Repair text is sent back into the model, but it is also retained in the
-    native trajectory. Keep the useful exception category/message while
-    excluding URLs, stack dumps, Fleet framing markers, and terminal control
-    sequences from every later projection.
-    """
     cleaned = _ANSI_ESCAPE.sub("", text)
     cleaned = _URLISH.sub("[redacted-url]", cleaned)
     cleaned = _PRIVATE_MARKER.sub("[redacted-marker]", cleaned)
@@ -315,22 +276,13 @@ def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:
 
 
 def truncate_public_text(text: str, *, max_len: int = 10_000) -> str:
-    """Bound explicit semantic product text without content-dependent rewriting."""
     limit = max(1, int(max_len))
     if len(text) <= limit:
         return text
-    if limit <= 3:
-        return "." * limit
-    return text[: limit - 3] + "..."
+    return "." * limit if limit <= 3 else text[: limit - 3] + "..."
 
 
 def truncate_head_tail(text: str, *, max_chars: int = 4_000) -> str:
-    """Bound large sandbox execution output, keeping head and tail with an omission marker.
-
-    Mirrors DSPy's ``REPLHistory`` truncation semantics so the model sees that
-    output was cut and how much. Deliberately does not redact: this text feeds
-    the RLM code-repair loop and must stay semantically intact.
-    """
     limit = max(1, int(max_chars))
     raw_len = len(text)
     if raw_len <= limit:
@@ -340,62 +292,45 @@ def truncate_head_tail(text: str, *, max_chars: int = 4_000) -> str:
     return text[:half] + f"\n\n... ({omitted:,} characters omitted) ...\n\n" + text[-half:]
 
 
-def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
-    """Recursively bound and redact JSON-like public detail values."""
+def _sanitize_recursive(
+    value: Any,
+    text_fn: Callable[[str], str],
+    *,
+    max_len: int,
+    depth: int,
+) -> Any:
     if depth >= 8:
         return "[truncated]"
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return sanitize_public_text(value, max_len=max_len)
-    if isinstance(value, dict):
+        return text_fn(value)
+    if isinstance(value, Mapping):
         return {
-            str(key)[:128]: (
-                "[redacted]"
-                if _is_sensitive_key(key)
-                else sanitize_public_value(item, max_len=max_len, depth=depth + 1)
-            )
-            for key, item in list(value.items())[:50]
+            str(k)[:128]: "[redacted]"
+            if _is_sensitive_key(k)
+            else _sanitize_recursive(v, text_fn, max_len=max_len, depth=depth + 1)
+            for k, v in list(value.items())[:50]
         }
     if isinstance(value, (list, tuple)):
-        return [sanitize_public_value(item, max_len=max_len, depth=depth + 1) for item in list(value)[:50]]
-    return sanitize_public_text(str(value), max_len=max_len)
+        return [_sanitize_recursive(item, text_fn, max_len=max_len, depth=depth + 1) for item in list(value)[:50]]
+    return text_fn(str(value))
+
+
+def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
+    return _sanitize_recursive(value, partial(sanitize_public_text, max_len=max_len), max_len=max_len, depth=depth)
 
 
 def sanitize_trace_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
-    """Recursively bound trace values while preserving non-secret content."""
-    if depth >= 8:
-        return "[truncated]"
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    if isinstance(value, str):
-        return sanitize_trace_text(value, max_len=max_len)
-    if isinstance(value, Mapping):
-        return {
-            str(key)[:128]: "[redacted]"
-            if _is_sensitive_key(key)
-            else sanitize_trace_value(item, max_len=max_len, depth=depth + 1)
-            for key, item in list(value.items())[:50]
-        }
-    if isinstance(value, (list, tuple)):
-        return [sanitize_trace_value(item, max_len=max_len, depth=depth + 1) for item in list(value)[:50]]
-    return sanitize_trace_text(str(value), max_len=max_len)
+    return _sanitize_recursive(value, partial(sanitize_trace_text, max_len=max_len), max_len=max_len, depth=depth)
 
 
 def _is_safe_placeholder(value: str) -> bool:
     raw_candidate = value.strip().strip("\"'").strip()
     candidate = raw_candidate.lower()
-    if candidate in _DECLARED_SAFE_PLACEHOLDERS:
+    if candidate in _DECLARED_SAFE_PLACEHOLDERS or re.fullmatch(r"[A-Z][A-Z0-9_]*", raw_candidate):
         return True
-    if re.fullmatch(r"[A-Z][A-Z0-9_]*", raw_candidate):
-        return True
-    return bool(
-        re.fullmatch(
-            r"(?:\$\{?[a-z_][a-z0-9_]*\}?|<[a-z_][a-z0-9_-]*>)",
-            candidate,
-            flags=re.IGNORECASE,
-        )
-    )
+    return bool(re.fullmatch(r"(?:\$\{?[a-z_][a-z0-9_]*\}?|<[a-z_][a-z0-9_-]*>)", candidate, flags=re.IGNORECASE))
 
 
 def _contains_sensitive_value(value: Any) -> bool:
@@ -403,39 +338,24 @@ def _contains_sensitive_value(value: Any) -> bool:
         return False
     if isinstance(value, str):
         return not _is_safe_placeholder(value)
-    if isinstance(value, (list, tuple, dict)):
-        return bool(value)
-    return True
-
-
-def _validate_declared_secret_assignments(text: str) -> None:
-    for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
-        if not _is_safe_placeholder(match.group("value")):
-            raise ValueError("declared output contains a sensitive value")
-
-
-def _validate_declared_bearer_tokens(text: str) -> None:
-    for match in _DECLARED_BEARER.finditer(text):
-        if not _is_safe_placeholder(match.group("value")):
-            raise ValueError("declared output contains a bearer credential")
-
-
-def _validate_declared_private_paths(text: str) -> None:
-    for match in _DECLARED_PRIVATE_PATH.finditer(text):
-        path = match.group(0).rstrip(".,;:)]}")
-        if path == "/home/daytona/fleet" or path.startswith("/home/daytona/fleet/"):
-            continue
-        raise ValueError("declared output contains a private host path")
+    return bool(value) if isinstance(value, (list, tuple, dict)) else True
 
 
 def _validate_declared_text(text: str) -> None:
-    _validate_declared_secret_assignments(text)
-    _validate_declared_bearer_tokens(text)
+    for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
+        if not _is_safe_placeholder(match.group("value")):
+            raise ValueError("declared output contains a sensitive value")
+    for match in _DECLARED_BEARER.finditer(text):
+        if not _is_safe_placeholder(match.group("value")):
+            raise ValueError("declared output contains a bearer credential")
     if _DECLARED_PROVIDER_TOKEN.search(text):
         raise ValueError("declared output contains a provider credential")
     if _DSNISH.search(text):
         raise ValueError("declared output contains a connection string")
-    _validate_declared_private_paths(text)
+    for match in _DECLARED_PRIVATE_PATH.finditer(text):
+        path = match.group(0).rstrip(".,;:)]}")
+        if path != "/home/daytona/fleet" and not path.startswith("/home/daytona/fleet/"):
+            raise ValueError("declared output contains a private host path")
     if _DECLARED_STACK_DUMP.search(text):
         raise ValueError("declared output contains a stack dump")
     if _DECLARED_PROMPT_DUMP.search(text):
@@ -443,11 +363,6 @@ def _validate_declared_text(text: str) -> None:
 
 
 def validate_declared_public_value(value: Any, *, depth: int = 0) -> None:
-    """Fail closed when an original declared output contains private material.
-
-    This validator intentionally does not return a transformed value. Callers
-    either preserve the accepted semantic output exactly or reject the Turn.
-    """
     if depth >= 16:
         raise ValueError("declared output nesting is too deep")
     if value is None or isinstance(value, (bool, int, float)):
@@ -484,7 +399,6 @@ class TrajectoryStep:
 
 
 def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ...]:
-    """Validate and convert DSPy's public ``Prediction.trajectory`` projection."""
     trajectory = getattr(prediction, "trajectory", None)
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
         raise PredictionOutputError
@@ -505,8 +419,6 @@ def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ..
 
 @dataclass(frozen=True, slots=True)
 class PredictionResult:
-    """Validated declared Signature outputs selected for Turn Commit."""
-
     display_text: str
     outputs: Mapping[str, JsonValue]
     schema_id: str
@@ -547,8 +459,7 @@ def _strict_json(value: object) -> JsonValue:
 
 def _plain_json(value: JsonValue) -> object:
     if isinstance(value, Mapping):
-        mapping = cast(Mapping[str, JsonValue], value)
-        return {key: _plain_json(item) for key, item in mapping.items()}
+        return {key: _plain_json(item) for key, item in cast(Mapping[str, JsonValue], value).items()}
     if isinstance(value, tuple):
         return [_plain_json(item) for item in value]
     return value
@@ -562,7 +473,6 @@ def prediction_result(
     schema_version: str = "1",
     max_output_chars: int = 10_000,
 ) -> PredictionResult:
-    """Encode all declared outputs through their annotations, then strict JSON."""
     outputs: dict[str, JsonValue] = {}
     try:
         for name, field in signature.output_fields.items():
@@ -579,6 +489,7 @@ def prediction_result(
             outputs[name] = _strict_json(encoded)
     except (AttributeError, TypeError, ValueError, PydanticSerializationError):
         raise PredictionOutputError from None
+
     display = outputs.get("answer")
     if not isinstance(display, str) or not display.strip():
         raise PredictionOutputError
@@ -587,10 +498,7 @@ def prediction_result(
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
         preview = sanitize_public_text(result.display_text, max_len=400)
-        raise PredictionOutputTooLargeError(
-            output_chars=len(encoded),
-            output_preview=preview,
-        )
+        raise PredictionOutputTooLargeError(output_chars=len(encoded), output_preview=preview)
     try:
         validate_declared_public_value(result.outputs)
     except ValueError:
@@ -600,19 +508,13 @@ def prediction_result(
 
 @dataclass(frozen=True, slots=True)
 class ResultContract:
-    """Output validation contract declared for one execution."""
-
     signature: type[dspy.Signature]
     schema_id: str = "fleet.default"
     schema_version: str = "1"
     max_output_chars: int = 10_000
 
 
-def validate_prediction(
-    prediction: Any,
-    contract: ResultContract,
-) -> PredictionResult:
-    """Validate a native DSPy Prediction against a declared ResultContract."""
+def validate_prediction(prediction: Any, contract: ResultContract) -> PredictionResult:
     return prediction_result(
         prediction,
         contract.signature,
@@ -690,9 +592,8 @@ def _safe_usage_details(value: object, *, path: str, filter_unknown: bool) -> di
     if not isinstance(value, Mapping) or any(not isinstance(detail, str) for detail in value):
         raise ValueError(f"{path} must be an object")
 
-    detail_usage = cast(Mapping[str, object], value)
     details: dict[str, JsonValue] = {}
-    for detail, detail_value in detail_usage.items():
+    for detail, detail_value in cast(Mapping[str, object], value).items():
         if detail not in _SAFE_USAGE_DETAIL_KEYS:
             if filter_unknown:
                 continue
@@ -708,22 +609,10 @@ def _safe_usage_value(key: str, value: object, *, path: str, filter_unknown: boo
 
 
 def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict[str, JsonValue]:
-    """
-    Validate and normalize an observed usage mapping for safe telemetry.
-
-    Parameters:
-        value (object): Usage data to validate.
-        path (str): Location used in validation error messages.
-        filter_unknown (bool): Whether to omit unrecognized usage fields instead of raising an error.
-
-    Returns:
-        dict[str, JsonValue]: A validated usage mapping containing only allowed JSON-compatible values.
-    """
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise ValueError(f"{path} must be an object with string keys")
-    usage = cast(Mapping[str, object], value)
     result: dict[str, JsonValue] = {}
-    for key, item in usage.items():
+    for key, item in cast(Mapping[str, object], value).items():
         if key not in _SAFE_USAGE_KEYS:
             if filter_unknown:
                 continue
@@ -735,9 +624,8 @@ def _safe_usage_entry(value: object, *, path: str, filter_unknown: bool) -> dict
 def _safe_observed_usage(value: object, *, filter_unknown: bool) -> dict[str, dict[str, JsonValue]]:
     if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
         raise ValueError("observed_lm_usage must be an object with string keys")
-    usage = cast(Mapping[str, object], value)
     result: dict[str, dict[str, JsonValue]] = {}
-    for key, item in usage.items():
+    for key, item in cast(Mapping[str, object], value).items():
         entry = _safe_usage_entry(item, path=f"observed_lm_usage.{key}", filter_unknown=filter_unknown)
         if entry or not filter_unknown:
             result[key] = entry
@@ -763,12 +651,6 @@ def _validated_lm_call_count(value: object, *, path: str) -> dict[str, JsonValue
 
 
 def _safe_extra_metric(value: object, *, path: str, depth: int = 0) -> JsonValue:
-    """Validate non-required delegation telemetry without trusting its shape.
-
-    Extra snapshot keys ride along for forward compatibility, but persisted
-    and SSE-projected usage must stay bounded and finite even for
-    hand-crafted payloads.
-    """
     if depth > 8:
         raise ValueError(f"{path} exceeds the delegation nesting bound")
     if value is None or isinstance(value, (bool, int, str)):
@@ -782,10 +664,7 @@ def _safe_extra_metric(value: object, *, path: str, depth: int = 0) -> JsonValue
     if isinstance(value, (list, tuple)):
         if len(value) > 4096:
             raise ValueError(f"{path} exceeds the delegation breadth bound")
-        checked_items = [
-            _safe_extra_metric(item, path=f"{path}[{index}]", depth=depth + 1) for index, item in enumerate(value)
-        ]
-        return tuple(checked_items)
+        return tuple(_safe_extra_metric(item, path=f"{path}[{i}]", depth=depth + 1) for i, item in enumerate(value))
     if isinstance(value, Mapping):
         if len(value) > 256:
             raise ValueError(f"{path} exceeds the delegation breadth bound")
@@ -817,14 +696,12 @@ def _validated_delegation_metrics(value: object) -> dict[str, Any]:
     for key, item in metrics.items():
         if not isinstance(key, str):
             raise ValueError("delegation_metrics must contain only string keys")
-        if key in normalized:
-            continue
-        normalized[key] = _safe_extra_metric(item, path=f"delegation_metrics.{key}")
+        if key not in normalized:
+            normalized[key] = _safe_extra_metric(item, path=f"delegation_metrics.{key}")
     return normalized
 
 
 def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
-    """Validate and normalize the exact public/durable RLM usage shape."""
     keys = set(value)
     if not keys >= _USAGE_REQUIRED_KEYS or keys - _USAGE_REQUIRED_KEYS - _EXTRA_USAGE_KEYS:
         raise ValueError(
@@ -834,10 +711,9 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
     observed = value["observed_lm_usage"]
     if not isinstance(observed, Mapping):
         raise ValueError("observed_lm_usage must be a JSON object")
-    normalized = _safe_observed_usage(observed, filter_unknown=False)
     usage = RLMUsage(
         iterations=_nonnegative_integer(value["iterations"], field="iterations"),
-        observed_lm_usage=normalized,
+        observed_lm_usage=_safe_observed_usage(observed, filter_unknown=False),
         duration_ms=_nonnegative_integer(value["duration_ms"], field="duration_ms"),
     )
     if "recursive_call_count" in value:
@@ -850,23 +726,13 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
 
 
 def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]]:
-    """Aggregate observed token counts from LM histories without estimates.
-
-    The DSPy usage tracker can miss calls that bypass its thread-local
-    collection (worker threads, isolated adapter copies). Histories are
-    written from the same provider responses, so they are a sound fallback
-    when the tracker yields nothing. Tracker data always wins; this never
-    merges or double-counts.
-    """
     from fleet_rlm.rlm.recursion import normalize_lm_token_usage
 
     merged: dict[str, dict[str, JsonValue]] = {}
     seen: set[int] = set()
     for index, lm in enumerate(lms):
         history = getattr(lm, "history", ())
-        if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
-            continue
-        if id(history) in seen:
+        if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)) or id(history) in seen:
             continue
         seen.add(id(history))
         totals: dict[str, int] = {}
@@ -878,10 +744,8 @@ def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]
             name = getattr(lm, "model", None) or f"lm-{index}"
             existing = merged.setdefault(str(name), {})
             for key, value in totals.items():
-                previous = existing.get(key)
-                existing[key] = (
-                    value + previous if isinstance(previous, int) and not isinstance(previous, bool) else value
-                )
+                prev = existing.get(key)
+                existing[key] = value + prev if isinstance(prev, int) and not isinstance(prev, bool) else value
     return merged
 
 
@@ -892,13 +756,6 @@ def observed_usage(
     lms: tuple[Any, ...] = (),
     delegation: Mapping[str, object] | None = None,
 ) -> RLMUsage:
-    """Read conservative usage from public Prediction surfaces without estimates.
-
-    ``delegation`` is an optional pre-built mapping carrying
-    ``recursive_call_count`` and/or ``delegation_metrics`` (for example from a
-    recursive-call summary). It is merged after token handling and validated by
-    ``validate_rlm_usage``; ``None`` keeps the historical three-key payload.
-    """
     trajectory = getattr(prediction, "trajectory", None)
     iterations = (
         len(trajectory)
@@ -938,13 +795,6 @@ _RLM_EXTRACTION_FALLBACK_REASONING = "Extract forced final output"
 
 
 def rlm_termination_mode(prediction: Any) -> str:
-    """Classify one completed RLM prediction's termination mode.
-
-    DSPy's forced final-output extraction lands on the reserved
-    ``final_reasoning`` marker; its presence means the RLM could not settle
-    through typed SUBMIT payloads, so the fallback is named explicitly rather
-    than re-derived with the magic string at each call site.
-    """
     if getattr(prediction, "final_reasoning", None) == _RLM_EXTRACTION_FALLBACK_REASONING:
         return "native_extraction_fallback"
     return "typed_submit"
@@ -955,14 +805,11 @@ def rlm_termination_mode(prediction: Any) -> str:
 # ---------------------------------------------------------------------------
 
 TerminalStatus: TypeAlias = Literal["completed", "cancelled", "timeout", "failed"]
-
 ExecutionDetail: TypeAlias = Any
 
 
 @dataclass(frozen=True, slots=True)
 class RLMOutcome:
-    """Runner result after non-terminal observations; lifecycle owns settlement."""
-
     terminal_status: TerminalStatus
     prediction: PredictionResult | None = None
     usage: RLMUsage = field(default_factory=empty_rlm_usage)
