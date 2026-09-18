@@ -319,6 +319,28 @@ def _decode_cursor(cursor: str, expected_path: str) -> int:
     return offset
 
 
+def _validate_sha256_precondition(expected_sha256: str | None) -> None:
+    if expected_sha256 is not None and not (
+        isinstance(expected_sha256, str)
+        and len(expected_sha256) == 64
+        and all(c in "0123456789abcdefABCDEF" for c in expected_sha256)
+    ):
+        raise ValueError("checksum precondition must be a 64-character hex string")
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    total = 0
+    while total < len(data):
+        try:
+            total += os.write(fd, data[total:])
+        except InterruptedError:
+            continue
+        except OSError as exc:
+            if exc.errno == errno.EINTR:
+                continue
+            raise
+
+
 class WorkspaceStorage:
     """Lean, direct Daytona Volume & Filesystem Workspace Storage.
 
@@ -520,17 +542,7 @@ class WorkspaceStorage:
     def _write_bytes_with_fsync(self, path: Path, data: bytes) -> None:
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            total = 0
-            while total < len(data):
-                try:
-                    written = os.write(fd, data[total:])
-                    total += written
-                except InterruptedError:
-                    continue
-                except OSError as exc:
-                    if exc.errno == errno.EINTR:
-                        continue
-                    raise
+            _write_all(fd, data)
             try:
                 os.fsync(fd)
             except OSError as exc:
@@ -577,17 +589,7 @@ class WorkspaceStorage:
                     if exc.errno in (errno.EPERM, errno.ENOSYS, errno.EMLINK, 38, 95):
                         fd = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                         try:
-                            total = 0
-                            while total < len(encoded):
-                                try:
-                                    written = os.write(fd, encoded[total:])
-                                    total += written
-                                except InterruptedError:
-                                    continue
-                                except OSError as write_exc:
-                                    if write_exc.errno == errno.EINTR:
-                                        continue
-                                    raise
+                            _write_all(fd, encoded)
                             try:
                                 os.fsync(fd)
                             except OSError as fsync_exc:
@@ -610,17 +612,7 @@ class WorkspaceStorage:
         try:
             temp_fd = os.open(str(temp_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             try:
-                total = 0
-                while total < len(encoded):
-                    try:
-                        written = os.write(temp_fd, encoded[total:])
-                        total += written
-                    except InterruptedError:
-                        continue
-                    except OSError as exc:
-                        if exc.errno == errno.EINTR:
-                            continue
-                        raise
+                _write_all(temp_fd, encoded)
                 try:
                     os.fsync(temp_fd)
                 except OSError as exc:
@@ -698,14 +690,8 @@ class WorkspaceStorage:
         if target.is_dir():
             raise IsADirectoryError(path)
         data = target.read_text(encoding="utf-8")
+        _validate_sha256_precondition(expected_sha256)
         if expected_sha256 is not None:
-            is_valid_sha = (
-                isinstance(expected_sha256, str)
-                and len(expected_sha256) == 64
-                and all(c in "0123456789abcdefABCDEF" for c in expected_sha256)
-            )
-            if not is_valid_sha:
-                raise ValueError("checksum precondition must be a 64-character hex string")
             actual = hashlib.sha256(data.encode("utf-8")).hexdigest()
             if actual != expected_sha256:
                 raise WorkspaceConflictError("checksum mismatch", detail="checksum_mismatch")
@@ -727,18 +713,12 @@ class WorkspaceStorage:
         target = self._resolve(path)
         if not target.exists():
             raise FileNotFoundError(path)
-        if expected_sha256 is not None:
-            is_valid_sha = (
-                isinstance(expected_sha256, str)
-                and len(expected_sha256) == 64
-                and all(c in "0123456789abcdefABCDEF" for c in expected_sha256)
-            )
-            if not is_valid_sha:
-                raise ValueError("checksum precondition must be a 64-character hex string")
-            if target.is_file():
-                actual = hashlib.sha256(target.read_bytes()).hexdigest()
-                if actual != expected_sha256:
-                    raise WorkspaceConflictError("checksum mismatch on delete", detail="checksum_mismatch")
+        _validate_sha256_precondition(expected_sha256)
+        if expected_sha256 is not None and target.is_file():
+            actual = hashlib.sha256(target.read_bytes()).hexdigest()
+            if actual != expected_sha256:
+                raise WorkspaceConflictError("checksum mismatch on delete", detail="checksum_mismatch")
+
         if target.is_dir():
             try:
                 target.rmdir()
@@ -1180,48 +1160,45 @@ def _is_uuid(value: str) -> bool:
 
 def _is_artifact_candidate(path: str, paths: VolumePaths) -> bool:
     try:
-        relative = PurePosixPath(path).relative_to(paths.artifacts_root())
+        rel = PurePosixPath(path).relative_to(paths.artifacts_root())
+        return len(rel.parts) == 2 and rel.parts[1] == "blob" and _is_uuid(rel.parts[0])
     except ValueError:
         return False
-    return len(relative.parts) == 2 and relative.parts[1] == "blob" and _is_uuid(relative.parts[0])
 
 
 def _is_committed_artifact(path: str, paths: VolumePaths, keep: Collection[str]) -> bool:
     return _is_artifact_candidate(path, paths) and path in keep
 
 
+def _run_identity(path: str, paths: VolumePaths) -> tuple[UUID, UUID] | None:
+    try:
+        rel = PurePosixPath(path).relative_to(paths.sessions_root())
+    except ValueError:
+        return None
+    if len(rel.parts) < 4 or rel.parts[1] != "runs" or not _is_uuid(rel.parts[0]) or not _is_uuid(rel.parts[2]):
+        return None
+    return UUID(rel.parts[0]), UUID(rel.parts[2])
+
+
 def _is_snapshot_candidate(path: str, paths: VolumePaths) -> bool:
     try:
-        relative = PurePosixPath(path).relative_to(paths.sessions_root())
+        rel = PurePosixPath(path).relative_to(paths.sessions_root())
+        return (
+            len(rel.parts) == 4
+            and rel.parts[1] == "runs"
+            and rel.parts[3] == "result.json"
+            and _is_uuid(rel.parts[0])
+            and _is_uuid(rel.parts[2])
+        )
     except ValueError:
         return False
-    return (
-        len(relative.parts) == 4
-        and relative.parts[1] == "runs"
-        and relative.parts[3] == "result.json"
-        and _is_uuid(relative.parts[0])
-        and _is_uuid(relative.parts[2])
-    )
 
 
 def _is_completed_snapshot(path: str, paths: VolumePaths, keep: Collection[tuple[UUID, UUID]]) -> bool:
     if not _is_snapshot_candidate(path, paths):
         return False
-    relative = PurePosixPath(path).relative_to(paths.sessions_root())
-    return (UUID(relative.parts[0]), UUID(relative.parts[2])) in keep
-
-
-def _run_identity(path: str, paths: VolumePaths) -> tuple[UUID, UUID] | None:
-    try:
-        relative = PurePosixPath(path).relative_to(paths.sessions_root())
-    except ValueError:
-        return None
-    if len(relative.parts) < 4 or relative.parts[1] != "runs":
-        return None
-    session_id, run_id = relative.parts[0], relative.parts[2]
-    if not _is_uuid(session_id) or not _is_uuid(run_id):
-        return None
-    return UUID(session_id), UUID(run_id)
+    rel = PurePosixPath(path).relative_to(paths.sessions_root())
+    return (UUID(rel.parts[0]), UUID(rel.parts[2])) in keep
 
 
 def _is_active_run_file(path: str, paths: VolumePaths, keep: Collection[tuple[UUID, UUID]]) -> bool:
@@ -1367,21 +1344,15 @@ def _convert_to_volume_files(raw_entries: Any, *, max_files: int | None = None) 
         if isinstance(entry, str):
             results.append(VolumeFile(path=entry, modified_at=0.0))
             continue
-        p = getattr(entry, "path", None)
-        if p is None and isinstance(entry, dict):
-            p = entry.get("path")
-        if p is None:
-            p = str(entry)
-        is_dir = getattr(entry, "is_dir", False)
-        if isinstance(entry, dict):
-            is_dir = entry.get("is_dir", False)
+        p = entry.get("path") if isinstance(entry, dict) else getattr(entry, "path", str(entry))
+        is_dir = entry.get("is_dir", False) if isinstance(entry, dict) else getattr(entry, "is_dir", False)
         if is_dir:
             continue
-        mod_time = getattr(entry, "mod_time", None)
-        if mod_time is None:
-            mod_time = getattr(entry, "modified_at", 0.0)
-        if isinstance(entry, dict) and "mod_time" in entry:
-            mod_time = entry["mod_time"]
+        mod_time = (
+            entry.get("mod_time")
+            if isinstance(entry, dict)
+            else getattr(entry, "mod_time", getattr(entry, "modified_at", 0.0))
+        )
         try:
             mod_float = float(mod_time)
         except (TypeError, ValueError):

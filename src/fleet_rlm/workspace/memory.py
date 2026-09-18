@@ -1389,56 +1389,39 @@ class MemoryCandidateToolHost:
             raw_learning = arguments.get("key_learning")
             supersedes = arguments.get("supersedes_id")
             return {
-                "category": _event_candidate_category(arguments.get("category")),
+                "category": _event_category(arguments.get("category")),
                 "learning_bytes": len(str(raw_learning or "").encode("utf-8")),
                 "supersedes": supersedes is not None,
-                "supersedes_id": _event_candidate_id(supersedes) if supersedes is not None else None,
+                "supersedes_id": _event_id(supersedes) if supersedes is not None else None,
             }
 
-        def propose_output(result: object) -> JsonValue:
-            if not isinstance(result, Mapping):
-                return {}
-            values = cast(Mapping[str, JsonValue], result)
-            payload: dict[str, JsonValue] = {}
-            for field in (
-                "ok",
-                "namespace",
-                "candidate_id",
-                "category",
-                "byte_size",
-                "candidate_count",
-                "candidate_bytes",
-                "supersedes",
-            ):
-                if field in values:
-                    payload[field] = (
-                        bound_event_text(values[field]) if isinstance(values[field], str) else values[field]
-                    )
-            return payload
-
-        return MappingProxyType(
-            {"propose_memory": ToolEventView(input_projection=propose_input, output_projection=propose_output)}
+        fields = (
+            "ok",
+            "namespace",
+            "candidate_id",
+            "category",
+            "byte_size",
+            "candidate_count",
+            "candidate_bytes",
+            "supersedes",
         )
-
-
-def _event_candidate_category(value: object) -> str:
-    try:
-        return normalize_workspace_memory_category(value)
-    except WorkspaceMemoryCategoryError:
-        return "invalid"
-
-
-def _event_candidate_id(value: object) -> str:
-    try:
-        return normalize_workspace_memory_id(value)
-    except WorkspaceMemoryIdError:
-        return "invalid"
+        return MappingProxyType(
+            {
+                "propose_memory": ToolEventView(
+                    input_projection=propose_input, output_projection=lambda res: _output(res, fields)
+                )
+            }
+        )
 
 
 def _output(result: object, fields: tuple[str, ...]) -> JsonValue:
     if not isinstance(result, Mapping):
         return {}
-    return {field: result[field] for field in fields if field in result}
+    return {
+        field: bound_event_text(result[field]) if isinstance(result[field], str) else cast(JsonValue, result[field])
+        for field in fields
+        if field in result
+    }
 
 
 def _walk_cause_chain(exc: BaseException) -> Iterator[BaseException]:

@@ -762,7 +762,7 @@ class WorkspaceToolHost:
 
 
 __all__ = [
-    "DAYTONA_WORKSPACE_CAPABILITY" if False else "MAX_PUBLIC_LIST_LIMIT",
+    "MAX_PUBLIC_LIST_LIMIT",
     "MAX_PUBLIC_READ_CHARS",
     "MAX_WORKSPACE_TEXT_BATCH_CHARS",
     "MAX_WORKSPACE_TEXT_BATCH_ITEMS",
@@ -771,16 +771,16 @@ __all__ = [
     "FilesystemToolError",
     "HostWorkspaceAccessGateway",
     "SessionWorkspace",
-    "UNAVAILABLE_WORKSPACE_CAPABILITY" if False else "WorkspaceAccessGateway",
+    "WorkspaceAccessGateway",
     "WorkspaceCapabilityMetadata",
     "WorkspaceConflictError",
+    "WorkspaceEntry",
     "WorkspaceFileConflictError",
     "WorkspaceFileEntry",
     "WorkspaceFileList",
     "WorkspaceFileService",
     "WorkspaceFileSession",
     "WorkspaceListResult",
-    "WorkspaceEntry",
     "WorkspaceTextPage",
     "WorkspaceToolError",
     "WorkspaceToolHost",
