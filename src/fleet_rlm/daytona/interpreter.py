@@ -363,33 +363,32 @@ class InProcessInterpreterBackend:
         if variables:
             self.namespace.update(variables)
         stdout = _StreamingTextBuffer(on_stdout)
+
+        def _make_result(
+            *, final: dict[str, Any] | None = None, error: str | None = None, category: str | None = None
+        ) -> BackendExecutionResult:
+            return BackendExecutionResult(
+                stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                final=final,
+                error=error,
+                error_category=category,
+                context_accesses=self._drain_context_accesses(),
+            )
+
         with contextlib.redirect_stdout(stdout):
             try:
                 exec(code, self.namespace, self.namespace)
             except FleetFinalOutputError as final:
-                return BackendExecutionResult(
-                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-                    final=dict(final.value),
-                    context_accesses=self._drain_context_accesses(),
-                )
+                return _make_result(final=dict(final.value))
             except Exception as exc:
                 value = getattr(exc, "value", None)
                 if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
-                    return BackendExecutionResult(
-                        stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-                        final=dict(value),
-                        context_accesses=self._drain_context_accesses(),
-                    )
-                return BackendExecutionResult(
-                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                    return _make_result(final=dict(value))
+                return _make_result(
                     error=sanitize_provider_message(str(exc)),
-                    error_category=type(exc).__name__,
-                    context_accesses=self._drain_context_accesses(),
+                    category=type(exc).__name__,
                 )
-        return BackendExecutionResult(
-            stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-            context_accesses=self._drain_context_accesses(),
-        )
+        return _make_result()
 
     def _drain_context_accesses(self) -> tuple[str, ...]:
         values = tuple(self._context_accesses)
@@ -633,28 +632,17 @@ def _fleet_load_context_manifest(raw_manifest):
             on_stdout(stdout)
 
         final = extract_final_payload(stdout)
-        if final is not None:
-            return BackendExecutionResult(
-                stdout=stdout,
-                stderr=stderr,
-                final=final,
-                context_accesses=self._drain_context_accesses(),
-            )
-
-        if exit_code != 0 or exec_error:
+        err_msg: str | None = None
+        category: str | None = None
+        if final is None and (exit_code != 0 or exec_error):
             err_msg = str(exec_error) if exec_error else (stderr or stdout or "Execution failed")
             category = _repair_category(err_msg)
-            return BackendExecutionResult(
-                stdout=stdout,
-                stderr=stderr,
-                error=err_msg,
-                error_category=category,
-                context_accesses=self._drain_context_accesses(),
-            )
-
         return BackendExecutionResult(
             stdout=stdout,
             stderr=stderr,
+            final=final,
+            error=err_msg,
+            error_category=category,
             context_accesses=self._drain_context_accesses(),
         )
 
@@ -1021,6 +1009,30 @@ class DaytonaCodeInterpreter:
                 ),
             },
         ) as phase:
+
+            def _fail_step(
+                label: str,
+                category: str,
+                *,
+                recovered: bool = False,
+                outputs: dict[str, Any] | None = None,
+            ) -> None:
+                stdout_projector.finish()
+                _close_output_stream(
+                    label,
+                    step=step,
+                    stream_id=output_stream_id,
+                    state=output_state,
+                    observe=self._observe,
+                )
+                res_outputs = {"failure_category": category}
+                if outputs:
+                    res_outputs.update(outputs)
+                attrs = {"failure_category": category}
+                if recovered:
+                    attrs["recovered"] = True
+                phase.finish(phase_status="failed", outputs=res_outputs, attributes=attrs)
+
             try:
                 normalized_code = "\n".join(line.rstrip() for line in code.splitlines()).strip()
                 bindings_started = time.perf_counter()
@@ -1088,94 +1100,53 @@ class DaytonaCodeInterpreter:
                 return result
 
             except TurnBudgetExhausted as exc:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": f"budget_{exc.dimension.value}"},
-                    attributes={"failure_category": f"budget_{exc.dimension.value}"},
-                )
+                _fail_step("Execution failed", f"budget_{exc.dimension.value}")
                 raise
             except RunTerminalError:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": "terminal_error"},
-                    attributes={"failure_category": "terminal_error"},
-                )
+                _fail_step("Execution failed", "terminal_error")
                 raise
             except CodeInterpreterError as exc:
-                stdout_projector.finish()
                 if not isinstance(exc, CodeExecutionError):
                     cat = str(getattr(exc, "category", "CodeInterpreterError"))
                     msg = sanitize_repair_text(sanitize_provider_message(str(exc)))
-                    exc = _terminal_error(msg, category=cat)
-                    _close_output_stream(
-                        "Execution failed",
-                        step=step,
-                        stream_id=output_stream_id,
-                        state=output_state,
-                        observe=self._observe,
-                    )
-                    phase.finish(phase_status="failed", outputs={"failure_category": cat})
-                    raise exc from None
+                    _fail_step("Execution failed", cat)
+                    raise _terminal_error(msg, category=cat) from None
 
                 cat = str(getattr(exc, "category", "execution_error"))
                 msg = str(exc)
                 if "characters omitted" not in msg:
                     msg = sanitize_repair_text(msg)
-                exc = _repair_error(msg, category=cat)
-                phase.finish(
-                    phase_status="failed",
+                _fail_step(
+                    "Execution error",
+                    cat,
+                    recovered=True,
                     outputs={
                         "path": type(self._backend).__name__,
                         "result_kind": "repair_error",
                         "execution_status": "recovered_error",
                         "repair_category": cat,
                     },
-                    attributes={"recovered": True, "failure_category": cat},
                 )
-                _close_output_stream(
-                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                raise exc
+                raise _repair_error(msg, category=cat) from exc
             except SyntaxError as exc:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                repair = _repair_error(str(exc), category="SyntaxError")
-                phase.finish(
-                    phase_status="failed",
+                _fail_step(
+                    "Execution error",
+                    "SyntaxError",
+                    recovered=True,
                     outputs={
                         "path": "syntax",
                         "result_kind": "repair_error",
                         "execution_status": "recovered_error",
                         "repair_category": "SyntaxError",
                     },
-                    attributes={"recovered": True, "failure_category": "SyntaxError"},
                 )
-                raise repair from None
+                raise _repair_error(str(exc), category="SyntaxError") from None
             except DaytonaAdapterError:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(phase_status="failed", outputs={"failure_category": "adapter_error"})
+                _fail_step("Execution failed", "adapter_error")
                 raise
             except Exception as exc:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                mapped = map_provider_error(exc)
-                phase.finish(phase_status="failed", outputs={"failure_category": "execution_error"})
-                raise mapped from exc
+                _fail_step("Execution failed", "execution_error")
+                raise map_provider_error(exc) from exc
             finally:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
                 self._observe(StepFinished(step, duration_ms))
@@ -1183,7 +1154,6 @@ class DaytonaCodeInterpreter:
     @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """Shut down the interpreter and release backend resources."""
-        _ = strict_broker_cleanup
         with self._shutdown_lock:
             if self._shutdown:
                 return

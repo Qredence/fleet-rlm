@@ -501,9 +501,7 @@ class DaytonaSessionManager:
 
     @staticmethod
     async def _settle_provider_acquisition(acquisition: asyncio.Task[InterpreterLease]) -> InterpreterLease:
-        effect = OwnedEffect.from_task(acquisition)
-        await effect.settle()
-        return effect.result()
+        return await _settle_provider_task(acquisition)
 
     async def _settle_late_owner(self, owner: _LateOwner, *, deadline: float | None = None) -> None:
         if owner.unpublished:
@@ -549,6 +547,11 @@ class DaytonaSessionManager:
             if acquisition.done() and self._late_owners.get(id(acquisition)) is owner:
                 self._late_owners.pop(id(acquisition), None)
 
+    def _track_late_cleanup(self, owner: _LateOwner, task: Any) -> None:
+        owner.cleanup_task = task
+        self._late_cleanup_tasks.add(task)
+        task.add_done_callback(self._settled_late_cleanup)
+
     def _schedule_late_owner_fallback(self, owner: _LateOwner) -> bool:
         try:
             owner_loop = owner.acquisition.get_loop() if owner.acquisition is not None else None
@@ -566,10 +569,7 @@ class DaytonaSessionManager:
         except BaseException as exc:
             logger.critical("unable to retain late Daytona ownership cleanup", extra={"error_type": type(exc).__name__})
             return False
-        task = execution.future
-        owner.cleanup_task = task
-        self._late_cleanup_tasks.add(task)
-        task.add_done_callback(self._settled_late_cleanup)
+        self._track_late_cleanup(owner, execution.future)
         return True
 
     def _schedule_late_owner(self, owner: _LateOwner) -> bool:
@@ -585,9 +585,7 @@ class DaytonaSessionManager:
                 with contextlib.suppress(BaseException):
                     awaitable.close()
                 return self._schedule_late_owner_fallback(owner)
-        owner.cleanup_task = task
-        self._late_cleanup_tasks.add(task)
-        task.add_done_callback(self._settled_late_cleanup)
+        self._track_late_cleanup(owner, task)
         return True
 
     def _adopt_late_acquisition(
@@ -620,7 +618,7 @@ class DaytonaSessionManager:
         release_error: BaseException | None = None
         try:
             release_task = asyncio.create_task(asyncio.to_thread(lease.release))
-            await OwnedEffect.from_task(release_task).settle()
+            await _settle_provider_task(release_task)
         except BaseException as exc:
             release_error = exc
 
@@ -654,15 +652,7 @@ class DaytonaSessionManager:
     async def _retry_late_owners(self, deadline: float) -> bool:
         current_loop = asyncio.get_running_loop()
         tasks: list[asyncio.Future[Any]] = []
-        unique_owners: list[_LateOwner] = []
-        seen_owner_ids: set[int] = set()
-        for owner in self._late_owners.values():
-            owner_id = id(owner)
-            if owner_id in seen_owner_ids:
-                continue
-            seen_owner_ids.add(owner_id)
-            unique_owners.append(owner)
-        for owner in unique_owners:
+        for owner in {id(o): o for o in self._late_owners.values()}.values():
             if owner.unpublished:
                 awaitable = self._settle_late_owner(owner, deadline=deadline)
                 try:
@@ -671,9 +661,7 @@ class DaytonaSessionManager:
                     with contextlib.suppress(BaseException):
                         awaitable.close()
                     continue
-                owner.cleanup_task = task
-                self._late_cleanup_tasks.add(task)
-                task.add_done_callback(self._settled_late_cleanup)
+                self._track_late_cleanup(owner, task)
                 tasks.append(task)
                 continue
             if owner.acquisition is not None and owner.lease is None:
@@ -689,17 +677,12 @@ class DaytonaSessionManager:
                     self._schedule_late_owner(owner)
                     task = owner.cleanup_task
                 if task is not None:
-                    if isinstance(task, asyncio.Future):
-                        tasks.append(task)
-                    else:
-                        tasks.append(asyncio.wrap_future(task))
+                    tasks.append(task if isinstance(task, asyncio.Future) else asyncio.wrap_future(task))
                 continue
             task = owner.cleanup_task
             if task is None or task.done():
                 task = asyncio.create_task(self._settle_late_lease(owner), name="fleet-daytona-late-lease-retry")
-                owner.cleanup_task = task
-                self._late_cleanup_tasks.add(task)
-                task.add_done_callback(self._settled_late_cleanup)
+                self._track_late_cleanup(owner, task)
             tasks.append(task)
         if not tasks:
             return not self._late_owners
