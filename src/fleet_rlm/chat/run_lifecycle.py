@@ -91,7 +91,7 @@ class OwnedPostCommitMemoryPromotion:
             return PostCommitPromotionAttempt("deadline_exceeded")
         except asyncio.CancelledError:
             return PostCommitPromotionAttempt("interrupted")
-        except BaseException:
+        except Exception:
             return PostCommitPromotionAttempt("failed")
         return PostCommitPromotionAttempt("completed", result)
 

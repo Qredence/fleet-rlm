@@ -620,7 +620,11 @@ class TurnRuntime:
                 try:
                     prepared = await prep_task
                     await shield_cleanup(prepared.aclose())
-                except BaseException as exc:
+                except asyncio.CancelledError as exc:
+                    if state.cleanup_error is None:
+                        state.cleanup_error = exc
+                    logger.error("late Turn preparation cleanup failed", exc_info=exc)
+                except Exception as exc:
                     if state.cleanup_error is None:
                         state.cleanup_error = exc
                     logger.error("late Turn preparation cleanup failed", exc_info=exc)

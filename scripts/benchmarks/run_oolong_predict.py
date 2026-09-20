@@ -230,12 +230,16 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
             answer = prediction.answer
             usage = prediction.usage
             usages.append(usage)
-        except BaseException as exc:
+        except asyncio.CancelledError as exc:
+            primary_error = exc
+        except Exception as exc:
             primary_error = exc
         finally:
             try:
                 await release_ephemeral_lease(lease, staged_paths=staged_paths)
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                cleanup_error = exc
+            except Exception as exc:
                 cleanup_error = exc
         if primary_error is not None:
             raise primary_error

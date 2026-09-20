@@ -607,7 +607,9 @@ async def release_ephemeral_lease(
         for logical_path in staged_paths:
             try:
                 await storage.remove(logical_path)
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                cleanup_errors.append(exc)
+            except Exception as exc:
                 cleanup_errors.append(exc)
     interpreter = getattr(lease, "interpreter", None)
     if interpreter is not None:
@@ -615,11 +617,15 @@ async def release_ephemeral_lease(
         if callable(shutdown):
             try:
                 await asyncio.to_thread(shutdown, strict_broker_cleanup=True)
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                cleanup_errors.append(exc)
+            except Exception as exc:
                 cleanup_errors.append(exc)
     try:
         await lease.platform.delete(lease.sandbox)
-    except BaseException as exc:
+    except asyncio.CancelledError as exc:
+        cleanup_errors.append(exc)
+    except Exception as exc:
         cleanup_errors.append(exc)
     if cleanup_errors:
         raise OolongAdapterError("ephemeral lease cleanup failed") from cleanup_errors[0]
