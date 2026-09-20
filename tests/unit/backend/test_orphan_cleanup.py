@@ -139,7 +139,7 @@ async def test_artifact_repository_enumerates_workspace_keep_sets() -> None:
         create_tables,
     )
     from fleet_rlm.persistence.models import ArtifactRow, RunRow, SessionRow, UserRow, WorkspaceRow
-    from fleet_rlm.persistence.repositories.artifacts import SqlAlchemyArtifactCatalog
+    from fleet_rlm.persistence.repositories.sessions import SqlAlchemyArtifactCatalog
 
     engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
     try:

@@ -4,9 +4,12 @@ Fleet RLM has one Python backend under `src/fleet_rlm/` and one maintained
 development client under `tools/fleet-tui/`. It exposes a compact Session-first
 FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
 
-Fleet uses native DSPy RLM on the retained broker interpreter, with a fresh
-program per Run. Sequential Turns may reuse a healthy Root Sandbox. Native
-Daytona interpreter cutover is not selected.
+Fleet uses native DSPy RLM with a fresh program per Run. Sequential Turns may
+reuse a healthy Root Sandbox, which receives submitted Python source and
+serializable values. A Sandbox-local broker dispatches authorized Fleet and
+DSPy semantic tools to the host over Daytona's authenticated preview connection,
+so host callables and preview credentials stay on the host. Native Daytona
+interpreter cutover is not selected.
 
 ## Start here
 
@@ -28,15 +31,16 @@ Daytona interpreter cutover is not selected.
 - [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
 - [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md) — historical migration contract.
 - [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — retained-broker architecture, historical target decisions, and open gates.
-- [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and remaining work.
-- [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
+- [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and verification ledger.
 
-The current production path is retained broker-backed execution.
-Fleet child RLM tools follow the selected policy; the shipped
-`daytona-recursive` default currently enables them, while native `llm_query`
-remains available. This operational setting does not certify recursive value.
-Phase 3 complete-MVP and Phase 5–6 operational certification are open. Read
-the status ledger before treating any dated receipt as a current guarantee.
+The configured Daytona path reuses a healthy Root Sandbox for submitted source
+and serializable bindings, resetting the execution namespace and invocation
+credential between Turns. Authorized Fleet tools and DSPy's native semantic
+tools reach the host through the same broker path. Live recursive execution and
+trace retrieval are verified by the maintained recursive-batch canary; this does
+not certify recursive value. Phase 3 complete-MVP and Phase 5–6 operational
+certification are open. Read the status ledger before treating any dated receipt
+as a current guarantee.
 
 ## Historical baselines and evidence
 
@@ -70,8 +74,7 @@ profile matrix, must be regenerated from its source rather than edited by hand.
 - schema: `migrations/`
 - validation: `Makefile`, `tests/`, and TUI tests
 
-The maintained [ADR 006 implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
-and its [execution/status ledger](decisions/006-implementation-status.md) track
-implementation separately from live certification and rollout authorization.
+The maintained [ADR 006 implementation status ledger](decisions/006-implementation-status.md)
+tracks implementation separately from live certification and rollout authorization.
 Historical baselines preserve their original evidence scope and do not override
 current code, policy, or generated contracts.

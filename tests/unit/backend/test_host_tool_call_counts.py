@@ -11,8 +11,7 @@ import pytest
 
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments.models import AttachmentRef, StagedAttachment
-    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
@@ -178,8 +177,7 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
 
 
 def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None:
-    from fleet_rlm.attachments.models import AttachmentRef, StagedAttachment
-    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from fleet_rlm.workspace.paths import VolumePaths
     from fleet_rlm.workspace.storage import HostVolumeMirror
 
@@ -215,7 +213,7 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
 @pytest.mark.asyncio
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.attachments import AttachmentToolHost
     from fleet_rlm.composition.daytona_run_preparation import LivePreparedCapabilities
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.workspace.paths import VolumePaths

@@ -29,7 +29,6 @@ certification.
 * [Phase 6 promotion and rollback](how-to-guides/phase6-promotion.md)
 * [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md)
 * [ADR 006 implementation status](decisions/006-implementation-status.md)
-* [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Runtime Profile Matrix](reference/profile-matrix.md)

@@ -140,7 +140,7 @@ def test_sanitize_provider_message_strips_secrets_and_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
-    from fleet_rlm.daytona.broker import sync_sandbox
+    from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
     class AsyncFilesystem:
         async def download_file(self, path: str) -> bytes:
@@ -151,14 +151,12 @@ async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
         asyncio.get_running_loop(),
     )
 
-    assert await asyncio.to_thread(sandbox.fs.download_file, "/home/daytona/fleet/file.txt") == (
-        b"/home/daytona/fleet/file.txt"
-    )
+    assert await asyncio.to_thread(sandbox.fs.download_file, "file.txt") == (b"file.txt")
 
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
-    from fleet_rlm.daytona.broker import sync_sandbox
+    from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
     class Service:
         async def create_context(self, **kwargs):
@@ -227,8 +225,8 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
-    from fleet_rlm.daytona.broker import sync_sandbox
     from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
     class Fs:
         async def download_file(self, path: str) -> bytes:
@@ -236,7 +234,7 @@ async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
 
     bridge = sync_sandbox(SimpleNamespace(fs=Fs()), asyncio.get_running_loop())
     with pytest.raises(DaytonaAdapterError, match="owning event loop"):
-        bridge.fs.download_file("/x")
+        bridge.fs.download_file("x")
 
 
 @pytest.mark.asyncio
@@ -253,7 +251,7 @@ async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
             raise FileNotFoundError(path)
 
     volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=Fs()))
-    assert await volume.read_bytes("/home/daytona/fleet/text") == b"text"
-    assert await volume.exists("/home/daytona/fleet/text") is True
-    assert await volume.exists("/home/daytona/fleet/missing") is False
-    await volume.remove("/home/daytona/fleet/missing")
+    assert await volume.read_bytes("text") == b"text"
+    assert await volume.exists("text") is True
+    assert await volume.exists("missing") is False
+    await volume.remove("missing")

@@ -27,7 +27,7 @@ class _Catalog:
         self.calls.append(("catalog", (access, ref, storage_ref)))
 
     async def get_many(self, *, access: object, attachment_ids: object) -> tuple[object, ...]:
-        from fleet_rlm.attachments.errors import AttachmentNotFoundError
+        from fleet_rlm.attachments import AttachmentNotFoundError
 
         ids = tuple(attachment_ids)  # type: ignore[arg-type]
         self.calls.append(("metadata", (access, ids)))
@@ -83,8 +83,7 @@ class _Sink:
 
 @pytest.mark.asyncio
 async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.models import AttachmentAccess, AttachmentUpload
+    from fleet_rlm.attachments import AttachmentAccess, AttachmentLifecycleService, AttachmentUpload
 
     calls: list[tuple[str, object]] = []
     source = _Source([b"abc", b"def", b""])
@@ -112,9 +111,12 @@ async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
-    from fleet_rlm.attachments.errors import AttachmentStorageError
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.models import AttachmentAccess, AttachmentUpload
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentStorageError,
+        AttachmentUpload,
+    )
 
     class FailingCatalog(_Catalog):
         async def create(self, *, access: object, ref: object, storage_ref: str) -> None:
@@ -135,9 +137,13 @@ async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None:
-    from fleet_rlm.attachments.errors import AttachmentValidationError
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService, StoredAttachment
-    from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRef
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentValidationError,
+        StoredAttachment,
+    )
 
     first_id, second_id = uuid4(), uuid4()
     first = AttachmentRef(first_id, "first.txt", "text/plain", 1, "a" * 64)
@@ -168,8 +174,13 @@ async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None
 
 @pytest.mark.asyncio
 async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -> None:
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService, StoredAttachment
-    from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRef, AttachmentRun
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentRun,
+        StoredAttachment,
+    )
 
     first_id, second_id = uuid4(), uuid4()
     first_data, second_data = b"a", b"bc"
@@ -211,9 +222,14 @@ async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -
 
 @pytest.mark.asyncio
 async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() -> None:
-    from fleet_rlm.attachments.errors import AttachmentStorageError
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService, StoredAttachment
-    from fleet_rlm.attachments.models import AttachmentAccess, AttachmentRef, AttachmentRun
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentRun,
+        AttachmentStorageError,
+        StoredAttachment,
+    )
 
     ids = (uuid4(), uuid4())
     refs = (

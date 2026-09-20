@@ -1,21 +1,18 @@
 # DSPy RLM and Daytona integration
 
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
-The broker Root Sandbox may be reused across sequential successful Turns; DSPy's
+A healthy Root Sandbox may be reused across sequential successful Turns; DSPy's
 private `REPLHistory` and Turn capabilities are fresh for every invocation. The
-Root Model generates iterative Python, while the Sub Model answers `llm_query()`
-and ordered `llm_query_batched()` calls. Fleet child tools
-`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)` are available
-according to the selected policy; the shipped `daytona-recursive` default enables them,
-while comparison profiles can disable them. Both model roles and every
-executable capability are host-configured; API clients cannot supply models,
-Signatures, or executable capabilities.
+current Sandbox adapter executes generated Python remotely with serializable
+variable bindings. A Sandbox-local broker dispatches authorized Fleet tools and
+DSPy's native semantic tools to the host through Daytona's authenticated preview
+connection. Host callables and preview credentials stay on the host. The same
+broker path serves root and child invocations.
 
-This guide describes the current retained-broker runtime. Native DSPy execution
-does not select the removed native Daytona interpreter path. Fresh per-Run
-programs, capsule-only child inputs, and the bounded recursive policy are the
-checked-in implementation; provider, quality, and capacity certification remain
-separate gates in the [implementation status](../decisions/006-implementation-status.md).
+Fresh per-Run programs and DSPy's private history ownership remain the
+checked-in behavior. Live recursive execution and trace retrieval are verified
+by the maintained recursive-batch canary; provider quality and capacity remain
+separate validation gates.
 
 ## Execution contract
 
@@ -92,9 +89,15 @@ separate gates in the [implementation status](../decisions/006-implementation-st
   extends DSPy's JSON adapter with deadline/budget accounting and bounded
   corrective re-asks. Wrap-up also starts on the final native iteration
   (`current == total`). When wrap-up is enabled (`rlm.wrap_up_seconds` > 0,
-  the production default), exhaustion on that last iteration is a Turn
-  `timeout`: DSPy extract fallback (`native_extraction_fallback`) only runs if
-  every `generate_action` returns without SUBMIT, so it is unreachable.
+  the production default), a wrap-up action is any number of data-only
+  `name = <value>` bindings followed by exactly one compliant `SUBMIT(...)`.
+  Bindings cannot call a Tool, import, or reach the provider, so shaping an
+  answer is admitted while further work is not. Exhausting the finalization
+  allowance on that last iteration settles the Turn as a `timeout` and reports
+  `failure_category: "wrap_up_rejected"` in diagnostics, so a rejected final
+  action is never mistaken for an expired clock. DSPy extract fallback
+  (`native_extraction_fallback`) only runs if every `generate_action` returns
+  without SUBMIT, so it is unreachable.
   Empty or reasoning-only completions use those bounded parse re-asks while
   time and iterations remain. It retains the pinned DSPy action grammar;
   exhausted repairs produce bounded `adapter_parse_error` failures without

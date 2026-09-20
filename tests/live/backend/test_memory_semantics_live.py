@@ -50,7 +50,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.broker import sync_sandbox
+from fleet_rlm.daytona.sync_bridge import sync_sandbox
 from fleet_rlm.skills.catalog import stable_skill_id
 from fleet_rlm.workspace.memory import WorkspaceMemory, WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
 from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES

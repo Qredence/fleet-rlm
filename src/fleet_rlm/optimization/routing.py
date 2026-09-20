@@ -17,6 +17,7 @@ from typing import Any, Literal, cast
 
 import dspy
 
+from fleet_rlm.observability.tracing import dspy_turn_callbacks
 from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
@@ -392,7 +393,9 @@ async def run_routing_scenario(
             with dspy.context(
                 lm=root_lm,
                 adapter=dspy.JSONAdapter(),
-                callbacks=[_RLMTraceCallback(root_lm=root_lm, sub_lm=sub_lm, metrics=recursive.metrics)],
+                callbacks=dspy_turn_callbacks(
+                    _RLMTraceCallback(root_lm=root_lm, sub_lm=sub_lm, metrics=recursive.metrics)
+                ),
                 track_usage=True,
             ):
                 effect = OwnedEffect.start(asyncio.to_thread(rlm, root_interpreter, prompt=scenario.prompt))

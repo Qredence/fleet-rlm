@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
+from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.chat.commands import OpenTurnCommand
 from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings

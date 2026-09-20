@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, Request
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments.lifecycle import AttachmentLifecycle
+from fleet_rlm.attachments import AttachmentLifecycle
 from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.composition.inventory import RuntimeInventory, RuntimeInventoryError, get_runtime_inventory

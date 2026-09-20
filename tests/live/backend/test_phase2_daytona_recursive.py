@@ -33,8 +33,8 @@ _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
 
 
@@ -130,7 +130,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         Settings: Validated settings configured for the Daytona recursive canary.
     """
     if not os.environ.get(_EVIDENCE_ENV):
-        pytest.skip("Run this credentialed canary via scripts/live_phase2_recursive_verify.py")
+        pytest.skip("Run this credentialed canary with live Daytona credentials")
     load_dotenv(_REPO_ROOT / ".env", override=False)
     import fleet_rlm.config.loader as configuration
 

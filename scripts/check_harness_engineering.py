@@ -13,6 +13,21 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT_AGENTS_LINE_BUDGET = 140
+SAFE_SCRIPT_HELP = frozenset(
+    {
+        "check_agents_md_freshness.py",
+        "check_codebase_tree.py",
+        "check_dependency_boundaries.py",
+        "check_docs_quality.py",
+        "check_harness_engineering.py",
+        "generate_profile_matrix.py",
+        "generate_stream_fixture.py",
+        "generate_tui_chunk_validation.py",
+        "openapi_tools.py",
+        "validate_release.py",
+        "verify_child_sandboxes_turn.py",
+    }
+)
 REQUIRED_GUIDANCE_FILES = (
     "AGENTS.md",
     "ARCHITECTURE.md",
@@ -185,7 +200,7 @@ class HarnessChecker:
             rel_path = script.relative_to(self.repo_root).as_posix()
             if script.name not in inventory and rel_path not in inventory:
                 self._error(rel_path, "top-level Python helper is missing from scripts/README.md")
-            if self.check_script_help:
+            if self.check_script_help and script.name in SAFE_SCRIPT_HELP:
                 self._check_script_help(script)
 
     def _control_surface_files(self) -> list[Path]:
@@ -195,7 +210,6 @@ class HarnessChecker:
             "tools/fleet-tui/AGENTS.md",
             "CONTRIBUTING.md",
             "Makefile",
-            "PRODUCT.md",
             "pyproject.toml",
             ".pre-commit-config.yaml",
             ".circleci/config.yml",

@@ -10,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.attachments.models import PreparedAttachments
+from fleet_rlm.attachments import PreparedAttachments
 from fleet_rlm.config.settings import Settings
 
 

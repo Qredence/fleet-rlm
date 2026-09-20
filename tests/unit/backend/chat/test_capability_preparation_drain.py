@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
+from fleet_rlm.chat.preparation import PreparedHostCapabilities
 
 
 class _FilesStub:

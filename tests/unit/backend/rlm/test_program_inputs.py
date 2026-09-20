@@ -514,6 +514,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         # P44.1 canonical History factory returns the exact installed
         # dspy.History Pydantic model; the dspy coupling is the point.
         "sessions/history.py",
+        "attachments/service.py",
         "attachments/tools.py",
         "artifacts/tools.py",
         "workspace/memory.py",

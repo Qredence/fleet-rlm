@@ -32,8 +32,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
 _APPROVED_MODELS = frozenset(
     name
     for base in {
@@ -195,7 +195,7 @@ def _load_live_settings(tmp_path: Path) -> Settings:
         Settings: Validated settings using an upgraded temporary database and bounded execution limits.
     """
     if not os.environ.get(_EVIDENCE_ENV):
-        pytest.skip("Run this credentialed canary via scripts/live_phase1_stream_verify.py")
+        pytest.skip("Run this credentialed canary with live Daytona credentials")
     load_dotenv(_REPO_ROOT / ".env", override=False)
     try:
         policy = require_live_execution()

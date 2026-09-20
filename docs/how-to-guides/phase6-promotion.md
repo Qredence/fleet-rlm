@@ -268,7 +268,7 @@ ground truth.
 
 Warm capacity is deferred for the current 0.7.8 continuation by operator
 instruction; this neither changes configured policy nor certifies a warm pool.
-The [Phase 6 task list](../../fleet-rlm-implementation-plan-2026-09-06-v2.md#phase-6---promotion-rollback-and-final-deletion)
+The [ADR 006 implementation status ledger](../decisions/006-implementation-status.md)
 tracks remaining work. Historical runtime/adapter v2 benchmark receipts remain
 readable without rewriting their seals; new receipts use v3, and comparisons
 cannot mix generations. These scripted lanes do not prove live quality.

@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._evidence import candidate_identity, write_receipt
@@ -58,15 +58,12 @@ def _install_cancel_during_first_execute(
     session_id: UUID,
     ledger: dict[str, Any],
 ) -> None:
-    original = DaytonaHttpToolBroker.execute_code
+    original = DaytonaCodeInterpreter._execute_once
 
     def first_execute_cancels(
-        self: DaytonaHttpToolBroker,
+        self: DaytonaCodeInterpreter,
         code: str,
         variables: dict[str, Any] | None = None,
-        *,
-        timeout_s: float = 130.0,
-        on_stdout: Any | None = None,
     ) -> Any:
         ledger["calls"] = int(ledger.get("calls") or 0) + 1
         if ledger["calls"] == 1:
@@ -89,9 +86,9 @@ def _install_cancel_during_first_execute(
             ledger["cancel_state"] = client.portal.call(_mark_cancelled)
             time.sleep(_WORKER_HOLD_SECONDS)
             raise TimeoutError("host-forced cancel during interpreter execute")
-        return original(self, code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
+        return original(self, code, variables)
 
-    monkeypatch.setattr(DaytonaHttpToolBroker, "execute_code", first_execute_cancels)
+    monkeypatch.setattr(DaytonaCodeInterpreter, "_execute_once", first_execute_cancels)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:

@@ -133,15 +133,21 @@ def trace_failure_category(exc: BaseException) -> str:
         exc (BaseException): The failure to classify.
 
     Returns:
-        str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``timeout``,
-            ``cancelled``, or the normalized diagnostic cause type.
+        str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``wrap_up_rejected``,
+            ``timeout``, ``cancelled``, or the normalized diagnostic cause type.
     """
+    from fleet_rlm.rlm.budget import FinalizationExhausted
     from fleet_rlm.rlm.recursion import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
 
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
     if isinstance(exc, ChildRuntimeCleanupError):
         return "cleanup_failed"
+    # Checked before the generic deadline branch: exhausted wrap-up capacity is
+    # not a deadline expiry, and reporting it as one sends triage after a clock
+    # that never ran out.
+    if isinstance(exc, FinalizationExhausted):
+        return "wrap_up_rejected"
     status = getattr(exc, "status", None)
     if status in {"timeout", "cancelled"}:
         return str(status)

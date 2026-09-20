@@ -7,12 +7,17 @@ from typing import Annotated, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel
 
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
+    MLflowRuntimeDep,
+    RunLifecycleDep,
     SessionCatalogDep,
     SessionLifecycleDep,
     SessionPrewarmDep,
+    SettingsDep,
+    TraceFeedbackServiceDep,
 )
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
@@ -22,15 +27,23 @@ from fleet_rlm.api.schemas import (
     SessionPatchRequest,
     SessionSummaryResponse,
     SessionTurnPageResponse,
+    TraceFeedbackRequest,
+    TraceFeedbackResponse,
     UIMessageResponse,
 )
 from fleet_rlm.api.ui_message import assistant_turn_to_ui_message, user_turn_to_ui_message
+from fleet_rlm.observability.feedback import (
+    TraceFeedbackNotFoundError,
+    TraceFeedbackUnavailableError,
+)
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
-from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord
+from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord, TurnAccess
+from fleet_rlm.sessions.run_state import RunNotFoundError
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
+sessions_router = router
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -264,3 +277,112 @@ async def list_session_turns(
         items=[UIMessageResponse.model_validate(message) for message in messages],
         next_after_sequence=page.next_after_sequence,
     )
+
+
+# ---------------------------------------------------------------------------
+# Traces Router (/api/sessions/{session_id}/traces/feedback)
+# ---------------------------------------------------------------------------
+
+traces_router = APIRouter(prefix="/api/sessions", tags=["traces"])
+
+
+@traces_router.post(
+    "/{session_id}/traces/feedback",
+    response_model=TraceFeedbackResponse,
+    operation_id="submit_trace_feedback",
+    responses={
+        404: {"description": "Trace not found"},
+        503: {"description": "Trace feedback is unavailable"},
+    },
+)
+async def submit_trace_feedback(
+    session_id: UUID,
+    body: TraceFeedbackRequest,
+    identity: LocalScopeDep,
+    repo: SessionCatalogDep,
+    settings: SettingsDep,
+    service: TraceFeedbackServiceDep,
+    mlflow_runtime: MLflowRuntimeDep,
+) -> TraceFeedbackResponse:
+    """Record human feedback for an execution trace owned by this Session."""
+    try:
+        await repo.get(
+            session_id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+        )
+    except SessionNotFoundError as exc:
+        raise http_error(404, "feedback_trace_not_found", "Trace not found") from exc
+
+    try:
+        result = await mlflow_runtime.run_operation(
+            service.submit,
+            session_id=session_id,
+            trace_id=body.trace_id,
+            value=body.value,
+            comment=body.comment,
+            content_enabled=settings.mlflow_trace_content_enabled,
+        )
+    except TraceFeedbackNotFoundError as exc:
+        raise http_error(404, "feedback_trace_not_found", "Trace not found") from exc
+    except TraceFeedbackUnavailableError as exc:
+        raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable") from exc
+    except RuntimeError as exc:
+        raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable") from exc
+
+    return TraceFeedbackResponse(
+        trace_id=result.trace_id,
+        value=result.value,
+        assessment_id=result.assessment_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Runs Router (/api/runs)
+# ---------------------------------------------------------------------------
+
+runs_router = APIRouter(prefix="/api/runs", tags=["runs"])
+
+
+class CancellationResponse(BaseModel):
+    run_id: UUID
+    state: Literal["requested", "already_requested", "already_terminal"]
+
+
+@runs_router.put(
+    "/{run_id}/cancellation",
+    response_model=CancellationResponse,
+    operation_id="request_run_cancellation",
+    responses={
+        404: {"description": "Run not found"},
+        503: {"description": "Service is not ready"},
+    },
+)
+async def request_run_cancellation(
+    run_id: UUID,
+    identity: LocalScopeDep,
+    lifecycle: RunLifecycleDep,
+) -> CancellationResponse:
+    """Request cancellation for a run."""
+    try:
+        status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
+    except RunNotFoundError as exc:
+        raise http_error(404, "run_not_found", "Run not found") from exc
+    capture(
+        "run_cancellation_requested",
+        properties={
+            "workspace_id": str(identity.workspace_id),
+            "run_id": str(run_id),
+            "cancellation_state": status,
+        },
+    )
+    return CancellationResponse(run_id=run_id, state=status)
+
+
+__all__ = [
+    "CancellationResponse",
+    "router",
+    "runs_router",
+    "sessions_router",
+    "traces_router",
+]

@@ -12,29 +12,35 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
-from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.provisioning import EphemeralInterpreterLease
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
-from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter
+from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter, FleetRLMSignature
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from scripts.benchmarks import run_oolong_predict as runner
+from scripts.benchmarks.oolong import adapter as oolong_adapter
 from scripts.benchmarks.oolong.adapter import (
+    DEFAULT_HF_DATASET_CONFIGS,
     DEFAULT_HF_DATASET_REVISIONS,
+    LivePrediction,
     LoadedDatapoint,
     OolongAdapterError,
+    OolongDNDRLMSignature,
     build_predict_kwargs,
     build_receipt,
     invoke_live_prediction,
     kwargs_context_mode,
     load_fixture,
     load_hf_row,
+    normalize_dnd_answer,
+    oolong_signature,
     receipt_safe_score,
     release_ephemeral_lease,
     resolve_datapoints,
     score_prediction,
+    select_hf_offsets,
     stage_attachment_context_on_lease,
     stage_context_capsule,
+    sum_lm_usage,
 )
 from scripts.benchmarks.oolong.scoring import synth_process_response
 
@@ -45,6 +51,199 @@ def _production_kwargs(datapoint: dict[str, object], capsule: AttachmentContextC
         mode="production",
         attachment_context=capsule,
     )
+
+
+def test_normalize_dnd_answer_wraps_only_unwrapped_values() -> None:
+    assert normalize_dnd_answer("110") == ("\\boxed{110}", True)
+    assert normalize_dnd_answer("\\boxed{110}") == ("\\boxed{110}", False)
+    assert normalize_dnd_answer("  ") == ("  ", False)
+
+
+def test_real_scoring_credits_near_correct_typed_answer() -> None:
+    """A typed answer carries no delimiter; without normalization the value is unreadable to the rubric."""
+    datapoint = {"id": "row", "context_window_id": "cw", "answer": "114"}
+
+    near = score_prediction(datapoint, "110", dataset="real", model_name="fleet-test")
+    exact = score_prediction(datapoint, "114", dataset="real", model_name="fleet-test")
+
+    assert near["parse_confidence"] == "high"
+    assert near["answer_normalized"] is True
+    assert near["score"] == pytest.approx(0.75**4)
+    assert exact["score"] == 1.0
+
+
+def test_synth_scoring_is_untouched_by_dnd_normalization() -> None:
+    datapoint = load_fixture()
+    score = score_prediction(datapoint, "Label: spam", dataset="synth", model_name="fleet-test")
+    assert score["score"] == 1
+    assert "answer_normalized" not in score
+
+
+def test_real_rows_restate_official_answer_format() -> None:
+    """The real-split rubric cannot parse an unwrapped answer, so the request restates its format."""
+    datapoint = {"question": "Total rolls?", "context_window_text": "ctx"}
+
+    real = build_predict_kwargs(datapoint, mode="dry_shortcut", dataset="real")
+    synth = build_predict_kwargs(datapoint, mode="dry_shortcut", dataset="synth")
+
+    assert real["request"].endswith("Return the final answer in \\boxed{}.")
+    assert "boxed" not in synth["request"]
+    assert synth["request"].endswith("Total rolls?")
+
+
+def test_dnd_signature_states_answer_format_without_changing_contract() -> None:
+    """The real-split rubric needs \\boxed{...}; stating that must not alter the output contract."""
+    dnd_answer = OolongDNDRLMSignature.output_fields["answer"]
+    fleet_answer = FleetRLMSignature.output_fields["answer"]
+
+    assert list(OolongDNDRLMSignature.output_fields) == list(FleetRLMSignature.output_fields)
+    assert dnd_answer.is_required() == fleet_answer.is_required()
+    assert OolongDNDRLMSignature.instructions == FleetRLMSignature.instructions
+    assert "boxed" in str(dnd_answer.json_schema_extra["desc"])
+
+
+def _selector_fake(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Install a datasets double whose stream yields ``rows``."""
+    calls: list[dict[str, object]] = []
+    datasets = ModuleType("datasets")
+
+    def fake_load_dataset(dataset_id: str, **kwargs: object) -> _FakeRowStream:
+        calls.append({"dataset_id": dataset_id, **kwargs})
+        return _FakeRowStream(rows)
+
+    datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "datasets", datasets)
+    return calls
+
+
+def test_select_hf_offsets_matches_tier_by_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    rows: list[dict[str, object]] = [
+        {"id": "a", "dataset": "spam", "context_len": 1024},
+        {"id": "b", "dataset": "trec_coarse", "context_len": 4096},
+        {"id": "c", "dataset": "trec_coarse", "context_len": 131072},
+        {"id": "d", "dataset": "trec_coarse", "context_len": 131072},
+        {"id": "e", "dataset": "spam", "context_len": 131072},
+    ]
+    calls = _selector_fake(monkeypatch, rows)
+
+    offsets = select_hf_offsets(
+        dataset="synth",
+        split="validation",
+        limit=2,
+        context_len=131072,
+        row_dataset="trec_coarse",
+    )
+
+    assert offsets == (2, 3), "the spam row at 131072 must not match"
+    assert calls[0]["streaming"] is True
+    assert calls[0]["columns"] == ["id", "dataset", "context_len"]
+
+
+def test_select_hf_offsets_reports_empty_and_rejects_real(monkeypatch: pytest.MonkeyPatch) -> None:
+    _selector_fake(monkeypatch, [{"id": "a", "dataset": "spam", "context_len": 1024}])
+
+    with pytest.raises(OolongAdapterError, match="no oolongbench/oolong-synth rows"):
+        select_hf_offsets(dataset="synth", split="validation", limit=1, context_len=131072)
+    with pytest.raises(OolongAdapterError, match="needs synth metadata"):
+        select_hf_offsets(dataset="real", split="test", limit=1, context_len=131072)
+
+
+def test_resolve_datapoints_selection_requires_hf() -> None:
+    with pytest.raises(OolongAdapterError, match="requires --hf"):
+        resolve_datapoints(
+            dataset="synth",
+            split="validation",
+            start_index=0,
+            limit=1,
+            fixture=Path("fixture.json"),
+            context_len=131072,
+        )
+
+
+def test_oolong_signature_selects_contract_per_dataset() -> None:
+    assert oolong_signature("synth") is FleetRLMSignature
+    assert oolong_signature("real") is OolongDNDRLMSignature
+    with pytest.raises(OolongAdapterError, match="unknown dataset"):
+        oolong_signature("nope")
+
+
+def test_build_native_program_uses_dataset_signature(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The RLM is constructed with the answer-format contract, not the stock signature."""
+    captured: dict[str, object] = {}
+
+    def fake_build_native_rlm(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(oolong_adapter, "build_native_rlm", fake_build_native_rlm)
+    monkeypatch.setattr(oolong_adapter, "rlm_options", lambda _settings: object())
+
+    oolong_adapter.build_native_program(MagicMock(), sub_lm=MagicMock(), dataset="real")
+    assert captured["signature"] is OolongDNDRLMSignature
+
+    captured.clear()
+    oolong_adapter.build_native_program(MagicMock(), sub_lm=MagicMock(), dataset="synth")
+    assert captured["signature"] is FleetRLMSignature
+
+
+def _receipt_kwargs() -> dict[str, object]:
+    return {
+        "mode": "live",
+        "dataset": "synth",
+        "split": "validation",
+        "limit": 1,
+        "rows": [],
+        "scores": [],
+        "context_mode": "attachment_context_capsule",
+        "model_name": "fleet-test",
+        "dataset_revision": None,
+        "source": "huggingface",
+    }
+
+
+def test_receipt_reports_usage_availability_honestly() -> None:
+    """Missing usage is 'unavailable', never a zeroed measurement."""
+    unavailable = build_receipt(**_receipt_kwargs())
+    assert unavailable["usage_status"] == "unavailable"
+    assert "usage" not in unavailable
+
+    observed = build_receipt(
+        **_receipt_kwargs(),
+        usage={"iterations": 2, "duration_ms": 5, "observed_lm_usage": {"m": {"total_tokens": 10}}},
+    )
+    assert observed["usage_status"] == "observed"
+    assert observed["usage"]["observed_lm_usage"]["m"]["total_tokens"] == 10
+
+
+def test_receipt_prices_observed_cost_and_fails_closed() -> None:
+    priced = build_receipt(
+        **_receipt_kwargs(),
+        usage={"iterations": 1, "duration_ms": 1, "observed_lm_usage": {"m": {"cost": 0.25}}},
+    )
+    assert priced["observed_cost_usd"] == pytest.approx(0.25)
+    assert "cost_status" not in priced
+
+    unpriced = build_receipt(
+        **_receipt_kwargs(),
+        usage={"iterations": 1, "duration_ms": 1, "observed_lm_usage": {"m": {"prompt_tokens": 10}}},
+    )
+    assert unpriced["cost_status"] == "unknown"
+    assert "observed_cost_usd" not in unpriced
+
+
+def test_sum_lm_usage_aggregates_rows_and_reports_absence() -> None:
+    assert sum_lm_usage([None, None]) is None
+
+    merged = sum_lm_usage(
+        [
+            {"iterations": 1, "duration_ms": 10, "observed_lm_usage": {"m": {"prompt_tokens": 5, "total_tokens": 9}}},
+            {"iterations": 2, "duration_ms": 20, "observed_lm_usage": {"m": {"prompt_tokens": 7}}},
+        ]
+    )
+    assert merged is not None
+    assert merged["iterations"] == 3
+    assert merged["duration_ms"] == 30
+    assert merged["observed_lm_usage"]["m"] == {"prompt_tokens": 12, "total_tokens": 9}
 
 
 def test_official_synth_scoring_matches_label_answer() -> None:
@@ -78,8 +277,6 @@ def test_production_kwargs_use_committed_session_history(tmp_path: Path) -> None
     assert type(history) is CommittedSessionHistory
     assert isinstance(history, dspy.SandboxSerializable)
     assert history.to_sandbox() == b"[]"
-    with pytest.raises(DaytonaAdapterError, match="unsupported"):
-        DaytonaHttpToolBroker._encode_value(dspy.History(messages=[]))
 
 
 def test_dry_shortcut_uses_dspy_history() -> None:
@@ -122,7 +319,8 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
         )
 
     interpreter.bind_context_capsule.assert_called_once_with(capsule)
-    assert answer == "Label: spam"
+    assert answer.answer == "Label: spam"
+    assert answer.usage is None
 
 
 @pytest.mark.asyncio
@@ -265,6 +463,25 @@ async def test_invoke_live_prediction_preserves_partially_injected_model(
     assert bundles == [(expected_root, expected_sub)]
 
 
+class _FakeRowStream:
+    """Minimal streaming-dataset double that records skip/take selection."""
+
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+        self.ops: list[tuple[str, int]] = []
+
+    def skip(self, count: int) -> _FakeRowStream:
+        self.ops.append(("skip", count))
+        return _FakeRowStream(self.rows[count:])
+
+    def take(self, count: int) -> _FakeRowStream:
+        self.ops.append(("take", count))
+        return _FakeRowStream(self.rows[:count])
+
+    def __iter__(self):
+        return iter(self.rows)
+
+
 @pytest.mark.parametrize(("dataset", "split"), (("synth", "validation"), ("real", "test")))
 def test_load_hf_row_uses_immutable_dataset_default(
     monkeypatch: pytest.MonkeyPatch,
@@ -274,9 +491,19 @@ def test_load_hf_row_uses_immutable_dataset_default(
     calls: list[dict[str, str]] = []
     datasets = ModuleType("datasets")
 
-    def fake_load_dataset(dataset_id: str, *, split: str, revision: str) -> list[dict[str, object]]:
-        calls.append({"dataset_id": dataset_id, "split": split, "revision": revision})
-        return [{"id": "row"}]
+    def fake_load_dataset(
+        dataset_id: str, *, split: str, revision: str, name: str | None = None, streaming: bool = False
+    ) -> _FakeRowStream:
+        calls.append(
+            {
+                "dataset_id": dataset_id,
+                "split": split,
+                "revision": revision,
+                "name": name,
+                "streaming": streaming,
+            }
+        )
+        return _FakeRowStream([{"id": f"row-{i}"} for i in range(5)])
 
     datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "datasets", datasets)
@@ -284,6 +511,7 @@ def test_load_hf_row_uses_immutable_dataset_default(
     datapoint = load_hf_row(dataset=dataset, split=split, index=2)
 
     assert calls[0]["revision"] == DEFAULT_HF_DATASET_REVISIONS[dataset]
+    assert calls[0]["name"] == DEFAULT_HF_DATASET_CONFIGS[dataset]
     assert datapoint.dataset_revision == DEFAULT_HF_DATASET_REVISIONS[dataset]
 
 
@@ -291,10 +519,13 @@ def test_load_hf_row_preserves_explicit_revision_override(monkeypatch: pytest.Mo
     calls: list[str] = []
     datasets = ModuleType("datasets")
 
-    def fake_load_dataset(_dataset_id: str, *, split: str, revision: str) -> list[dict[str, object]]:
-        assert split == "validation[0:1]"
+    def fake_load_dataset(
+        _dataset_id: str, *, split: str, revision: str, name: str | None = None, **_kwargs: object
+    ) -> _FakeRowStream:
+        assert split == "validation"
+        assert name is None
         calls.append(revision)
-        return [{"id": "row"}]
+        return _FakeRowStream([{"id": f"row-{i}"} for i in range(5)])
 
     datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "datasets", datasets)
@@ -303,6 +534,28 @@ def test_load_hf_row_preserves_explicit_revision_override(monkeypatch: pytest.Mo
 
     assert calls == ["test-revision"]
     assert datapoint.dataset_revision == "test-revision"
+
+
+def test_load_hf_row_passes_real_dataset_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, object]] = []
+    datasets = ModuleType("datasets")
+
+    def fake_load_dataset(dataset_id: str, **kwargs: object) -> _FakeRowStream:
+        calls.append({"dataset_id": dataset_id, **kwargs})
+        return _FakeRowStream([{"id": f"row-{i}"} for i in range(5)])
+
+    datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "datasets", datasets)
+
+    load_hf_row(dataset="real", split="test", index=0)
+    datapoints = resolve_datapoints(dataset="real", split="test", start_index=0, limit=2, fixture=None)
+
+    assert [call["dataset_id"] for call in calls] == ["oolongbench/oolong-real"] * 3
+    assert [call["split"] for call in calls] == ["test", "test", "test"]
+    assert all(call["streaming"] is True for call in calls)
+    assert [call["revision"] for call in calls] == [DEFAULT_HF_DATASET_REVISIONS["real"]] * 3
+    assert [call.get("name") for call in calls] == ["dnd", "dnd", "dnd"]
+    assert [datapoint.index for datapoint in datapoints] == [0, 1]
 
 
 @pytest.mark.asyncio
@@ -335,9 +588,9 @@ async def test_live_rows_receive_independent_deadlines_and_budgets(monkeypatch: 
     async def fake_stage(*_args: object, **_kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(entries=())
 
-    async def fake_invoke(*_args: object, deadline: float, turn_budget: object, **_kwargs: object) -> str:
+    async def fake_invoke(*_args: object, deadline: float, turn_budget: object, **_kwargs: object) -> LivePrediction:
         observed.append((deadline, turn_budget))
-        return "Label: spam"
+        return LivePrediction(answer="Label: spam")
 
     async def fake_release(*_args: object, **_kwargs: object) -> None:
         return None

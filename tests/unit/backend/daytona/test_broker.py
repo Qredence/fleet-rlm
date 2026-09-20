@@ -1,308 +1,178 @@
-"""Pure source-generation seams for the Daytona host-tool broker."""
+"""Focused tests for the sandbox-local broker protocol."""
 
 from __future__ import annotations
 
-import base64
-import hashlib
-import io
-import json
-import urllib.error
-import urllib.request
-from collections.abc import Callable
-from types import SimpleNamespace
+import socket
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Iterator
+from pathlib import Path
 
+import httpx
 import pytest
 
-from fleet_rlm.daytona.broker import (
-    BROKER_SERVER_CODE,
-    FINAL_OUTPUT_MARKER,
-    TOOL_WRAPPER_TEMPLATE,
-    DaytonaHttpToolBroker,
-    build_submit_setup_code,
-    extract_final_payload,
-    final_output_frame,
-    remote_submit_setup_code,
-    reset_binding_source,
-)
+from fleet_rlm.daytona import broker as broker_module
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
 
-def _build_sandbox_wrapper(tool_name: str, tool_func: Callable[..., object]) -> Callable[..., object]:
-    broker = DaytonaHttpToolBroker(sandbox=object())
-    namespace: dict[str, object] = {}
-    exec(broker._tool_wrapper_source(tool_name, tool_func), namespace, namespace)
-    wrapper = namespace[tool_name]
-    assert callable(wrapper)
-    return wrapper
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
 
 
-class _StubbedHTTPResponse:
-    """Minimal context-manager response returned by the stubbed ``urlopen``."""
-
-    def __init__(self, payload: dict[str, object]) -> None:
-        self._body = json.dumps(payload).encode("utf-8")
-
-    def read(self) -> bytes:
-        return self._body
-
-    def __enter__(self) -> _StubbedHTTPResponse:
-        return self
-
-    def __exit__(self, *_args: object) -> None:
-        return None
-
-
-def _write_workspace_text_stub(path: str, content: str, overwrite: bool = False) -> dict[str, object]:
-    raise AssertionError(
-        f"generated wrapper must never call the host function in-process: {path} {content} {overwrite}"
+@pytest.fixture
+def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
+    port = _free_port()
+    secret = "test-broker-secret"
+    source = (
+        broker_module._SERVER_SOURCE.replace("__SECRET__", repr(secret))
+        .replace("__PORT__", str(port))
+        .replace("__MAX_REQUEST_BYTES__", str(broker_module._MAX_REQUEST_BYTES))
+        .replace("__MAX_OUTPUT_CHARS__", str(broker_module._MAX_OUTPUT_CHARS))
+        .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(broker_module._DEFAULT_TOOL_TIMEOUT_S))
     )
+    process = subprocess.Popen(
+        [sys.executable, "-c", source],
+        cwd=Path(__file__).resolve().parents[4],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    base_url = f"http://127.0.0.1:{port}"
+    headers = {"X-Broker-Secret": secret}
+    try:
+        for _ in range(50):
+            try:
+                if httpx.get(f"{base_url}/health", timeout=0.2).status_code == 200:
+                    break
+            except httpx.HTTPError:
+                time.sleep(0.02)
+        else:
+            pytest.fail("embedded broker did not start")
+        yield base_url, headers
+    finally:
+        process.terminate()
+        process.wait(timeout=2)
 
 
-def test_submit_source_supports_typed_and_generic_signatures() -> None:
-    typed = build_submit_setup_code([{"name": "answer", "type": "str"}])
-    generic = build_submit_setup_code(None)
-
-    assert "def SUBMIT(answer: str)" in typed
-    assert "def SUBMIT(**kwargs)" in generic
-    assert "FleetFinalOutputError" in typed
-    assert "FINAL_OUTPUT_MARKER" in generic
-
-
-def test_remote_submit_setup_is_self_contained() -> None:
-    source = remote_submit_setup_code([{"name": "answer", "type": "str"}])
-
-    namespace: dict[str, object] = {}
-    exec(source, namespace, namespace)
-    with pytest.raises(Exception) as raised:
-        namespace["SUBMIT"](answer="done")  # type: ignore[operator]
-    assert type(raised.value).__name__ == "FleetFinalOutputError"
-    assert getattr(raised.value, "value", None) == {"answer": "done"}
+def _run_execute(
+    client: httpx.Client, code: str, *, timeout_s: float = 2
+) -> tuple[threading.Thread, list[httpx.Response]]:
+    responses: list[httpx.Response] = []
+    thread = threading.Thread(
+        target=lambda: responses.append(
+            client.post("/execute", json={"code": code, "variables": {}, "timeout_s": timeout_s}, timeout=3)
+        ),
+        daemon=True,
+    )
+    thread.start()
+    return thread, responses
 
 
-def test_binding_reset_source_removes_stale_tool_names() -> None:
-    namespace: dict[str, object] = {"old_tool": object(), "SUBMIT": object(), "keep": object()}
-    exec(reset_binding_source(("old_tool",)), namespace, namespace)
-    assert "old_tool" not in namespace
-    assert "SUBMIT" not in namespace
-    assert "keep" in namespace
-
-
-def test_typed_string_submit_rejects_structured_values_and_accepts_json_text() -> None:
-    source = remote_submit_setup_code([{"name": "answer", "type": "str"}])
-
-    namespace: dict[str, object] = {}
-    exec(source, namespace, namespace)
-
-    with pytest.raises(TypeError, match=r"json\.dumps"):
-        namespace["SUBMIT"](answer={"value": 1})  # type: ignore[operator]
-
-    formatted = json.dumps({"value": 1}, ensure_ascii=False, indent=2)
-    with pytest.raises(Exception) as raised:
-        exec("SUBMIT(answer=json.dumps({'value': 1}, ensure_ascii=False, indent=2))", namespace, namespace)
-    assert type(raised.value).__name__ == "FleetFinalOutputError"
-    assert getattr(raised.value, "value", None) == {"answer": formatted}
-
-
-def test_final_output_frames_round_trip_and_accept_legacy_plain_payload() -> None:
-    value = {"answer": "done", "count": 2}
-    frame = final_output_frame(value)
-
-    assert extract_final_payload(frame) == value
-    plain = json.dumps(value, ensure_ascii=False)
-    assert extract_final_payload(f"{FINAL_OUTPUT_MARKER}{plain}{FINAL_OUTPUT_MARKER}") == value
-
-    encoded = frame[len(FINAL_OUTPUT_MARKER) : -len(FINAL_OUTPUT_MARKER)]
-    assert base64.b64decode(encoded).decode("utf-8") == json.dumps(value, ensure_ascii=False)
-
-
-def test_startup_command_failure_retains_created_session_for_cleanup() -> None:
-    class Filesystem:
-        def __init__(self) -> None:
-            self.uploaded = b""
-
-        def upload_file(self, content: bytes, _path: str) -> None:
-            self.uploaded = content
-
-    class Process:
-        def __init__(self, filesystem: Filesystem) -> None:
-            self.filesystem = filesystem
-            self.created: list[str] = []
-            self.deleted: list[str] = []
-
-        def code_run(self, _code: str) -> SimpleNamespace:
-            return SimpleNamespace(result=hashlib.sha256(self.filesystem.uploaded).hexdigest())
-
-        def create_session(self, session_id: str) -> None:
-            self.created.append(session_id)
-
-        def execute_session_command(self, _session_id: str, _request: object) -> None:
-            raise RuntimeError("broker startup command failed")
-
-        def delete_session(self, session_id: str) -> None:
-            self.deleted.append(session_id)
-
-    filesystem = Filesystem()
-    process = Process(filesystem)
-    sandbox = SimpleNamespace(fs=filesystem, process=process)
-    broker = DaytonaHttpToolBroker(sandbox=sandbox)
-
-    with pytest.raises(RuntimeError, match="startup command failed"):
-        broker.ensure_started()
-
-    assert process.created
-    assert broker._broker_session_id == process.created[0]
-    broker.stop(strict=True)
-    assert process.deleted == process.created
-
-
-def test_stop_retains_failed_cleanup_ownership_for_retry() -> None:
-    class Client:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def close(self) -> None:
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("client close failed")
-
-    class Process:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def delete_session(self, session_id: str) -> None:
-            assert session_id == "broker-session"
-            self.calls += 1
-            if self.calls == 1:
-                raise RuntimeError("session delete failed")
-
-    client = Client()
-    process = Process()
-    broker = DaytonaHttpToolBroker(sandbox=SimpleNamespace(process=process))
-    broker._client = client  # type: ignore[assignment]
-    broker._broker_session_id = "broker-session"
-    broker._broker_url = "https://preview"
-    broker._broker_token = "token"
-
-    with pytest.raises(RuntimeError, match="client close failed"):
-        broker.stop(strict=True)
-    assert broker._client is client
-    assert broker._broker_session_id == "broker-session"
-
-    broker.stop(strict=True)
-    assert client.calls == 2
-    assert process.calls == 2
-    assert broker._client is None
-    assert broker._broker_session_id is None
-
-
-def test_broker_server_and_wrapper_sources_are_provider_independent() -> None:
-    assert "http.server" in BROKER_SERVER_CODE
-    assert 'protocol_version = "HTTP/1.1"' in BROKER_SERVER_CODE
-    assert "self.close_connection = True" in BROKER_SERVER_CODE
-    assert "__BROKER_SECRET__" in BROKER_SERVER_CODE
-    assert "{broker_port}" in TOOL_WRAPPER_TEMPLATE
-    assert "daytona" not in (BROKER_SERVER_CODE + TOOL_WRAPPER_TEMPLATE).lower()
-
-
-def test_broker_namespace_binds_empty_context_default() -> None:
-    """tr-1a67398e: REPL `context` is always defined, even with no capsule bound."""
-    assert '"context": []' in BROKER_SERVER_CODE
-
-
-def test_tool_wrapper_forwards_every_parameter_as_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """RC-1: required parameters cross the wire by name; ``args`` stays empty."""
-    wrapper = _build_sandbox_wrapper("write_workspace_text", _write_workspace_text_stub)
-    captured: list[dict[str, object]] = []
-
-    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedHTTPResponse:
-        del timeout
-        captured.append(json.loads(bytes(request.data).decode("utf-8")))
-        return _StubbedHTTPResponse({"result": {"ok": True}})
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    # Sandbox-side ergonomics stay positional/kwargs mixed, exactly as model
-    # code writes them against the unchanged wrapper signature.
-    assert wrapper("notes/todo.md", "hello fleet", overwrite=True) == {"ok": True}
-    assert wrapper("notes/todo.md", "hello fleet") == {"ok": True}
-
-    assert len(captured) == 2
-    assert captured[0]["tool_name"] == "write_workspace_text"
-    assert captured[0]["args"] == []
-    assert captured[0]["kwargs"] == {
-        "path": "notes/todo.md",
-        "content": "hello fleet",
-        "overwrite": True,
-    }
-    assert captured[1]["args"] == []
-    assert captured[1]["kwargs"] == {
-        "path": "notes/todo.md",
-        "content": "hello fleet",
-        "overwrite": False,
-    }
-
-
-def test_tool_wrapper_surfaces_http_error_body_message(monkeypatch: pytest.MonkeyPatch) -> None:
-    """RC-3: a 500-with-body broker answer surfaces the safe categorized message."""
-    wrapper = _build_sandbox_wrapper("write_workspace_text", _write_workspace_text_stub)
-
-    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedHTTPResponse:
-        del timeout
-        body = json.dumps({"error": "Session Workspace request is invalid"}).encode("utf-8")
-        raise urllib.error.HTTPError(request.full_url, 500, "Internal Server Error", None, io.BytesIO(body))
-
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
-
-    with pytest.raises(RuntimeError, match="Tool call failed: Session Workspace request is invalid"):
-        wrapper("notes/todo.md", "hello fleet")
-
-
-def test_tool_wrapper_falls_back_to_http_status_when_error_body_is_not_json(
-    monkeypatch: pytest.MonkeyPatch,
+def test_embedded_server_preserves_failure_and_rejects_completed_duplicate(
+    embedded_server: tuple[str, dict[str, str]],
 ) -> None:
-    wrapper = _build_sandbox_wrapper("write_workspace_text", _write_workspace_text_stub)
-
-    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedHTTPResponse:
-        del timeout
-        raise urllib.error.HTTPError(
-            request.full_url, 503, "Service Unavailable", None, io.BytesIO(b"upstream unavailable")
+    base_url, headers = embedded_server
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools({"failing_tool": lambda: None})
+    source = broker.setup_source("failing_tool()")
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        thread, responses = _run_execute(client, source)
+        for _ in range(50):
+            pending = client.get("/pending").json()["requests"]
+            if pending:
+                break
+            time.sleep(0.01)
+        assert pending
+        request = pending[0]
+        failure = {"category": "ProviderError", "message": "safe provider failure", "call_id": request["id"]}
+        assert (
+            client.post(
+                "/result", json={"id": request["id"], "lease": request["lease"], "tool_error": failure}
+            ).status_code
+            == 200
         )
+        thread.join(timeout=2)
+        assert responses and responses[0].json()["tool_error"] == failure
+        duplicate = client.post(
+            "/tool_call",
+            json={
+                "id": request["id"],
+                "tool_name": "failing_tool",
+                "args": [],
+                "kwargs": {},
+            },
+        )
+        assert duplicate.status_code == 409
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    with pytest.raises(RuntimeError, match=r"Tool call failed: HTTP 503"):
-        wrapper("notes/todo.md", "hello fleet")
+def test_embedded_server_bounds_output_before_response(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        response = client.post(
+            "/execute",
+            json={"code": "print('x' * 100_000)", "variables": {}, "timeout_s": 2},
+        )
+    assert response.status_code == 200
+    stdout = response.json()["stdout"]
+    assert len(stdout) <= broker_module._MAX_OUTPUT_CHARS + len("\n...[sandbox output truncated]")
+    assert "sandbox output truncated" in stdout
 
 
-def test_project_tool_wrapper_forwards_every_parameter_as_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
-    """PR-E: project deliverable tools keep the kwargs-only wire contract."""
-    from fleet_rlm.workspace.projects import ProjectToolHost
+def test_tool_call_uses_execution_deadline(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools({"waiting_tool": lambda: None})
+    source = broker.setup_source("waiting_tool()")
+    started = time.monotonic()
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        thread, responses = _run_execute(client, source, timeout_s=0.2)
+        for _ in range(50):
+            if client.get("/pending").json()["requests"]:
+                break
+            time.sleep(0.01)
+        thread.join(timeout=2)
+    assert responses and responses[0].status_code == 200
+    assert time.monotonic() - started < 1
 
-    host = ProjectToolHost(None, max_file_bytes=1024)  # type: ignore[arg-type]
-    tool = {str(item.name): item for item in host.as_tools()}["write_project_text"]
-    wrapper = _build_sandbox_wrapper("write_project_text", tool.func)
-    captured: list[dict[str, object]] = []
 
-    def fake_urlopen(request: urllib.request.Request, timeout: float = 0) -> _StubbedHTTPResponse:
-        del timeout
-        captured.append(json.loads(bytes(request.data).decode("utf-8")))
-        return _StubbedHTTPResponse({"result": {"ok": True}})
+def test_retained_backend_resets_invocation_but_preserves_state_between_actions(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    from fleet_rlm.daytona.interpreter import sandbox_backend
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    base_url, headers = embedded_server
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker._url = base_url
+    backend = sandbox_backend(object())
+    backend._broker = broker
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        broker._client = client
+        backend.bind_async_bridge(None)
+        backend.bind_host_tools({"tool": lambda value: value + 1})
+        assert backend.run("value = 40").error is None
+        assert backend.run("value = tool(value)").error is None
+        assert backend.run("print(value + 1)").stdout == "42\n"
+        old_secret = broker._secret
+        backend.bind_async_bridge(None)
+        backend.bind_host_tools({"tool": lambda value: value + 10})
+        assert backend.run("print('value' in globals()); print(tool(1))").stdout == "False\n11\n"
+        assert client.post("/execute", headers={"X-Broker-Secret": old_secret}, json={}).status_code == 401
 
-    assert wrapper("fleet-rlm/reports/review.md", "durable review", overwrite=True) == {"ok": True}
-    assert wrapper("fleet-rlm/reports/review.md", "durable review") == {"ok": True}
 
-    assert len(captured) == 2
-    assert captured[0]["tool_name"] == "write_project_text"
-    assert captured[0]["args"] == []
-    assert captured[0]["kwargs"] == {
-        "path": "fleet-rlm/reports/review.md",
-        "content": "durable review",
-        "overwrite": True,
-    }
-    assert captured[1]["args"] == []
-    assert captured[1]["kwargs"] == {
-        "path": "fleet-rlm/reports/review.md",
-        "content": "durable review",
-        "overwrite": False,
-    }
+def test_settled_broker_rejects_new_calls_and_unknown_results(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        assert client.post("/tool_call", json={"id": "late", "tool_name": "tool"}).status_code == 409
+        assert client.post("/result", json={"id": "unknown", "lease": "old", "result": 1}).status_code == 404

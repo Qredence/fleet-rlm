@@ -31,7 +31,7 @@ async def test_sql_begin_translates_session_setup_failures(failure_type: type[Ba
 
 
 def test_stale_claim_is_a_canonical_typed_failure_code() -> None:
-    from fleet_rlm.persistence.repositories.run_codec import _decode_failure_code
+    from fleet_rlm.persistence.repositories.turns import _decode_failure_code
 
     assert _decode_failure_code("stale_claim", status="failed") == "stale_claim"
 
@@ -803,7 +803,7 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
-    from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
+    from fleet_rlm.persistence.repositories.sessions import SqlAlchemySessionCatalog
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.catalog import SequenceCursor

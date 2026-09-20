@@ -15,6 +15,7 @@ of truth and are intentionally absent on current tip.
 - Benchmark repo: https://github.com/abertsch72/oolong
 - HF datasets: `oolongbench/oolong-synth`, `oolongbench/oolong-real`
 - Default HF revisions: synth `f0d59eaf0febf130664cfceb710436c8e3216b2b`; real `6bc9ef04866fcf005c9749b70649be69dd37fffb`
+- Default HF builder configs: synth is single-config (`default`); real pins `dnd`
 - Scoring: `synth_process_response` / `dnd_process_response` from the official
   repo (vendored under `scripts/benchmarks/oolong/scoring.py`)
 
@@ -74,6 +75,33 @@ Optional MLflow 3.16 logging is available via ``--mlflow-url`` and
 ``--mlflow-experiment``; see [Evaluation and monitoring](evaluation-optimization.md)
 for local tracking setup. Logging is skipped when
 ``--mlflow-url`` is unset.
+
+## Selecting a benchmark tier
+
+Positional `--index` cannot express a tier: in `oolong-synth` the rows are ordered by dataset
+then context length, so the blog's 128K group sits at fixed-but-undocumented offsets. Select by
+metadata instead:
+
+```bash
+# Oolong 128K tier (~50 trec_coarse rows at 131072 tokens)
+uv run python scripts/benchmarks/run_oolong_predict.py --live --hf \
+  --dataset synth --split validation \
+  --context-len 131072 --row-dataset trec_coarse --limit 10 \
+  --output .scratch/benchmark-reports/oolong-128k.json
+
+# the 263K group
+uv run python scripts/benchmarks/run_oolong_predict.py --live --hf \
+  --dataset synth --split validation --context-len 262144 --limit 10 \
+  --output .scratch/benchmark-reports/oolong-263k.json
+```
+
+Selection requires `--hf`: the bundled fixture is a single fixed row. `oolong-real` has none of
+these metadata columns, so tier selection is synth-only; the real split already carries one
+context size per row at `dnd`. The chosen criteria are recorded in the receipt under `selection`.
+
+Rows are fetched by streaming with column/filter pushdown, so a run costs what it reads (the
+128K tier resolves in ~26MB) rather than materializing the whole split (~2GB for synth
+validation, ~9GB for real).
 
 ## Context mapping
 

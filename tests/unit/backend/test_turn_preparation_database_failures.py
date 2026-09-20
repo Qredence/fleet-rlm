@@ -9,7 +9,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import (
         DefaultRunPreparer,
         RunEnvironment,
@@ -131,7 +131,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import (
         DefaultRunPreparer,
         RunEnvironment,

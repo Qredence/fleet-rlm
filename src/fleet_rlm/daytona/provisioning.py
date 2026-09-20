@@ -352,6 +352,22 @@ def volume_config_from_settings(settings: Any) -> VolumeConfig:
     return VolumeConfig.from_settings(settings)
 
 
+def execution_timeout_s_from_settings(settings: Any) -> int:
+    """Resolve the configured sandbox execution timeout for an ephemeral interpreter.
+
+    The service path threads ``rlm.execution_timeout_s`` explicitly
+    (``composition/daytona_run_preparation.py``). Ephemeral leases must use the same
+    configured value; omitting it silently fell back to the 120s default, which a
+    long-context cell can exceed.
+    """
+    from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_TIMEOUT_S
+
+    configured = getattr(settings, "rlm_execution_timeout_s", DEFAULT_EXECUTION_TIMEOUT_S)
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured
+    return DEFAULT_EXECUTION_TIMEOUT_S
+
+
 def snapshot_execution_dependencies(
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
 ) -> tuple[str, ...]:
@@ -661,15 +677,20 @@ async def _file_info(fs: Any, path: str) -> Any | None:
 
 
 async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
-    info = await _file_info(fs, path)
-    if info is not None:
+    if not create:
+        info = await _file_info(fs, path)
+        if info is None:
+            raise DaytonaAdapterError(
+                message="Workspace Volume mount is unavailable",
+                cause_type="VolumeLayoutMissingMount",
+            )
         _assert_directory(info)
         return
-    if not create:
-        raise DaytonaAdapterError(
-            message="Workspace Volume mount is unavailable",
-            cause_type="VolumeLayoutMissingMount",
-        )
+
+    # Direct creation path (EAFP):
+    # Daytona's create_folder is idempotent for existing directories.
+    # Attempting creation directly eliminates speculative 404 GET /files/info
+    # calls that pollute Daytona provider logs with 'API ERROR' entries.
     try:
         await fs.create_folder(path, _DIRECTORY_MODE)
     except Exception as exc:
@@ -681,9 +702,6 @@ async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
             raise map_provider_error(exc) from exc
         _assert_directory(info)
         return
-    # create_folder returning normally is the creation confirmation; a
-    # success-path re-stat costs one extra provider round-trip per directory
-    # on the session cold-start path for no additional safety.
 
 
 async def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:
@@ -912,7 +930,13 @@ async def acquire_ephemeral_interpreter(
             run_id=run_id,
         )
         loop = asyncio.get_running_loop()
-        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(sandbox, loop=loop))
+        interpreter = DaytonaCodeInterpreter(
+            backend=sandbox_backend(
+                sandbox,
+                loop=loop,
+                timeout_s=execution_timeout_s_from_settings(settings),
+            )
+        )
     except BaseException:
         await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
         raise

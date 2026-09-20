@@ -137,7 +137,7 @@ def classify_provider_error(exc: object) -> ProviderFailureKind:
     if isinstance(exc, TimeoutError) or "timeout" in normalized or "timedout" in normalized:
         return "timeout"
     if isinstance(exc, OSError) or any(
-        part in normalized for part in ("connection", "network", "connecterror", "transporterror")
+        part in normalized for part in ("connection", "network", "connecterror", "transporterror", "protocolerror")
     ):
         return "network"
     if status is not None and 500 <= status <= 599:

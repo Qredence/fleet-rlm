@@ -33,6 +33,17 @@ class TurnBudgetExhausted(RuntimeError):  # noqa: N818 - domain exhaustion categ
         super().__init__(f"Turn budget exhausted: {dimension.value}")
 
 
+class FinalizationExhausted(TimeoutError):  # noqa: N818 - domain exhaustion category
+    """Raised when wrap-up finalization capacity is spent without a compliant SUBMIT.
+
+    Deliberately a `TimeoutError` subclass: wrap-up exhaustion already
+    participates in Turn deadline reserve accounting and must flow through the
+    deadline handling that already exists. The distinct type exists so
+    diagnostics can report exhaustion instead of a wall-clock expiry that never
+    happened.
+    """
+
+
 @dataclass(frozen=True, slots=True)
 class BudgetLimits:
     """None means observed accounting, not a claimed hard admission limit."""
@@ -304,6 +315,7 @@ class AdapterBudget:
         self.max_parse_retries = max_parse_retries
         self.max_finalization_attempts = max_finalization_attempts
         self._finalization_used = 0
+        self._parse_repairs_used = 0
         self._wrap_up_entered = False
         self._wrap_up_rejection_reason: str | None = None
         self._wrap_up_remaining_ms: int | None = None
@@ -343,6 +355,25 @@ class AdapterBudget:
         return retries < self.max_parse_retries
 
     @property
+    def parse_repairs_used(self) -> int:
+        """Report the number of corrective parse re-asks issued by this invocation.
+
+        A parse re-ask is a full additional provider call. Counting it makes
+        cap-saturated actions legible: an action whose response hits the output
+        ceiling cannot close its JSON, so it pays for a second call to recover.
+
+        Returns:
+                int: The number of parse-repair re-asks consumed.
+        """
+        with self._lock:
+            return self._parse_repairs_used
+
+    def note_parse_repair(self) -> None:
+        """Record one corrective parse re-ask against this invocation."""
+        with self._lock:
+            self._parse_repairs_used += 1
+
+    @property
     def finalization_used(self) -> int:
         """Report the number of finalization attempts used by this invocation.
 
@@ -361,9 +392,9 @@ class AdapterBudget:
         return self.finalization_used < self.max_finalization_attempts
 
     def _check_finalization(self) -> None:
-        """Raise ``TimeoutError`` when the local finalization-attempt limit is exhausted."""
+        """Raise `FinalizationExhausted` when the local finalization-attempt limit is exhausted."""
         if self._finalization_used >= self.max_finalization_attempts:
-            raise TimeoutError("wrap-up action did not submit before the Turn deadline")
+            raise FinalizationExhausted("wrap-up finalization attempts exhausted before a compliant SUBMIT")
 
     def reclassify_late_response(self, *, can_finalize: bool = True) -> None:
         """Reclassify a previously admitted response as a finalization attempt
