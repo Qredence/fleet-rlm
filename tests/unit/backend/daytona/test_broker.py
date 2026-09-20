@@ -230,3 +230,9 @@ def test_poll_delivers_async_host_tool_result_through_application_bridge() -> No
         "lease": "lease-1",
         "result": {"ok": True, "path": "notes/findings.md", "bytes": 7},
     }
+
+
+def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> None:
+    from fleet_rlm.daytona.broker import _SERVER_SOURCE
+
+    assert "sys.set_int_max_str_digits(200_000)" in _SERVER_SOURCE

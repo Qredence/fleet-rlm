@@ -68,13 +68,22 @@ from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, WORKSPACE_M
 from fleet_rlm.workspace.paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.workspace.storage import (
     AgentAsyncVolumeStorage,
-    AgentStorageSession,
     AgentVolumeStorage,
+    DaytonaSandboxWorkspaceStorage,
     VolumeFSCacheState,
     WorkspaceMemoryStorage,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _workspace_storage(sandbox: Any, **kwargs: Any) -> Any:
+    """Bind live workspaces to Sandbox FS while retaining local deterministic doubles."""
+    if getattr(sandbox, "fs", None) is not None:
+        return DaytonaSandboxWorkspaceStorage(sandbox, **kwargs)
+    from fleet_rlm.workspace.storage import AgentStorageSession as LocalStorage
+
+    return LocalStorage(sandbox, **kwargs)
 
 
 def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSessionHistory:
@@ -474,7 +483,7 @@ class _DaytonaEnvironmentProvider:
                 paths=paths,
             )
             assert sink.volume_fs is not None
-            memory_session = AgentStorageSession(
+            memory_session = _workspace_storage(
                 sync_sandbox(sandbox, asyncio.get_running_loop(), getattr(self.resources, "dispatcher", None)),
                 volume_root=str(paths.mount_path),
                 root=str(paths.mount_path),
@@ -660,7 +669,6 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.attachments import AttachmentToolHost
         from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost, build_workspace_memory_store
         from fleet_rlm.workspace.projects import ProjectToolHost
-        from fleet_rlm.workspace.storage import AgentStorageSession
         from fleet_rlm.workspace.url import UrlToolHost, WorkspaceUrlSourceStore
         from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
@@ -687,7 +695,7 @@ class _LiveCapabilityPreparer:
             max_artifact_bytes=self.settings.max_artifact_bytes,
             volume_paths=paths,
         )
-        session_workspace = AgentStorageSession(
+        session_workspace = _workspace_storage(
             sandbox,
             volume_root=str(paths.mount_path),
             root=str(paths.session_workspace_dir(run.session_id)),
@@ -697,7 +705,7 @@ class _LiveCapabilityPreparer:
             session_workspace,
             max_file_bytes=self.settings.max_upload_bytes,
         )
-        projects_fs = AgentStorageSession(
+        projects_fs = _workspace_storage(
             sandbox,
             volume_root=str(paths.mount_path),
             root=str(paths.projects_root()),
@@ -710,7 +718,7 @@ class _LiveCapabilityPreparer:
         url_host = UrlToolHost(
             session_id=run.session_id,
             store=WorkspaceUrlSourceStore(
-                AgentStorageSession(
+                _workspace_storage(
                     sandbox,
                     volume_root=str(paths.mount_path),
                     root=str(paths.session_workspace_dir(run.session_id)),
@@ -723,7 +731,7 @@ class _LiveCapabilityPreparer:
         if memory_store is None:
             # Direct capability-preparation tests may provide only a minimal
             # RunEnvironment; production acquisition owns this store.
-            memory_session = AgentStorageSession(
+            memory_session = _workspace_storage(
                 sandbox,
                 volume_root=str(paths.mount_path),
                 root=str(paths.mount_path),

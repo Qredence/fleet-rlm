@@ -246,6 +246,12 @@ class _SyncFileSystem:
     def list_files(self, path: str, **kwargs: Any) -> Any:
         return _sync_await(self._service.list_files(path, **kwargs), self._owner, self._guard_loop)
 
+    def get_file_info(self, path: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.get_file_info(path, **kwargs), self._owner, self._guard_loop)
+
+    def create_folder(self, path: str, mode: str = "755", **kwargs: Any) -> Any:
+        return _sync_await(self._service.create_folder(path, mode, **kwargs), self._owner, self._guard_loop)
+
 
 class _DSPySyncSandboxView:
     """Explicit synchronous Daytona view used by synchronous execution contexts."""

@@ -222,8 +222,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert "key_learning" not in update_input
     assert "content" not in read_output
     assert learning not in repr((update_input, read_output))
-    canonical_memory = volume_root / "memory" / "MEMORIES.md"
-    canonical_text = canonical_memory.read_text(encoding="utf-8")
+    canonical_memory = str(volume_root / "memory" / "MEMORIES.md")
+    canonical_text = volume[canonical_memory].decode("utf-8")
     assert canonical_text.startswith("# Fleet Memory v2\n")
     from fleet_rlm.workspace.models import (
         parse_workspace_memory_lines,
@@ -302,9 +302,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     assert written["ok"] is True
     assert written["namespace"] == "project_workspace"
-    assert (volume_root / "projects" / "fleet-rlm" / "reports" / "review.md").read_text(
-        encoding="utf-8"
-    ) == "durable review"
+    assert volume[str(volume_root / "projects" / "fleet-rlm" / "reports" / "review.md")] == b"durable review"
     read_back = await asyncio.to_thread(
         tools["read_project_text"], path="fleet-rlm/reports/review.md", max_chars=10_000
     )
@@ -358,15 +356,16 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     result_path = prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id)
     assert receipt.committed_turn.text == "done"
-    assert set(volume) == {next(path for path, value in volume.items() if value == data), result_path}
+    attachment_path = next(path for path, value in volume.items() if value == data)
+    project_path = str(volume_root / "projects" / "fleet-rlm" / "reports" / "review.md")
+    memory_path = str(volume_root / "memory" / "MEMORIES.md")
+    assert {attachment_path, project_path, memory_path, result_path} <= set(volume)
 
     await prepared.aclose()
-    # The project deliverable survives attachment staging cleanup because it is
-    # Volume state written by the sandbox agent, not a staged Run attachment.
-    assert set(volume) == {result_path}
-    assert (volume_root / "projects" / "fleet-rlm" / "reports" / "review.md").read_text(
-        encoding="utf-8"
-    ) == "durable review"
+    # Staged attachments are released; remote workspace and project data remain durable.
+    assert attachment_path not in volume
+    assert {project_path, memory_path, result_path} <= set(volume)
+    assert volume[project_path] == b"durable review"
     assert resources.session_manager.released is True
 
 
