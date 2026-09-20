@@ -236,3 +236,31 @@ def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> No
     from fleet_rlm.daytona.broker import _SERVER_SOURCE
 
     assert "sys.set_int_max_str_digits(200_000)" in _SERVER_SOURCE
+
+
+def test_poll_settles_required_mutation_only_after_remote_acknowledgement() -> None:
+    settled: list[tuple[str, dict[str, object], object]] = []
+    broker = DaytonaHttpToolBroker(
+        object(),
+        port=1,
+        tool_settled=lambda name, args, result: settled.append((name, dict(args), result)),
+    )
+    client = MagicMock()
+    client.get.return_value.json.return_value = {
+        "requests": [
+            {
+                "id": "call-1",
+                "lease": "lease-1",
+                "tool_name": "append_workspace_text",
+                "args": [],
+                "kwargs": {"path": "notes/findings.md", "content": "durable"},
+            }
+        ]
+    }
+    client.post.return_value.status_code = 200
+    broker._client = client
+    broker.bind_tools({"append_workspace_text": lambda **_kwargs: {"ok": True}})
+
+    broker._poll_once()
+
+    assert settled == [("append_workspace_text", {"path": "notes/findings.md", "content": "durable"}, {"ok": True})]

@@ -149,16 +149,12 @@ async def test_prewarm_release_failure_is_not_reported_as_success() -> None:
     assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
 
     assert await mgr.aclose(drain_seconds=5.0) is True
-    assert backend.close_calls == 2
+    assert backend.close_calls == 1
 
 
 @pytest.mark.asyncio
 async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
-    """The failed pre-warm lease stays drain-retryable after the claim clear.
-
-    aclose retries the retained release; the fail-once backend settles on
-    its second close, and the manager ends with no pending ownership.
-    """
+    """The failed pre-warm lease is contained by provider retirement."""
     mgr, platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
     backend = _attach_failing_backend(platform)
@@ -169,15 +165,15 @@ async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
         )
 
     assert backend.close_calls == 1
-    # The retry owner keeps the admission permit and PREWARM claim until the
-    # interpreter shutdown succeeds.
+    # The retained owner keeps admission and claim until provider retirement
+    # confirms cleanup after the failed interpreter shutdown.
     assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
     assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
 
     settled = await mgr.aclose(drain_seconds=5.0)
 
     assert settled is True
-    assert backend.close_calls == 2, "drain must retry the failed interpreter shutdown"
+    assert backend.close_calls == 1, "drain retires the owned sandbox without reopening the failed broker"
     assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
     assert not mgr.has_pending_ownership
 

@@ -8,6 +8,7 @@ never executes model-authored Python.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 import logging
 import secrets
@@ -188,7 +189,15 @@ Server(("0.0.0.0", __PORT__), Handler).serve_forever()
 class DaytonaHttpToolBroker:
     """Run a local sandbox broker and fulfil its JSON-only tool requests."""
 
-    def __init__(self, sandbox: Any, *, port: int, async_bridge: Any | None = None) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        port: int,
+        async_bridge: Any | None = None,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
+    ) -> None:
         self._sandbox = sandbox
         self._port = port
         self._secret = secrets.token_urlsafe(32)
@@ -197,6 +206,8 @@ class DaytonaHttpToolBroker:
         self._client: httpx.Client | None = None
         self._tools: dict[str, Callable[..., Any]] = {}
         self._async_bridge = async_bridge
+        self._tool_settled = tool_settled
+        self._tool_failed = tool_failed
         self._stopped = False
         self._delivery_error: DaytonaAdapterError | None = None
 
@@ -238,6 +249,18 @@ class DaytonaHttpToolBroker:
         if self._stopped:
             raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
         self._async_bridge = async_bridge
+
+    def rebind_tool_outcomes(
+        self,
+        *,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
+    ) -> None:
+        """Refresh per-invocation host-tool settlement ownership."""
+        if self._stopped:
+            raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
+        self._tool_settled = tool_settled
+        self._tool_failed = tool_failed
 
     def setup_source(self, submit_source: str) -> str:
         return (
@@ -355,15 +378,23 @@ class DaytonaHttpToolBroker:
             return
         for request in requests:
             name = str(request.get("tool_name") or "")
+            arguments = dict(request.get("kwargs") or {})
+            result: Any = None
+            succeeded = False
             try:
                 tool = self._tools[name]
                 result = _resolve_awaitable_result(
-                    tool(*list(request.get("args") or []), **dict(request.get("kwargs") or {})),
+                    tool(*list(request.get("args") or []), **arguments),
                     async_bridge=self._async_bridge,
                 )
                 validate_json_value(result, path=f"Tool {name} result")
                 body = {"id": request["id"], "lease": request["lease"], "result": result}
+                succeeded = True
             except Exception as exc:
+                failed = self._tool_failed
+                if failed is not None:
+                    with contextlib.suppress(Exception):
+                        failed(name, arguments)
                 body = {
                     "id": request.get("id"),
                     "lease": request.get("lease"),
@@ -380,6 +411,10 @@ class DaytonaHttpToolBroker:
                         self._record_delivery_failure(
                             request, phase="result_delivery", category=f"http_{response.status_code}"
                         )
+                    elif succeeded:
+                        settled = self._tool_settled
+                        if settled is not None:
+                            settled(name, arguments, result)
             except httpx.HTTPError:
                 self._record_delivery_failure(request, phase="result_delivery", category="http_error")
 

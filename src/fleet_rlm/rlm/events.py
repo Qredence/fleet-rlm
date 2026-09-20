@@ -829,34 +829,35 @@ def _public_trajectory_output(output: str) -> str:
 
 
 def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int | None) -> tuple[TrajectoryStep, ...]:
-    """Keep public trajectory step IDs within the configured execution bound.
+    """Assign trajectory details to the bounded executed-iteration sequence.
 
-    DSPy's prediction trajectory can include a terminal record after it has
-    exhausted the configured REPL iterations.  That record is useful public
-    evidence, but it is not another executed iteration.  Fold it into the
-    last executed step instead of projecting an impossible extra step ID.
+    Native DSPy may retain setup or terminal backfill records with an index past
+    the executed REPL budget. Public events use their retained sequence
+    position, never those provider-internal indexes. Overflow records fold
+    into the final executed step so no public code event can claim an
+    impossible iteration while all diagnostic content remains available.
     """
-    if max_steps is None or len(trajectory) <= max_steps:
+    if max_steps is None:
         return tuple(trajectory)
     if max_steps < 1:
         raise ValueError("max_steps must be positive when bounding a trajectory")
 
-    retained = list(trajectory[:max_steps])
-    last = retained[-1]
-    supplemental = trajectory[max_steps:]
+    grouped: list[list[TrajectoryStep]] = [[] for _ in range(min(len(trajectory), max_steps))]
+    for position, item in enumerate(trajectory, start=1):
+        grouped[min(position, max_steps) - 1].append(item)
 
     def combine(values: Sequence[str]) -> str:
         return "\n\n".join(value for value in values if value)
 
-    retained[-1] = TrajectoryStep(
-        index=last.index,
-        reasoning=combine((last.reasoning, *(step.reasoning for step in supplemental))),
-        code=combine((last.code, *(step.code for step in supplemental))),
-        output=combine(
-            (_public_trajectory_output(last.output), *(_public_trajectory_output(step.output) for step in supplemental))
-        ),
+    return tuple(
+        TrajectoryStep(
+            index=index,
+            reasoning=combine(tuple(item.reasoning for item in items)),
+            code=combine(tuple(item.code for item in items)),
+            output=combine(tuple(_public_trajectory_output(item.output) for item in items)),
+        )
+        for index, items in enumerate(grouped, start=1)
     )
-    return tuple(retained)
 
 
 def trajectory_details(
@@ -1657,6 +1658,16 @@ class ObservationSession:
         """Record a stream envelope without treating it as execution detail."""
         return self._recorder.record(detail)
 
+    @staticmethod
+    def _bound_step(detail: RuntimeEventDetail, *, max_steps: int) -> RuntimeEventDetail:
+        """Project interpreter setup/backfill onto an executed public step."""
+        if max_steps < 1:
+            return detail
+        step = getattr(detail, "step", None)
+        if isinstance(step, int) and step > max_steps:
+            return replace(detail, step=max_steps)
+        return detail
+
     def _order_live_detail(self, detail: RuntimeEventDetail) -> tuple[RuntimeEventDetail, ...]:
         """Hold step output until its parsed reasoning is ready for publication.
 
@@ -1700,10 +1711,14 @@ class ObservationSession:
     ) -> AsyncIterator[RuntimeEvent]:
         """Yield live worker observations, final drain details, and overflow warning."""
         monitor = WorkerMonitor(worker, self._relay, context, drain_capabilities)
+        options = getattr(context.execution, "options", None)
+        max_steps = getattr(options, "max_iters", 0)
         async for detail in monitor.stream():
+            detail = self._bound_step(detail, max_steps=max_steps)
             for ordered in self._order_live_detail(detail):
                 yield self.record(ordered)
         for detail in (*drain_capabilities(), *self._relay.drain()):
+            detail = self._bound_step(detail, max_steps=max_steps)
             for ordered in self._order_live_detail(detail):
                 yield self.record(ordered)
         for detail in self._flush_pending_step_details():
