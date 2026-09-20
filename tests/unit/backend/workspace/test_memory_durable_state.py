@@ -98,7 +98,11 @@ def test_append_enforces_capacity_and_active_supersession(tmp_path) -> None:
 
 def test_tail_budget_reports_full_size_without_returning_over_budget(tmp_path) -> None:
     store = _memory(tmp_path)
-    record, _ = format_workspace_memory_record("é" * 20, "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC))
+    record, _ = format_workspace_memory_record(
+        "é" * 20,
+        "General",
+        timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+    )
     store.append_record(record)
 
     result = store.read_tail(byte_budget=17)

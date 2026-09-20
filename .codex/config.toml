@@ -29,40 +29,5 @@ max_threads = 8
 max_depth = 1
 job_max_runtime_seconds = 3600
 
-[agents.backend-runtime]
-description = "FastAPI, Turn orchestration, DSPy RLM, persistence, and Runtime Event implementation work."
-config_file = "agents/backend-runtime.toml"
-nickname_candidates = ["Runtime", "Backend"]
-
-[agents.api-contract]
-description = "OpenAPI schema, HTTP routes, AI SDK UI v1 SSE, and generated backend contract review."
-config_file = "agents/api-contract.toml"
-nickname_candidates = ["Contract", "OpenAPI"]
-
-[agents.testing-strategist]
-description = "Chooses and audits backend, terminal-client, contract, live, and release validation lanes."
-config_file = "agents/testing-strategist.toml"
-nickname_candidates = ["Tests", "Validation"]
-
-[agents.security-reviewer]
-description = "Focused auth, token, middleware, settings, dependency, and secret-handling security reviewer."
-config_file = "agents/security-reviewer.toml"
-nickname_candidates = ["Security", "Reviewer"]
-
-[agents.release-manager]
-description = "Backend release hygiene, packaging, metadata, docs, contracts, and publish readiness."
-config_file = "agents/release-manager.toml"
-nickname_candidates = ["Release", "Packager"]
-
-[agents.sandbox-runtime]
-description = "Daytona SDK integration, Sandbox lifecycle, Interpreter Leases, Volumes, and safe provider seams."
-config_file = "agents/sandbox-runtime.toml"
-nickname_candidates = ["Daytona", "Sandbox"]
-
-[agents.docs-maintainer]
-description = "AGENTS.md, current architecture/reference docs, README, and workflow documentation consistency."
-config_file = "agents/docs-maintainer.toml"
-nickname_candidates = ["Docs", "Maintainer"]
-
 [sandbox_workspace_write]
 network_access = true

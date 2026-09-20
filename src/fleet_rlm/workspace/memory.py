@@ -406,12 +406,12 @@ class WorkspaceMemory:
             migrated += "\n"
         try:
             self._storage.write_text(self._memory_path, migrated, overwrite=False)
-        except FileExistsError:
+        except FileExistsError as exc:
             # Another worker won the create race.  Its verified canonical copy
             # is authoritative; never overwrite it with the legacy snapshot.
             canonical = self._read_storage_path(self._memory_path, full=True)
             if canonical.missing:
-                raise MemoryMigrationError("canonical Workspace Memory appeared but is unreadable") from None
+                raise MemoryMigrationError("canonical Workspace Memory appeared but is unreadable") from exc
             return canonical.content
         except (OSError, ValueError) as exc:
             raise MemoryMigrationError("Workspace Memory legacy migration could not be written") from exc

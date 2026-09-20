@@ -589,7 +589,10 @@ class _DaytonaEnvironmentProvider:
         for owner in owners:
             try:
                 await owner.close(deadline=owner_deadline)
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                if first_error is None:
+                    first_error = exc
+            except Exception as exc:
                 if first_error is None:
                     first_error = exc
             gate_tuple = self._late_root_gate_owners.pop(id(owner), None)

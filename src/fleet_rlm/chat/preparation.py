@@ -685,12 +685,17 @@ class PreparedHostCapabilities:
         if self._close_files:
             try:
                 await self._files.aclose()
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                first_error = exc
+            except Exception as exc:
                 first_error = exc
         if self._artifacts is not None:
             try:
                 await self._artifacts.aclose()
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                if first_error is None:
+                    first_error = exc
+            except Exception as exc:
                 if first_error is None:
                     first_error = exc
         if first_error is not None:
