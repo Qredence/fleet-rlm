@@ -1297,9 +1297,9 @@ class RLMRunner:
             for detail in self._drain_capability_details(context):
                 observations.publish(detail)
 
-        # Live Daytona host tools settle through the broker only after its
-        # remote acknowledgement. The broker owns integrity bookkeeping in
-        # that path; local interpreter doubles keep direct observed guards.
+        # The broker acknowledges remote results after delivery. It completes
+        # the durable integrity ledger there; observed tools remain responsible
+        # for public lifecycle events and no-progress accounting.
         fleet_dispatch = bool(getattr(context.execution.interpreter, "fleet_host_tool_dispatch_available", False))
         broker_acknowledges_tools = callable(getattr(context.execution.interpreter, "bind_tool_outcomes", None))
         observed_tools = tuple(
@@ -1309,7 +1309,7 @@ class RLMRunner:
                 spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                 is_authorized=lambda: not context.identity.authority.revoked,
-                guards=None if broker_acknowledges_tools else guards,
+                guards=guards,
                 async_bridge=getattr(context.execution, "async_bridge", None),
             )
             for tool in spec.tools
@@ -1365,13 +1365,10 @@ class RLMRunner:
                 bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
             bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
             if broker_acknowledges_tools and callable(bind_tool_outcomes):
-
-                def settled_tool(name: str, arguments: Mapping[str, Any], result: Any) -> None:
-                    warning = guards.completed(name, arguments, result)
-                    if warning is not None:
-                        observations.publish(WarningEvent(warning, "tool_no_progress"))
-
-                bind_tool_outcomes(tool_settled=settled_tool, tool_failed=guards.failed)
+                bind_tool_outcomes(
+                    tool_settled=lambda name, arguments, result: guards.integrity.completed(name, arguments, result),
+                    tool_failed=guards.integrity.failed,
+                )
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,

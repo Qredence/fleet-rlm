@@ -847,7 +847,11 @@ def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int 
         grouped[min(position, max_steps) - 1].append(item)
 
     def combine(values: Sequence[str]) -> str:
-        return "\n\n".join(value for value in values if value)
+        unique: list[str] = []
+        for value in values:
+            if value and value not in unique:
+                unique.append(value)
+        return "\n\n".join(unique)
 
     return tuple(
         TrajectoryStep(
