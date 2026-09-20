@@ -15,7 +15,8 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID, uuid4
 
-from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile
+from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_OUTPUT_CHARS
+from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile, execution_timeout_s_from_settings
 from fleet_rlm.daytona.session_manager import LeaseState, RootSessionLease
 
 
@@ -153,7 +154,14 @@ async def _close_child_lease(lease: Any) -> Any:
 class ChildEnvironment:
     """Async context-managed view over one strictly disposable child lease."""
 
-    def __init__(self, spec: ChildEnvironmentSpec, lease: Any, *, sandbox: Any | None = None) -> None:
+    def __init__(
+        self,
+        spec: ChildEnvironmentSpec,
+        lease: Any,
+        *,
+        sandbox: Any | None = None,
+        on_closed: Callable[[RootSessionLease], Any] | None = None,
+    ) -> None:
         self.spec = spec
         self.lease = lease
         self.sandbox = sandbox if sandbox is not None else getattr(lease, "sandbox", None)
@@ -167,6 +175,7 @@ class ChildEnvironment:
             spec.key or ("child", str(spec.call_index)),
             lease,
             _close_child_lease,
+            on_closed=on_closed,
             sandbox=self.sandbox,
             interpreter=self.interpreter,
             volume=self.volume_id,
@@ -383,30 +392,45 @@ class DaytonaRuntime:
             await owner.close(deadline=deadline)
 
     async def aclose(self, *, deadline: float | None = None) -> bool:
-        """Close all retained roots and active children."""
+        """Close all retained roots and active children.
+
+        Registry entries remain owned until their close is confirmed.  This is
+        important when cancellation or a provider failure interrupts shutdown:
+        a later close call must be able to retry the same lease instead of
+        losing the only reference to it.
+        """
         self._state = DaytonaRuntimeState.CLOSING
         errors: list[BaseException] = []
 
         async with self._lock:
             children = tuple(self._children)
-            self._children.clear()
             roots = tuple(self._roots.values())
-            self._roots.clear()
 
         for child in children:
             try:
                 await child.close(deadline=deadline)
             except BaseException as exc:
                 errors.append(exc)
+            else:
+                if child.closed:
+                    async with self._lock:
+                        self._children.discard(child)
 
         for root in roots:
             try:
                 await root.close(deadline=deadline)
             except BaseException as exc:
                 errors.append(exc)
+            else:
+                if root.closed:
+                    async with self._lock:
+                        if self._roots.get(root.key) is root:
+                            self._roots.pop(root.key, None)
 
-        self._state = DaytonaRuntimeState.FAILED if errors else DaytonaRuntimeState.CLOSED
-        return not errors
+        async with self._lock:
+            retained = bool(self._children or self._roots)
+        self._state = DaytonaRuntimeState.FAILED if errors or retained else DaytonaRuntimeState.CLOSED
+        return not errors and not retained
 
     async def close(self, *, deadline: float | None = None) -> bool:
         return await self.aclose(deadline=deadline)
@@ -489,6 +513,7 @@ class DaytonaRuntime:
 
         environment = self._coerce_child(spec, raw)
         async with self._lock:
+            environment._owner.on_closed = self._deregister_child
             self._children.add(environment)
         return environment
 
@@ -500,6 +525,11 @@ class DaytonaRuntime:
         if isinstance(candidate, ChildEnvironment):
             return candidate
         return ChildEnvironment(spec, candidate, sandbox=sandbox)
+
+    async def _deregister_child(self, owner: RootSessionLease) -> None:
+        """Forget a child only after its provider cleanup has succeeded."""
+        async with self._lock:
+            self._children = {child for child in self._children if child._owner is not owner}
 
     async def _acquire_from_resources(self, spec: RootSessionSpec, *, force_new: bool = False, **_kwargs: Any) -> Any:
         from fleet_rlm.daytona.session_manager import LeaseRequest
@@ -558,12 +588,12 @@ class DaytonaRuntime:
             execution_timeout_s=(
                 spec.execution_timeout_s
                 if spec.execution_timeout_s is not None
-                else getattr(settings, "daytona_execution_timeout_s", 120)
+                else execution_timeout_s_from_settings(settings)
             ),
             execution_output_cap=(
                 spec.execution_output_cap
                 if spec.execution_output_cap is not None
-                else getattr(settings, "daytona_execution_output_cap", 4_000)
+                else getattr(settings, "rlm_max_execution_output_chars", DEFAULT_EXECUTION_OUTPUT_CHARS)
             ),
             is_authorized=spec.is_authorized,
             profile=spec.profile,
