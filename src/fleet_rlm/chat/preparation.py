@@ -681,11 +681,20 @@ class PreparedHostCapabilities:
             recorder(attachment_ids)
 
     async def aclose(self) -> None:
-        if not self._close_files:
-            return
-        await self._files.aclose()
+        first_error: BaseException | None = None
+        if self._close_files:
+            try:
+                await self._files.aclose()
+            except BaseException as exc:
+                first_error = exc
         if self._artifacts is not None:
-            await self._artifacts.aclose()
+            try:
+                await self._artifacts.aclose()
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise first_error
 
 
 async def prepare_host_capabilities(

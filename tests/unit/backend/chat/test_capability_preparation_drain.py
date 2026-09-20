@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from fleet_rlm.chat.preparation import PreparedHostCapabilities
 
 
@@ -56,3 +58,63 @@ def test_drain_public_details_skips_artifact_workspace_publish_notices() -> None
     assert len(details) == 1
     assert details[0].filename == "notes.txt"
     assert details[0].byte_size == 8000
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_files_and_artifacts_independently_and_reraises_first_error() -> None:
+    class Files:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+            raise ValueError("files failed")
+
+    class Artifacts:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+            raise RuntimeError("artifacts failed")
+
+    files = Files()
+    artifacts = Artifacts()
+    prepared = PreparedHostCapabilities(
+        spec=None,
+        files=files,
+        skills=_SkillsStub(),
+        close_files=True,
+        artifact_candidates=True,
+        artifacts=artifacts,
+    )
+
+    with pytest.raises(ValueError, match="files failed"):
+        await prepared.aclose()
+
+    assert files.closed is True
+    assert artifacts.closed is True
+
+
+@pytest.mark.asyncio
+async def test_aclose_closes_artifacts_when_file_ownership_is_not_declared() -> None:
+    class Artifacts:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    artifacts = Artifacts()
+    prepared = PreparedHostCapabilities(
+        spec=None,
+        files=object(),
+        skills=_SkillsStub(),
+        close_files=False,
+        artifact_candidates=True,
+        artifacts=artifacts,
+    )
+
+    await prepared.aclose()
+
+    assert artifacts.closed is True
