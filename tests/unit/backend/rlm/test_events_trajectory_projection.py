@@ -617,3 +617,23 @@ def test_trajectory_reconciliation_reemits_earlier_code_correction_after_later_s
         'single_result = llm_query("Reply with exactly: COMPLETE")',
         'SUBMIT(answer="ok")',
     ]
+
+
+def test_trajectory_reconciliation_bounds_provider_backfill_steps() -> None:
+    from fleet_rlm.rlm.events import RLMCode, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    details = []
+    reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(1, "one", "one-code", "one-out"),
+            TrajectoryStep(2, "two", "two-code", "two-out"),
+            TrajectoryStep(4, "backfill", "backfill-code", "backfill-out"),
+        ),
+        max_chars=500,
+        max_steps=2,
+    )
+
+    assert {detail.step for detail in details if isinstance(detail, RLMCode)} == {1, 2}
+    assert any("backfill-code" in detail.code for detail in details if isinstance(detail, RLMCode) and detail.step == 2)

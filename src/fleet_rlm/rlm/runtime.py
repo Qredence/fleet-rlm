@@ -1297,6 +1297,11 @@ class RLMRunner:
             for detail in self._drain_capability_details(context):
                 observations.publish(detail)
 
+        # Live Daytona host tools settle through the broker only after its
+        # remote acknowledgement. The broker owns integrity bookkeeping in
+        # that path; local interpreter doubles keep direct observed guards.
+        fleet_dispatch = bool(getattr(context.execution.interpreter, "fleet_host_tool_dispatch_available", False))
+        broker_acknowledges_tools = callable(getattr(context.execution.interpreter, "bind_tool_outcomes", None))
         observed_tools = tuple(
             observe_tool(
                 tool,
@@ -1304,7 +1309,7 @@ class RLMRunner:
                 spec.tool_event_views.get(str(tool.name), ToolEventView.metadata_only()),
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                 is_authorized=lambda: not context.identity.authority.revoked,
-                guards=guards,
+                guards=None if broker_acknowledges_tools else guards,
                 async_bridge=getattr(context.execution, "async_bridge", None),
             )
             for tool in spec.tools
@@ -1342,9 +1347,6 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
-            fleet_dispatch = bool(
-                getattr(state_context.execution.interpreter, "fleet_host_tool_dispatch_available", False)
-            )
             rlm = self._factory.create(
                 models=state_context.execution.models,
                 options=state_context.execution.options,
@@ -1361,6 +1363,15 @@ class RLMRunner:
             bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
             if callable(bind_async_bridge):
                 bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
+            bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
+            if broker_acknowledges_tools and callable(bind_tool_outcomes):
+
+                def settled_tool(name: str, arguments: Mapping[str, Any], result: Any) -> None:
+                    warning = guards.completed(name, arguments, result)
+                    if warning is not None:
+                        observations.publish(WarningEvent(warning, "tool_no_progress"))
+
+                bind_tool_outcomes(tool_settled=settled_tool, tool_failed=guards.failed)
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,

@@ -229,7 +229,7 @@ async def test_release_and_quarantine_retains_admission_when_fence_fails() -> No
 
 
 @pytest.mark.asyncio
-async def test_release_failure_is_retried_under_quarantine_ownership() -> None:
+async def test_release_failure_is_contained_by_quarantine_ownership() -> None:
     mgr, platform, _store, _volumes = _manager()
     request = _request()
     lease = await _acquire(mgr, request)
@@ -253,7 +253,7 @@ async def test_release_failure_is_retried_under_quarantine_ownership() -> None:
     assert mgr._late_owners
     assert await mgr.aclose(drain_seconds=5)
 
-    assert interpreter.calls == 2
+    assert interpreter.calls == 1
     assert lease.closed
     assert await platform.get(lease.sandbox_id) is None
     assert not mgr.has_pending_ownership

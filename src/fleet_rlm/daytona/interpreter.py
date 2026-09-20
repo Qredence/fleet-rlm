@@ -496,6 +496,8 @@ class _SandboxProcessBackend:
         self._interpreter_context: Any = None
         self._broker: DaytonaHttpToolBroker | None = None
         self._async_bridge: Any | None = None
+        self._tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None
+        self._tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None
 
     @property
     def sandbox(self) -> Any:
@@ -514,6 +516,17 @@ class _SandboxProcessBackend:
         if self._broker is not None:
             self._broker.rebind_tools(tools)
         self._bound_tools = dict(tools)
+
+    def bind_tool_outcomes(
+        self,
+        *,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
+    ) -> None:
+        self._tool_settled = tool_settled
+        self._tool_failed = tool_failed
+        if self._broker is not None:
+            self._broker.rebind_tool_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
 
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         # The runner binds once for each invocation on a retained root lease.
@@ -591,7 +604,12 @@ def _fleet_load_context_manifest(raw_manifest):
 """)
         timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
         if self._broker is None:
-            self._broker = DaytonaHttpToolBroker(self._sandbox, port=DEFAULT_BROKER_PORT)
+            self._broker = DaytonaHttpToolBroker(
+                self._sandbox,
+                port=DEFAULT_BROKER_PORT,
+                tool_settled=self._tool_settled,
+                tool_failed=self._tool_failed,
+            )
             bind_bridge = getattr(self._broker, "bind_async_bridge", None)
             if callable(bind_bridge):
                 bind_bridge(self._async_bridge)
@@ -1279,6 +1297,17 @@ class DaytonaCodeInterpreter:
             if backend_error is not None:
                 raise backend_error
             self._shutdown = True
+
+    def bind_tool_outcomes(
+        self,
+        *,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
+    ) -> None:
+        backend = self._backend
+        bind = getattr(backend, "bind_tool_outcomes", None)
+        if callable(bind):
+            bind(tool_settled=tool_settled, tool_failed=tool_failed)
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any], *args: Any) -> Any:
