@@ -255,3 +255,19 @@ async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
     assert await volume.exists("text") is True
     assert await volume.exists("missing") is False
     await volume.remove("missing")
+
+
+@pytest.mark.asyncio
+async def test_sync_sandbox_bridges_workspace_metadata_operations() -> None:
+    from fleet_rlm.daytona.sync_bridge import sync_sandbox
+
+    class Fs:
+        async def get_file_info(self, path: str):
+            return {"path": path}
+
+        async def create_folder(self, path: str, mode: str):
+            return path, mode
+
+    bridge = sync_sandbox(SimpleNamespace(fs=Fs()), asyncio.get_running_loop())
+    assert await asyncio.to_thread(bridge.fs.get_file_info, "/workspace/a") == {"path": "/workspace/a"}
+    assert await asyncio.to_thread(bridge.fs.create_folder, "/workspace/a") == ("/workspace/a", "755")

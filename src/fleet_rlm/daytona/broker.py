@@ -32,7 +32,7 @@ _DEFAULT_TOOL_TIMEOUT_S = 120
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, threading, time, uuid
+import contextlib, hmac, io, json, sys, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -40,6 +40,13 @@ _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
 _lock, _execution_lock = threading.Lock(), threading.Lock()
 _active_deadline = None
+
+# Keep a bounded, useful conversion ceiling for legitimate high-precision
+# computations.  The default CPython limit makes the Pi canary fail before it
+# can submit a result, despite the sandbox output budget already bounding what
+# returns to the host.
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(200_000)
 
 class _BoundedWriter(io.StringIO):
     def __init__(self, limit):
