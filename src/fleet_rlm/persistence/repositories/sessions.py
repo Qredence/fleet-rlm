@@ -68,6 +68,29 @@ def _session_record(row: SessionRow) -> SessionRecord:
     )
 
 
+async def _ensure_identity_row(
+    db: AsyncSession,
+    model: type[UserRow] | type[WorkspaceRow],
+    identity: UUID,
+    **values: object,
+) -> None:
+    """Insert a parent identity, tolerating a concurrent creator.
+
+    The savepoint contains the expected unique-key race so the surrounding
+    transaction remains usable.  The follow-up read observes the winner and
+    only re-raises when the identity is still genuinely unavailable.
+    """
+    if await db.get(model, identity) is not None:
+        return
+    try:
+        async with db.begin_nested():
+            db.add(model(id=identity, **values))
+            await db.flush()
+    except IntegrityError:
+        if await db.get(model, identity) is None:
+            raise
+
+
 class SqlAlchemySessionCatalog:
     """SQL read/write Session Catalog adapter."""
 
@@ -82,11 +105,8 @@ class SqlAlchemySessionCatalog:
         title: str,
     ) -> SessionRecord:
         async with self._sessions() as db, db.begin():
-            if await db.get(UserRow, user_id) is None:
-                db.add(UserRow(id=user_id))
-            if await db.get(WorkspaceRow, workspace_id) is None:
-                db.add(WorkspaceRow(id=workspace_id))
-            await db.flush()
+            await _ensure_identity_row(db, UserRow, user_id)
+            await _ensure_identity_row(db, WorkspaceRow, workspace_id)
             row = SessionRow(
                 id=uuid4(),
                 user_id=user_id,
@@ -425,11 +445,8 @@ class SqlAlchemyAttachmentCatalog:
         storage_ref: str,
     ) -> None:
         async with self._session_factory() as db:
-            if await db.get(UserRow, access.user_id) is None:
-                db.add(UserRow(id=access.user_id))
-            if await db.get(WorkspaceRow, access.workspace_id) is None:
-                db.add(WorkspaceRow(id=access.workspace_id, name="default"))
-            await db.flush()
+            await _ensure_identity_row(db, UserRow, access.user_id)
+            await _ensure_identity_row(db, WorkspaceRow, access.workspace_id, name="default")
             db.add(
                 AttachmentRow(
                     id=ref.id,
