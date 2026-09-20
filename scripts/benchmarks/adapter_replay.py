@@ -21,6 +21,12 @@ from fleet_rlm.rlm.program import DeadlineLMProxy, FleetJSONAdapter
 DATASET = Path(__file__).with_name("runtime_v2_adapter_cases.json")
 SCORERS = ("adapter-outcome/v1", "provider-accounting/v1", "fleet-attempt-ceiling/v1")
 
+# Adapter protocol outcome vocabulary, most specific first. The dataset encodes
+# these protocol classes, never concrete exception class names, so a future
+# specialization (for example a `TimeoutError` subclass) is recorded under the
+# protocol outcome it still belongs to instead of silently drifting the dataset.
+_PROTOCOL_OUTCOMES = (AdapterParseError, LMTimeoutError, TimeoutError)
+
 
 class ActionSignature(dspy.Signature):
     iteration: str = dspy.InputField()
@@ -134,8 +140,8 @@ def replay(case: dict[str, Any], *, variant: str, asynchronous: bool) -> dict[st
             else:
                 result = adapter(lm, {}, ActionSignature, [], {"iteration": "1/3"})
             outcome = "submit" if result[0]["code"] == "SUBMIT(answer=1)" else "other-action"
-        except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
-            outcome = type(exc).__name__
+        except _PROTOCOL_OUTCOMES as exc:
+            outcome = next(name.__name__ for name in _PROTOCOL_OUTCOMES if isinstance(exc, name))
     return {
         "case": case["id"],
         "variant": variant,

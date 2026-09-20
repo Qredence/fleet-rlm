@@ -24,18 +24,21 @@ references fail startup.
 
 The provider environment contract is policy-derived; see the [profile matrix](profile-matrix.md).
 The committed policy uses the OpenAI-compatible Chat Completion API and routes
-Root and Sub through the Databricks Unity AI Gateway MLflow endpoint, which
-requires `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, and
-`FLEET_DAYTONA_ORG_ID`.
+Root and Sub through the Alibaba DashScope (MaaS) endpoint by default, which
+requires `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, and
+`FLEET_DAYTONA_ORG_ID`. The workspace Databricks gateway enforces a per-minute
+output-token quota that terminates multi-step Turns after roughly five root-LM
+calls; MaaS carries no such quota, which is why it is the committed default.
 The committed policy keeps `daytona-recursive` as the safe local/disposable
 default (it inherits the complete policy from `[defaults]`) and declares an
-explicit `daytona-managed` production profile. The managed profile inherits
-the same Daytona, model, and local-MLflow settings but requires
-`FLEET_DATABASE_URL` to be a TLS PostgreSQL URL authenticated as `fleet_app`.
+explicit `daytona-managed` production profile. The managed profile pins Root and
+Sub back to the Databricks Unity AI Gateway transport (`DATABRICKS_TOKEN`,
+`FLEET_LLM_BASE_URL`) and requires `FLEET_DATABASE_URL` to be a TLS PostgreSQL
+URL authenticated as `fleet_app`.
 
 | Profile | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona-recursive` (default) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled. |
+| `daytona-recursive` (default) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled. |
 | `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DATABASE_URL` | TLS Lakebase PostgreSQL as `fleet_app`, at Alembic head; local MLflow tracing remains enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
@@ -43,10 +46,11 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 
 ## Policy settings
 
-Fleet has one supported broker execution architecture. Configuration does not
-select an execution architecture: `runtime.environment = "daytona"` selects
-the provider environment and `runtime.live_enabled` controls live admission.
-Policies containing the removed `runtime.variant` key are rejected. See
+`runtime.environment = "daytona"` selects the provider environment and
+`runtime.live_enabled` controls live admission. The Daytona interpreter executes
+generated source remotely and brokers authorized Fleet and DSPy semantic tools
+through the authenticated preview connection. Policies
+containing the removed `runtime.variant` key are rejected. See
 [ADR 005](../decisions/005-runtime-variant.md).
 
 `config/fleet.toml` deep-merges `[defaults]` into the selected
@@ -180,12 +184,15 @@ behavior.
 All committed profiles use the OpenAI-compatible Chat Completion format.
 `dspy.LM` sends the request to the provider's `/chat/completions` endpoint with
 `model_type="chat"`; no provider-specific routing header is required. The
-committed Root and Sub roles use `databricks-deepseek-v4-1-flash` with the
-`DATABRICKS_TOKEN` and `FLEET_LLM_BASE_URL` references, no reasoning-effort
-override, and LM caching disabled. `FLEET_LLM_BASE_URL` must be the
-`/ai-gateway/mlflow/v1` base; the client appends `/chat/completions`. Their
+committed Root and Sub roles use `deepseek-v4.1-flash` with the
+`ALIBABA_API_KEY` and `FLEET_MAAS_BASE_URL` references, no reasoning-effort
+override, and LM caching disabled. `FLEET_MAAS_BASE_URL` must be the DashScope
+`/compatible-mode/v1` base; the client appends `/chat/completions`. Their
+`num_retries = 3` policy lets the client back off provider 429s, and their
 `max_tokens = 16384` ceiling and Fleet's character-level output caps are
-independent policy bounds.
+independent policy bounds. The pinned `daytona-managed` profile instead uses
+`databricks-deepseek-v4-1-flash` with `DATABRICKS_TOKEN` and
+`FLEET_LLM_BASE_URL`, where the base must be the `/ai-gateway/mlflow/v1` base.
 
 The committed default routes traces to the local `fleet-rlm` experiment at
 `http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses
@@ -203,11 +210,11 @@ the preparation root, and disabled tracing records none. The execution root
 additionally carries the bounded one-way `fleet.preparation_trace_id` tag;
 preparation traces never reference the execution trace.
 
-The shipped Root and Sub LLM roles set `num_retries = 1`. This is a committed
+The shipped Root and Sub LLM roles set `num_retries = 3`. This is a committed
 runtime policy choice, not a change to DSPy's generic constructor defaults;
-custom profiles that omit the field inherit the shipped default of `1`. The
-typed settings default of `3` applies only when both the defaults and selected
-profile omit the field.
+custom profiles that omit the field inherit the shipped default of `3`. The
+typed settings default is also `3` when both the defaults and selected profile
+omit the field.
 
 ## Local terminal editing
 
@@ -246,8 +253,10 @@ Fleet restart.
 | `FLEET_DATABASE_URL` | `storage.database_url_env` | Async SQLAlchemy URL; required for durable deployments |
 | `FLEET_DAYTONA_API_KEY` | `daytona.api_key_env` | Daytona provider credential for every profile |
 | `FLEET_DAYTONA_ORG_ID` | `daytona.org_id_env` | Daytona organization routing identifier; required by live Daytona composition |
-| `DATABRICKS_TOKEN` | Root/Sub `api_key_env` in the committed policy | Databricks credential for the configured Chat Completion endpoint |
-| `FLEET_LLM_BASE_URL` | Root/Sub `base_url_env` in the committed policy | Databricks Unity AI Gateway MLflow base (`/chat/completions` is appended) |
+| `ALIBABA_API_KEY` | Root/Sub `api_key_env` in the committed defaults | DashScope (MaaS) credential for the default Chat Completion endpoint |
+| `FLEET_MAAS_BASE_URL` | Root/Sub `base_url_env` in the committed defaults | Alibaba DashScope OpenAI-compatible base, e.g. `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` (`/chat/completions` is appended) |
+| `DATABRICKS_TOKEN` | `daytona-managed` Root/Sub `api_key_env` | Databricks credential for the pinned managed Chat Completion endpoint |
+| `FLEET_LLM_BASE_URL` | `daytona-managed` Root/Sub `base_url_env` | Databricks Unity AI Gateway MLflow base (`/chat/completions` is appended) |
 | `DATABRICKS_HOST` | MLflow/evaluation tooling | Databricks workspace root; not the Fleet Root/Sub Chat Completions base |
 | `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Custom/benchmark policy or latency benchmark only | Optional Databricks AI Gateway base for explicitly custom paths; not used by the committed Root/Sub policy |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |

@@ -35,7 +35,7 @@ from fleet_rlm.composition.inventory import (
     install_runtime_inventory,
 )
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
@@ -161,7 +161,7 @@ async def _finish_daytona_disposal(
     composition_loop: asyncio.AbstractEventLoop | None,
 ) -> None:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.daytona.sandbox_lease import has_pending_lease_ownership, wait_lease_ownership
+    from fleet_rlm.daytona.session_manager import has_pending_lease_ownership, wait_lease_ownership
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
     while asyncio.get_running_loop().time() < retry_deadline:
@@ -471,8 +471,10 @@ async def build_daytona_composition(
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.attachments.lifecycle import AttachmentLifecycleService
-    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.attachments import (
+        AttachmentLifecycleService,
+        WorkspaceAttachmentPathPolicy,
+    )
     from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.composition.daytona_run_preparation import resolve_settings

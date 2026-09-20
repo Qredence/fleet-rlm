@@ -4,7 +4,7 @@ from uuid import UUID
 
 import dspy
 
-from fleet_rlm.attachments.models import PreparedAttachment
+from fleet_rlm.attachments import PreparedAttachment
 from fleet_rlm.rlm.program import build_rlm_input_kwargs
 from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
 from fleet_rlm.skills.models import SkillCard

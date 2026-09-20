@@ -433,3 +433,30 @@ def test_tokens_plus_delegation_payload_validates() -> None:
     )
 
     assert validate_rlm_usage(dict(usage)) == usage
+
+
+def test_phase_trace_records_parse_repair_diagnostics() -> None:
+    """Corrective re-asks must reach the Turn span as bounded adapter diagnostics."""
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+
+    record_phase_failure(
+        phase,
+        0.0,
+        None,
+        None,
+        TimeoutError("deadline"),
+        repair={"parse_repairs_used": 2},
+    )
+
+    assert outputs[-1]["parse_repairs_used"] == 2
+
+
+def test_phase_trace_omits_parse_repair_diagnostics_when_absent() -> None:
+    """A Turn without an adapter must not gain a phantom repair field."""
+    outputs: list[dict[str, object]] = []
+    phase = SimpleNamespace(set_outputs=outputs.append)
+
+    record_phase_failure(phase, 0.0, None, None, TimeoutError("deadline"))
+
+    assert "parse_repairs_used" not in outputs[-1]

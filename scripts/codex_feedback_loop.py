@@ -32,9 +32,8 @@ SAFE_COMMANDS = (
             "zsh",
             "-n",
             ".codex/workspace-bootstrap.zsh",
-            ".codex/hooks/block-env-edit.zsh",
-            ".codex/hooks/generated-artifact-check.zsh",
-            ".codex/hooks/python-format.zsh",
+            ".codex/maintenance.zsh",
+            ".codex/cloud-preflight.zsh",
         ],
     ),
     ("harness", [sys.executable, "scripts/check_harness_engineering.py"]),
@@ -148,55 +147,44 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="safe runs static/local checks; app also probes a running local API.",
     )
     parser.add_argument(
-        "--server-url",
-        default="http://127.0.0.1:8000",
-        help="Local API server URL for the app profile.",
-    )
-    parser.add_argument(
         "--output",
         type=Path,
         default=Path("artifacts/codex-feedback-loop/report.json"),
-        help="Report path.",
+        help="Path for emitted JSON report.",
     )
     parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=Path(__file__).resolve().parents[1],
-        help="Repository root.",
+        "--app-url",
+        default="http://127.0.0.1:8000/health",
+        help="Local application health endpoint probed when --profile app is selected.",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint."""
+    """Run commands and write the report."""
     args = parse_args(argv)
-    repo_root = args.repo_root.resolve()
+    repo_root = Path(__file__).resolve().parents[1]
     command_results = [run_command(name, command, repo_root) for name, command in SAFE_COMMANDS]
-    probes: list[HttpProbe] = []
+    probe_result: HttpProbe | None = None
     if args.profile == "app":
-        base = args.server_url.rstrip("/")
-        probes = [probe_url(f"{base}/openapi.json")]
-
+        probe_result = probe_url(args.app_url)
     report = {
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "profile": args.profile,
         "commands": [asdict(result) for result in command_results],
-        "http_probes": [asdict(probe) for probe in probes],
+        "app_probe": asdict(probe_result) if probe_result else None,
+        "ok": all(result.returncode == 0 for result in command_results) and (probe_result is None or probe_result.ok),
     }
-    output_path = repo_root / args.output
-    write_report(report, output_path)
-
-    failed_commands = [result for result in command_results if result.returncode != 0]
-    failed_probes = [probe for probe in probes if not probe.ok]
-    print(f"Codex feedback loop report: {output_path}")
-    if failed_commands or failed_probes:
-        for result in failed_commands:
-            print(f"FAIL command {result.name}: exit {result.returncode}", file=sys.stderr)
-        for probe in failed_probes:
-            print(f"FAIL probe {probe.url}: {probe.error or probe.status}", file=sys.stderr)
+    write_report(report, args.output)
+    failed = [result.name for result in command_results if result.returncode != 0]
+    if probe_result and not probe_result.ok:
+        failed.append("app-probe")
+    if failed:
+        sys.stderr.write(f"codex feedback loop reported failures: {', '.join(failed)}\n")
         return 1
-    print("OK: Codex feedback loop completed.")
+    sys.stdout.write(f"codex feedback loop passed ({len(command_results)} commands checked)\n")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

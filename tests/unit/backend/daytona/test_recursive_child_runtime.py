@@ -165,6 +165,32 @@ async def test_child_scope_purge_removes_nested_files_and_directories() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_failed_acquire_confirms_deletion_before_releasing_admission() -> None:
+    calls: list[str] = []
+
+    class Platform:
+        async def delete(self, sandbox_id: str) -> None:
+            calls.append(f"delete:{sandbox_id}")
+
+        async def get(self, sandbox_id: str) -> None:
+            calls.append(f"probe:{sandbox_id}")
+            return None
+
+    admission = DaytonaAdmission(max_active_leases=1)
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    await recursive_child_runtime.cleanup_after_failed_acquire(
+        Platform(),
+        SimpleNamespace(id="failed-child"),
+        "failed-child",
+        permit,
+    )
+
+    assert calls == ["delete:failed-child", "probe:failed-child"]
+    replacement = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    replacement.release()
+
+
 def test_child_runtime_lease_failure_is_failed_and_reobserved() -> None:
     calls = 0
 
@@ -296,6 +322,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
             "labels": {"fleet.runtime": "recursive-child", "fleet.profile": "semantic-child"},
             "with_volume": False,
             "ephemeral": True,
+            "network_block_all": True,
         }
     ]
 

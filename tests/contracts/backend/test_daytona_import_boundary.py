@@ -11,31 +11,28 @@ ALLOWED_DAYTONA_IMPORT_ROOTS = {
 }
 EXPECTED_DAYTONA_MODULES = {
     "__init__.py",
-    "broker.py",
     "admission.py",
+    "broker.py",
+    "client.py",
     "diagnostics.py",
     "errors.py",
+    "fs.py",
     "interpreter.py",
-    "interpreter_output.py",
     "lifecycle.py",
+    "models.py",
     "platform.py",
     "provisioning.py",
     "recursive_child_runtime.py",
     "runtime.py",
-    "sandbox_lease.py",
+    "sandbox.py",
     "session_manager.py",
-    "warm_pool.py",
-    "_cleanup.py",
-    "_lease.py",
+    "sync_bridge.py",
 }
-EXPECTED_WORKSPACE_AGENT_MODULES = {"__init__.py", "client.py", "protocol.py", "runtime.py"}
 
 
 def test_daytona_package_has_exact_simplified_module_boundary() -> None:
     actual = {path.name for path in (PACKAGE_ROOT / "daytona").glob("*.py")}
     assert actual == EXPECTED_DAYTONA_MODULES
-    workspace_agent = PACKAGE_ROOT / "daytona" / "workspace_agent"
-    assert {path.name for path in workspace_agent.glob("*.py")} == EXPECTED_WORKSPACE_AGENT_MODULES
 
 
 def _imported_roots(tree: ast.AST) -> set[str]:

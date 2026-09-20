@@ -14,26 +14,28 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Root and Sub use the selected Databricks Unity AI Gateway Chat Completions
-# endpoint. Keep the deliberately bounded 16,384-token role limit; Fleet's
+# Root and Sub use the Alibaba DashScope (MaaS) OpenAI-compatible endpoint.
+# The workspace Databricks gateway enforces a per-minute output-token quota that
+# kills multi-step Turns after roughly five root-LM calls; MaaS carries no such
+# quota. Keep the deliberately bounded 16,384-token role limit; Fleet's
 # character-level output caps independently bound retained output.
 [defaults.llm.root]
-model = "databricks-deepseek-v4-1-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
+model = "deepseek-v4.1-flash"
+api_key_env = "ALIBABA_API_KEY"
+base_url_env = "FLEET_MAAS_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 300
-num_retries = 1
+num_retries = 3
 cache = false
 
 [defaults.llm.sub]
-model = "databricks-deepseek-v4-1-flash"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
+model = "deepseek-v4.1-flash"
+api_key_env = "ALIBABA_API_KEY"
+base_url_env = "FLEET_MAAS_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 90
 temperature = 0
-num_retries = 1
+num_retries = 3
 cache = false
 
 # Operator-selected recursive execution. This operational opt-in does not
@@ -74,10 +76,6 @@ child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
 org_id_env = "FLEET_DAYTONA_ORG_ID"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
-warm_pool_enabled = true
-warm_pool_size = 1
-# Explicit operator-selected clean SemanticChild capacity; reconciled separately.
-warm_pool_region = "us"
 
 [defaults.logging]
 level = "INFO"
@@ -198,5 +196,18 @@ turn_timeout_seconds = 90
 # as the default until the Lakebase maintenance-window rehearsal and native
 # containment gates are complete; operators select this profile by changing
 # [config] default_profile in the deployment artifact.
+# Managed deployment keeps the Databricks Unity AI Gateway transport even though
+# the committed defaults now select Alibaba MaaS: this profile is the credentialed
+# Lakebase + managed-MLflow deployment contract.
+[profiles.daytona-managed.llm.root]
+model = "databricks-deepseek-v4-1-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
+[profiles.daytona-managed.llm.sub]
+model = "databricks-deepseek-v4-1-flash"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
 [profiles.daytona-managed.storage]
 database_url_env = "FLEET_DATABASE_URL"

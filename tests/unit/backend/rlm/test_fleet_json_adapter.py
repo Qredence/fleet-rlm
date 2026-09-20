@@ -12,6 +12,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.budget import FinalizationExhausted
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions, build_native_rlm
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
@@ -234,7 +235,6 @@ def test_wrap_up_accepts_direct_submit_and_safe_serialization() -> None:
     "bad_code",
     (
         "answer = tool()",
-        "answer = 1\nSUBMIT(answer=answer)",
         "SUBMIT(answer=tool())",
         'SUBMIT(answer=f"answer: {tool()}")',
         "SUBMIT(answer=(",
@@ -246,7 +246,7 @@ def test_wrap_up_rejects_non_submit_actions_after_one_correction(bad_code: str) 
 
     lm = _ScriptedLM([payload(bad_code), payload(bad_code), payload(bad_code)])
 
-    with pytest.raises(TimeoutError, match="wrap-up action"):
+    with pytest.raises(FinalizationExhausted):
         _run_iteration_action(
             lm,
             FleetJSONAdapter(deadline=time.monotonic() + 0.5, wrap_up_seconds=1),
@@ -343,7 +343,7 @@ def test_parse_and_wrap_up_corrections_share_two_attempt_ceiling() -> None:
         ]
     )
 
-    with pytest.raises(TimeoutError, match="wrap-up action"):
+    with pytest.raises(FinalizationExhausted):
         _run_iteration_action(
             lm,
             FleetJSONAdapter(deadline=time.monotonic() + 0.5, wrap_up_seconds=1),
@@ -643,3 +643,66 @@ def test_retry_correction_escalates_on_repeated_empty_failure() -> None:
     assert third != first
     assert "ONLY" in third
     assert "zero reasoning" in third.lower()
+
+
+def test_final_iteration_accepts_bound_answer_before_submit() -> None:
+    """Regression: a wrap-up answer bound to a local variable must still submit.
+
+    Reproduces trace tr-7235afb87cca966f38b8b39988b70def, where both wrap-up
+    attempts emitted ``answer = "..."`` followed by ``SUBMIT(answer=answer)``
+    and the turn was reported as a timeout with 19 minutes of budget left.
+    """
+    code = 'answer = "The 1495552252th digit of Pi is 5."\nSUBMIT(answer=answer)'
+    lm = _ScriptedLM([json.dumps({"reasoning": "budget exhausted", "code": code})])
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+
+    prediction = _run_iteration_action(lm, adapter, iteration="12/12")
+
+    assert prediction.code == code
+    assert len(lm.calls) == 1
+    summary = adapter.wrap_up_summary()
+    assert summary["wrap_up_entered"] is True
+    assert summary["wrap_up_attempts"] == 1
+    assert summary["wrap_up_rejection_reason"] is None
+
+
+def test_wrap_up_directive_allows_data_only_answer_bindings() -> None:
+    lm = _ScriptedLM(['{"reasoning": "r", "code": "SUBMIT(answer=\'ok\')"}'])
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+
+    _run_iteration_action(lm, adapter, iteration="3/3")
+
+    directive = _last_user_text(lm.calls[0])
+    assert "data-only answer assignments" in directive
+    assert "No imports, print, tool calls" in directive
+
+
+def test_wrap_up_correction_allows_data_only_answer_bindings() -> None:
+    lm = _ScriptedLM(
+        [
+            '{"reasoning": "explore", "code": "probe = fetch_more()"}',
+            '{"reasoning": "r", "code": "SUBMIT(answer=answer)"}',
+        ]
+    )
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+
+    _run_iteration_action(lm, adapter, iteration="3/3")
+
+    correction = _last_user_text(lm.calls[1])
+    assert "Wrap-up correction" in correction
+    assert "data-only answer assignments" in correction
+    assert "No imports, print, tool calls" in correction
+
+
+def test_exhausted_finalization_reports_exhaustion_not_deadline() -> None:
+    """Two non-compliant wrap-up attempts is a rejection, never a time expiry."""
+    lm = _ScriptedLM(
+        [
+            '{"reasoning": "explore", "code": "answer = tool()"}',
+            '{"reasoning": "explore", "code": "answer = tool()"}',
+        ]
+    )
+    adapter = FleetJSONAdapter(deadline=time.monotonic() + 30, wrap_up_seconds=1)
+
+    with pytest.raises(FinalizationExhausted):
+        _run_iteration_action(lm, adapter, iteration="12/12")

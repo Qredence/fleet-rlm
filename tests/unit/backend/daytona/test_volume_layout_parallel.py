@@ -4,7 +4,7 @@ The canonical layout (ensure_volume_layout) creates 11 directories through
 the sandbox filesystem. Creation is batched by depth level: directories that
 share no parent/child relationship within one layout run concurrently, and
 parent levels complete before child levels start. Each directory keeps the
-idempotent verify-then-create contract, including tolerance for concurrent
+idempotent direct-create contract (EAFP), including tolerance for concurrent
 creation by an unrelated writer.
 """
 
@@ -116,27 +116,28 @@ async def test_layout_creates_parents_before_children() -> None:
 
 @pytest.mark.asyncio
 async def test_layout_tolerates_concurrent_creation_by_another_writer() -> None:
-    # mkdir fails because another writer created the directory first; the
-    # post-failure stat must observe it and accept.
+    # mkdir fails because another writer created the directory concurrently;
+    # the post-failure stat must observe it and accept.
     artifact_root = "/home/daytona/fleet/artifacts"
     fs = _FakeFs(existing={"/home/daytona/fleet"}, fail_once={artifact_root: 1})
 
-    real_get_info = fs.get_file_info
+    real_create_folder = fs.create_folder
 
-    async def racing_get_info(path: str) -> _FakeInfo | None:
-        info = await real_get_info(path)
-        if info is None and "artifacts" in path:
-            # Another writer creates it right after our stat misses.
+    async def racing_create_folder(path: str, mode: str) -> None:
+        try:
+            await real_create_folder(path, mode)
+        except RuntimeError:
+            # Another writer created it while our mkdir was in flight.
             fs._existing.add(path)
-        return info
+            raise
 
-    fs.get_file_info = racing_get_info  # type: ignore[method-assign]
+    fs.create_folder = racing_create_folder  # type: ignore[method-assign]
 
     await ensure_volume_layout(_sandbox(fs), _paths(), session_id=uuid4(), run_id=uuid4())
 
     assert artifact_root in fs._existing
     assert _dirs_of(fs, "mkdir").count(artifact_root) == 1
-    assert _dirs_of(fs, "stat").count(artifact_root) == 2
+    assert _dirs_of(fs, "stat").count(artifact_root) == 1
 
 
 @pytest.mark.asyncio

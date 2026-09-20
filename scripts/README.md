@@ -33,7 +33,6 @@ hand.
 | `db_init.py` | Apply Alembic to the configured database target. |
 | `migrate_sqlite_to_postgres.py` | Run the explicit one-time database import. |
 | `daytona_snapshot.py` | Plan, create, check, or verify immutable Daytona snapshots. |
-| `daytona_warm_pool.py` | Plan, inspect, or explicitly reconcile the operator-selected SemanticChild pool; activation remains separately gated. |
 | `inventory_db_heads.py` | Record a read-only deployed database-head inventory. |
 | `lakebase_preflight.py` | Run the sanitized Lakebase readiness preflight. |
 | `normalize_release_artifacts.py` | Normalize wheel and sdist metadata for reproducible release identities. |
@@ -41,9 +40,6 @@ hand.
 | `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
 | `deployment_observability.py` | Inspect release observability inputs. |
 | `circleci_trigger_release.py` | Trigger and await the release workflow. |
-| `phase6_authority.py` | In-process Phase 6 issuance seals and gate-authorization primitives. |
-| `phase6_identity.py` | Phase 6 digest helpers and inspection-only validators. |
-| `phase6_promotion.py` | Seal bundle identities, check rollback observations, compare matched quality measurements, or record a fail-closed blocked decision; never switch or authorize promotion. |
 | `benchmarks/curate_mlflow.py` | Read selected local MLflow root requests and seal explicit agent-reviewed expectations with grouped splits; never run optimization. |
 
 These commands may contact providers or mutate external state. Invoke them only
@@ -55,23 +51,20 @@ snapshot, enable paid capacity, or certify a deployment by themselves.
 
 | Script | Purpose |
 | --- | --- |
-| `live_phase1_stream_verify.py` | Run the narrow live stream canary. |
-| `live_phase2_recursive_verify.py` | Run the opt-in recursive-child canary. |
 | `live_daytona_verify.py` | Run the broader Daytona MVP and durability verifier. |
-| `live_p27_snapshot_verify.py` | Seal a reduced-snapshot probe receipt. |
+| `verify_child_sandboxes_turn.py` | Run the maintained two-child recursive-batch canary with an explicit new receipt path. |
 | `benchmark_daytona_lifecycle.py` | Measure Daytona lifecycle behavior. |
-| `benchmarks/run_phase4_campaign.py` | Run the sealed four-arm recursion ablation. |
 | `benchmarks/run_rlm_latency.py` / `run_routing_eval.py` | Run bounded latency, quality, or routing evaluations. |
+| `benchmarks/run_oolong_predict.py` | Run the official Oolong predict adapter (dry N=1 or live). |
 | `benchmarks/certify_mlflow.py` / `certify_postgres.py` / `certify_daytona_sdk.py` | Run bounded certification lanes. |
-| `benchmarks/record_mlflow_campaign.py` / `attach_phase3_receipt.py` | Attach bounded evidence to MLflow. |
+| `benchmarks/record_mlflow_campaign.py` | Attach bounded evidence to MLflow. |
 | `benchmarks/rlm_eval_dataset.py`, `enable_monitoring.py`, `align_judges.py` | Manage the operator-gated evaluation loop. |
 | `benchmarks/runtime_v2.py` / `corpus_chain.py` | Run deterministic protocol and corpus fixtures. |
 
-`phase4_campaign.py`, `phase4_api_client.py`, `phase4_api_server.py`,
-`phase4_api_fake_server.py`, `adapter_replay.py`, and `campaign.py` are support
-modules for these entrypoints, not standalone operator workflows. Keep dated
-campaign results in the ADR 006 status ledger; do not convert partial, local, or
-failed receipts into a product or certification claim.
+`adapter_replay.py` and `campaign.py` are support modules for these entrypoints,
+not standalone operator workflows. Keep dated campaign results in the ADR 006
+status ledger; do not convert partial, local, or failed receipts into a product
+or certification claim.
 
 ## Required boundaries
 

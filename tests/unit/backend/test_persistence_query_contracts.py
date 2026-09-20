@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import event
 
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
-from fleet_rlm.persistence.repositories.session_catalog import SqlAlchemySessionCatalog
+from fleet_rlm.persistence.repositories.sessions import SqlAlchemySessionCatalog
 from fleet_rlm.sessions.models import TurnInput
 from fleet_rlm.sessions.run_state import RunClaim
 from tests.support.memory_intents import _intents, _seed_with_intents

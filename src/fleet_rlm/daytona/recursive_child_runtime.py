@@ -1,26 +1,4 @@
-"""Contracted owner for native DSPy recursive child runtimes (P39).
-
-One child-runtime owner concentrates the complete lease/cleanup contract for
-recursive children (P36 rows P39-REC-002..006, absorbed behind this owner):
-
-- acquisition with admission reservation and authorization fences
-  (former ``recursive_child_acquisition``);
-- the explicit single-owner, joinable, re-observable lease close state
-  (former ``recursive_child_lease``);
-- strict interpreter/broker shutdown, scope purge, provider deletion with
-  confirmed absence, and admission restoration (former
-  ``recursive_child_cleanup``);
-- late-acquisition adoption and quarantined cleanup ownership that survives
-  owner-loop and dispatch loss (former ``recursive_child_late``);
-- the factory seam that binds those obligations to one absolute deadline.
-
-Cleanup law: interpreter close -> broker stop -> scope purge -> Sandbox
-delete -> confirmed absence -> admission restore, and only then may the
-parent succeed.  Any step failure fails the child and the Root (fail-closed)
-while the remaining steps are still attempted.  DSPy never shuts down these
-caller-owned child interpreters; only this owner does, exactly once per
-lease.
-"""
+"""Contracted owner for native DSPy recursive child runtimes (P39)."""
 
 from __future__ import annotations
 
@@ -41,7 +19,6 @@ from fleet_rlm.daytona.admission import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
 )
-from fleet_rlm.daytona.broker import SyncBridgeDispatcher
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import (
@@ -49,7 +26,8 @@ from fleet_rlm.daytona.provisioning import (
     SandboxPlatform,
     recursive_child_volume_subpath,
 )
-from fleet_rlm.daytona.sandbox_lease import SandboxLease, SandboxLeasePolicy, schedule_owned_close
+from fleet_rlm.daytona.sandbox import schedule_owned_close
+from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
@@ -57,21 +35,13 @@ from fleet_rlm.rlm.recursion import (
 )
 from fleet_rlm.runtime.owned_effect import OwnedEffect
 
-# Cleanup ownership must retain cancellation and process-level shutdown
-# signals while avoiding a bare BaseException handler in each branch.
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
 CHILD_DELETE_CONFIRM_TIMEOUT_S = 120.0
 CHILD_DELETE_CONFIRM_POLL_S = 1.0
-# Read at call time by the factory and close seams so fault-injection lanes
-# can shorten the result timeout through this module attribute.
 _CHILD_CLEANUP_RESULT_TIMEOUT_S = CHILD_CLEANUP_RESULT_TIMEOUT_S
 
-# Absence-confirmation budget policy: distinctly larger than the close-path
-# result timeout so a quarantined (retained, still-running) cleanup coroutine
-# normally confirms within its own budget instead of dying unclassified with
-# the loop.
 _FALLBACK_CLEANUP_EXECUTOR = ThreadPoolExecutor(
     max_workers=1,
     thread_name_prefix="fleet-late-child-cleanup-fallback",
@@ -93,13 +63,7 @@ class ChildRuntimeLeaseState(StrEnum):
 
 @dataclass(slots=True)
 class ChildRuntimeLease:
-    """One synchronously usable child interpreter and its owned cleanup action.
-
-    ``FAILED`` is an explicit terminal observation for the close attempt. A
-    later caller re-observes the same failure rather than starting a second
-    provider cleanup, while callers that arrive during ``CLOSING`` join the
-    one in-flight close operation.
-    """
+    """One synchronously usable child interpreter and its owned cleanup action."""
 
     interpreter: Any
     sandbox_id: str
@@ -113,31 +77,15 @@ class ChildRuntimeLease:
 
     @property
     def state(self) -> ChildRuntimeLeaseState:
-        """
-        Expose the lease's current lifecycle state.
-
-        Returns:
-                ChildRuntimeLeaseState: The current lease state.
-        """
         with self._condition:
             return self._state
 
     @property
     def close_error(self) -> BaseException | None:
-        """Return the terminal close error, if the lease is ``FAILED``."""
         with self._condition:
             return self._close_error
 
     def close(self) -> None:
-        """Close the child runtime lease exactly once.
-
-        Concurrent callers wait for an in-progress close and observe its result. Cleanup
-        failures are retained and re-raised by subsequent callers.
-
-        Raises:
-            RuntimeError: If cleanup is invoked recursively by the closing thread.
-            BaseException: The exception raised by the cleanup callback.
-        """
         with self._condition:
             if self._state is ChildRuntimeLeaseState.CLOSED:
                 return
@@ -181,29 +129,17 @@ class LateCleanupOwner:
     """Keep late provider work owned until its cleanup future settles."""
 
     def __init__(self, *, wait_timeout_s: float) -> None:
-        """Initialize an owner for tracking late cleanup work.
-
-        Parameters:
-                wait_timeout_s (float): Maximum time to wait for owned cleanup work to finish.
-        """
         self._lock = Lock()
         self._pending: set[Future[Any]] = set()
         self._error: BaseException | None = None
         self._wait_timeout_s = wait_timeout_s
 
     def _record_error(self, exc: BaseException) -> None:
-        """Record the first cleanup error observed by this owner."""
         with self._lock:
             if self._error is None:
                 self._error = exc
 
     def _state(self) -> tuple[BaseException | None, bool]:
-        """
-        Collect completed work and report the first recorded error and whether work remains pending.
-
-        Returns:
-            tuple[BaseException | None, bool]: The first cleanup error, if any, and whether unfinished work remains.
-        """
         with self._lock:
             for future in tuple(self._pending):
                 if not future.done():
@@ -219,14 +155,6 @@ class LateCleanupOwner:
 
     @staticmethod
     def _complete(marker: Future[None], error: BaseException | None = None) -> None:
-        """
-        Completes a marker future with a result or an exception.
-
-        Parameters:
-                marker (Future[None]): The future to complete.
-                error (BaseException | None): The exception to assign to the
-                    future, or `None` to complete it successfully.
-        """
         if marker.done():
             return
         if error is None:
@@ -235,17 +163,10 @@ class LateCleanupOwner:
             marker.set_exception(error)
 
     def retain(self, future: Future[Any]) -> None:
-        """Retain one future and observe its terminal exception."""
         with self._lock:
             self._pending.add(future)
 
         def settled(done: Future[Any]) -> None:
-            """
-            Record a completed future's failure and release it from pending ownership.
-
-            Parameters:
-                done (Future[Any]): The completed future whose terminal state is observed.
-            """
             try:
                 error = done.exception()
             except _CLEANUP_EXCEPTIONS as exc:
@@ -263,23 +184,10 @@ class LateCleanupOwner:
         acquisition: Future[Any],
         close_lease: Callable[[Any], None],
     ) -> None:
-        """Adopt a late lease for cleanup outside the event loop.
-
-        Parameters:
-            acquisition (Future[Any]): Future resolving to the lease to close.
-            close_lease (Callable[[Any], None]): Function that closes the acquired lease.
-
-        ChildRuntimeCleanupError and lease-closing failures are recorded for later reporting.
-        """
         marker: Future[None] = Future()
         self.retain(marker)
 
         def close_late(done: Future[Any]) -> None:
-            """Handle a completed late acquisition and arrange independent lease cleanup.
-
-            Parameters:
-                done (Future[Any]): Completed future containing the acquired lease or an acquisition error.
-            """
             try:
                 lease = done.result()
             except ChildRuntimeCleanupError as exc:
@@ -291,9 +199,6 @@ class LateCleanupOwner:
                 return
 
             def close() -> None:
-                """
-                Close the acquired lease and mark the late cleanup operation complete.
-                """
                 try:
                     close_lease(lease)
                 except _CLEANUP_EXCEPTIONS as exc:
@@ -315,7 +220,6 @@ class LateCleanupOwner:
         acquisition.add_done_callback(close_late)
 
     def raise_if_failed(self) -> None:
-        """Raise an observable late-cleanup error or pending-ownership error."""
         error, pending = self._state()
         if error is not None:
             raise ChildRuntimeCleanupError("recursive child cleanup failed") from error
@@ -323,12 +227,6 @@ class LateCleanupOwner:
             raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
 
     def wait_owned(self) -> None:
-        """
-        Wait for retained cleanup work until the bounded ownership window expires.
-
-        Raises:
-            ChildRuntimeCleanupError: If cleanup fails or remains pending after the wait.
-        """
         wait_deadline = time.monotonic() + max(self._wait_timeout_s, 1.0)
         while True:
             with self._lock:
@@ -358,37 +256,10 @@ def close_child_runtime_sync(
     confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
     confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
-    """
-    Shutdown the interpreter and complete provider cleanup for a recursive child runtime.
-
-    Parameters:
-        loop (Any): Event loop used to schedule asynchronous cleanup.
-        platform (SandboxPlatform): Sandbox provider platform.
-        sandbox (Any): Sandbox instance to clean up.
-        sandbox_id (str): Identifier of the sandbox.
-        mount_path (str): POSIX mount path whose files are purged during cleanup.
-        interpreter (Any): Interpreter to shut down.
-        permit (DaytonaAdmissionPermit): Admission permit released after cleanup.
-        retain_pending_cleanup (Callable[[Future[Any]], None] | None): Callback
-            for retaining cleanup that exceeds its timeout.
-        cleanup_result_timeout_s (float): Maximum time to wait for shutdown or cleanup results.
-        cleanup_child_runtime (Callable[..., Coroutine[Any, Any, None]] | None): Optional cleanup implementation.
-        confirm_timeout_s (float): Maximum time to wait for provider deletion confirmation.
-        confirm_poll_interval_s (float): Interval between provider deletion checks.
-
-    Raises:
-        ChildRuntimeCleanupError: If shutdown or cleanup fails, or cleanup cannot be completed within the timeout.
-    """
     first_error: BaseException | None = None
     cleanup_fn = cleanup_child_runtime if cleanup_child_runtime is not None else cleanup_child_runtime_async
 
     def schedule_cleanup() -> tuple[Future[None], Any | None]:
-        """
-        Schedule asynchronous child-runtime cleanup.
-
-        Returns:
-                tuple[Future[None], Any | None]: The cleanup future and an optional coroutine handle.
-        """
         execution = schedule_owned_close(
             loop=loop,
             build=lambda: cleanup_fn(
@@ -425,19 +296,20 @@ def close_child_runtime_sync(
         try:
             shutdown_result.result(timeout=cleanup_result_timeout_s)
         except TimeoutError as exc:
-            # A synchronous broker/provider shutdown cannot be force-cancelled.
-            # Quarantine the remainder under the factory owner instead of
-            # blocking the child worker or releasing its permit early.
             marker: Future[None] | None = None
             if retain_pending_cleanup is not None:
                 marker = Future()
                 retain_pending_cleanup(marker)
 
+            def complete_marker(error: BaseException | None) -> None:
+                if marker is None or marker.done():
+                    return
+                if error is None:
+                    marker.set_result(None)
+                else:
+                    marker.set_exception(error)
+
             def finish_quarantine() -> None:
-                """
-                Completes quarantined runtime shutdown and cleanup, signaling the
-                pending completion marker when all work finishes.
-                """
                 quarantine_error: BaseException | None = None
                 marker_pending = False
                 try:
@@ -452,20 +324,12 @@ def close_child_runtime_sync(
                         marker_pending = marker is not None
 
                         def finish_marker(done: Future[None]) -> None:
-                            """
-                            Completes the cleanup marker with the quarantine or cleanup error, if any.
-
-                            Parameters:
-                                done (Future[None]): Future whose completion status determines the cleanup result.
-                            """
-                            error = quarantine_error
+                            err = quarantine_error
                             try:
-                                cleanup_error = done.exception()
-                            except _CLEANUP_EXCEPTIONS as done_error:
-                                cleanup_error = done_error
-                            if error is None:
-                                error = cleanup_error
-                            complete_marker(error)
+                                cleanup_err = done.exception()
+                            except _CLEANUP_EXCEPTIONS as done_err:
+                                cleanup_err = done_err
+                            complete_marker(err or cleanup_err)
 
                         cleanup_future.add_done_callback(finish_marker)
                     except _CLEANUP_EXCEPTIONS:
@@ -478,14 +342,6 @@ def close_child_runtime_sync(
                     quarantine_error = quarantine_error or cleanup_error
                 if not marker_pending:
                     complete_marker(quarantine_error)
-
-            def complete_marker(error: BaseException | None) -> None:
-                if marker is None or marker.done():
-                    return
-                if error is None:
-                    marker.set_result(None)
-                else:
-                    marker.set_exception(error)
 
             quarantine_thread = Thread(
                 target=finish_quarantine,
@@ -531,7 +387,7 @@ def close_child_runtime_sync(
                     cleanup_coroutine.close()
 
     if first_error is not None:
-        raise ChildRuntimeCleanupError("recursive child cleanup failed") from first_error
+        raise ChildRuntimeCleanupError(f"recursive child cleanup failed: {first_error!r}") from first_error
 
 
 async def cleanup_after_failed_acquire(
@@ -539,11 +395,51 @@ async def cleanup_after_failed_acquire(
     sandbox: Any | None,
     sandbox_id: str | None,
     permit: DaytonaAdmissionPermit,
+    *,
+    confirm: Callable[..., Awaitable[AbsenceOutcome]] | None = None,
+    confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
+    confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
-    """Delete any partially acquired sandbox and release the admission permit."""
-    try:
-        if sandbox is not None:
+    async def cleanup() -> None:
+        if sandbox is None:
+            return
+
+        delete_error: Exception | None = None
+        try:
             await platform.delete(sandbox_id if sandbox_id is not None else sandbox)
+        except Exception as exc:
+            delete_error = exc
+
+        confirm_fn: Any = confirm or confirm_absence
+        if sandbox_id is None:
+            raise ChildRuntimeCleanupError("failed-acquire cleanup cannot confirm a sandbox without an id")
+        try:
+            outcome = await confirm_fn(
+                probe=platform.get,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        except TypeError:
+            outcome = await confirm_fn(
+                platform=platform,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        is_absent = bool(getattr(outcome, "confirmed_absent", False) or getattr(outcome, "absent", False))
+        if delete_error is not None:
+            raise ChildRuntimeCleanupError(
+                f"failed to delete child sandbox {sandbox_id}: {delete_error}"
+            ) from delete_error
+        if not is_absent:
+            raise ChildRuntimeCleanupError(f"absence unconfirmed: failed-acquire child sandbox cleanup: {sandbox_id}")
+
+    # Keep the cleanup operation owned if its caller is cancelled.  Admission
+    # is released only after the deletion confirmation attempt settles.
+    cleanup_effect = OwnedEffect.start(cleanup())
+    try:
+        await cleanup_effect.settle()
     finally:
         permit.release()
 
@@ -560,63 +456,48 @@ async def cleanup_child_runtime_async(
     confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
     purge: Callable[[Any, str], Awaitable[None]] | None = None,
 ) -> None:
-    """
-    Purge and delete a recursive-child sandbox, confirm its provider-side absence, and release its admission permit.
-
-    Parameters:
-        sandbox_id (str): Identifier of the sandbox being cleaned up.
-        mount_path (str): POSIX mount path whose regular files are purged.
-        confirm (Callable | None): Function used to confirm provider-side sandbox
-            absence; resolved at call time so the owner's seam stays test- and
-            fault-injectable.
-        confirm_timeout_s (float): Maximum time allowed for absence confirmation.
-        confirm_poll_interval_s (float): Interval between absence confirmation checks.
-        purge (Callable | None): Optional function used to purge files from the sandbox.
-
-    Raises:
-        ChildRuntimeCleanupError: If cleanup fails or provider-side absence is not confirmed.
-    """
-    purge_fn = purge if purge is not None else purge_regular_files
-
-    async def purge_scope(target: Any, root: str | None) -> None:
-        if root:
-            await purge_fn(target, root)
-
-    confirm_fn = confirm if confirm is not None else confirm_absence
-    lease = SandboxLease(
-        kind="recursive_child",
-        sandbox=sandbox,
-        sandbox_id=sandbox_id,
-        platform=platform,
-        permit=permit,
-        purge=lambda sandbox: purge_scope(sandbox, mount_path),
-        policy=SandboxLeasePolicy(
-            kind="recursive_child",
-            interpreter_shutdown=False,
-            confirm_timeout_s=confirm_timeout_s,
-            confirm_poll_interval_s=confirm_poll_interval_s,
-            confirm_fn=confirm_fn,
-        ),
-    )
-    receipt = await lease.aclose()
-    if receipt.first_error is not None or not receipt.provider.confirmed_absent:
-        raise ChildRuntimeCleanupError(
-            "recursive child Sandbox cleanup failed "
-            f"(sandbox_id={sandbox_id!r}, provider_error={receipt.provider.error!r}, "
-            f"first_error={receipt.first_error!r}, quarantined={receipt.quarantine.quarantined})"
-        )
+    purge_fn = purge or purge_regular_files
+    try:
+        if mount_path:
+            await purge_fn(sandbox, mount_path)
+        delete_error: Exception | None = None
+        try:
+            await platform.delete(sandbox_id)
+        except Exception as exc:
+            delete_error = exc
+        confirm_fn: Any = confirm or confirm_absence
+        try:
+            outcome = await confirm_fn(
+                probe=platform.get,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        except TypeError:
+            outcome = await confirm_fn(
+                platform=platform,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        is_absent = bool(getattr(outcome, "confirmed_absent", False) or getattr(outcome, "absent", False))
+        if delete_error is not None:
+            raise ChildRuntimeCleanupError(
+                f"failed to delete child sandbox {sandbox_id}: {delete_error}"
+            ) from delete_error
+        if not is_absent:
+            raise ChildRuntimeCleanupError(
+                f"absence unconfirmed: recursive child sandbox deletion not confirmed absent: {sandbox_id}"
+            )
+    except ChildRuntimeCleanupError:
+        raise
+    except Exception as exc:
+        raise ChildRuntimeCleanupError(f"cleanup failed: {exc}") from exc
+    finally:
+        permit.release()
 
 
 async def purge_regular_files(sandbox: Any, mount_path: str) -> None:
-    """
-    Delete contained files and directories under a POSIX mount path.
-
-    Parameters:
-        sandbox (Any): Sandbox whose filesystem is being cleaned.
-        mount_path (str): Root path whose contents should be deleted.
-
-    Files are deleted before directories, and entries outside the mount path or without a valid path are ignored.
-    """
     root = PurePosixPath(mount_path)
     entries = await sandbox.fs.list_files(str(root), depth=None)
     files: list[PurePosixPath] = []
@@ -667,37 +548,14 @@ async def acquire_child_runtime(
     sandbox_id_for_fn: Callable[[Any], str] | None = None,
     require_authorized_fn: Callable[[Callable[[], bool] | None], None] | None = None,
 ) -> ChildRuntimeLease:
-    """
-    Acquire an ephemeral runtime for executing a recursive child operation.
-
-    Parameters:
-        volume_id (str | None): Identifier of the volume mounted in the child sandbox.
-        mount_path (str | None): Path where the volume is mounted.
-        profile (DaytonaEnvironmentProfile): Immutable child image/access profile.
-        workspace_id (UUID): Workspace containing the recursive child.
-        run_id (UUID): Run containing the recursive child.
-        call_index (int): Index identifying the recursive child call.
-        deadline (float): Absolute event-loop time by which acquisition must complete.
-        execution_timeout_s (int): Maximum execution time for the child runtime.
-        execution_output_cap (int): Maximum output retained from child execution.
-
-    Returns:
-        ChildRuntimeLease: Lease containing the child interpreter, sandbox metadata, and cleanup callback.
-
-    Raises:
-        ChildRuntimeAuthorizationError: If the owning turn is no longer authorized.
-        ChildRuntimeCleanupError: If acquisition fails and cleanup also fails.
-    """
-    sandbox_id_resolver = sandbox_id_for if sandbox_id_for_fn is None else sandbox_id_for_fn
-    authorization_check = require_authorized if require_authorized_fn is None else require_authorized_fn
+    sandbox_id_resolver = sandbox_id_for_fn or sandbox_id_for
+    authorization_check = require_authorized_fn or require_authorized
     authorization_check(is_authorized)
     if not isinstance(profile, DaytonaEnvironmentProfile):
         profile = DaytonaEnvironmentProfile(str(profile))
     semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
     if not semantic and (not volume_id or not mount_path):
         raise ValueError("WorkspaceChild requires a Volume binding")
-    # Validate the selected profile before taking a scarce child permit. A
-    # malformed WorkspaceChild request must not strand admission capacity.
     permit = await admission.acquire(deadline=deadline)
     sandbox: Any | None = None
     sandbox_id: str | None = None
@@ -708,15 +566,18 @@ async def acquire_child_runtime(
             labels = {"fleet.runtime": "recursive-child"}
             if semantic:
                 labels["fleet.profile"] = profile.value
-            sandbox = await platform.create(
-                profile=profile,
-                volume_id=None if semantic else volume_id,
-                mount_path=None if semantic else mount_path,
-                volume_subpath=None if semantic else subpath,
-                labels=labels,
-                with_volume=not semantic,
-                ephemeral=True,
-            )
+            create_kwargs: dict[str, Any] = {
+                "profile": profile,
+                "volume_id": None if semantic else volume_id,
+                "mount_path": None if semantic else mount_path,
+                "volume_subpath": None if semantic else subpath,
+                "labels": labels,
+                "with_volume": not semantic,
+                "ephemeral": True,
+            }
+            if semantic:
+                create_kwargs["network_block_all"] = True
+            sandbox = await platform.create(**create_kwargs)
         sandbox_id = sandbox_id_resolver(sandbox)
         child_sandbox_id = sandbox_id
         authorization_check(is_authorized)
@@ -731,14 +592,11 @@ async def acquire_child_runtime(
         )
 
         def close() -> None:
-            """Close the child runtime and release its associated resources."""
             close_child_runtime(
                 loop=loop,
                 platform=platform,
                 sandbox=sandbox,
                 sandbox_id=child_sandbox_id,
-                # Semantic children are volume-less even when this factory
-                # was created with the parent Session's volume binding.
                 mount_path=None if semantic else (mount_path or ""),
                 interpreter=interpreter,
                 permit=permit,
@@ -762,7 +620,6 @@ async def acquire_child_runtime(
 
 
 def sandbox_id_for(sandbox: Any) -> str:
-    """Extract and validate the identifier of a provider Sandbox."""
     value = getattr(sandbox, "id", None)
     if not isinstance(value, str) or not value:
         raise RuntimeError("recursive child sandbox is missing an id")
@@ -770,21 +627,10 @@ def sandbox_id_for(sandbox: Any) -> str:
 
 
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
-    """
-    Ensure the owning turn remains authorized.
-
-    Parameters:
-        is_authorized (Callable[[], bool] | None): Authorization callback, or None to skip the check.
-
-    Raises:
-        ChildRuntimeAuthorizationError: If the callback reports that the owning turn is no longer authorized.
-    """
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
 
 
-# Patchable compatibility seam: tests and live proofs monkeypatch this module-
-# level name, so the acquisition call site reads it at call time.
 _acquire_child_runtime = acquire_child_runtime
 
 
@@ -806,34 +652,6 @@ def build_child_runtime_factory(
     semantic_child_available: bool = True,
     semantic_child_fallback: bool = False,
 ) -> ChildRuntimeFactory:
-    """
-    Build a factory for acquiring disposable child-runtime leases for recursive calls.
-
-    The factory waits until the configured deadline for each acquisition and retains
-    late acquisitions for cleanup.
-
-    Parameters:
-        volume_id (str | None): Identifier of the volume mounted in child runtimes.
-        mount_path (str | None): Mount path used by child runtimes.
-        profile (DaytonaEnvironmentProfile): Default child profile; selected-input
-            callers may override it when acquiring a SemanticChild.
-        semantic_child_available (bool): Whether the configured runtime includes
-            a SemanticChild snapshot contract.
-        semantic_child_fallback (bool): Whether an unavailable SemanticChild
-            falls back to the volume-backed WorkspaceChild profile.
-        workspace_id (UUID): Identifier of the workspace owning the runtimes.
-        run_id (UUID): Identifier of the root turn run.
-        deadline (float): Monotonic acquisition deadline.
-        execution_timeout_s (int): Maximum execution time for each child runtime.
-        execution_output_cap (int): Maximum output size for each child runtime.
-        is_authorized (Callable[[], bool] | None): Optional callback that determines
-            whether child-runtime creation remains authorized.
-
-    Returns:
-        ChildRuntimeFactory: A callable factory that accepts a recursive call index
-            and returns its leased child runtime.
-    """
-
     late_owner = LateCleanupOwner(wait_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
 
     def create(
@@ -841,15 +659,6 @@ def build_child_runtime_factory(
         *,
         selected_profile: DaytonaEnvironmentProfile | str | None = None,
     ) -> ChildRuntimeLease:
-        """
-        Acquire a disposable child runtime lease for a recursive call.
-
-        Parameters:
-            call_index (int): Index identifying the recursive child call.
-
-        Returns:
-            ChildRuntimeLease: Lease for the acquired child runtime.
-        """
         chosen_profile = selected_profile if selected_profile is not None else profile
         if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
             chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
@@ -888,40 +697,22 @@ def build_child_runtime_factory(
         except DaytonaAdmissionTimeoutError:
             raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
         except TimeoutError:
-            # The provider future can complete in the race between result()
-            # timing out and this handler.  Adopt it unconditionally: a late
-            # exception is harmless, while a late lease must still be closed.
-            # Do not cancel provider work that may already have crossed the
-            # acquisition boundary or its Sandbox/permit could be orphaned.
             late_owner.adopt_late_acquisition(acquisition, lambda lease: lease.close())
             raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
 
     class Factory:
-        """Callable child-runtime factory with late-acquisition ownership."""
-
         def __call__(
             self,
             call_index: int,
             *,
             profile: DaytonaEnvironmentProfile | str | None = None,
         ) -> ChildRuntimeLease:
-            """
-            Create a disposable child-runtime lease for a recursive call.
-
-            Parameters:
-                call_index (int): Index identifying the recursive call.
-
-            Returns:
-                ChildRuntimeLease: Lease for the acquired child runtime.
-            """
             return create(call_index, selected_profile=profile)
 
         def wait_owned(self) -> None:
-            """Wait for all retained cleanup operations to finish."""
             late_owner.wait_owned()
 
         def raise_if_cleanup_failed(self) -> None:
-            """Raise a deferred cleanup error if any late cleanup operation failed."""
             late_owner.raise_if_failed()
 
     return Factory()
@@ -938,8 +729,6 @@ def _close_child_runtime_sync(
     permit: Any,
     retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
 ) -> None:
-    """Patchable close seam: forwards to the canonical cleanup with this
-    module's result-timeout policy read at call time."""
     close_child_runtime_sync(
         loop=loop,
         platform=platform,

@@ -21,9 +21,23 @@ from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
 @pytest.fixture(autouse=True)
 def _clear_process_snapshot_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Keep dotenv-only snapshot tests isolated from credentialed live-module imports."""
-    monkeypatch.delenv("FLEET_DAYTONA_SNAPSHOT", raising=False)
-    monkeypatch.delenv("FLEET_DAYTONA_CHILD_SNAPSHOT", raising=False)
+    """Keep dotenv-only snapshot tests isolated from credentialed live-module imports.
+
+    Each name below is resolved from the repository ``.env`` under an explicit
+    fail-closed rule: when a policy-declared value is also exported by the
+    developer's shell with a different value, loading refuses instead of
+    guessing. These tests supply their own hermetic temp ``.env``, so the
+    ambient copies must be cleared or the fixture, not the policy, is what
+    decides the result. Tests that need an override set it after this fixture.
+    """
+    for name in (
+        "FLEET_DAYTONA_SNAPSHOT",
+        "FLEET_DAYTONA_CHILD_SNAPSHOT",
+        "FLEET_DAYTONA_ORG_ID",
+        "DATABASE_URL",
+        "FLEET_DATABASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
@@ -34,8 +48,8 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
         "FLEET_DAYTONA_ORG_ID",
-        "DATABRICKS_TOKEN",
-        "FLEET_LLM_BASE_URL",
+        "ALIBABA_API_KEY",
+        "FLEET_MAAS_BASE_URL",
     )
     assert contracts["daytona-managed"].managed_policy_environment_names == (
         "FLEET_DAYTONA_API_KEY",
@@ -53,7 +67,7 @@ def test_runtime_policy_has_no_execution_architecture_selector() -> None:
         Settings(runtime_variant="legacy")
 
 
-def test_committed_policy_declares_databricks_model_roles() -> None:
+def test_committed_policy_declares_default_maas_model_roles() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
@@ -70,29 +84,36 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
     assert document["defaults"]["runtime"]["environment"] == "daytona"
     assert document["defaults"]["llm"] == {
         "root": {
-            "model": "databricks-deepseek-v4-1-flash",
-            "api_key_env": "DATABRICKS_TOKEN",
-            "base_url_env": "FLEET_LLM_BASE_URL",
+            "model": "deepseek-v4.1-flash",
+            "api_key_env": "ALIBABA_API_KEY",
+            "base_url_env": "FLEET_MAAS_BASE_URL",
             "max_tokens": 16384,
             "timeout_seconds": 300,
-            "num_retries": 1,
+            "num_retries": 3,
             "cache": False,
         },
         "sub": {
-            "model": "databricks-deepseek-v4-1-flash",
-            "api_key_env": "DATABRICKS_TOKEN",
-            "base_url_env": "FLEET_LLM_BASE_URL",
+            "model": "deepseek-v4.1-flash",
+            "api_key_env": "ALIBABA_API_KEY",
+            "base_url_env": "FLEET_MAAS_BASE_URL",
             "max_tokens": 16384,
             "timeout_seconds": 90,
             "temperature": 0,
-            "num_retries": 1,
+            "num_retries": 3,
             "cache": False,
         },
+    }
+    # The managed Databricks deployment keeps the Unity AI Gateway transport even
+    # though the committed defaults select Alibaba MaaS.
+    assert document["profiles"]["daytona-managed"]["llm"]["root"] == {
+        "model": "databricks-deepseek-v4-1-flash",
+        "api_key_env": "DATABRICKS_TOKEN",
+        "base_url_env": "FLEET_LLM_BASE_URL",
     }
     assert document["defaults"]["runtime"]["live_enabled"] is True
 
 
-def test_committed_policy_uses_bounded_root_rlm_budget_and_single_provider_retry() -> None:
+def test_committed_policy_uses_bounded_root_rlm_budget_and_provider_retries() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
@@ -101,18 +122,25 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_single_provider_retry
         "max_llm_calls": 32,
         "max_output_chars": 6_000,
     }
-    assert document["defaults"]["llm"]["root"]["num_retries"] == 1
-    assert document["defaults"]["llm"]["sub"]["num_retries"] == 1
+    # MaaS carries no per-minute output-token quota, but backs off provider 429s.
+    assert document["defaults"]["llm"]["root"]["num_retries"] == 3
+    assert document["defaults"]["llm"]["sub"]["num_retries"] == 3
 
 
-# Every committed profile routes Root and Sub through the Databricks endpoint.
+# The committed defaults route Root and Sub through Alibaba MaaS; the managed
+# Databricks deployment profile pins the Unity AI Gateway transport.
+_MAAS_MODEL = "deepseek-v4.1-flash"
+_MAAS_ROLE = ("ALIBABA_API_KEY", "FLEET_MAAS_BASE_URL")
 _DATABRICKS_MODEL = "databricks-deepseek-v4-1-flash"
 _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_role"),
-    (("daytona-recursive", _DATABRICKS_MODEL, _DATABRICKS_ROLE),),
+    (
+        ("daytona-recursive", _MAAS_MODEL, _MAAS_ROLE),
+        ("daytona-managed", _DATABRICKS_MODEL, _DATABRICKS_ROLE),
+    ),
 )
 def test_daytona_profiles_use_expected_model_for_both_roles(
     profile: str,
@@ -164,21 +192,21 @@ def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None
     }
 
 
-def test_selected_recursive_profile_resolves_root_and_sub_with_databricks_params(
+def test_selected_recursive_profile_resolves_root_and_sub_with_maas_params(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config.loader as config
 
     # Only the selected profile's declared names supply the Root/Sub provider.
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
-    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
+    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
+    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
 
     settings = config.load_runtime_settings()
 
-    assert settings.root_model == "databricks-deepseek-v4-1-flash"
-    assert settings.sub_model == "databricks-deepseek-v4-1-flash"
-    # The endpoint has no reasoning-effort policy override; it
+    assert settings.root_model == "deepseek-v4.1-flash"
+    assert settings.sub_model == "deepseek-v4.1-flash"
+    # The MaaS endpoint carries no reasoning-effort policy override; it
     # stays unset instead of being forwarded with a default.
     assert settings.root_llm_reasoning_effort is None
     assert settings.sub_llm_reasoning_effort is None
@@ -201,6 +229,8 @@ def test_explicit_phase4_profile_overrides_committed_default_without_ambient_sel
 ) -> None:
     import fleet_rlm.config.loader as config
 
+    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
+    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
     monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona-managed")
@@ -229,6 +259,8 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     import fleet_rlm.config.loader as config
 
     monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
+    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-databricks-token")
     monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
     monkeypatch.setenv("FLEET_MLFLOW_EXPERIMENT_NAME", "managed-experiment")
@@ -275,14 +307,11 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_committed_policy_enables_operator_selected_recursion_and_warm_pool() -> None:
+def test_committed_policy_enables_operator_selected_recursion() -> None:
     policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert document["defaults"]["rlm"]["recursion_enabled"] is True
-    assert document["defaults"]["daytona"]["warm_pool_enabled"] is True
-    assert document["defaults"]["daytona"]["warm_pool_size"] == 1
-    assert document["defaults"]["daytona"]["warm_pool_region"] == "us"
     # The committed default profile is the [defaults] policy itself: the table
     # stays empty because the schema requires at least one profile.
     assert document["profiles"]["daytona-recursive"] == {}

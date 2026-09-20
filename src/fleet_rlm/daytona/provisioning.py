@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import re
@@ -12,7 +13,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
 from typing import Any, Protocol
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
@@ -351,6 +352,22 @@ def volume_config_from_settings(settings: Any) -> VolumeConfig:
     return VolumeConfig.from_settings(settings)
 
 
+def execution_timeout_s_from_settings(settings: Any) -> int:
+    """Resolve the configured sandbox execution timeout for an ephemeral interpreter.
+
+    The service path threads ``rlm.execution_timeout_s`` explicitly
+    (``composition/daytona_run_preparation.py``). Ephemeral leases must use the same
+    configured value; omitting it silently fell back to the 120s default, which a
+    long-context cell can exceed.
+    """
+    from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_TIMEOUT_S
+
+    configured = getattr(settings, "rlm_execution_timeout_s", DEFAULT_EXECUTION_TIMEOUT_S)
+    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
+        return configured
+    return DEFAULT_EXECUTION_TIMEOUT_S
+
+
 def snapshot_execution_dependencies(
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
 ) -> tuple[str, ...]:
@@ -660,15 +677,20 @@ async def _file_info(fs: Any, path: str) -> Any | None:
 
 
 async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
-    info = await _file_info(fs, path)
-    if info is not None:
+    if not create:
+        info = await _file_info(fs, path)
+        if info is None:
+            raise DaytonaAdapterError(
+                message="Workspace Volume mount is unavailable",
+                cause_type="VolumeLayoutMissingMount",
+            )
         _assert_directory(info)
         return
-    if not create:
-        raise DaytonaAdapterError(
-            message="Workspace Volume mount is unavailable",
-            cause_type="VolumeLayoutMissingMount",
-        )
+
+    # Direct creation path (EAFP):
+    # Daytona's create_folder is idempotent for existing directories.
+    # Attempting creation directly eliminates speculative 404 GET /files/info
+    # calls that pollute Daytona provider logs with 'API ERROR' entries.
     try:
         await fs.create_folder(path, _DIRECTORY_MODE)
     except Exception as exc:
@@ -680,9 +702,6 @@ async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
             raise map_provider_error(exc) from exc
         _assert_directory(info)
         return
-    # create_folder returning normally is the creation confirmation; a
-    # success-path re-stat costs one extra provider round-trip per directory
-    # on the session cold-start path for no additional safety.
 
 
 async def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:
@@ -744,7 +763,10 @@ def verify_sandbox_workspace_mount(sandbox: Any, expected: ExpectedWorkspaceMoun
             "subpath": getattr(sandbox, "volume_subpath", None),
         }
         if all(value is None for value in flat.values()):
-            return
+            raise DaytonaAdapterError(
+                message="sandbox volume mount metadata is unavailable",
+                cause_type="WorkspaceMountMetadataMissing",
+            )
         mounts = [flat]
     for mount in mounts:
         if (
@@ -825,6 +847,115 @@ class SandboxProvisioner:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class EphemeralInterpreterLease:
+    """Caller-owned ephemeral volume sandbox and interpreter for operator scripts."""
+
+    interpreter: Any
+    sandbox: Any
+    platform: Any
+    session_id: UUID
+    run_id: UUID
+    workspace_id: UUID
+    context_mount_path: str
+    volume_paths: VolumePaths
+
+
+async def _retire_failed_ephemeral_sandbox(
+    platform: Any,
+    sandbox: Any,
+    *,
+    interpreter: Any | None = None,
+) -> None:
+    """Delete one ephemeral sandbox after lease construction fails."""
+    if interpreter is not None:
+        shutdown = getattr(interpreter, "shutdown", None)
+        if callable(shutdown):
+            with contextlib.suppress(BaseException):
+                await asyncio.to_thread(shutdown)
+    await platform.delete(sandbox)
+
+
+async def acquire_ephemeral_interpreter(
+    settings: Any,
+    *,
+    purpose: str,
+    workspace_id: UUID | None = None,
+) -> EphemeralInterpreterLease:
+    """Acquire one ephemeral volume-backed interpreter through ``SandboxProvisioner``."""
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+    from fleet_rlm.daytona.platform import (
+        LiveDaytonaPlatform,
+        LiveDaytonaVolumeClient,
+        build_daytona_client,
+        sandbox_state,
+    )
+
+    client = build_daytona_client(settings)
+    spec = sandbox_spec_from_settings(settings)
+    platform = LiveDaytonaPlatform(client, spec)
+    volume_client = LiveDaytonaVolumeClient(client)
+    volume_config = volume_config_from_settings(settings)
+    provisioner = SandboxProvisioner(
+        platform=platform,
+        volume_config=volume_config,
+        sandbox_spec=spec,
+    )
+    resolved_workspace = workspace_id or uuid4()
+    volume_id = await get_or_create_volume_id(volume_client, volume_config)
+    expected = provisioner.expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
+    sandbox = await provisioner.create(
+        expected,
+        labels={
+            "fleet-package": "fleet_rlm",
+            "purpose": purpose,
+            "workspace_id": str(resolved_workspace),
+        },
+        ephemeral=True,
+    )
+    interpreter: Any | None = None
+    try:
+        if sandbox_state(sandbox) != "running":
+            await platform.start(str(sandbox.id))
+            refreshed = await platform.get(str(sandbox.id))
+            if refreshed is None or sandbox_state(refreshed) != "running":
+                raise DaytonaAdapterError(
+                    message="sandbox did not reach running state",
+                    cause_type="SandboxLifecycleError",
+                )
+            sandbox = refreshed
+        session_id = uuid4()
+        run_id = uuid4()
+        await provisioner.verify_run_layout(
+            sandbox,
+            expected,
+            session_id=session_id,
+            run_id=run_id,
+        )
+        loop = asyncio.get_running_loop()
+        interpreter = DaytonaCodeInterpreter(
+            backend=sandbox_backend(
+                sandbox,
+                loop=loop,
+                timeout_s=execution_timeout_s_from_settings(settings),
+            )
+        )
+    except BaseException:
+        await _retire_failed_ephemeral_sandbox(platform, sandbox, interpreter=interpreter)
+        raise
+    volume_paths = volume_config.paths()
+    return EphemeralInterpreterLease(
+        interpreter=interpreter,
+        sandbox=sandbox,
+        platform=platform,
+        session_id=session_id,
+        run_id=run_id,
+        workspace_id=resolved_workspace,
+        context_mount_path=str(volume_paths.mount_path),
+        volume_paths=volume_paths,
+    )
+
+
 __all__ = [
     "BASE_IMAGE",
     "DEFAULT_CHILD_SNAPSHOT_NAME",
@@ -834,11 +965,13 @@ __all__ = [
     "DaytonaEnvironmentManifest",
     "DaytonaEnvironmentProfile",
     "DaytonaSandboxSpec",
+    "EphemeralInterpreterLease",
     "ExpectedWorkspaceMount",
     "MissingImportObservation",
     "MissingImportOutcome",
     "SandboxProvisioner",
     "VolumeConfig",
+    "acquire_ephemeral_interpreter",
     "build_snapshot_image",
     "environment_manifest",
     "normalize_missing_import_observation",

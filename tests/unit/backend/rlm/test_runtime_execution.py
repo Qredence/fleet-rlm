@@ -87,9 +87,11 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
 
     class Factory:
         created = False
+        host_tool_dispatch = None
 
-        def create(self, **_kwargs):
+        def create(self, **kwargs):
             self.created = True
+            self.host_tool_dispatch = kwargs["host_tool_dispatch"]
             return Program()
 
     async def not_cancelled() -> bool:
@@ -107,7 +109,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=SimpleNamespace(),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
@@ -127,6 +129,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
         "step.finished",
     ]
     assert factory.created
+    assert factory.host_tool_dispatch is False
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
@@ -210,6 +213,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
     class Interpreter:
         observer = None
+        fleet_host_tool_dispatch_available = True
 
         def bind_observer(self, observer, *, max_chars):
             assert max_chars == RLMOptions().max_output_chars
@@ -475,7 +479,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
-    from fleet_rlm.chat.capability_preparation import PreparedHostCapabilities
+    from fleet_rlm.chat.preparation import PreparedHostCapabilities
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
@@ -563,7 +567,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=SimpleNamespace(fleet_host_tool_dispatch_available=True),
             cancellation_requested=not_cancelled,
         ),
         capabilities=capabilities,

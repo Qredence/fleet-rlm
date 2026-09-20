@@ -4,7 +4,7 @@ export const description =
 	'Adds a safe local validation command for Fleet DSPy RLM and Daytona broker performance changes.'
 
 const FOCUSED_TEST_PATHS = [
-	'tests/unit/backend/test_host_tool_submit_broker.py',
+	'tests/contracts/backend/test_host_tool_submit_binding.py',
 	'tests/unit/backend/daytona/test_broker.py',
 	'tests/unit/backend/daytona/test_interpreter_tracing.py',
 	'tests/unit/backend/rlm/test_program_instructions.py',
@@ -49,7 +49,7 @@ export default function (amp: PluginAPI) {
 				await ctx.ui.notify(`Fleet-RLM focused checks passed.\n${output}`)
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
-				await ctx.ui.notify(`Fleet-RLM focused checks failed.\n${message.slice(0, 1200)}`)
+				await ctx.ui.notify(`Fleet-RLM focused checks failed.\n${message}`)
 			}
 		},
 	)

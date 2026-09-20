@@ -1,21 +1,18 @@
 # DSPy RLM and Daytona integration
 
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
-The broker Root Sandbox may be reused across sequential successful Turns; DSPy's
+A healthy Root Sandbox may be reused across sequential successful Turns; DSPy's
 private `REPLHistory` and Turn capabilities are fresh for every invocation. The
-Root Model generates iterative Python, while the Sub Model answers `llm_query()`
-and ordered `llm_query_batched()` calls. Fleet child tools
-`rlm_query(capsule=...)` and `rlm_query_batched(capsules=...)` are available
-according to the selected policy; the shipped `daytona-recursive` default enables them,
-while comparison profiles can disable them. Both model roles and every
-executable capability are host-configured; API clients cannot supply models,
-Signatures, or executable capabilities.
+current Sandbox adapter executes generated Python remotely with serializable
+variable bindings. A Sandbox-local broker dispatches authorized Fleet tools and
+DSPy's native semantic tools to the host through Daytona's authenticated preview
+connection. Host callables and preview credentials stay on the host. The same
+broker path serves root and child invocations.
 
-This guide describes the current retained-broker runtime. Native DSPy execution
-does not select the removed native Daytona interpreter path. Fresh per-Run
-programs, capsule-only child inputs, and the bounded recursive policy are the
-checked-in implementation; provider, quality, and capacity certification remain
-separate gates in the [implementation status](../decisions/006-implementation-status.md).
+Fresh per-Run programs and DSPy's private history ownership remain the
+checked-in behavior. Live recursive execution and trace retrieval are verified
+by the maintained recursive-batch canary; provider quality and capacity remain
+separate validation gates.
 
 ## Execution contract
 
@@ -92,9 +89,15 @@ separate gates in the [implementation status](../decisions/006-implementation-st
   extends DSPy's JSON adapter with deadline/budget accounting and bounded
   corrective re-asks. Wrap-up also starts on the final native iteration
   (`current == total`). When wrap-up is enabled (`rlm.wrap_up_seconds` > 0,
-  the production default), exhaustion on that last iteration is a Turn
-  `timeout`: DSPy extract fallback (`native_extraction_fallback`) only runs if
-  every `generate_action` returns without SUBMIT, so it is unreachable.
+  the production default), a wrap-up action is any number of data-only
+  `name = <value>` bindings followed by exactly one compliant `SUBMIT(...)`.
+  Bindings cannot call a Tool, import, or reach the provider, so shaping an
+  answer is admitted while further work is not. Exhausting the finalization
+  allowance on that last iteration settles the Turn as a `timeout` and reports
+  `failure_category: "wrap_up_rejected"` in diagnostics, so a rejected final
+  action is never mistaken for an expired clock. DSPy extract fallback
+  (`native_extraction_fallback`) only runs if every `generate_action` returns
+  without SUBMIT, so it is unreachable.
   Empty or reasoning-only completions use those bounded parse re-asks while
   time and iterations remain. It retains the pinned DSPy action grammar;
   exhausted repairs produce bounded `adapter_parse_error` failures without
@@ -108,8 +111,9 @@ separate gates in the [implementation status](../decisions/006-implementation-st
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. Both roles use the committed Databricks endpoint
-  and are capped at 16,384 output tokens. The
+  routing header is required. The default Root and Sub roles use Alibaba
+  DashScope (MaaS) and are capped at 16,384 output tokens; the managed profile
+  uses Databricks. The
   exact credential and endpoint names are policy-derived in [the profile
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
@@ -145,9 +149,9 @@ The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
 concurrency are separate controls. The shipped Root and Sub provider roles use
-`num_retries = 1`; omitted custom-role values inherit the shipped default, while
-the typed settings default of `3` applies only when the policy omits the field
-from both defaults and the selected profile.
+`num_retries = 3`; omitted custom-role values inherit that shipped default.
+The typed settings default is also `3` when the policy omits the field from
+both defaults and the selected profile.
 `rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's
 Runtime Events and trajectory reconciliation.

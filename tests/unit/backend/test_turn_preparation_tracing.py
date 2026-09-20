@@ -74,7 +74,7 @@ def _make_turn() -> Any:
 
 
 def _make_preparer(*, environments: Any = None) -> Any:
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec

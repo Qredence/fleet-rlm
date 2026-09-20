@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
-from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
@@ -29,38 +29,14 @@ _STOPPED_STATES = frozenset({"stopped", "stop"})
 _PAUSED_STATES = frozenset({"paused", "pause"})
 _ARCHIVED_STATES = frozenset({"archived", "archive"})
 
-
-def build_daytona_client(settings: Settings) -> Any:
-    """Construct the asynchronous Daytona SDK client with the configured endpoint and credentials.
-
-    Parameters:
-        settings (Settings): Configuration containing the optional Daytona API key and organization ID.
-
-    Returns:
-        Any: The configured asynchronous Daytona client.
-    """
-    from daytona import AsyncDaytona, DaytonaConfig
-
-    api_key = None
-    if settings.daytona_api_key is not None:
-        raw = settings.daytona_api_key
-        api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
-        api_key = api_key or None
-    # Pass the current SDK field explicitly.  Leaving this unset makes Daytona
-    # evaluate the deprecated ``server_url`` fallback, and would also
-    # allow ambient SDK endpoint discovery to bypass Fleet's configuration.
-    config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
-    if api_key:
-        config_kwargs["api_key"] = api_key
-    if settings.daytona_org_id:
-        config_kwargs["organization_id"] = settings.daytona_org_id
-    config = DaytonaConfig(**config_kwargs) if config_kwargs else None
-    client = AsyncDaytona(config)
-    # The SDK only sets X-Daytona-Organization-ID for JWT auth; also set it for
-    # API-key auth so the org routing is respected.
-    if settings.daytona_org_id and api_key:
-        client._api_client.default_headers["X-Daytona-Organization-ID"] = settings.daytona_org_id
-    return client
+__all__ = [
+    "LiveDaytonaPlatform",
+    "LiveDaytonaVolumeClient",
+    "ProviderState",
+    "build_daytona_client",
+    "normalize_state",
+    "sandbox_state",
+]
 
 
 def normalize_state(raw: Any) -> ProviderState:
@@ -218,6 +194,7 @@ class LiveDaytonaPlatform:
             if volume_id or mount_path or volume_subpath:
                 raise ValueError("SemanticChild sandboxes cannot mount a Workspace Volume")
             with_volume = False
+            network_block_all = True
 
         volumes = None
         if with_volume:

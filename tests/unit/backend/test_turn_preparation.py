@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec
@@ -173,7 +173,7 @@ async def test_precommit_cleanup_closes_only_native_context_then_full_drain_skip
 async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
     import asyncio
 
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -238,7 +238,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
-    from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -316,7 +316,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 
 @pytest.mark.asyncio
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
-    from fleet_rlm.attachments.models import AttachmentRef, PreparedAttachments, StagedAttachment
+    from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec

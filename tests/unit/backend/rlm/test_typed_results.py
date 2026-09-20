@@ -6,7 +6,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from fleet_rlm.rlm.submit_validation import is_submit_only_code
+from fleet_rlm.rlm.submit_validation import is_finalization_action, is_submit_only_code
 
 
 def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
@@ -111,3 +111,41 @@ def test_accepts_finalization_expressions(code: str) -> None:
 )
 def test_rejects_non_finalization_syntax(code: object) -> None:
     assert not is_submit_only_code(code)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        'answer = "5"\nSUBMIT(answer=answer)',
+        "answer = 1\nSUBMIT(answer=answer)",
+        'answer = json.dumps({"items": items})\nSUBMIT(answer=answer)',
+        'answer = f"Found {count}"\nSUBMIT(answer=answer)',
+        "partial = items[:3]\nanswer = str(partial)\nSUBMIT(answer=answer, count=len(items))",
+        'SUBMIT(answer="done")',
+    ],
+)
+def test_finalization_action_accepts_safe_binding_before_submit(code: str) -> None:
+    """A deterministic answer binding must not be mistaken for exploration."""
+    assert is_finalization_action(code)
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        None,
+        "",
+        "SUBMIT(",
+        'answer = "done"',
+        "answer = tool()\nSUBMIT(answer=answer)",
+        'answer = llm_query("more work")\nSUBMIT(answer=answer)',
+        'answer = "x"\nanswer = tool()\nSUBMIT(answer=answer)',
+        'print("explore"); SUBMIT(answer="done")',
+        "import json\nSUBMIT(answer=json.dumps({}))",
+        'answer = "x"\nprint(answer)',
+        'g["answer"] = "x"\nSUBMIT(answer="x")',
+        '_answer = "x"\nSUBMIT(answer="x")',
+        'answer = "x"\nSUBMIT(answer=answer, **extra)',
+    ],
+)
+def test_finalization_action_rejects_effectful_or_incomplete_actions(code: object) -> None:
+    assert not is_finalization_action(code)
