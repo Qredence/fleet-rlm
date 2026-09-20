@@ -290,6 +290,20 @@ def test_verify_sandbox_workspace_mount_fail_closed() -> None:
     assert exc.value.cause_type == "WorkspaceMountMismatch"
 
 
+def test_verify_sandbox_workspace_mount_rejects_missing_metadata() -> None:
+    wid = uuid4()
+    expected = ExpectedWorkspaceMount(
+        volume_id="vol-1",
+        volume_subpath=f"workspaces/{wid}",
+        mount_path="/home/daytona/fleet",
+        workspace_id=wid,
+    )
+    missing = type("SandboxWithoutMountMetadata", (), {"labels": {"workspace_id": str(wid)}})()
+
+    with pytest.raises(DaytonaAdapterError, match="mount metadata is unavailable"):
+        verify_sandbox_workspace_mount(missing, expected)
+
+
 @pytest.mark.asyncio
 async def test_binding_store_rejects_zero_workspace_on_upsert() -> None:
     store = InMemoryBindingStore()

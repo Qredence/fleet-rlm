@@ -401,8 +401,6 @@ class SandboxLeasePolicy:
             object.__setattr__(self, "interpreter_shutdown", False)
             object.__setattr__(self, "provider_action", "delete")
             object.__setattr__(self, "confirm_absence", True)
-            object.__setattr__(self, "confirm_timeout_s", 60.0)
-            object.__setattr__(self, "confirm_poll_interval_s", 0.1)
         elif self.kind == "recovery_fence":
             object.__setattr__(self, "interpreter_shutdown", False)
             object.__setattr__(self, "provider_action", "stop")

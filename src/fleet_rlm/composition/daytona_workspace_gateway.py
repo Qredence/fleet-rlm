@@ -110,7 +110,7 @@ class _DaytonaWorkspaceFileSession:
         )
 
     async def stat(self, path: str, *, include_checksum: bool | None = False) -> WorkspaceFileEntry | None:
-        entry = await self._workspace.stat(path, include_checksum=include_checksum or True)
+        entry = await self._workspace.stat(path, include_checksum=include_checksum)
         if entry is None:
             return None
         checksum = entry.checksum_sha256 if entry.kind == "file" else None

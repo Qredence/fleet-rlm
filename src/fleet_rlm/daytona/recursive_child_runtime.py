@@ -395,10 +395,51 @@ async def cleanup_after_failed_acquire(
     sandbox: Any | None,
     sandbox_id: str | None,
     permit: DaytonaAdmissionPermit,
+    *,
+    confirm: Callable[..., Awaitable[AbsenceOutcome]] | None = None,
+    confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
+    confirm_poll_interval_s: float = CHILD_DELETE_CONFIRM_POLL_S,
 ) -> None:
-    try:
-        if sandbox is not None:
+    async def cleanup() -> None:
+        if sandbox is None:
+            return
+
+        delete_error: Exception | None = None
+        try:
             await platform.delete(sandbox_id if sandbox_id is not None else sandbox)
+        except Exception as exc:
+            delete_error = exc
+
+        confirm_fn: Any = confirm or confirm_absence
+        if sandbox_id is None:
+            raise ChildRuntimeCleanupError("failed-acquire cleanup cannot confirm a sandbox without an id")
+        try:
+            outcome = await confirm_fn(
+                probe=platform.get,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        except TypeError:
+            outcome = await confirm_fn(
+                platform=platform,
+                sandbox_id=sandbox_id,
+                timeout_s=confirm_timeout_s,
+                poll_interval_s=confirm_poll_interval_s,
+            )
+        is_absent = bool(getattr(outcome, "confirmed_absent", False) or getattr(outcome, "absent", False))
+        if delete_error is not None:
+            raise ChildRuntimeCleanupError(
+                f"failed to delete child sandbox {sandbox_id}: {delete_error}"
+            ) from delete_error
+        if not is_absent:
+            raise ChildRuntimeCleanupError(f"absence unconfirmed: failed-acquire child sandbox cleanup: {sandbox_id}")
+
+    # Keep the cleanup operation owned if its caller is cancelled.  Admission
+    # is released only after the deletion confirmation attempt settles.
+    cleanup_effect = OwnedEffect.start(cleanup())
+    try:
+        await cleanup_effect.settle()
     finally:
         permit.release()
 
