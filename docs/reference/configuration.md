@@ -210,11 +210,11 @@ the preparation root, and disabled tracing records none. The execution root
 additionally carries the bounded one-way `fleet.preparation_trace_id` tag;
 preparation traces never reference the execution trace.
 
-The shipped Root and Sub LLM roles set `num_retries = 1`. This is a committed
+The shipped Root and Sub LLM roles set `num_retries = 3`. This is a committed
 runtime policy choice, not a change to DSPy's generic constructor defaults;
-custom profiles that omit the field inherit the shipped default of `1`. The
-typed settings default of `3` applies only when both the defaults and selected
-profile omit the field.
+custom profiles that omit the field inherit the shipped default of `3`. The
+typed settings default is also `3` when both the defaults and selected profile
+omit the field.
 
 ## Local terminal editing
 

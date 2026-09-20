@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.9"
+version = "0.7.10"
 description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -219,8 +219,6 @@ exclude = [
     "build",
     "dist",
     ".egg-info",
-    # Remote Daytona Workspace Agent program (loaded as text, not host-styled).
-    "src/fleet_rlm/daytona/workspace_agent/runtime.py",
 ]
 
 [tool.ruff.lint]
@@ -281,8 +279,6 @@ exclude = [
     # assignment patches that are not worth a host type-check pass.
     "tests/",
     "scripts/",
-    # Remote agent entrypoint expects host-injected parameters; not host-typed.
-    "src/fleet_rlm/daytona/workspace_agent/runtime.py",
 ]
 
 [tool.deptry]
