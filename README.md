@@ -49,25 +49,27 @@ You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`). `uv
 
 Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
 
-Fleet connects through an OpenAI-compatible Chat Completions base URL, so
-Databricks is only the shipped example. To use OpenAI or another compatible
-provider, update the selected profile's `model`, `api_key_env`, and
+Fleet connects through an OpenAI-compatible Chat Completions base URL. The
+shipped `daytona-recursive` profile uses Alibaba DashScope (MaaS); the
+`daytona-managed` profile is the Databricks example. To use OpenAI or another
+compatible provider, update the selected profile's `model`, `api_key_env`, and
 `base_url_env` entries in `config/fleet.toml`; the base URL is typically the
 provider's `/v1` root, such as `https://api.openai.com/v1`.
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
 export FLEET_DAYTONA_API_KEY='...'
-export DATABRICKS_TOKEN='...'
-export FLEET_LLM_BASE_URL='https://<workspace-host>/ai-gateway/mlflow/v1'
+export ALIBABA_API_KEY='...'
+export FLEET_MAAS_BASE_URL='https://dashscope-intl.aliyuncs.com/compatible-mode/v1'
 
 uv run python scripts/db_init.py
 ```
 
-`FLEET_LLM_BASE_URL` is the committed Fleet chat-inference base; the client
-appends `/chat/completions`. Keep `DATABRICKS_HOST` for Databricks MLflow or
-evaluation tooling. `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` is reserved for
-explicit custom or benchmark paths and is not read by the shipped profile.
+`FLEET_MAAS_BASE_URL` is the committed Fleet chat-inference base; the client
+appends `/chat/completions`. For `daytona-managed`, provide `DATABRICKS_TOKEN`
+and `FLEET_LLM_BASE_URL` instead. Keep `DATABRICKS_HOST` for Databricks MLflow
+or evaluation tooling. `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` is reserved for
+explicit custom or benchmark paths and is not read by the shipped profiles.
 
 Startup never applies migrations automatically — initialize the database explicitly before serving.
 

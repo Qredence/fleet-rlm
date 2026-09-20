@@ -1167,7 +1167,7 @@ wheels = [
 
 [[package]]
 name = "fleet-rlm"
-version = "0.7.9"
+version = "0.7.10"
 source = { editable = "." }
 dependencies = [
     { name = "aiosqlite" },
@@ -3413,8 +3413,8 @@ version = "1.18.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'darwin'",
-    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version >= '3.13' and sys_platform == 'linux'",
+    "python_full_version == '3.12.*' and sys_platform == 'darwin'",
     "python_full_version == '3.12.*' and sys_platform == 'linux'",
 ]
 dependencies = [
