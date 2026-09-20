@@ -87,9 +87,10 @@ def test_append_enforces_capacity_and_active_supersession(tmp_path) -> None:
         )
     assert error.value.detail == "supersedes_not_active"
 
+    header_size = len(b"# Fleet Memory v2\n")
     capacity_store = _memory(
         tmp_path / "capacity",
-        max_file_bytes=len(b"# Fleet Memory v2\n") + len(first.encode()) - 1,
+        max_file_bytes=header_size + len(first.encode()) - 1,
     )
     with pytest.raises(WorkspaceMemoryStoreFullError):
         capacity_store.append_record(first)
