@@ -823,6 +823,42 @@ def observe_tool(
 _StreamDetail = RLMReasoning | RLMCode | RLMOutput
 
 
+def _public_trajectory_output(output: str) -> str:
+    """Return the bounded public form of one native trajectory output."""
+    return "FINAL submitted" if output.startswith("FINAL:") else output
+
+
+def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int | None) -> tuple[TrajectoryStep, ...]:
+    """Keep public trajectory step IDs within the configured execution bound.
+
+    DSPy's prediction trajectory can include a terminal record after it has
+    exhausted the configured REPL iterations.  That record is useful public
+    evidence, but it is not another executed iteration.  Fold it into the
+    last executed step instead of projecting an impossible extra step ID.
+    """
+    if max_steps is None or len(trajectory) <= max_steps:
+        return tuple(trajectory)
+    if max_steps < 1:
+        raise ValueError("max_steps must be positive when bounding a trajectory")
+
+    retained = list(trajectory[:max_steps])
+    last = retained[-1]
+    supplemental = trajectory[max_steps:]
+
+    def combine(values: Sequence[str]) -> str:
+        return "\n\n".join(value for value in values if value)
+
+    retained[-1] = TrajectoryStep(
+        index=last.index,
+        reasoning=combine((last.reasoning, *(step.reasoning for step in supplemental))),
+        code=combine((last.code, *(step.code for step in supplemental))),
+        output=combine(
+            (_public_trajectory_output(last.output), *(_public_trajectory_output(step.output) for step in supplemental))
+        ),
+    )
+    return tuple(retained)
+
+
 def trajectory_details(
     steps: Sequence[TrajectoryStep],
     *,
@@ -831,9 +867,7 @@ def trajectory_details(
     """Project strictly normalized DSPy trajectory steps into public details."""
     details: list[ObservationDetail] = []
     for step in steps:
-        output = step.output
-        if output.startswith("FINAL:"):
-            output = "FINAL submitted"
+        output = _public_trajectory_output(step.output)
         code = step.code
         details.extend(
             (
@@ -1012,6 +1046,7 @@ def reconcile_trajectory(
     *,
     max_chars: int,
     request: str | None = None,
+    max_steps: int | None = None,
 ) -> list[ObservationDetail]:
     """Reconcile completed DSPy trajectory details with live observations.
 
@@ -1052,7 +1087,7 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
-    for trajectory_step in trajectory:
+    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps):
         step = trajectory_step.index
         step_details = trajectory_details(
             (trajectory_step,),

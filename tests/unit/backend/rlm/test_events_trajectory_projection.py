@@ -203,6 +203,49 @@ def test_trajectory_reconciliation_reemits_code_when_a_midrun_iteration_has_no_l
     ]
 
 
+def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_step() -> None:
+    """A terminal DSPy record cannot create an SSE step beyond max_iters."""
+    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+    from fleet_rlm.rlm.result import TrajectoryStep
+
+    details = [
+        StepStarted(1),
+        RLMReasoning("reasoning 1", 1),
+        RLMCode("code 1", 1),
+        RLMOutput("output 1", 1),
+        StepFinished(1),
+        StepStarted(2),
+        RLMReasoning("reasoning 2", 2),
+        RLMCode("code 2", 2),
+        RLMOutput("output 2", 2),
+        StepFinished(2),
+        StepStarted(3),
+        RLMReasoning("reasoning 3", 3),
+        RLMCode("code 3", 3),
+        RLMOutput("output 3", 3),
+        StepFinished(3),
+    ]
+
+    reconcile_trajectory(
+        details,
+        (
+            TrajectoryStep(1, "reasoning 1", "code 1", "output 1"),
+            TrajectoryStep(2, "reasoning 2", "code 2", "output 2"),
+            TrajectoryStep(3, "reasoning 3", "code 3", "output 3"),
+            TrajectoryStep(4, "final reasoning", "SUBMIT(answer='ok')", "FINAL: ok"),
+        ),
+        max_chars=100,
+        max_steps=3,
+    )
+
+    code = [item for item in details if isinstance(item, RLMCode)]
+    output = [item for item in details if isinstance(item, RLMOutput)]
+    assert {item.step for item in code} == {1, 2, 3}
+    assert "code 3" in code[-1].code
+    assert "SUBMIT(answer='ok')" in code[-1].code
+    assert output[-1].output == "output 3\n\nFINAL submitted"
+
+
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep

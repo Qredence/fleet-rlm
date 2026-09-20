@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import socket
 import subprocess
 import sys
@@ -193,3 +194,39 @@ def test_poll_records_rejected_tool_result_delivery() -> None:
 
     assert broker._delivery_error is not None
     assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+
+
+def test_poll_delivers_async_host_tool_result_through_application_bridge() -> None:
+    class Bridge:
+        def run(self, awaitable, **_kwargs):
+            return asyncio.run(awaitable)
+
+    async def append_workspace_text(path: str, content: str) -> dict[str, object]:
+        await asyncio.sleep(0)
+        return {"ok": True, "path": path, "bytes": len(content)}
+
+    broker = DaytonaHttpToolBroker(object(), port=1, async_bridge=Bridge())
+    client = MagicMock()
+    client.get.return_value.json.return_value = {
+        "requests": [
+            {
+                "id": "call-1",
+                "lease": "lease-1",
+                "tool_name": "append_workspace_text",
+                "args": [],
+                "kwargs": {"path": "notes/findings.md", "content": "durable"},
+            }
+        ]
+    }
+    client.post.return_value.status_code = 200
+    broker._client = client
+    broker.bind_tools({"append_workspace_text": append_workspace_text})
+
+    broker._poll_once()
+
+    assert broker._delivery_error is None
+    assert client.post.call_args.kwargs["json"] == {
+        "id": "call-1",
+        "lease": "lease-1",
+        "result": {"ok": True, "path": "notes/findings.md", "bytes": 7},
+    }

@@ -9,6 +9,7 @@ never executes model-authored Python.
 from __future__ import annotations
 
 import inspect
+import logging
 import secrets
 import threading
 import time
@@ -21,6 +22,8 @@ import httpx
 from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
 from fleet_rlm.json_types import validate_json_value
 from fleet_rlm.rlm.events import _resolve_awaitable_result
+
+logger = logging.getLogger(__name__)
 
 _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
@@ -207,6 +210,7 @@ class DaytonaHttpToolBroker:
             raise DaytonaAdapterError(message="broker invocation is still active", cause_type="BrokerBindingError")
         self._secret = secret
         self._client.headers["X-Broker-Secret"] = secret
+        self._delivery_error = None
 
     def rebind_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         """Refresh the host registry between executions on a live broker."""
@@ -246,6 +250,7 @@ class DaytonaHttpToolBroker:
     def execute(self, code: str, variables: Mapping[str, Any], *, timeout_s: int) -> Any:
         self._ensure_started()
         assert self._client is not None
+        self._delivery_error = None
         client = self._client
         outcome: list[httpx.Response | BaseException] = []
 
@@ -267,9 +272,13 @@ class DaytonaHttpToolBroker:
             if self._stopped:
                 break
             self._poll_once()
-            if self._delivery_error is not None:
-                raise self._delivery_error
             worker.join(0.05)
+        # The remote /execute request owns every outstanding /tool_call.  Do
+        # not return (or tear down its broker) until that request has settled,
+        # even after a rejected result delivery.  The typed delivery failure is
+        # raised only once remote execution has contained its waiting call.
+        if self._delivery_error is not None:
+            raise self._delivery_error
         if not outcome or isinstance(outcome[0], BaseException):
             raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
         response = outcome[0]
@@ -361,15 +370,27 @@ class DaytonaHttpToolBroker:
                 if not self._stopped and self._client is client:
                     response = client.post("/result", json=body)
                     if response.status_code != 200:
-                        self._delivery_error = DaytonaAdapterError(
-                            message="sandbox tool result delivery failed",
-                            cause_type="BrokerDeliveryError",
+                        self._record_delivery_failure(
+                            request, phase="result_delivery", category=f"http_{response.status_code}"
                         )
             except httpx.HTTPError:
-                self._delivery_error = DaytonaAdapterError(
-                    message="sandbox tool result delivery failed",
-                    cause_type="BrokerDeliveryError",
-                )
+                self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+
+    def _record_delivery_failure(self, request: Mapping[str, Any], *, phase: str, category: str) -> None:
+        """Retain a sanitized failed delivery outcome until remote execution settles."""
+        call_id = str(request.get("id") or "")[:128]
+        tool_name = str(request.get("tool_name") or "")[:80]
+        logger.warning(
+            "sandbox tool result delivery failed call_id=%s tool_name=%s phase=%s category=%s",
+            call_id,
+            tool_name,
+            phase,
+            category,
+        )
+        self._delivery_error = DaytonaAdapterError(
+            message="sandbox tool result delivery failed",
+            cause_type="BrokerDeliveryError",
+        )
 
     def _wrapper_source(self, name: str, tool: Callable[..., Any]) -> str:
         if not name.isidentifier():

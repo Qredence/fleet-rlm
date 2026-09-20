@@ -1440,6 +1440,7 @@ class RLMRunner:
             trajectory,
             max_chars=context.execution.options.max_output_chars,
             request=context.session.request,
+            max_steps=context.execution.options.max_iters,
         ):
             # ``reconcile_trajectory`` appends the canonical details to the
             # observation list; emit them without recording them a second time.

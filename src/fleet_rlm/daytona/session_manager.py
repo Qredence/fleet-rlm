@@ -1295,7 +1295,26 @@ class DaytonaSessionManager:
                 ),
             )
             return
-        await self._release_interpreter(lease)
+        try:
+            await self._release_interpreter(lease)
+        except BaseException:
+            if lease.session_id is None or lease.workspace_id is None or lease.run_id is None or lease.user_id is None:
+                raise
+            # A failed broker/interpreter shutdown still owns a live remote
+            # resource.  Retain it behind the existing durable fencing and
+            # quarantine path instead of merely logging a failed task.  Keep
+            # the original failure visible to the active caller; ``aclose``
+            # owns the bounded retry and final provider retirement.
+            self._retain_unpublished_lease(
+                lease,
+                LeaseRequest(
+                    session_id=UUID(lease.session_id),
+                    workspace_id=UUID(lease.workspace_id),
+                    user_id=UUID(lease.user_id),
+                    run_id=UUID(lease.run_id),
+                ),
+            )
+            raise
 
     async def _finish_unpublished_lease(
         self,
@@ -1338,6 +1357,11 @@ class DaytonaSessionManager:
         *,
         deadline: float | None = None,
     ) -> None:
+        owner = self._retain_unpublished_lease(lease, request)
+        await self._finish_unpublished_lease(owner, deadline=deadline)
+
+    def _retain_unpublished_lease(self, lease: InterpreterLease, request: LeaseRequest) -> _LateOwner:
+        """Keep failed interpreter release attached to durable cleanup ownership."""
         owner = self._late_owners.get(id(lease))
         if owner is None or not owner.unpublished:
             owner = _LateOwner(
@@ -1349,7 +1373,7 @@ class DaytonaSessionManager:
             self._late_owners[id(lease)] = owner
         else:
             owner.request = request
-        await self._finish_unpublished_lease(owner, deadline=deadline)
+        return owner
 
     async def quarantine(
         self,
