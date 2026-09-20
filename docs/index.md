@@ -31,8 +31,7 @@ interpreter cutover is not selected.
 - [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
 - [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md) — historical migration contract.
 - [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — retained-broker architecture, historical target decisions, and open gates.
-- [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and remaining work.
-- [ADR 006 consolidated implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md) — detailed task ledger.
+- [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and verification ledger.
 
 The configured Daytona path reuses a healthy Root Sandbox for submitted source
 and serializable bindings, resetting the execution namespace and invocation
@@ -75,8 +74,7 @@ profile matrix, must be regenerated from its source rather than edited by hand.
 - schema: `migrations/`
 - validation: `Makefile`, `tests/`, and TUI tests
 
-The maintained [ADR 006 implementation plan](../fleet-rlm-implementation-plan-2026-09-06-v2.md)
-and its [execution/status ledger](decisions/006-implementation-status.md) track
-implementation separately from live certification and rollout authorization.
+The maintained [ADR 006 implementation status ledger](decisions/006-implementation-status.md)
+tracks implementation separately from live certification and rollout authorization.
 Historical baselines preserve their original evidence scope and do not override
 current code, policy, or generated contracts.

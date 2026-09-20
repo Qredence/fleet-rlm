@@ -412,9 +412,7 @@ the corpus; this ablation does not test depth-1 need on long-context work.
 Phase 5 (snapshot promotion, deployed Lakebase closeout, MLflow backend cert)
 is **not started**.
 
-The simplification-plan phases in
-[`fleet-rlm-implementation-plan-2026-09-06-v2.md`](../../fleet-rlm-implementation-plan-2026-09-06-v2.md)
-are the forward sequence. The "Implemented through Phase 6" checklist later in
+The simplification-plan phases establish the forward sequence. The "Implemented through Phase 6" checklist later in
 this file uses the older ADR 006 numbering and is not that sequence.
 
 ### Phase 3 recert, P4.5 harness fix, and docs reconcile (2026-09-12)
