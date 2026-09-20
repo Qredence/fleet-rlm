@@ -1343,7 +1343,7 @@ class RLMRunner:
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
             fleet_dispatch = bool(
-                getattr(state_context.execution.interpreter, "fleet_host_tool_dispatch_available", True)
+                getattr(state_context.execution.interpreter, "fleet_host_tool_dispatch_available", False)
             )
             rlm = self._factory.create(
                 models=state_context.execution.models,

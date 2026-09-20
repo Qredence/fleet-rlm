@@ -154,7 +154,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--app-url",
-        default="http://127.0.0.1:8000/api/v1/health",
+        default="http://127.0.0.1:8000/health",
         help="Local application health endpoint probed when --profile app is selected.",
     )
     return parser.parse_args(argv)

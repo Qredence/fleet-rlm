@@ -733,6 +733,8 @@ class WorkspaceStorage:
             target.unlink()
 
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
+        if type(byte_budget) is not int or byte_budget < 1:
+            raise ValueError("byte_budget must be positive")
         try:
             target = self._resolve(path)
             if not target.is_file():
@@ -740,7 +742,12 @@ class WorkspaceStorage:
             data = target.read_bytes()
             total_size = len(data)
             sha = hashlib.sha256(data).hexdigest()
-            tail = data[-byte_budget:] if total_size > byte_budget else data
+            start = max(0, total_size - byte_budget)
+            # Never decode a partial UTF-8 code point.  Moving the boundary
+            # forward keeps the returned bytes within the requested budget.
+            while start < total_size and (data[start] & 0xC0) == 0x80:
+                start += 1
+            tail = data[start:]
             return {
                 "missing": False,
                 "content": tail.decode("utf-8", errors="replace"),
@@ -1109,7 +1116,35 @@ class WorkspaceMemoryStorage:
         return res
 
     def read_full_bytes(self, path: str, *, max_bytes: int | None = None) -> Mapping[str, object]:
-        return self.read_bytes(path, max_bytes=max_bytes)
+        normalized = normalize_workspace_path(path)
+        bound = max_bytes or WORKSPACE_MEMORY_BYTE_BUDGET
+        cursor: str | None = None
+        chunks: list[str] = []
+        byte_size = 0
+        while True:
+            page = self._session.read_text_page(
+                normalized,
+                cursor=cursor,
+                max_chars=MAX_STORAGE_READ_CHARS,
+                max_bytes=bound,
+            )
+            chunks.append(page.content)
+            byte_size = page.byte_size
+            if page.eof:
+                break
+            if page.next_cursor is None:
+                raise WorkspaceStorageError("storage returned a non-terminal page without a cursor")
+            cursor = page.next_cursor
+        content = "".join(chunks)
+        encoded = content.encode("utf-8")
+        if len(encoded) != byte_size:
+            raise WorkspaceStorageError("storage returned an incomplete UTF-8 file")
+        return {
+            "missing": False,
+            "content": content,
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "byte_size": byte_size,
+        }
 
     def replace_bytes(self, path: str, content: bytes, *, expected_sha256: str | None = None) -> WorkspaceEntry:
         text = content.decode("utf-8") if isinstance(content, bytes) else str(content)
@@ -1131,8 +1166,14 @@ class WorkspaceMemoryStorage:
             normalize_workspace_path(path), content, overwrite=overwrite, expected_sha256=expected_sha256
         )
 
-    def append_text(self, path: str, content: str) -> WorkspaceEntry:
-        return self._session.append_text(normalize_workspace_path(path), content)
+    def append_text(
+        self,
+        path: str,
+        content: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> WorkspaceEntry:
+        return self._session.append_text(normalize_workspace_path(path), content, expected_sha256=expected_sha256)
 
     def delete_bytes(self, path: str, *, expected_sha256: str | None = None) -> bool:
         try:

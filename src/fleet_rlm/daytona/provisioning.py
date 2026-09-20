@@ -763,7 +763,10 @@ def verify_sandbox_workspace_mount(sandbox: Any, expected: ExpectedWorkspaceMoun
             "subpath": getattr(sandbox, "volume_subpath", None),
         }
         if all(value is None for value in flat.values()):
-            return
+            raise DaytonaAdapterError(
+                message="sandbox volume mount metadata is unavailable",
+                cause_type="WorkspaceMountMetadataMissing",
+            )
         mounts = [flat]
     for mount in mounts:
         if (

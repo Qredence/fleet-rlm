@@ -111,8 +111,9 @@ separate validation gates.
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. Both roles use the committed Databricks endpoint
-  and are capped at 16,384 output tokens. The
+  routing header is required. The default Root and Sub roles use Alibaba
+  DashScope (MaaS) and are capped at 16,384 output tokens; the managed profile
+  uses Databricks. The
   exact credential and endpoint names are policy-derived in [the profile
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
@@ -148,9 +149,9 @@ The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
 concurrency are separate controls. The shipped Root and Sub provider roles use
-`num_retries = 1`; omitted custom-role values inherit the shipped default, while
-the typed settings default of `3` applies only when the policy omits the field
-from both defaults and the selected profile.
+`num_retries = 3`; omitted custom-role values inherit that shipped default.
+The typed settings default is also `3` when the policy omits the field from
+both defaults and the selected profile.
 `rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's
 Runtime Events and trajectory reconciliation.

@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.10] - 2026-09-20
+
+This release packages the layer 4 release documentation and tooling updates.
+The committed `daytona-recursive` defaults are documented consistently as
+Alibaba DashScope (MaaS) with three provider retries, and local health probes
+use `/health`.
+
+### Changed
+
+- Updated the release metadata and generated API contract to `0.7.10`.
+- Aligned the README, `.env.example`, DSPy integration guide, and configuration
+  reference with the Alibaba/MaaS default provider and `num_retries = 3`.
+- Corrected the Codex feedback-loop application probe to target `/health`.
+
 ## [0.7.9] - 2026-09-15
 
 This release follows 0.7.8 with the merged codebase-simplification work,

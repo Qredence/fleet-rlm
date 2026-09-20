@@ -16,7 +16,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
-from threading import Lock
+from threading import Lock, RLock
 from types import MappingProxyType
 from typing import Any, Protocol, cast
 from uuid import UUID, uuid4
@@ -183,8 +183,10 @@ class MemoryStorageRead:
 
 class MemoryStorage(Protocol):
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> Mapping[str, object]: ...
-    def append_text(self, path: str, content: str) -> Any: ...
+    def read_full_bytes(self, path: str, *, max_bytes: int | None = None) -> Mapping[str, object]: ...
+    def append_text(self, path: str, content: str, *, expected_sha256: str | None = None) -> Any: ...
     def write_text(self, path: str, content: str, *, overwrite: bool = True) -> Any: ...
+    def delete_bytes(self, path: str, *, expected_sha256: str | None = None) -> bool: ...
 
 
 class WorkspaceMemoryStore(Protocol):
@@ -319,25 +321,128 @@ class WorkspaceMemory:
         self._memory_path = memory_path
         self._legacy_path = legacy_path
         self._max_file_bytes = max_file_bytes
-        self._lock = Lock()
+        self._lock = RLock()
         del kwargs
 
     @classmethod
     def from_storage(cls, storage: Any, **kwargs: Any) -> WorkspaceMemory:
         return cls(storage, **kwargs)
 
-    def _read_content(self) -> str:
+    def _read_storage_path(
+        self,
+        path: str,
+        *,
+        full: bool,
+        byte_budget: int | None = None,
+    ) -> MemoryStorageRead:
+        reader_name = "read_full_bytes" if full else "read_tail"
+        reader = getattr(self._storage, reader_name, None)
+        using_full_reader = callable(reader) and full
+        if not callable(reader):
+            if full:
+                reader = getattr(self._storage, "read_tail", None)
+                using_full_reader = False
+            if not callable(reader):
+                raise MemoryMigrationError("Workspace Memory storage cannot read the canonical file")
         try:
-            tail = self._storage.read_tail(self._memory_path, byte_budget=self._max_file_bytes)
-            return str(tail.get("content") or "")
-        except (FileNotFoundError, OSError):
+            result = (
+                reader(path, max_bytes=self._max_file_bytes)
+                if using_full_reader
+                else reader(path, byte_budget=byte_budget or self._max_file_bytes)
+            )
+        except FileNotFoundError:
+            return MemoryStorageRead("", True, "", 0)
+        except (OSError, ValueError) as exc:
+            raise MemoryMigrationError("Workspace Memory storage could not be read") from exc
+        if not isinstance(result, Mapping):
+            raise MemoryMigrationError("Workspace Memory storage returned an invalid read result")
+        content = result.get("content")
+        if not isinstance(content, str):
+            raise MemoryMigrationError("Workspace Memory storage returned invalid content")
+        try:
+            byte_size = int(result.get("byte_size", len(content.encode("utf-8"))))
+        except (TypeError, ValueError, UnicodeError) as exc:
+            raise MemoryMigrationError("Workspace Memory storage returned an invalid byte size") from exc
+        if full and byte_size != len(content.encode("utf-8")):
+            raise MemoryMigrationError("Workspace Memory canonical file is only partially readable")
+        return MemoryStorageRead(
+            content=content,
+            missing=bool(result.get("missing", False)),
+            sha256=str(result.get("sha256") or ""),
+            byte_size=byte_size,
+        )
+
+    def _retire_legacy(self, legacy: MemoryStorageRead) -> None:
+        remover = getattr(self._storage, "delete_bytes", None)
+        if not callable(remover):
+            remover = getattr(self._storage, "delete_path", None)
+        if not callable(remover):
+            return
+        try:
+            remover(self._legacy_path, expected_sha256=legacy.sha256)
+        except TypeError:
+            remover(self._legacy_path)
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError) as exc:
+            # The canonical copy has already been verified.  Keeping the old
+            # file is safer than turning a successful migration into loss.
+            raise MemoryMigrationError("Workspace Memory legacy file could not be retired") from exc
+
+    def _ensure_canonical_locked(self) -> str:
+        canonical = self._read_storage_path(self._memory_path, full=True)
+        if not canonical.missing:
+            return canonical.content
+
+        legacy = self._read_storage_path(self._legacy_path, full=True)
+        if legacy.missing:
             return ""
+        if legacy.byte_size > self._max_file_bytes:
+            raise MemoryMigrationError("legacy Workspace Memory exceeds the configured byte budget")
+
+        header = WORKSPACE_MEMORY_HEADER + "\n"
+        migrated = legacy.content if legacy.content.startswith(header) else header + legacy.content
+        if migrated and not migrated.endswith("\n"):
+            migrated += "\n"
+        try:
+            self._storage.write_text(self._memory_path, migrated, overwrite=False)
+        except FileExistsError as exc:
+            # Another worker won the create race.  Its verified canonical copy
+            # is authoritative; never overwrite it with the legacy snapshot.
+            canonical = self._read_storage_path(self._memory_path, full=True)
+            if canonical.missing:
+                raise MemoryMigrationError("canonical Workspace Memory appeared but is unreadable") from exc
+            return canonical.content
+        except (OSError, ValueError) as exc:
+            raise MemoryMigrationError("Workspace Memory legacy migration could not be written") from exc
+
+        verified = self._read_storage_path(self._memory_path, full=True)
+        if verified.missing or verified.content != migrated:
+            raise MemoryMigrationError("Workspace Memory legacy migration failed verification")
+        self._retire_legacy(legacy)
+        return verified.content
+
+    def _read_content(self) -> str:
+        return self._ensure_canonical_locked()
+
+    def _read_bounded_tail(self, byte_budget: int) -> MemoryStorageRead:
+        if type(byte_budget) is not int or byte_budget < 1:
+            raise ValueError("byte_budget must be positive")
+        # Migration is performed under the same lock as appends so a first
+        # read cannot observe a half-created canonical file.
+        self._ensure_canonical_locked()
+        return self._read_storage_path(self._memory_path, full=False, byte_budget=byte_budget)
+
+    def _read_content(self) -> str:
+        return self._ensure_canonical_locked()
 
     def read_tail(self, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> WorkspaceMemoryReadResult:
-        content = self._read_content()
+        with self._lock:
+            bounded = self._read_bounded_tail(byte_budget)
+        content = bounded.content
         lines = parse_workspace_memory_lines(content)
         filtered = "".join(line.raw for line in lines)
-        total_bytes = len(content.encode("utf-8"))
+        total_bytes = bounded.byte_size
         truncated = total_bytes > byte_budget
         return WorkspaceMemoryReadResult(
             content=filtered,
@@ -352,6 +457,24 @@ class WorkspaceMemory:
         validate_workspace_memory_record(record)
         with self._lock:
             existing = self._read_content()
+            record_entry = parse_workspace_memory_lines(record, complete_memory_graph=False)[0].entry
+            if record_entry is None:
+                raise WorkspaceMemoryRecordError
+            existing_lines = parse_workspace_memory_lines(existing)
+            existing_entries = tuple(line.entry for line in existing_lines if line.entry is not None)
+            for line in existing_lines:
+                entry = line.entry
+                if entry is None:
+                    continue
+                if entry.memory_id == record_entry.memory_id:
+                    if line.raw == record:
+                        total = len(existing.encode("utf-8"))
+                        return WorkspaceMemoryAppendResult(len(record.encode("utf-8")), total)
+                    raise WorkspaceMemoryConflictError("memory_id_collision")
+            if record_entry.supersedes_id is not None:
+                active_ids = {entry.memory_id for entry in existing_entries if entry.active}
+                if record_entry.supersedes_id not in active_ids:
+                    raise WorkspaceMemoryConflictError("supersedes_not_active")
             if not existing:
                 header = (
                     WORKSPACE_MEMORY_HEADER
@@ -359,11 +482,19 @@ class WorkspaceMemory:
                     else WORKSPACE_MEMORY_HEADER + "\n"
                 )
                 to_write = header + record
-                self._storage.write_text(self._memory_path, to_write, overwrite=True)
                 total = len(to_write.encode("utf-8"))
+                if total > self._max_file_bytes:
+                    raise WorkspaceMemoryStoreFullError()
+                self._storage.write_text(self._memory_path, to_write, overwrite=True)
             else:
-                self._storage.append_text(self._memory_path, record)
-                total = len((existing + record).encode("utf-8"))
+                total = len(existing.encode("utf-8")) + len(record.encode("utf-8"))
+                if total > self._max_file_bytes:
+                    raise WorkspaceMemoryStoreFullError()
+                self._storage.append_text(
+                    self._memory_path,
+                    record,
+                    expected_sha256=hashlib.sha256(existing.encode("utf-8")).hexdigest(),
+                )
             return WorkspaceMemoryAppendResult(entry_bytes=len(record.encode("utf-8")), total_bytes=total)
 
     def list_entries(
@@ -373,9 +504,10 @@ class WorkspaceMemory:
         limit: int = 10,
         category: str | None = None,
     ) -> WorkspaceMemoryListResult:
-        content = self._read_content()
-        lines = parse_workspace_memory_lines(content)
-        entries = [line.entry for line in lines if line.entry is not None]
+        with self._lock:
+            content = self._read_content()
+            lines = parse_workspace_memory_lines(content)
+            entries = [line.entry for line in lines if line.entry is not None]
         if category:
             entries = [e for e in entries if e.category == category]
         if after:

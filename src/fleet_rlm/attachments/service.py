@@ -387,19 +387,18 @@ class AttachmentLifecycleService:
             checksum_sha256=hashlib.sha256(data).hexdigest(),
         )
         storage_ref = self._paths.attachment_blob(attachment_id)
-        written = False
+        attempted_storage_ref = True
         try:
             await self._blobs.write_bytes(access.workspace_id, storage_ref, bytes(data))
-            written = True
             await self._catalog.create(access=access, ref=ref, storage_ref=storage_ref)
             return ref
         except (AttachmentError, ValueError):
-            if written:
+            if attempted_storage_ref:
                 with suppress(Exception):
                     await self._blobs.remove_bytes(access.workspace_id, storage_ref)
             raise
         except Exception as exc:
-            if written:
+            if attempted_storage_ref:
                 with suppress(Exception):
                     await self._blobs.remove_bytes(access.workspace_id, storage_ref)
             raise AttachmentStorageError("failed to persist attachment") from exc
@@ -459,14 +458,19 @@ class AttachmentLifecycleService:
             blobs.append((aid, logical_path, data))
 
         staged: list[StagedAttachment] = []
+        attempted_paths: list[str] = []
         try:
             for aid, logical_path, data in blobs:
+                # A provider may persist a path before reporting a failed
+                # write.  Record the intent before crossing that boundary so
+                # cleanup covers both successful and partially failed writes.
+                attempted_paths.append(logical_path)
                 await sink.write_private(logical_path, data)
                 staged.append(StagedAttachment(aid, logical_path))
         except Exception as exc:
-            for item in staged:
+            for logical_path in attempted_paths:
                 with suppress(Exception):
-                    await sink.remove_private(item.sandbox_path)
+                    await sink.remove_private(logical_path)
             raise AttachmentStorageError("attachment sink is unavailable") from exc
 
         return PreparedAttachments(tuple(by_id[aid].ref for aid in attachment_ids), tuple(staged))
