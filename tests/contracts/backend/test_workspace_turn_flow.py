@@ -204,6 +204,8 @@ class Capabilities:
 
 
 class Interpreter:
+    fleet_host_tool_dispatch_available = True
+
     def __init__(self) -> None:
         self.variables: dict[str, object] = {}
 
