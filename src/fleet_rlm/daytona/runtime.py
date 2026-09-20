@@ -12,12 +12,77 @@ import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_OUTPUT_CHARS
 from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile, execution_timeout_s_from_settings
 from fleet_rlm.daytona.session_manager import LeaseState, RootSessionLease
+
+if TYPE_CHECKING:
+    from daytona import AsyncDaytona
+
+    from fleet_rlm.config.settings import Settings
+
+
+_DAYTONA_CLOUD_API_URL = "https://app.daytona.io/api"
+
+
+def build_async_daytona_client(settings: Settings) -> AsyncDaytona:
+    """Construct the process-owned asynchronous Daytona SDK client."""
+    from daytona import AsyncDaytona, DaytonaConfig
+
+    api_key: str | None = None
+    if settings.daytona_api_key is not None:
+        raw = settings.daytona_api_key
+        api_key = raw.get_secret_value() if hasattr(raw, "get_secret_value") else str(raw)
+        api_key = api_key or None
+    config_kwargs: dict[str, Any] = {"api_url": _DAYTONA_CLOUD_API_URL}
+    if api_key:
+        config_kwargs["api_key"] = api_key
+    if settings.daytona_org_id:
+        config_kwargs["organization_id"] = settings.daytona_org_id
+    client = AsyncDaytona(DaytonaConfig(**config_kwargs))
+    if settings.daytona_org_id and api_key and hasattr(client, "_api_client"):
+        client._api_client.default_headers["X-Daytona-Organization-ID"] = settings.daytona_org_id
+    return client
+
+
+build_daytona_client = build_async_daytona_client
+
+
+def _sandbox_fs(sandbox: Any) -> Any:
+    return getattr(sandbox, "fs", sandbox)
+
+
+async def read_file(sandbox: Any, path: str) -> bytes:
+    data = await _maybe_await(_sandbox_fs(sandbox).download_file(path))
+    return data.encode("utf-8") if isinstance(data, str) else bytes(data)
+
+
+async def write_file(sandbox: Any, path: str, data: bytes) -> None:
+    await _maybe_await(_sandbox_fs(sandbox).upload_file(data, path))
+
+
+async def list_files(sandbox: Any, path: str, *, depth: int = 1) -> list[Any]:
+    fs = _sandbox_fs(sandbox)
+    try:
+        entries = await _maybe_await(fs.list_files(path, depth=depth))
+    except TypeError:
+        entries = await _maybe_await(fs.list_files(path))
+    return list(entries or [])
+
+
+async def delete_file(sandbox: Any, path: str) -> None:
+    await _maybe_await(_sandbox_fs(sandbox).delete_file(path))
+
+
+async def get_file_info(sandbox: Any, path: str) -> Any:
+    return await _maybe_await(_sandbox_fs(sandbox).get_file_info(path))
+
+
+async def create_folder(sandbox: Any, path: str, mode: str = "755") -> None:
+    await _maybe_await(_sandbox_fs(sandbox).create_folder(path, mode=mode))
 
 
 class DaytonaRuntimeState(StrEnum):

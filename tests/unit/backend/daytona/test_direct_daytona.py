@@ -6,19 +6,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleet_rlm.daytona.fs import (
+from fleet_rlm.daytona.models import (
+    FINAL_OUTPUT_MARKER,
+    ExecutionResult,
+    extract_final_payload,
+    final_output_frame,
+)
+from fleet_rlm.daytona.runtime import (
     create_folder,
     delete_file,
     get_file_info,
     list_files,
     read_file,
     write_file,
-)
-from fleet_rlm.daytona.models import (
-    FINAL_OUTPUT_MARKER,
-    ExecutionResult,
-    extract_final_payload,
-    final_output_frame,
 )
 
 
@@ -111,7 +111,7 @@ def test_build_async_daytona_client():
     from types import SimpleNamespace
     from unittest.mock import patch
 
-    from fleet_rlm.daytona.client import build_async_daytona_client
+    from fleet_rlm.daytona.runtime import build_async_daytona_client
 
     mock_settings = SimpleNamespace(
         daytona_api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),

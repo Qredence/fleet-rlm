@@ -28,7 +28,6 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backen
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
-    build_daytona_client,
     sandbox_state,
 )
 from fleet_rlm.daytona.provisioning import (
@@ -41,6 +40,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
     volume_mount_spec,
 )
+from fleet_rlm.daytona.runtime import build_daytona_client
 from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
 RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v2"

@@ -38,7 +38,6 @@ from fleet_rlm.daytona.errors import is_sandbox_not_found
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
-    build_daytona_client,
 )
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
@@ -48,7 +47,7 @@ from fleet_rlm.daytona.provisioning import (
     volume_config_from_settings,
 )
 from fleet_rlm.daytona.recursive_child_runtime import build_child_runtime_factory
-from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
+from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec, build_daytona_client
 from fleet_rlm.daytona.session_manager import (
     DEFAULT_IDLE_STOP_SECONDS,
     BindingStoreLike,

@@ -529,10 +529,10 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
    prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
-   relevant public HTTPS URL, call ``fetch_url`` once, assign its ``content`` to a Python variable, and never
-   print the complete value. Validate the result is a mapping with ``.get('content')``; ``content`` may be raw
-   text and metadata such as ``start`` may be absent, so handle both with a guarded ``json.loads`` fallback
-   instead of assuming keys. Assume the declared minimal environment;
+   relevant public HTTPS URL, call ``fetch_url`` once. For inline sources, assign ``content`` to a Python
+   variable; for large sources, use the returned ``workspace_path`` with bounded Workspace reads. Never print
+   the complete value. Validate the result is a mapping and handle either ``content`` or a workspace reference.
+   Assume the declared minimal environment;
    do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
    sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
    and never recompute a cached prefix. If the completed answer would exceed the declared inline output budget,

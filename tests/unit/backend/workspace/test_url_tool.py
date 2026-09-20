@@ -235,6 +235,25 @@ def test_url_tool_returns_content_to_repl_but_projects_metadata_only() -> None:
     assert "https://example.com/report" not in str(observed)
 
 
+def test_url_tool_returns_a_workspace_reference_for_large_content() -> None:
+    session_id = uuid4()
+    content = "x" * (1_024 * 1_024 + 1)
+    host = UrlToolHost(
+        session_id=session_id,
+        store=WorkspaceUrlSourceStore(_FakeWorkspace()),
+        max_bytes=len(content.encode("utf-8")) + 1,
+        fetcher=_FakeFetcher([], text=content),
+    )
+
+    result = host.as_tools()[0](url="https://example.com/large")
+
+    assert result["ok"] is True
+    assert "content" not in result
+    assert result["content_available"] is True
+    assert result["content_preview"] == content[:4_000]
+    assert result["workspace_path"].startswith("sources/urls/")
+
+
 def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
     session_id = uuid4()
     workspace = _FakeWorkspace()

@@ -8,7 +8,6 @@ never executes model-authored Python.
 
 from __future__ import annotations
 
-import contextlib
 import inspect
 import secrets
 import threading
@@ -189,6 +188,7 @@ class DaytonaHttpToolBroker:
         self._tools: dict[str, Callable[..., Any]] = {}
         self._async_bridge = async_bridge
         self._stopped = False
+        self._delivery_error: DaytonaAdapterError | None = None
 
     def bind_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         if self._url is not None:
@@ -267,6 +267,8 @@ class DaytonaHttpToolBroker:
             if self._stopped:
                 break
             self._poll_once()
+            if self._delivery_error is not None:
+                raise self._delivery_error
             worker.join(0.05)
         if not outcome or isinstance(outcome[0], BaseException):
             raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
@@ -355,9 +357,19 @@ class DaytonaHttpToolBroker:
                         "call_id": str(request.get("id") or ""),
                     },
                 }
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 if not self._stopped and self._client is client:
-                    client.post("/result", json=body)
+                    response = client.post("/result", json=body)
+                    if response.status_code != 200:
+                        self._delivery_error = DaytonaAdapterError(
+                            message="sandbox tool result delivery failed",
+                            cause_type="BrokerDeliveryError",
+                        )
+            except httpx.HTTPError:
+                self._delivery_error = DaytonaAdapterError(
+                    message="sandbox tool result delivery failed",
+                    cause_type="BrokerDeliveryError",
+                )
 
     def _wrapper_source(self, name: str, tool: Callable[..., Any]) -> str:
         if not name.isidentifier():
