@@ -702,6 +702,7 @@ class RLMFactoryLike(Protocol):
         tools: Sequence[dspy.Tool] | None = None,
         signature: Any = None,
         verbose: bool = True,
+        host_tool_dispatch: bool = True,
     ) -> Any:
         """Construct an RLM with the specified models, options, tools, and signature."""
         ...
@@ -1337,11 +1338,19 @@ class RLMRunner:
             await asyncio.to_thread(worker_executor.shutdown, True, cancel_futures=True)
 
         try:
+            # Fleet tools may only be supplied where the interpreter can bind
+            # them into the execution namespace. DSPy's native semantic tools
+            # are injected separately by dspy.RLM and are deliberately not
+            # represented by this Fleet-only capability.
+            fleet_dispatch = bool(
+                getattr(state_context.execution.interpreter, "fleet_host_tool_dispatch_available", True)
+            )
             rlm = self._factory.create(
                 models=state_context.execution.models,
                 options=state_context.execution.options,
-                tools=all_tools or None,
+                tools=(all_tools or None) if fleet_dispatch else None,
                 signature=spec.signature,
+                host_tool_dispatch=fleet_dispatch,
             )
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
             if callable(bind_budget):
@@ -1349,6 +1358,9 @@ class RLMRunner:
             bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
             if callable(bind_request):
                 bind_request(state_context.session.request)
+            bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
+            if callable(bind_async_bridge):
+                bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,

@@ -524,7 +524,11 @@ class SandboxLease:
     def _shutdown_interpreter(self) -> InterpreterCloseOutcome:
         interpreter = self._interpreter
         policy = self._policy
-        has_broker = bool(getattr(interpreter, "_http_broker", None)) if interpreter is not None else False
+        has_broker = (
+            bool(getattr(interpreter, "broker", None) or getattr(interpreter, "_http_broker", None))
+            if interpreter is not None
+            else False
+        )
         has_backend = bool(getattr(interpreter, "_backend", None)) if interpreter is not None else False
         if interpreter is None or not policy.interpreter_shutdown:
             return InterpreterCloseOutcome(

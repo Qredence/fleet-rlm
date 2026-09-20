@@ -1158,3 +1158,115 @@ def test_annotate_turn_attributes_swallows_sink_failures(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(mlflow, "get_current_active_span", lambda: _FailingSpan())
     annotate_turn_attributes({"fleet.memory_degradation.category": "normalization"})
+
+
+def test_dspy_turn_callbacks_carries_mlflow_autolog_callback() -> None:
+    """A Turn context REPLACES dspy.settings.callbacks, so the autolog callback must be re-added.
+
+    Without this, MLflow's ``MlflowCallback`` is unregistered for the whole Turn
+    and every module, adapter-format/parse, and LM autolog span is silently lost.
+    """
+    from mlflow.dspy.callback import MlflowCallback
+
+    from fleet_rlm.observability.tracing import dspy_turn_callbacks
+
+    fleet_callback = object()
+    mlflow_callback = MlflowCallback()
+    previous = dspy.settings.callbacks
+    turn_tracing.set_tracing_active_for_tests(True)
+    try:
+        dspy.settings.configure(callbacks=[mlflow_callback])
+        composed = dspy_turn_callbacks(fleet_callback)
+    finally:
+        dspy.settings.configure(callbacks=previous)
+        turn_tracing.set_tracing_active_for_tests(False)
+
+    assert composed == [mlflow_callback, fleet_callback]
+
+
+def test_dspy_turn_callbacks_is_inert_when_tracing_is_inactive() -> None:
+    """Observability must never alter a Turn: inactive tracing returns callbacks unchanged."""
+    from fleet_rlm.observability.tracing import dspy_turn_callbacks
+
+    fleet_callback = object()
+    prior = turn_tracing.is_tracing_active()
+    turn_tracing.set_tracing_active_for_tests(False)
+    try:
+        assert dspy_turn_callbacks(fleet_callback) == [fleet_callback]
+    finally:
+        turn_tracing.set_tracing_active_for_tests(prior)
+
+
+def test_composed_callbacks_survive_the_turn_context_boundary() -> None:
+    """The composed list must actually reach the enclosing dspy.context.
+
+    This is the real failure mode: the helper is evaluated outside the context so
+    it reads the global list, and the context then installs the merged result.
+    """
+    from mlflow.dspy.callback import MlflowCallback
+
+    from fleet_rlm.observability.tracing import dspy_turn_callbacks
+
+    fleet_callback = object()
+    mlflow_callback = MlflowCallback()
+    previous = dspy.settings.callbacks
+    turn_tracing.set_tracing_active_for_tests(True)
+    try:
+        dspy.settings.configure(callbacks=[mlflow_callback])
+        with dspy.context(callbacks=dspy_turn_callbacks(fleet_callback)):
+            inside = list(dspy.settings.callbacks)
+    finally:
+        dspy.settings.configure(callbacks=previous)
+        turn_tracing.set_tracing_active_for_tests(False)
+
+    assert mlflow_callback in inside
+    assert fleet_callback in inside
+    assert dspy.settings.callbacks == previous
+
+
+def test_every_dspy_context_callback_list_composes_the_autolog_callback() -> None:
+    """No ``dspy.context(callbacks=[...])`` may install a bare list.
+
+    The list replaces ``dspy.settings.callbacks``; composing through
+    ``dspy_turn_callbacks`` is what keeps MLflow's autolog spans alive. This
+    guards the class of bug rather than one call site.
+    """
+    import ast
+    from pathlib import Path
+
+    offenders: list[str] = []
+    for path in sorted(Path("src/fleet_rlm").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "context"):
+                continue
+            if not (isinstance(func.value, ast.Name) and func.value.id == "dspy"):
+                continue
+            callbacks = next((kw for kw in node.keywords if kw.arg == "callbacks"), None)
+            if callbacks is None:
+                continue
+            value = callbacks.value
+            composes = isinstance(value, ast.Call) and (
+                getattr(value.func, "id", None) == "dspy_turn_callbacks"
+                or getattr(value.func, "attr", None) == "dspy_turn_callbacks"
+            )
+            if not composes:
+                offenders.append(f"{path}:{node.lineno}")
+
+    assert offenders == [], (
+        "dspy.context(callbacks=[...]) replaces dspy.settings.callbacks and drops "
+        f"MLflow autolog spans; compose with dspy_turn_callbacks instead: {offenders}"
+    )
+
+
+def test_exhausted_finalization_is_not_classified_as_a_deadline() -> None:
+    """Wrap-up rejection must not masquerade as a Turn deadline expiry."""
+    from fleet_rlm.rlm.budget import FinalizationExhausted
+
+    exhaustion = FinalizationExhausted("wrap-up action did not submit before the Turn deadline")
+
+    assert trace_failure_category(exhaustion) == "wrap_up_rejected"
+    assert trace_failure_category(TimeoutError("Turn deadline exceeded")) == "timeout"

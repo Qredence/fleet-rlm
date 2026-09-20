@@ -118,7 +118,11 @@ class _FailingLayoutPlatform(_FakePlatform):
     async def create(self, **kwargs: Any) -> _FakeSandbox:
         sandbox = await super().create(**kwargs)
         if self.fail_layout:
-            sandbox.fs.info_failures["/home/daytona/fleet/artifacts"] = RuntimeError(
+            # The create-first layout path reaches the provider through
+            # create_folder, so the failure must be injected there. A stat-only
+            # injection would never be observed and silently stop exercising
+            # the guard.
+            sandbox.fs.create_failures["/home/daytona/fleet/artifacts"] = RuntimeError(
                 "provider failed at /home/daytona/private"
             )
         return sandbox

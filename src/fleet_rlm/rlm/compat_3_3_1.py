@@ -34,7 +34,7 @@ _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
 
 DAYTONA_EXECUTION_INSTRUCTIONS = (
     "Execution runs in isolated Python. The Python namespace persists across actions in one invocation. "
-    "Host Tools are callable Python functions through Fleet's local mediation seam. "
+    "Host Tools are callable Python functions. "
     "Ordinary stdout is observable. Use the typed keyword `SUBMIT` for final completion."
 )
 

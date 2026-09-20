@@ -119,7 +119,10 @@ def test_packed_llm_query_then_batched_fits_interpreter_execution_budget() -> No
     policy = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
     sub_ceiling = float(policy["defaults"]["llm"]["sub"]["timeout_seconds"])
     execution_budget = float(policy["defaults"]["rlm"]["execution_timeout_s"])
-    assert policy["defaults"]["llm"]["sub"]["num_retries"] == 1
+    # Retries share the first attempt's role window (see
+    # test_provider_retries_share_the_sub_role_timeout_ceiling), so the packed
+    # pair stays bounded by two role windows regardless of the retry count.
+    assert policy["defaults"]["llm"]["sub"]["num_retries"] == 3
     assert 2 * sub_ceiling <= execution_budget
 
     sub = _DropTimeoutOnCopyLM(sub_ceiling)

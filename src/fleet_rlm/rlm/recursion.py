@@ -30,8 +30,9 @@ import dspy
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import start_turn_span
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
 from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
@@ -912,7 +913,7 @@ def _recursive_failure_category(exc: BaseException) -> str:
     if isinstance(exc, ChildRuntimeCleanupError):
         return "cleanup_failed"
     category = trace_failure_category(exc)
-    return category if category in {"timeout", "unauthorized", "cleanup_failed"} else "child_failed"
+    return category if category in {"timeout", "unauthorized", "cleanup_failed", "wrap_up_rejected"} else "child_failed"
 
 
 def _as_cleanup_error(exc: BaseException) -> ChildRuntimeCleanupError:
@@ -970,7 +971,7 @@ class RecursiveRLMExecutor:
         self._is_authorized = is_authorized
         self._selected_input_reader = selected_input_reader
         self._owns_scheduler = scheduler is None
-        self._last_completion: dict[str, object] | None = None
+        self._last_completion: Mapping[str, JsonValue] | None = None
         self._last_capsule_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
             self._call_selected,
@@ -1150,14 +1151,19 @@ class RecursiveRLMExecutor:
                 raise
             except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
                 raise
-            except TimeoutError:
+            except TimeoutError as exc:
+                category = _recursive_failure_category(exc)
                 self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
                 return ChildOutcome(
                     status="timed_out",
                     source_references=access.accessed_references,
                     delivered_fragments=access.delivered_fragments,
-                    uncertainty="child did not settle before the shared deadline",
-                    error_category="timeout",
+                    uncertainty=(
+                        "child finalization was rejected"
+                        if category == "wrap_up_rejected"
+                        else "child did not settle before the shared deadline"
+                    ),
+                    error_category=category,
                     selected_input_bytes=access.selected_input_bytes,
                     usage=_child_usage(local_metrics),
                 )
@@ -1255,7 +1261,7 @@ class RecursiveRLMExecutor:
         for future in pending:
             future.add_done_callback(settled)
 
-    def _recursive_output(self, result: Any) -> dict[str, object]:
+    def _recursive_output(self, result: Any) -> JsonValue:
         if isinstance(result, dict) and result.get("status") in {"failed", "timed_out", "cancelled"}:
             return {"status": result["status"], "error_category": result.get("error_category")}
         if self._last_completion is None:
@@ -1276,7 +1282,7 @@ class RecursiveRLMExecutor:
                     continue
         return {"capsule_count": len(capsules), "selected_input_bytes": selected_bytes}
 
-    def _recursive_batch_output(self, result: Any) -> dict[str, object]:
+    def _recursive_batch_output(self, result: Any) -> JsonValue:
         if isinstance(result, list):
             return {
                 "status": "completed",
@@ -1445,7 +1451,7 @@ class RecursiveRLMExecutor:
                 wrap_up_seconds=child_models.reserve_seconds,
                 budget=child_models.budget,
             ),
-            callbacks=[
+            callbacks=dspy_turn_callbacks(
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,
                     sub_lm=child_models.sub_lm,
@@ -1453,7 +1459,7 @@ class RecursiveRLMExecutor:
                     metrics=_child_metrics.get() or self._metrics,
                     deadline=self._deadline,
                 )
-            ],
+            ),
             track_usage=True,
         ):
             child_acall = getattr(child, "acall", None)

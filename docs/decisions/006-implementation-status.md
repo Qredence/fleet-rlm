@@ -335,6 +335,18 @@ later, explicitly authorized policy promotion set both default roles in
 `config/fleet.toml` to `databricks-deepseek-v4-1-flash` through Chat
 Completions; it is not certification evidence. Phase 5 remains not started.
 
+**Superseded (2026-09-18).** That default-pair promotion is superseded by an
+explicitly authorized operator change: `[defaults.llm.root|sub]` now select
+`deepseek-v4.1-flash` on the Alibaba DashScope (MaaS) OpenAI-compatible
+endpoint via `ALIBABA_API_KEY` and `FLEET_MAAS_BASE_URL`, with
+`num_retries = 3`. Rationale: the workspace Databricks gateway enforces a
+per-minute output-token quota that terminated every multi-step Turn after four
+to six root-LM calls (five measured traces, 17k-25k output tokens each), while
+MaaS carries no such quota. `daytona-managed` is deliberately pinned back to
+`databricks-deepseek-v4-1-flash` with `DATABRICKS_TOKEN` and
+`FLEET_LLM_BASE_URL`, so the managed production transport is unchanged. No
+Phase 3/4 certification gate is re-run or re-opened by this change.
+
 An explicitly authorized diagnostic run on clean candidate
 `706c53f906cd70ba78fc081ce75dc74f3eb5667c` isolated the complete-MVP failure
 to Root workflow compliance, not provider transport: it replaced the required

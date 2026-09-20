@@ -12,6 +12,7 @@ ALLOWED_DAYTONA_IMPORT_ROOTS = {
 EXPECTED_DAYTONA_MODULES = {
     "__init__.py",
     "admission.py",
+    "broker.py",
     "client.py",
     "diagnostics.py",
     "errors.py",

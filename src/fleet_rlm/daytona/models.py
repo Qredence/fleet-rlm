@@ -253,7 +253,14 @@ def build_submit_setup_code(output_fields: list[dict[str, Any]] | None = None) -
 
 
 def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None = None) -> str:
-    """Generate remote setup source code for submitting final tool output."""
+    """Generate self-contained setup source for submitting final tool output.
+
+    Unlike :func:`build_submit_setup_code`, this variant defines
+    ``FINAL_OUTPUT_MARKER`` and ``FleetFinalOutputError`` itself, so it is the
+    builder for any caller that executes the preamble as source rather than
+    injecting those names into a host namespace. The live Sandbox interpreter
+    backend depends on it for exactly that reason.
+    """
     return f"""
 import base64 as _base64
 import json

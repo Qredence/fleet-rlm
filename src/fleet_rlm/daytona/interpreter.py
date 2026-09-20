@@ -25,6 +25,7 @@ from uuid import uuid4
 import dspy
 from dspy.utils.callback import BaseCallback, with_callbacks
 
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
@@ -36,6 +37,7 @@ from fleet_rlm.daytona.models import (
     build_submit_setup_code,
     extract_final_payload,
     final_output_frame,
+    remote_submit_setup_code,
 )
 from fleet_rlm.daytona.sync_bridge import (
     SyncBridgeDispatcher,
@@ -332,6 +334,11 @@ class InProcessInterpreterBackend:
             )
         self._context_binding = binding
 
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed code directly."""
+        return True
+
     def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         for name in self._bound_tool_names.difference(tools):
             self.namespace.pop(name, None)
@@ -487,6 +494,8 @@ class _SandboxProcessBackend:
         self._context_accesses: list[str] = []
         self._closed = False
         self._interpreter_context: Any = None
+        self._broker: DaytonaHttpToolBroker | None = None
+        self._async_bridge: Any | None = None
 
     @property
     def sandbox(self) -> Any:
@@ -496,8 +505,25 @@ class _SandboxProcessBackend:
     def timeout_s(self) -> int | None:
         return self._timeout_s
 
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed code directly."""
+        return True
+
     def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
+        if self._broker is not None:
+            self._broker.rebind_tools(tools)
         self._bound_tools = dict(tools)
+
+    def bind_async_bridge(self, async_bridge: Any | None) -> None:
+        # The runner binds once for each invocation on a retained root lease.
+        if self._broker is not None:
+            self._broker.reset_invocation()
+            self._broker.rebind_async_bridge(async_bridge)
+        if self._interpreter_context is not None:
+            self._sandbox.code_interpreter.delete_context(self._interpreter_context)
+            self._interpreter_context = None
+        self._async_bridge = async_bridge
 
     def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
         self._output_fields = output_fields
@@ -521,14 +547,12 @@ class _SandboxProcessBackend:
         if self._closed:
             raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
 
-        submit_code = build_submit_setup_code(self._output_fields)
-
-        var_lines: list[str] = []
-        if variables:
-            for k, v in variables.items():
-                if isinstance(v, (str, int, float, bool, list, dict)) or v is None:
-                    var_lines.append(f"{k} = {json.dumps(v)}")
-        var_code = ("\n".join(var_lines) + "\n") if var_lines else ""
+        # A tool-free action can use Daytona's native code interpreter directly.
+        # This remains remote execution and keeps the lightweight SDK path used
+        # for ordinary deterministic cells. Tool-enabled actions below use the
+        # broker so the host never executes generated source.
+        if not self._bound_tools:
+            return self._run_direct(code, variables, on_stdout=on_stdout)
 
         context_lines = ["if 'context' not in globals(): context = []"]
         if self._context_binding is not None:
@@ -565,84 +589,132 @@ def _fleet_load_context_manifest(raw_manifest):
             values.append({{"data": data, "encoding": "bytes", "attachment_id": att_id}})
     return values
 """)
-        context_code = "\n".join(context_lines) + "\n"
-        full_code = f"{submit_code}\n\n{context_code}\n{var_code}\n{code}"
-
         timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
-        stdout = ""
-        stderr = ""
-        exit_code = 0
-        exec_error: Any = None
-
-        sandbox = self._sandbox
+        if self._broker is None:
+            self._broker = DaytonaHttpToolBroker(self._sandbox, port=DEFAULT_BROKER_PORT)
+            bind_bridge = getattr(self._broker, "bind_async_bridge", None)
+            if callable(bind_bridge):
+                bind_bridge(self._async_bridge)
+            self._broker.bind_tools(self._bound_tools)
+        context_code = "\n".join(context_lines)
+        setup = self._broker.setup_source(f"{remote_submit_setup_code(self._output_fields)}\n\n{context_code}")
         try:
-            if hasattr(sandbox, "code_interpreter") and hasattr(sandbox.code_interpreter, "run_code"):
-                kwargs: dict[str, Any] = {"timeout": timeout}
-                if self._interpreter_context is None and hasattr(sandbox.code_interpreter, "create_context"):
-                    with contextlib.suppress(Exception):
-                        self._interpreter_context = sandbox.code_interpreter.create_context()
-                if self._interpreter_context is not None:
-                    kwargs["context"] = self._interpreter_context
-                if on_stdout is not None:
-
-                    def _stream_stdout(msg: Any) -> None:
-                        chunk = getattr(msg, "output", getattr(msg, "text", str(msg)))
-                        if chunk:
-                            on_stdout(chunk)
-
-                    kwargs["on_stdout"] = _stream_stdout
-
-                res = sandbox.code_interpreter.run_code(full_code, **kwargs)
-                stdout = getattr(res, "stdout", "") or ""
-                stderr = getattr(res, "stderr", "") or ""
-                exec_error = getattr(res, "error", None)
-                exit_code = 0 if not exec_error else 1
-
-            elif hasattr(sandbox, "process"):
-                process = sandbox.process
-                if hasattr(process, "code_run"):
-                    res = process.code_run(full_code, timeout=timeout)
-                    stdout = getattr(res, "result", "") or ""
-                    exit_code = getattr(res, "exit_code", 0)
-                elif hasattr(process, "exec"):
-                    res = process.exec(
-                        f"python3 -c {shlex.quote(full_code)}",
-                        timeout=timeout,
-                        cwd=self._workdir,
-                    )
-                    stdout = getattr(res, "result", "") or ""
-                    exit_code = getattr(res, "exit_code", 0)
-                else:
-                    raise DaytonaAdapterError(
-                        message="Sandbox process has no code_run or exec capability",
-                        cause_type="InterpreterConfigurationError",
-                    )
-            else:
-                raise DaytonaAdapterError(
-                    message="Sandbox has neither code_interpreter nor process execution capability",
-                    cause_type="InterpreterConfigurationError",
-                )
+            result = self._broker.execute(f"{setup}\n\n{code}", variables or {}, timeout_s=timeout)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
             mapped = map_provider_error(exc)
             raise mapped from exc
 
+        stdout = str(result.get("stdout") or "")
         if on_stdout is not None and stdout:
             on_stdout(stdout)
+        failure = result.get("tool_error")
+        error = str(result.get("error") or "") or None
+        if isinstance(failure, dict):
+            error = (
+                f"{str(failure.get('category', 'tool_error'))[:80]} "
+                f"[call_id={str(failure.get('call_id', ''))[:128]}]: "
+                f"{str(failure.get('message', 'tool call failed'))[:500]}"
+            )
+        return BackendExecutionResult(
+            stdout=stdout,
+            stderr=str(result.get("stderr") or ""),
+            final=dict(result["final"]) if isinstance(result.get("final"), dict) else None,
+            error=error,
+            error_category=str(result.get("error_category") or "") or None,
+            context_accesses=self._drain_context_accesses(),
+        )
 
+    def _run_direct(
+        self,
+        code: str,
+        variables: dict[str, object] | None,
+        *,
+        on_stdout: OutputCallback | None,
+    ) -> BackendExecutionResult:
+        var_lines: list[str] = []
+        for name, value in (variables or {}).items():
+            try:
+                payload = json.dumps(value, ensure_ascii=False, allow_nan=True)
+            except (TypeError, ValueError) as exc:
+                raise DaytonaAdapterError(
+                    message=(
+                        f"interpreter binding {name!r} of type {type(value).__name__} "
+                        "cannot be represented in the Sandbox"
+                    ),
+                    cause_type="InterpreterConfigurationError",
+                ) from exc
+            var_lines.append(f"{name} = _fleet_bindings_json.loads({json.dumps(payload)})")
+        preamble = remote_submit_setup_code(self._output_fields)
+        if var_lines:
+            preamble += "\nimport json as _fleet_bindings_json\n" + "\n".join(var_lines)
+        full_code = f"{preamble}\n\n{code}"
+        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        sandbox = self._sandbox
+        streamed = False
+
+        def forward_stdout(message: Any) -> None:
+            nonlocal streamed
+            text = str(getattr(message, "output", message) or "")
+            if on_stdout is not None and text:
+                streamed = True
+                on_stdout(text)
+
+        try:
+            if hasattr(sandbox, "code_interpreter") and hasattr(sandbox.code_interpreter, "run_code"):
+                if self._interpreter_context is None:
+                    create_context = getattr(sandbox.code_interpreter, "create_context", None)
+                    if not callable(create_context):
+                        raise DaytonaAdapterError(
+                            message="Sandbox code interpreter cannot create a persistent context",
+                            cause_type="InterpreterConfigurationError",
+                        )
+                    self._interpreter_context = create_context()
+                result = sandbox.code_interpreter.run_code(
+                    full_code, timeout=timeout, context=self._interpreter_context, on_stdout=forward_stdout
+                )
+                stdout = str(getattr(result, "stdout", "") or "")
+                stderr = str(getattr(result, "stderr", "") or "")
+                error = getattr(result, "error", None)
+            else:
+                process = getattr(sandbox, "process", None)
+                if hasattr(process, "code_run"):
+                    result = process.code_run(full_code, timeout=timeout)
+                    stdout = str(getattr(result, "result", "") or "")
+                    stderr = ""
+                    error = (
+                        None
+                        if getattr(result, "exit_code", 0) == 0
+                        else (stdout or "Sandbox process exited unsuccessfully")
+                    )
+                elif hasattr(process, "exec"):
+                    result = process.exec(f"python3 -c {shlex.quote(full_code)}", timeout=timeout, cwd=self._workdir)
+                    stdout = str(getattr(result, "result", "") or "")
+                    stderr = ""
+                    error = (
+                        None
+                        if getattr(result, "exit_code", 0) == 0
+                        else (stdout or "Sandbox process exited unsuccessfully")
+                    )
+                else:
+                    raise DaytonaAdapterError(
+                        message="Sandbox code interpreter is unavailable",
+                        cause_type="InterpreterConfigurationError",
+                    )
+        except DaytonaAdapterError:
+            raise
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
+        if on_stdout is not None and stdout and not streamed:
+            on_stdout(stdout)
         final = extract_final_payload(stdout)
-        err_msg: str | None = None
-        category: str | None = None
-        if final is None and (exit_code != 0 or exec_error):
-            err_msg = str(exec_error) if exec_error else (stderr or stdout or "Execution failed")
-            category = _repair_category(err_msg)
         return BackendExecutionResult(
             stdout=stdout,
             stderr=stderr,
             final=final,
-            error=err_msg,
-            error_category=category,
+            error=None if final is not None or not error else str(error),
+            error_category=None if final is not None or not error else _repair_category(str(error)),
             context_accesses=self._drain_context_accesses(),
         )
 
@@ -653,13 +725,15 @@ def _fleet_load_context_manifest(raw_manifest):
 
     def close(self) -> None:
         self._closed = True
-        ctx = self._interpreter_context
-        self._interpreter_context = None
-        if ctx is not None and hasattr(self._sandbox, "code_interpreter"):
-            ci = self._sandbox.code_interpreter
-            if hasattr(ci, "delete_context") and callable(ci.delete_context):
+        if self._broker is not None:
+            self._broker.stop(strict=True)
+            self._broker = None
+        if self._interpreter_context is not None:
+            delete_context = getattr(getattr(self._sandbox, "code_interpreter", None), "delete_context", None)
+            if callable(delete_context):
                 with contextlib.suppress(Exception):
-                    ci.delete_context(ctx)
+                    delete_context(self._interpreter_context)
+            self._interpreter_context = None
 
 
 class DaytonaCodeInterpreter:
@@ -811,7 +885,14 @@ class DaytonaCodeInterpreter:
 
     @property
     def broker(self) -> Any:
-        return self._http_broker
+        return self._http_broker or getattr(self._backend, "_broker", None)
+
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed Sandbox code."""
+        if self._backend is not None:
+            return bool(getattr(self._backend, "fleet_host_tool_dispatch_available", False))
+        return False
 
     @property
     def output_fields(self) -> list[dict[str, Any]] | None:
@@ -848,6 +929,14 @@ class DaytonaCodeInterpreter:
 
     def bind_turn_request(self, request: str | None) -> None:
         self._turn_request = request
+
+    def bind_async_bridge(self, async_bridge: Any | None) -> None:
+        """Pass the composition-owned async bridge to a live tool broker."""
+        self._ensure_binding_mutation_allowed()
+        backend = self._backend
+        bind_bridge = getattr(backend, "bind_async_bridge", None)
+        if callable(bind_bridge):
+            bind_bridge(async_bridge)
 
     def bind_context_capsule(self, capsule: Any) -> None:
         self._ensure_binding_mutation_allowed()

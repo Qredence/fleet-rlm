@@ -536,7 +536,7 @@ def _sanitize_live_mlflow_span(span: Any) -> None:
                 from mlflow.entities import Link
 
                 span.add_link(
-                    Link(
+                    Link(  # ty: ignore[call-non-callable] - mlflow declares from_proto abstract without ABCMeta
                         trace_id=trace_id[:_PREPARATION_TRACE_ID_MAX_CHARS],
                         span_id=span_id[:32],
                         attributes={"fleet.relationship": "preparation"},
@@ -1158,6 +1158,41 @@ class TraceSpanHandle:
             logger.debug("trace span close failed; continuing")
 
 
+def dspy_turn_callbacks(*callbacks: Any) -> list[Any]:
+    """Return Fleet's Turn callbacks together with MLflow's autolog callback.
+
+    ``dspy.context(callbacks=...)`` REPLACES ``dspy.settings.callbacks`` for the
+    scope; it does not merge with the global list. MLflow's DSPy autolog
+    registers its ``MlflowCallback`` globally, so a Turn context that passes only
+    Fleet's callbacks silently unregisters it and drops every module, adapter,
+    and LM autolog span for the whole Turn. Carry it across the context boundary
+    explicitly instead.
+
+    Fail-soft by design: when tracing is inactive, or DSPy/MLflow cannot be
+    imported, the supplied callbacks are returned unchanged so observability
+    setup can never affect a Turn outcome.
+
+    Parameters:
+        *callbacks (Any): Fleet-owned callbacks for the enclosing DSPy scope.
+
+    Returns:
+        list[Any]: The MLflow autolog callback (when registered) followed by the
+            supplied callbacks.
+    """
+    ordered = list(callbacks)
+    if not _TRACING_ACTIVE:
+        return ordered
+    try:
+        import dspy
+        from mlflow.dspy.callback import MlflowCallback
+
+        registered = [item for item in dspy.settings.callbacks if isinstance(item, MlflowCallback)]
+    except Exception:
+        logger.debug("MLflow DSPy autolog callback lookup failed; continuing")
+        return ordered
+    return [*registered, *ordered]
+
+
 def start_turn_span(
     name: str,
     *,
@@ -1315,7 +1350,7 @@ def turn_trace(
                 add_link = getattr(span, "add_link", None)
                 if callable(add_link):
                     add_link(
-                        Link(
+                        Link(  # ty: ignore[call-non-callable] - mlflow declares from_proto abstract without ABCMeta
                             trace_id=str(preparation_trace_id)[:_PREPARATION_TRACE_ID_MAX_CHARS],
                             span_id=str(preparation_span_id)[:32],
                             attributes={"fleet.relationship": "preparation"},

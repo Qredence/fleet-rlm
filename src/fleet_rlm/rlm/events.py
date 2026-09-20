@@ -22,7 +22,7 @@ import dspy
 
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import turn_phase_span
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, turn_phase_span
 from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
@@ -1180,6 +1180,7 @@ def record_phase_failure(
     *,
     last_lm_call: Mapping[str, object] | None = None,
     wrap_up: Mapping[str, object] | None = None,
+    repair: Mapping[str, object] | None = None,
 ) -> None:
     """
     Record failure status, timing, recursive-call statistics, and delegation metrics for a trace phase.
@@ -1212,6 +1213,8 @@ def record_phase_failure(
         outputs["last_lm_call"] = merged_last_call
     if wrap_up:
         outputs.update(dict(wrap_up))
+    if repair:
+        outputs.update(dict(repair))
     output_diag = getattr(exc, "output_chars", None)
     if isinstance(output_diag, int):
         outputs["output_diagnostic"] = {
@@ -1229,6 +1232,7 @@ def record_phase_success(
     metrics: Any,
     *,
     wrap_up: Mapping[str, object] | None = None,
+    repair: Mapping[str, object] | None = None,
     lms: tuple[Any, ...] = (),
 ) -> Any:
     """
@@ -1272,6 +1276,8 @@ def record_phase_success(
     }
     if wrap_up:
         outputs.update(dict(wrap_up))
+    if repair:
+        outputs.update(dict(repair))
     phase.set_outputs(outputs)
     return prediction
 
@@ -1323,8 +1329,10 @@ class ExecutionTraceAssembler:
             dspy.context(
                 lm=context.execution.models.root_lm,
                 # DSPy 3.3.x combines context callbacks with instance callbacks
-                # around LM requests (dspy/utils/callback.py:258-288).
-                callbacks=[trace_callback],
+                # around LM requests (dspy/utils/callback.py:258-288), but a
+                # context callbacks list REPLACES dspy.settings.callbacks. Re-add
+                # MLflow's autolog callback so module/adapter/LM spans survive.
+                callbacks=dspy_turn_callbacks(trace_callback),
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
                 # second grammar that Fleet should reinterpret. FleetJSONAdapter
@@ -1347,6 +1355,7 @@ class ExecutionTraceAssembler:
                     exc,
                     last_lm_call=trace_callback.last_call_summary(),
                     wrap_up=adapter.wrap_up_summary(),
+                    repair=adapter.repair_summary(),
                 )
                 raise
             finally:
@@ -1358,6 +1367,7 @@ class ExecutionTraceAssembler:
                 self.recursive_executor,
                 context.delegation.metrics,
                 wrap_up=adapter.wrap_up_summary(),
+                repair=adapter.repair_summary(),
                 lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
             )
 

@@ -24,7 +24,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config.settings import LLMRoleSettings, Settings
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
-from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, BudgetDimension, ProviderAdmission, TurnBudget
+from fleet_rlm.rlm.budget import (
+    DEFAULT_PARSE_RETRIES,
+    AdapterBudget,
+    BudgetDimension,
+    FinalizationExhausted,
+    ProviderAdmission,
+    TurnBudget,
+)
 from fleet_rlm.rlm.compat_3_3_1 import (
     BaseLM,
     Signature,
@@ -34,7 +41,7 @@ from fleet_rlm.rlm.compat_3_3_1 import (
     daytona_provider_contract,
 )
 from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
-from fleet_rlm.rlm.submit_validation import is_submit_only_code
+from fleet_rlm.rlm.submit_validation import is_finalization_action
 from fleet_rlm.workspace.models import (
     UNAVAILABLE_WORKSPACE_CAPABILITY,
     WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
@@ -121,15 +128,17 @@ def _budget_directive(remaining: float, *, attempts_exhausted: bool = False, fin
         reason = "Time budget nearly exhausted"
     return (
         f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
-        "using evidence already gathered. Do not explore, call tools, or execute additional code. "
-        "Return exactly one SUBMIT(...) action."
+        "using evidence already gathered. Do not explore or call tools. "
+        "Return data-only answer assignments followed by one SUBMIT(...) call, or just SUBMIT(...). "
+        "No imports, print, tool calls, or other statements."
     )
 
 
 def _wrap_up_correction(reason: str) -> str:
     return (
-        "Wrap-up correction: the previous action was not a single compliant SUBMIT call "
-        f"({reason}). Use only existing variables and safe serialization; return exactly one SUBMIT(...) action."
+        "Wrap-up correction: the previous action was not a compliant finalization action "
+        f"({reason}). Return data-only answer assignments followed by one SUBMIT(...) call, "
+        "or just SUBMIT(...). No imports, print, tool calls, or other statements."
     )
 
 
@@ -183,6 +192,14 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def wrap_up_summary(self) -> dict[str, Any]:
         return dict(self._budget.wrap_up_summary())
+
+    def repair_summary(self) -> dict[str, Any]:
+        """Bounded provider-repair diagnostics for the enclosing Turn span.
+
+        Kept separate from ``wrap_up_summary`` because that contract describes
+        the final-answer reserve, not adapter parse-repair activity.
+        """
+        return {"parse_repairs_used": self._budget.parse_repairs_used}
 
     def _next_wrap_up_attempt(self, lm: BaseLM) -> None:
         self._budget.reclassify_late_response(can_finalize=isinstance(lm, DeadlineLMProxy) and lm.can_finalize)
@@ -341,7 +358,9 @@ class FleetJSONAdapter(dspy.JSONAdapter):
             except AdapterParseError as exc:
                 if wrap_up:
                     if not self._budget.can_finalize():
-                        raise TimeoutError("wrap-up action was not parseable before the Turn deadline") from exc
+                        raise FinalizationExhausted(
+                            "wrap-up finalization attempts exhausted before a parseable action"
+                        ) from exc
                     self._budget.set_wrap_up_rejection("unparseable_json")
                     request_signature, request_inputs = self._with_wrap_up_correction(
                         request_signature, request_inputs, reason="unparseable JSON"
@@ -363,6 +382,10 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 if not self._budget.can_repair(attempt):
                     raise
                 attempt += 1
+                # A repair re-ask is a full provider call. Record it so the Turn
+                # span can report how much of the output budget was spent
+                # recovering an action that could not be parsed.
+                self._budget.note_parse_repair()
                 request_signature, request_inputs = _retry_call_arguments(base_signature, base_inputs, attempt, exc)
                 continue
             if remaining is not None:
@@ -371,15 +394,15 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                     wrap_up = True
                     self._enter_wrap_up(after_response)
                     self._next_wrap_up_attempt(call_lm)
-                    if is_submit_only_code(_action_code(response)):
+                    if is_finalization_action(_action_code(response)):
                         return response
                     request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
                         request_signature, request_inputs, after_response, field_name=directive_field
                     )
-                if wrap_up and action and not is_submit_only_code(_action_code(response)):
+                if wrap_up and action and not is_finalization_action(_action_code(response)):
                     self._budget.set_wrap_up_rejection("exploration_or_additional_code")
                     if not self._budget.can_finalize():
-                        raise TimeoutError("wrap-up action did not submit before the Turn deadline")
+                        raise FinalizationExhausted("wrap-up finalization attempts exhausted before a compliant SUBMIT")
                     request_signature, request_inputs = self._with_wrap_up_correction(
                         request_signature, request_inputs, reason="exploration or additional code"
                     )
@@ -512,7 +535,9 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    instead of assuming keys. Assume the declared minimal environment;
    do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
    sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
-   and never recompute a cached prefix.
+   and never recompute a cached prefix. If the completed answer would exceed the declared inline output budget,
+   call ``create_artifact(kind="markdown", content=full_report, title=...)`` once, require ``ok == True``, then
+   ``SUBMIT`` a concise executive summary. The Artifact is the complete durable answer; do not paste it inline.
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
    its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
    a URL whose cached result is already available.
@@ -521,6 +546,26 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
 4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
    self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
    Prefer the cheapest sufficient mechanism."""
+
+# Fleet-provided recursion, URL-fetch, and Workspace tools require executable
+# host bindings. A remote Sandbox currently receives source and serializable
+# values only, so those Fleet tools must not be advertised when bindings are
+# unavailable. This does not suppress DSPy's native semantic tools: dspy.RLM
+# adds them independently through its action template and execution context.
+TOOL_RLM_INSTRUCTIONS_NO_DISPATCH = """1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
+   intermediate code action concise (prefer a few thousand characters; never paste a long report or the complete
+   request as unused text). When the request specifies exact Python statements, emit those statements in that order
+   unchanged. Never repeat an identical interpreter action: use its output, choose a different action, or call
+   ``SUBMIT`` when sufficient. Store large values in variables. Assume the declared minimal environment;
+   do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
+   sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
+   and never recompute a cached prefix.
+2. Load Session History, Skills, or Attachments only when the request or its discovery metadata establishes that
+   capability as relevant.
+3. This runtime dispatches no Fleet recursion, URL-fetch, or Workspace host tool. Do not probe for
+   ``rlm_query``, ``rlm_query_batched``, ``fetch_url``, or Workspace tools. Answer from the request text,
+   the Sandbox filesystem, and deterministic Python; if the request demands one of those Fleet capabilities,
+   say so plainly in the ``answer`` instead of searching for the tool."""
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
@@ -580,8 +625,12 @@ class RLMInstructionFragments:
         return "\n\n".join(sections)
 
 
-def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructionFragments:
-    step = 6 if recursion_enabled else 5
+def fleet_rlm_instruction_fragments(
+    *,
+    recursion_enabled: bool,
+    host_tool_dispatch: bool = True,
+) -> RLMInstructionFragments:
+    step = 6 if recursion_enabled and host_tool_dispatch else 5
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
@@ -598,15 +647,18 @@ def fleet_rlm_instruction_fragments(*, recursion_enabled: bool) -> RLMInstructio
     return RLMInstructionFragments(
         base=BASE_RLM_INSTRUCTIONS,
         repl=REPL_RLM_INSTRUCTIONS,
-        tools=TOOL_RLM_INSTRUCTIONS,
-        recursion=RECURSION_RLM_INSTRUCTIONS if recursion_enabled else None,
+        tools=TOOL_RLM_INSTRUCTIONS if host_tool_dispatch else TOOL_RLM_INSTRUCTIONS_NO_DISPATCH,
+        recursion=RECURSION_RLM_INSTRUCTIONS if recursion_enabled and host_tool_dispatch else None,
         verification=verification,
         discovery=DISCOVERY_RLM_INSTRUCTIONS,
     )
 
 
-def compose_rlm_instructions(*, recursion_enabled: bool) -> str:
-    return fleet_rlm_instruction_fragments(recursion_enabled=recursion_enabled).compose()
+def compose_rlm_instructions(*, recursion_enabled: bool, host_tool_dispatch: bool = True) -> str:
+    return fleet_rlm_instruction_fragments(
+        recursion_enabled=recursion_enabled,
+        host_tool_dispatch=host_tool_dispatch,
+    ).compose()
 
 
 class FleetRLMSignature(dspy.Signature):
@@ -663,11 +715,17 @@ def root_signature_for_recursion(
     recursion_enabled: bool,
     skill_instructions: tuple[str, ...] = (),
     tool_names: frozenset[str] = frozenset(),
+    host_tool_dispatch: bool = True,
 ) -> type[dspy.Signature]:
-    instructions = compose_rlm_instructions(recursion_enabled=recursion_enabled)
-    if "read_workspace_text_batch" in tool_names:
+    instructions = compose_rlm_instructions(
+        recursion_enabled=recursion_enabled,
+        host_tool_dispatch=host_tool_dispatch,
+    )
+    # Workspace guidance is dispatched through the same bridge as the sub-LM
+    # tools, so a runtime without that bridge must not receive it either.
+    if host_tool_dispatch and "read_workspace_text_batch" in tool_names:
         instructions += "\n\n" + WORKSPACE_BATCH_RLM_INSTRUCTIONS
-    if tool_names & WORKSPACE_MUTATION_TOOL_NAMES:
+    if host_tool_dispatch and tool_names & WORKSPACE_MUTATION_TOOL_NAMES:
         instructions += "\n\n" + WORKSPACE_MUTATION_RLM_INSTRUCTIONS
     if skill_instructions:
         instructions += "\n\n" + "\n\n".join(skill_instructions)
@@ -1513,6 +1571,7 @@ class FleetProgramSpec:
     recursion_enabled: bool = False
     verbose: bool = True
     tool_catalog: FleetToolCatalog | None = None
+    host_tool_dispatch: bool = True
 
     def __post_init__(self) -> None:
         if self.tools is not None and self.tool_catalog is not None:
@@ -1555,13 +1614,19 @@ def build_program(spec: RLMProgramSpec) -> Any:
     if (
         isinstance(sig, type)
         and issubclass(sig, dspy.Signature)
-        and (spec.recursion_enabled or spec.skill_instructions or _tool_names_need_instruction_overlay(tool_names))
+        and (
+            spec.recursion_enabled
+            or spec.skill_instructions
+            or not spec.host_tool_dispatch
+            or _tool_names_need_instruction_overlay(tool_names)
+        )
     ):
         sig = root_signature_for_recursion(
             sig,
             recursion_enabled=spec.recursion_enabled,
             skill_instructions=spec.skill_instructions,
             tool_names=tool_names,
+            host_tool_dispatch=spec.host_tool_dispatch,
         )
     return build_native_rlm(
         signature=sig,
@@ -1586,6 +1651,7 @@ class RLMFactory:
         tools: Sequence[dspy.Tool] | None = None,
         signature: type[dspy.Signature] | str | None = None,
         verbose: bool | None = None,
+        host_tool_dispatch: bool = True,
     ) -> Any:
         return build_program(
             FleetProgramSpec(
@@ -1594,6 +1660,7 @@ class RLMFactory:
                 tools=tools,
                 sub_lm=getattr(models, "sub_lm", None),
                 verbose=self.verbose if verbose is None else verbose,
+                host_tool_dispatch=host_tool_dispatch,
             )
         )
 
@@ -1604,6 +1671,7 @@ __all__ = [
     "RECURSION_RLM_INSTRUCTIONS",
     "REPL_RLM_INSTRUCTIONS",
     "TOOL_RLM_INSTRUCTIONS",
+    "TOOL_RLM_INSTRUCTIONS_NO_DISPATCH",
     "AttachmentContextCapsule",
     "AttachmentContextEntry",
     "AttachmentInput",

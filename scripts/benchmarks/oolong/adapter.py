@@ -448,8 +448,7 @@ async def stage_attachment_context_on_lease(
     content_type: str = "text/plain; charset=utf-8",
 ) -> AttachmentContextCapsule:
     """Stage ``context_window_text`` on the lease volume using Turn path policy."""
-    from fleet_rlm.attachments.models import AttachmentRun
-    from fleet_rlm.attachments.paths import WorkspaceAttachmentPathPolicy
+    from fleet_rlm.attachments import AttachmentRun, WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.storage import AgentAsyncVolumeStorage
 
     body = context_text.encode("utf-8")

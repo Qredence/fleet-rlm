@@ -75,12 +75,12 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
         }
         daytona_fields = next(scope for scope in body["scopes"] if scope["name"] == "daytona-recursive")["fields"]
         fields_by_path = {field["path"]: field["value"] for field in daytona_fields}
-        assert fields_by_path["llm.root.model"] == "databricks-deepseek-v4-1-flash"
-        assert fields_by_path["llm.root.api_key_env"] == "DATABRICKS_TOKEN"
-        assert fields_by_path["llm.root.base_url_env"] == "FLEET_LLM_BASE_URL"
-        assert fields_by_path["llm.sub.model"] == "databricks-deepseek-v4-1-flash"
-        assert fields_by_path["llm.sub.api_key_env"] == "DATABRICKS_TOKEN"
-        assert fields_by_path["llm.sub.base_url_env"] == "FLEET_LLM_BASE_URL"
+        assert fields_by_path["llm.root.model"] == "deepseek-v4.1-flash"
+        assert fields_by_path["llm.root.api_key_env"] == "ALIBABA_API_KEY"
+        assert fields_by_path["llm.root.base_url_env"] == "FLEET_MAAS_BASE_URL"
+        assert fields_by_path["llm.sub.model"] == "deepseek-v4.1-flash"
+        assert fields_by_path["llm.sub.api_key_env"] == "ALIBABA_API_KEY"
+        assert fields_by_path["llm.sub.base_url_env"] == "FLEET_MAAS_BASE_URL"
         inherited = next(field for field in daytona_fields if field["path"] == "rlm.max_iters")
         assert inherited["origin"] == "inherited"
         assert inherited["can_reset"] is False

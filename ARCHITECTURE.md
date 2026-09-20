@@ -27,13 +27,14 @@ state. A Session owns ordered Turns and committed history. A Turn is one user
 request; a Run is an attempt to execute it. An answer or Artifact is public
 only after durable settlement and Turn Commit.
 
-The currently configured production path is retained broker-backed execution:
-each Run receives fresh DSPy program bindings while a healthy Root Sandbox may
-be reused across sequential successful Turns. Native semantic queries remain
-available, and recursive child RLM tools follow the selected runtime policy.
-That choice is configuration, not a claim of value or certification. Consult
-the [ADR 006 status ledger](docs/decisions/006-implementation-status.md) for
-dated evidence and open operational gates.
+The Daytona interpreter keeps model-authored Python and its namespace inside a
+Sandbox. When a Run has authorized Fleet tools, a sandbox-local broker forwards
+JSON-only tool requests to the host and returns sanitized results; it does not
+move model code into the Fleet process. The broker lifecycle is owned by the
+interpreter and closes with its Sandbox lease. Reused root leases reset the
+execution namespace and invocation credential between Turns. DSPy's native
+semantic tools use the same broker path as Fleet tools. Consult the [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
+for dated evidence and open operational gates.
 
 ## Ownership map
 

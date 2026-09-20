@@ -677,15 +677,20 @@ async def _file_info(fs: Any, path: str) -> Any | None:
 
 
 async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
-    info = await _file_info(fs, path)
-    if info is not None:
+    if not create:
+        info = await _file_info(fs, path)
+        if info is None:
+            raise DaytonaAdapterError(
+                message="Workspace Volume mount is unavailable",
+                cause_type="VolumeLayoutMissingMount",
+            )
         _assert_directory(info)
         return
-    if not create:
-        raise DaytonaAdapterError(
-            message="Workspace Volume mount is unavailable",
-            cause_type="VolumeLayoutMissingMount",
-        )
+
+    # Direct creation path (EAFP):
+    # Daytona's create_folder is idempotent for existing directories.
+    # Attempting creation directly eliminates speculative 404 GET /files/info
+    # calls that pollute Daytona provider logs with 'API ERROR' entries.
     try:
         await fs.create_folder(path, _DIRECTORY_MODE)
     except Exception as exc:
@@ -697,9 +702,6 @@ async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
             raise map_provider_error(exc) from exc
         _assert_directory(info)
         return
-    # create_folder returning normally is the creation confirmation; a
-    # success-path re-stat costs one extra provider round-trip per directory
-    # on the session cold-start path for no additional safety.
 
 
 async def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:

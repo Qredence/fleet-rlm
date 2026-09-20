@@ -28,3 +28,24 @@ def test_adapter_comparison_requires_repeated_samples():
 
     with pytest.raises(ValueError, match="two repetitions"):
         run_adapter_comparison(repetitions=1)
+
+
+def test_protocol_outcome_survives_deadline_exception_subclassing():
+    """A finalization-exhaustion subclass must still score as the deadline protocol outcome.
+
+    Exhausted wrap-up capacity raises ``FinalizationExhausted``, which is a
+    ``TimeoutError`` subclass by design. The dataset encodes protocol outcomes,
+    not concrete exception class names, so the replay must classify by the
+    protocol class or every adapter case would silently drift when an exception
+    is specialized.
+    """
+    import json
+
+    from scripts.benchmarks.adapter_replay import DATASET, replay
+
+    case = next(c for c in json.loads(DATASET.read_text())["cases"] if c["id"] == "reserve-ceiling/v1")
+
+    result = replay(case, variant="fleet", asynchronous=False)
+
+    assert result["outcome"] == case["expected"] == "TimeoutError"
+    assert result["scores"]["adapter-outcome/v1"] is True

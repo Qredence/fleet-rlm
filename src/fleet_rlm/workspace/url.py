@@ -124,7 +124,7 @@ def _public_address(host: str) -> str:
         infos = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
     except OSError as exc:
         raise UrlToolError("unreachable", "URL host could not be resolved") from exc
-    addresses = {str(info[4][0]) for info in infos if info[4]}
+    addresses = {str(info[4][0]) for info in infos}
     if not addresses:
         raise UrlToolError("unreachable", "URL host could not be resolved")
     try:

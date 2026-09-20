@@ -122,6 +122,54 @@ def _is_safe_submit_value(node: ast.AST) -> bool:
     return False
 
 
+def _parse_action_module(code: object) -> ast.Module | None:
+    """Parse action source, or return `None` when it is not parseable Python."""
+    if not isinstance(code, str):
+        return None
+    try:
+        return ast.parse(_strip_action_code_fences(code), mode="exec")
+    except SyntaxError:
+        return None
+
+
+def _is_compliant_submit_call(statement: ast.stmt) -> bool:
+    """Whether `statement` is exactly one `SUBMIT(...)` call with data-only values."""
+    if not isinstance(statement, ast.Expr):
+        return False
+    expression = statement.value
+    if (
+        not isinstance(expression, ast.Call)
+        or not isinstance(expression.func, ast.Name)
+        or expression.func.id != "SUBMIT"
+    ):
+        return False
+    if expression.args or any(keyword.arg is None for keyword in expression.keywords):
+        return False
+    return all(_is_safe_submit_value(keyword.value) for keyword in expression.keywords)
+
+
+def _is_safe_answer_binding(statement: ast.stmt) -> bool:
+    """
+    Whether `statement` is a plain `name = <data>` answer binding.
+
+    Bindings qualify only when their value cannot reach a Tool, the provider, an
+    import, or a dunder: the value obeys the same data-only rule as a SUBMIT
+    keyword. This is what separates "shape the answer I already have" from
+    "perform one more piece of work".
+    """
+    if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+        return False
+    target = statement.targets[0]
+    if (
+        not isinstance(target, ast.Name)
+        or target.id.startswith("_")
+        or target.id in {"SUBMIT", "FleetFinalOutputError", "json"}
+        or target.id in _SAFE_SUBMIT_CALLS
+    ):
+        return False
+    return _is_safe_submit_value(statement.value)
+
+
 def is_submit_only_code(code: object) -> bool:
     """
     Determine whether code contains a syntactically valid, submit-only action.
@@ -134,26 +182,36 @@ def is_submit_only_code(code: object) -> bool:
             permitted keyword-value expressions, `false` otherwise.
 
     This validates syntax only; it does not resolve names or evaluate operator
-    behavior.
+    behavior. Use `is_finalization_action` to ask the wider question of whether
+    an action is an acceptable way to end a Turn.
     """
-    if not isinstance(code, str):
+    module = _parse_action_module(code)
+    return module is not None and len(module.body) == 1 and _is_compliant_submit_call(module.body[0])
+
+
+def is_finalization_action(code: object) -> bool:
+    """
+    Determine whether code is an admissible wrap-up finalization action.
+
+    Parameters:
+        code (object): Source code to validate.
+
+    Returns:
+        bool: `true` when the action is any number of non-effectful
+            `name = <data>` bindings followed by exactly one compliant
+            `SUBMIT(...)` call, `false` otherwise.
+
+    Wrap-up exists to stop exploration, not to forbid shaping an answer. A
+    binding whose value is data-only cannot call a Tool, import a module, or
+    reach the provider, so it is admitted; every other statement is rejected.
+    A submit-only action is always a finalization action.
+    """
+    module = _parse_action_module(code)
+    if module is None or not module.body:
         return False
-    try:
-        module = ast.parse(_strip_action_code_fences(code), mode="exec")
-    except SyntaxError:
+    if not _is_compliant_submit_call(module.body[-1]):
         return False
-    if len(module.body) != 1 or not isinstance(module.body[0], ast.Expr):
-        return False
-    expression = module.body[0].value
-    if (
-        not isinstance(expression, ast.Call)
-        or not isinstance(expression.func, ast.Name)
-        or expression.func.id != "SUBMIT"
-    ):
-        return False
-    if expression.args or any(keyword.arg is None for keyword in expression.keywords):
-        return False
-    return all(_is_safe_submit_value(keyword.value) for keyword in expression.keywords)
+    return all(_is_safe_answer_binding(statement) for statement in module.body[:-1])
 
 
 def normalize_action_code(code: object) -> str:
