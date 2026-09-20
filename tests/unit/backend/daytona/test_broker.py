@@ -9,6 +9,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -176,3 +177,19 @@ def test_settled_broker_rejects_new_calls_and_unknown_results(
     with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
         assert client.post("/tool_call", json={"id": "late", "tool_name": "tool"}).status_code == 409
         assert client.post("/result", json={"id": "unknown", "lease": "old", "result": 1}).status_code == 404
+
+
+def test_poll_records_rejected_tool_result_delivery() -> None:
+    broker = DaytonaHttpToolBroker(object(), port=1)
+    client = MagicMock()
+    client.get.return_value.json.return_value = {
+        "requests": [{"id": "call-1", "lease": "lease-1", "tool_name": "answer", "args": [], "kwargs": {}}]
+    }
+    client.post.return_value.status_code = 409
+    broker._client = client
+    broker.bind_tools({"answer": lambda: {"ok": True}})
+
+    broker._poll_once()
+
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"

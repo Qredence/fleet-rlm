@@ -105,8 +105,8 @@ def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> No
 
 
 def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> None:
-    assert ".get('content')" in TOOL_RLM_INSTRUCTIONS
-    assert "guarded ``json.loads`` fallback" in TOOL_RLM_INSTRUCTIONS
+    assert "workspace_path" in TOOL_RLM_INSTRUCTIONS
+    assert "workspace reference" in TOOL_RLM_INSTRUCTIONS
     assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
     assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
     assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS

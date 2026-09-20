@@ -18,7 +18,7 @@ from daytona import CreateSnapshotParams, Resources
 
 from fleet_rlm.daytona.errors import is_sandbox_not_found, sanitize_provider_message
 from fleet_rlm.daytona.lifecycle import confirm_absence
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
+from fleet_rlm.daytona.platform import LiveDaytonaPlatform
 from fleet_rlm.daytona.provisioning import (
     DEFAULT_CHILD_SNAPSHOT_NAME,
     DEFAULT_SNAPSHOT_NAME,
@@ -30,6 +30,7 @@ from fleet_rlm.daytona.provisioning import (
     environment_manifest,
     snapshot_dependency_import_names,
 )
+from fleet_rlm.daytona.runtime import build_daytona_client
 
 
 def _parser() -> argparse.ArgumentParser:

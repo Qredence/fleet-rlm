@@ -250,6 +250,7 @@ def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> Non
     class _Response:
         def __init__(self, body: dict[str, object]) -> None:
             self._body = body
+            self.status_code = 200
 
         def json(self) -> dict[str, object]:
             return self._body

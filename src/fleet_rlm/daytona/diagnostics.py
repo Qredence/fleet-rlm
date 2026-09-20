@@ -15,7 +15,6 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_erro
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
-    build_daytona_client,
 )
 from fleet_rlm.daytona.provisioning import (
     DaytonaSandboxSpec,
@@ -26,6 +25,7 @@ from fleet_rlm.daytona.provisioning import (
     verify_sandbox_workspace_mount,
     volume_config_from_settings,
 )
+from fleet_rlm.daytona.runtime import build_daytona_client
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.runtime.bindings import workspace_volume_subpath
 

@@ -887,9 +887,9 @@ async def acquire_ephemeral_interpreter(
     from fleet_rlm.daytona.platform import (
         LiveDaytonaPlatform,
         LiveDaytonaVolumeClient,
-        build_daytona_client,
         sandbox_state,
     )
+    from fleet_rlm.daytona.runtime import build_daytona_client
 
     client = build_daytona_client(settings)
     spec = sandbox_spec_from_settings(settings)

@@ -33,6 +33,8 @@ MAX_URL_REDIRECTS = 3
 URL_FETCH_CHUNK_BYTES = 64 * 1024
 URL_FETCH_TIMEOUT_SECONDS = 10.0
 URL_WORKSPACE_PREFIX = "sources/urls"
+URL_INLINE_CONTENT_MAX_BYTES = 1 * 1024 * 1024
+URL_CONTENT_PREVIEW_CHARS = 4_000
 URL_CACHE_MAX_ENTRIES_TOTAL = 64
 URL_CACHE_MAX_BYTES_TOTAL = 64 * 1024 * 1024
 _CHARSET_RE = re.compile(r"(?:^|;)\s*charset\s*=\s*[\"']?([^;\"']+)", re.IGNORECASE)
@@ -559,17 +561,22 @@ class UrlToolHost:
             "source_id": source_id,
             "canonical_url": canonical_url,
             "workspace_path": path,
-            "content": text,
             "byte_size": len(data),
             "checksum_sha256": hashlib.sha256(data).hexdigest(),
             "cache_hit": cache_hit,
         }
+        if len(data) <= URL_INLINE_CONTENT_MAX_BYTES:
+            result["content"] = text
+        else:
+            result["content_available"] = True
+            result["content_preview"] = text[:URL_CONTENT_PREVIEW_CHARS]
         if content_type is not None:
             result["content_type"] = content_type
         return result
 
 
 __all__ = [
+    "URL_INLINE_CONTENT_MAX_BYTES",
     "InMemoryUrlSourceStore",
     "UrlFetchResult",
     "UrlFetcher",

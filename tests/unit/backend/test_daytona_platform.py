@@ -9,7 +9,7 @@ import pytest
 from pydantic import SecretStr
 
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.platform import build_daytona_client
+from fleet_rlm.daytona.runtime import build_daytona_client
 
 
 @pytest.mark.asyncio
