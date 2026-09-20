@@ -8,8 +8,12 @@ from fleet_rlm.rlm.program import (
     RECURSION_RLM_INSTRUCTIONS,
     REPL_RLM_INSTRUCTIONS,
     TOOL_RLM_INSTRUCTIONS,
+    TOOL_RLM_INSTRUCTIONS_NO_DISPATCH,
     WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
+    FleetProgramSpec,
     FleetRLMSignature,
+    RLMOptions,
+    build_program,
     compose_rlm_instructions,
     fleet_rlm_instruction_fragments,
     root_signature_for_recursion,
@@ -170,3 +174,66 @@ def test_workspace_capability_declares_temporary_durable_and_commit_gated_state(
         assert marker in daytona
     assert "unavailable" in unavailable
     assert "REPL variables" in unavailable
+
+
+def test_runtime_without_host_tool_dispatch_stops_advertising_those_tools() -> None:
+    """A Sandbox with no host-tool bridge must not be told to call unbound tools."""
+    fragments = fleet_rlm_instruction_fragments(recursion_enabled=True, host_tool_dispatch=False)
+
+    assert fragments.tools == TOOL_RLM_INSTRUCTIONS_NO_DISPATCH
+    assert fragments.recursion is None
+    composed = fragments.compose()
+    # This overlay removes Fleet-provided tools only. DSPy adds its native
+    # semantic tools outside this Signature instruction composition.
+    for guidance in (
+        "call ``fetch_url`` once",
+        "Use ``rlm_query(capsule=capsule)``",
+    ):
+        assert guidance not in composed
+    assert "Do not probe for" in composed
+    assert "``llm_query``" not in composed
+
+
+def test_host_tool_dispatch_still_emits_workspace_guidance_only_when_dispatched() -> None:
+    """Workspace guidance shares the host-tool bridge, so it follows the same capability."""
+    signature = FleetRLMSignature.with_instructions("base")
+    dispatched = root_signature_for_recursion(
+        signature,
+        recursion_enabled=False,
+        tool_names=frozenset({"read_workspace_text_batch"}),
+        host_tool_dispatch=True,
+    )
+    undispatchable = root_signature_for_recursion(
+        signature,
+        recursion_enabled=False,
+        tool_names=frozenset({"read_workspace_text_batch"}),
+        host_tool_dispatch=False,
+    )
+
+    assert "read_workspace_text_batch" in dispatched.instructions
+    assert "read_workspace_text_batch" not in undispatchable.instructions
+
+
+def test_build_program_threads_host_tool_dispatch_into_the_signature() -> None:
+    """The spec capability reaches the built program's instructions."""
+    options = RLMOptions(max_iters=1, max_llm_calls=1)
+    without = build_program(FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=False))
+    with_dispatch = build_program(
+        FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
+    )
+
+    assert "Fleet recursion, URL-fetch, or Workspace host tool" in without.signature.instructions
+    assert "Fleet recursion, URL-fetch, or Workspace host tool" not in with_dispatch.signature.instructions
+
+
+def test_dspy_native_semantic_tools_survive_fleet_no_dispatch_overlay() -> None:
+    """Fleet instruction filtering cannot remove DSPy's built-in semantic tools."""
+    from dspy.predict.rlm import ACTION_INSTRUCTIONS_TEMPLATE
+
+    options = RLMOptions(max_iters=1, max_llm_calls=1)
+    rlm = build_program(FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=False))
+
+    assert "``llm_query``" not in rlm.signature.instructions
+    assert "llm_query(prompt)" in ACTION_INSTRUCTIONS_TEMPLATE
+    assert "llm_query(prompt)" in rlm.generate_action.signature.instructions
+    assert set(rlm._make_llm_tools()) == {"llm_query", "llm_query_batched"}

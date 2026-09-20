@@ -244,7 +244,9 @@ def translate_fs_tool_errors(
     """Map storage failures to a closed model-facing error vocabulary."""
     if isinstance(exc, FilesystemToolError):
         raise exc
-    if getattr(exc, "code", None) == "unsupported_storage":
+    from fleet_rlm.workspace.storage import WorkspaceStorageError
+
+    if isinstance(exc, WorkspaceStorageError) or getattr(exc, "code", None) == "unsupported_storage":
         raise error_type("unsupported_storage", f"{domain} storage does not support this mutation") from None
     if isinstance(exc, FileNotFoundError):
         raise error_type("not_found", f"{domain} file was not found") from None
@@ -760,7 +762,7 @@ class WorkspaceToolHost:
 
 
 __all__ = [
-    "DAYTONA_WORKSPACE_CAPABILITY" if False else "MAX_PUBLIC_LIST_LIMIT",
+    "MAX_PUBLIC_LIST_LIMIT",
     "MAX_PUBLIC_READ_CHARS",
     "MAX_WORKSPACE_TEXT_BATCH_CHARS",
     "MAX_WORKSPACE_TEXT_BATCH_ITEMS",
@@ -769,16 +771,16 @@ __all__ = [
     "FilesystemToolError",
     "HostWorkspaceAccessGateway",
     "SessionWorkspace",
-    "UNAVAILABLE_WORKSPACE_CAPABILITY" if False else "WorkspaceAccessGateway",
+    "WorkspaceAccessGateway",
     "WorkspaceCapabilityMetadata",
     "WorkspaceConflictError",
+    "WorkspaceEntry",
     "WorkspaceFileConflictError",
     "WorkspaceFileEntry",
     "WorkspaceFileList",
     "WorkspaceFileService",
     "WorkspaceFileSession",
     "WorkspaceListResult",
-    "WorkspaceEntry",
     "WorkspaceTextPage",
     "WorkspaceToolError",
     "WorkspaceToolHost",

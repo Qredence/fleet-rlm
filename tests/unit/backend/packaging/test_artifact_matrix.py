@@ -36,7 +36,7 @@ _REQUIRED_ASSET_PATHS = (
     "fleet_rlm/py.typed",
     "fleet_rlm/daytona/snapshot-requirements.txt",
     "fleet_rlm/daytona/provisioning.py",
-    "fleet_rlm/daytona/workspace_agent/runtime.py",
+    "fleet_rlm/daytona/sync_bridge.py",
     "fleet_rlm/skills/bundled/README.md",
     "fleet_rlm/skills/bundled/data-analysis/SKILL.md",
     "fleet_rlm/skills/bundled/dspy-rlm/SKILL.md",
@@ -232,7 +232,6 @@ for profile in provisioning.DaytonaEnvironmentProfile:
 assert manifests[provisioning.DaytonaEnvironmentProfile.SESSION].dependencies
 assert not manifests[provisioning.DaytonaEnvironmentProfile.SEMANTIC_CHILD].dependencies
 assert manifests[provisioning.DaytonaEnvironmentProfile.WORKSPACE_CHILD].volume_allowed
-assert files('fleet_rlm.daytona.workspace_agent').joinpath('runtime.py').read_text()
 """
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(

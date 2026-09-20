@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -31,12 +33,14 @@ from tests.live.backend._evidence import candidate_identity, write_receipt
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "databricks-deepseek-v4-1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "databricks-deepseek-v4-1-flash")
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
 _CONTRACT_ID = "fleet.daytona-recursive-batch"
 _TOKEN_A = "BATCH_TOKEN_ALPHA"
 _TOKEN_B = "BATCH_TOKEN_BETA"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
+_TRACE_WAIT_SECONDS = 20.0
+_TRACE_OPERATION_TIMEOUT_SECONDS = 5.0
 
 
 class BatchResult(dspy.Signature):
@@ -99,6 +103,96 @@ class _ChildEvidence:
     batch_answers: list[str] | None = None
 
 
+def _trace_id_from_chunks(chunks: list[dict[str, Any]]) -> str:
+    """Return the root trace ID emitted in the public Turn metadata."""
+    for chunk in chunks:
+        for key in ("messageMetadata", "metadata"):
+            value = chunk.get(key)
+            if isinstance(value, dict) and isinstance(value.get("traceId"), str) and value["traceId"]:
+                return value["traceId"]
+    raise AssertionError("live canary did not expose a root MLflow trace ID")
+
+
+def _trace_hierarchy(trace: Any, *, trace_id: str) -> dict[str, object]:
+    """Require one Fleet root and two recursive child spans in one trace."""
+    spans = list(getattr(getattr(trace, "data", None), "spans", ()) or ())
+    matching = [span for span in spans if getattr(span, "trace_id", None) == trace_id]
+    roots = [
+        span
+        for span in matching
+        if getattr(span, "name", None) == "fleet_turn" and not getattr(span, "parent_id", None)
+    ]
+    if len(roots) != 1:
+        raise AssertionError("MLflow trace must contain exactly one fleet_turn root span")
+    root = roots[0]
+    root_span_id = getattr(root, "span_id", None)
+    spans_by_id = {
+        span_id: span for span in matching if isinstance(span_id := getattr(span, "span_id", None), str) and span_id
+    }
+    children = [span for span in matching if getattr(span, "name", None) == "RLM.recursive_call"]
+    if len(children) < 2:
+        raise AssertionError("MLflow trace must contain two recursive child spans")
+    for child in children:
+        parent_id = getattr(child, "parent_id", None)
+        visited: set[str] = set()
+        while parent_id != root_span_id:
+            if not isinstance(parent_id, str) or parent_id in visited or parent_id not in spans_by_id:
+                raise AssertionError("MLflow recursive child span has no valid parent chain to fleet_turn")
+            visited.add(parent_id)
+            parent_id = getattr(spans_by_id[parent_id], "parent_id", None)
+    return {"root_span": "fleet_turn", "child_spans": len(children), "trace_id": trace_id}
+
+
+def _bounded_call(function: Any, *, timeout: float) -> Any:
+    """Run one blocking MLflow SDK call without extending the canary deadline."""
+    result: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+    def invoke() -> None:
+        try:
+            result.put((True, function()))
+        except BaseException:
+            result.put((False, None))
+
+    worker = threading.Thread(target=invoke, name="fleet-mlflow-canary-call", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise TimeoutError("MLflow SDK operation exceeded its bounded wait")
+    try:
+        succeeded, value = result.get_nowait()
+    except queue.Empty:
+        raise RuntimeError("MLflow SDK operation produced no result") from None
+    if not succeeded:
+        raise RuntimeError("MLflow SDK operation failed")
+    return value
+
+
+def _retrieve_trace_hierarchy(trace_id: str) -> dict[str, object]:
+    """Flush and retrieve the trace with a bounded wait for async export."""
+    import mlflow
+    from mlflow import MlflowClient
+
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        try:
+            _bounded_call(lambda: flush(terminate=False), timeout=_TRACE_OPERATION_TIMEOUT_SECONDS)
+        except Exception:
+            raise AssertionError("MLflow trace flush did not complete within its bounded wait") from None
+    deadline = time.monotonic() + _TRACE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            trace = _bounded_call(
+                lambda: MlflowClient().get_trace(trace_id, display=False, flush=True),
+                timeout=min(_TRACE_OPERATION_TIMEOUT_SECONDS, max(0.1, deadline - time.monotonic())),
+            )
+            return _trace_hierarchy(trace, trace_id=trace_id)
+        except AssertionError:
+            raise
+        except Exception:
+            time.sleep(0.5)
+    raise AssertionError("MLflow root/child trace was not retrievable before the canary deadline") from None
+
+
 def _live_enabled() -> bool:
     return os.environ.get("FLEET_LIVE", "").strip().lower() in _LIVE_VALUES
 
@@ -150,7 +244,9 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
             # Daytona Root + two child sandboxes can exceed the default 60s claim
             # stale window during preparation; match other live canaries.
             "run_stale_after_seconds": 600,
-            "mlflow_tracing_enabled": False,
+            "mlflow_tracing_enabled": True,
+            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_URI", "http://127.0.0.1:5001"),
+            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-canary"),
         }
     )
 
@@ -305,12 +401,44 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert len(child_evidence.sandbox_ids) == 2
             assert child_evidence.sandbox_ids[0] != child_evidence.sandbox_ids[1]
             assert len(child_evidence.volume_subpaths) == 2
-            assert child_evidence.volume_subpaths[0] != child_evidence.volume_subpaths[1]
+            # Semantic children are deliberately volumeless. Session-analysis
+            # children instead receive distinct scoped Volume subpaths.
+            assert (
+                child_evidence.volume_subpaths == ["", ""]
+                or child_evidence.volume_subpaths[0] != child_evidence.volume_subpaths[1]
+            )
             assert sorted(child_evidence.call_indexes) == [1, 2]
             assert child_evidence.peak_observed == 2
             assert child_evidence.cleanups == 2
             assert child_evidence._active == 0
+            trace_id = _trace_id_from_chunks(chunks)
+            trace_evidence = _retrieve_trace_hierarchy(trace_id)
             runtime = getattr(resources, "runtime", None)
+            retained_roots = tuple(runtime.roots)
+            assert len(retained_roots) == 1
+            followup = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Verify the fresh execution namespace for this second Turn. Do not call any tools. "
+                        "Execute assert 'outcomes' not in globals(), then typed "
+                        "SUBMIT(answer='fresh invocation confirmed', evidence='namespace reset')."
+                    )
+                },
+                headers={"Idempotency-Key": f"daytona-retained-root-{uuid4()}"},
+            )
+            assert followup.status_code == 200
+            followup_chunks, followup_done = _sse_chunks(followup)
+            assert followup_done == 1
+            assert followup_chunks[-1].get("finishReason") == "stop"
+            assert tuple(runtime.roots) == retained_roots
+            followup_code = "\n".join(
+                str(chunk.get("data", {}).get("code", ""))
+                for chunk in followup_chunks
+                if chunk.get("type") == "data-rlm-code"
+            )
+            assert "globals()" in followup_code
+            assert "fresh invocation confirmed" in str(followup_chunks)
             close = getattr(runtime, "close_root_session", None)
             if callable(close):
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
@@ -333,10 +461,12 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             "candidate": candidate_identity(),
             "assertions": {
                 "ordered_root_batch": True,
+                "retained_root_second_turn": True,
                 "native_child_count": 2,
                 "peak_child_concurrency": child_evidence.peak_observed,
             },
             "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "trace": trace_evidence,
             "passed": True,
         }
     )

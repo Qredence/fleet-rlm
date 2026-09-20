@@ -127,7 +127,7 @@ def _driver(lifecycle, runner, cleanup):
 
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
@@ -165,7 +165,7 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
@@ -216,7 +216,7 @@ async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_rac
 
 @pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
-    from fleet_rlm.chat.run_ownership import ClaimHeartbeat
+    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 

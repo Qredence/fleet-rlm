@@ -110,7 +110,7 @@ def _source_tools() -> dict[str, dspy.Tool]:
     workspace_memory_tool_host = _import_moved_symbol("WorkspaceMemoryToolHost", "fleet_rlm.workspace.memory")
     project_tool_host = _import_moved_symbol("ProjectToolHost", "fleet_rlm.workspace.projects")
     from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments.tools import AttachmentToolHost
+    from fleet_rlm.attachments import AttachmentToolHost
 
     url_source_store = _import_moved_symbol("UrlSourceStore", "fleet_rlm.workspace.url")
     url_tool_host = _import_moved_symbol("UrlToolHost", "fleet_rlm.workspace.url")

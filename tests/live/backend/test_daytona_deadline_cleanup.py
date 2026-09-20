@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._evidence import candidate_identity, write_receipt
 from tests.live.backend._mvp_support import _live_settings, _strict_cleanup
@@ -46,19 +46,16 @@ def _install_blocking_execute_code(
     release: threading.Event,
 ) -> None:
     def blocking(
-        self: DaytonaHttpToolBroker,
+        self: DaytonaCodeInterpreter,
         code: str,
         variables: dict[str, Any] | None = None,
-        *,
-        timeout_s: float = 130.0,
-        on_stdout: Any | None = None,
     ) -> Any:
-        del self, code, variables, timeout_s, on_stdout
+        del self, code, variables
         entered.set()
         release.wait(timeout=240)
         raise TimeoutError("host-forced deadline stall")
 
-    monkeypatch.setattr(DaytonaHttpToolBroker, "execute_code", blocking)
+    monkeypatch.setattr(DaytonaCodeInterpreter, "_execute_once", blocking)
 
 
 def _case_settings(tmp_path: Path) -> Settings:

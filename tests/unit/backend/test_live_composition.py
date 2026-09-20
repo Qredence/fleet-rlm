@@ -118,7 +118,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
 async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancellation from composition build must not leave bridge loop authority."""
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 
     seen: list[SyncBridgeDispatcher] = []
 
@@ -185,7 +185,7 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
 def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
     import fleet_rlm.composition.testing as common
     from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
-    from fleet_rlm.attachments.local_catalog import LocalAttachmentCatalog
+    from fleet_rlm.attachments import LocalAttachmentCatalog
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
 
     builder = getattr(common, "build_local_storage_adapters", None)
@@ -516,7 +516,7 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
 async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -> None:
     """Unsettled preparation must keep the bridge fenced for deferred disposal."""
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 
     class Preparation:
         async def aclose(self) -> bool:
@@ -610,7 +610,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     was removed in P33.
     """
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.broker import SyncBridgeDispatcher
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
         turn_runtime=object(),

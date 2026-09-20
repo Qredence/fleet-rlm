@@ -38,7 +38,6 @@ CLI_CONTRACT_COMMANDS = (("uv", "run", "fleet-rlm", "--help"),)
 
 CANONICAL_RUN_ENVIRONMENTS = frozenset({"daytona"})
 CANONICAL_ENVIRONMENT_DOCS = (
-    Path("PRODUCT.md"),
     Path("ARCHITECTURE.md"),
     Path("docs/reference/database.md"),
 )

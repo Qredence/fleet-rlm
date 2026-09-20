@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 
 from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
 from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
-from fleet_rlm.persistence.repositories.sandbox_bindings import SqlAlchemySandboxBindingStore
+from fleet_rlm.persistence.repositories.sessions import SqlAlchemySandboxBindingStore
 from fleet_rlm.runtime.bindings import SandboxBinding
 
 

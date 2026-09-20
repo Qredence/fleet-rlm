@@ -36,6 +36,7 @@ from scripts.benchmarks.oolong.adapter import (
     resolve_datapoints,
     score_prediction,
     stage_attachment_context_on_lease,
+    sum_lm_usage,
 )
 
 RECEIPT_SCHEMA = "fleet.oolong-predict/v1"
@@ -54,6 +55,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", default="validation", help="HF split (synth: validation|test)")
     parser.add_argument("--index", type=int, default=0, help="starting row index")
     parser.add_argument("--limit", type=int, default=1, help="rows to score (default N=1 dry)")
+    parser.add_argument(
+        "--context-len",
+        type=int,
+        default=None,
+        help="Select synth rows by context window size (e.g. 131072 for the Oolong 128K tier)",
+    )
+    parser.add_argument(
+        "--row-dataset",
+        default=None,
+        help="Select synth rows by the row's own dataset field (e.g. trec_coarse)",
+    )
     parser.add_argument(
         "--hf",
         action="store_true",
@@ -123,13 +135,15 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
         start_index=args.index,
         limit=args.limit,
         fixture=fixture,
+        context_len=getattr(args, "context_len", None),
+        row_dataset=getattr(args, "row_dataset", None),
     )
     explicit_answer = args.answer.strip()
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
     for item in loaded:
         answer = explicit_answer or _default_dry_answer(item.row)
-        kwargs = build_predict_kwargs(item.row, mode="dry_shortcut")
+        kwargs = build_predict_kwargs(item.row, mode="dry_shortcut", dataset=args.dataset)
         score = score_prediction(item.row, answer, dataset=args.dataset, model_name=args.model_name)
         rows.append(
             {
@@ -151,6 +165,7 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
     revision = next((item.dataset_revision for item in loaded if item.dataset_revision), None)
     return build_receipt(
         mode="dry",
+        selection=_selection(args),
         dataset=args.dataset,
         split=args.split,
         limit=args.limit,
@@ -173,12 +188,15 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
         start_index=args.index,
         limit=args.limit,
         fixture=_fixture_path(args),
+        context_len=getattr(args, "context_len", None),
+        row_dataset=getattr(args, "row_dataset", None),
     )
     loop = asyncio.get_running_loop()
     turn_timeout = float(getattr(settings, "turn_timeout_seconds", 1800))
     wrap_up_seconds = float(getattr(settings, "rlm_wrap_up_seconds", 0))
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
+    usages: list[Mapping[str, object] | None] = []
     for item in loaded:
         deadline = loop.time() + turn_timeout
         turn_budget = TurnBudget(deadline=deadline)
@@ -187,6 +205,7 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
         primary_error: BaseException | None = None
         cleanup_error: BaseException | None = None
         answer = ""
+        usage: Mapping[str, object] | None = None
         kwargs: dict[str, Any] = {}
         try:
             context_text = str(item.row.get("context_window_text", ""))
@@ -197,15 +216,20 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
                 mode="production",
                 session_id=lease.session_id,
                 attachment_context=capsule,
+                dataset=args.dataset,
             )
-            answer = await invoke_live_prediction(
+            prediction = await invoke_live_prediction(
                 settings,
                 kwargs,
                 interpreter=lease.interpreter,
                 deadline=deadline,
                 wrap_up_seconds=wrap_up_seconds,
                 turn_budget=turn_budget,
+                dataset=args.dataset,
             )
+            answer = prediction.answer
+            usage = prediction.usage
+            usages.append(usage)
         except BaseException as exc:
             primary_error = exc
         finally:
@@ -228,6 +252,7 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
                 "request_chars": len(str(kwargs.get("request", ""))),
                 "context_mode": kwargs_context_mode(kwargs),
                 "answer_chars": len(answer),
+                "usage": dict(usage) if usage else None,
                 "mocked": {"provider_llm": False, "daytona_interpreter": False},
             }
         )
@@ -235,6 +260,8 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
     revision = next((item.dataset_revision for item in loaded if item.dataset_revision), None)
     return build_receipt(
         mode="live",
+        usage=sum_lm_usage(usages),
+        selection=_selection(args),
         dataset=args.dataset,
         split=args.split,
         limit=args.limit,
@@ -245,6 +272,47 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
         dataset_revision=revision,
         source=loaded[0].source,
     )
+
+
+def _selection(args: argparse.Namespace) -> dict[str, object] | None:
+    """Freeze the tier selection so a receipts-only run is reproducible."""
+    selection = {
+        key: value
+        for key, value in (
+            ("context_len", getattr(args, "context_len", None)),
+            ("row_dataset", getattr(args, "row_dataset", None)),
+        )
+        if value is not None
+    }
+    return selection or None
+
+
+def _maybe_enable_mlflow_tracing(settings: Any) -> bool:
+    """Activate Fleet MLflow DSPy tracing for live predict when policy allows."""
+    if not getattr(settings, "mlflow_tracing_enabled", False):
+        return False
+    try:
+        from fleet_rlm.observability.tracing import configure_tracing, is_tracing_active
+
+        if not configure_tracing(settings):
+            print(
+                "oolong predict MLflow tracing unavailable; continuing without traces",
+                file=sys.stderr,
+            )
+            return False
+        return is_tracing_active()
+    except Exception as exc:
+        print(f"oolong predict MLflow tracing setup skipped: {exc}", file=sys.stderr)
+        return False
+
+
+def _flush_mlflow_tracing() -> None:
+    try:
+        from fleet_rlm.observability.tracing import flush_tracing
+
+        flush_tracing()
+    except Exception as exc:
+        print(f"oolong predict MLflow trace flush skipped: {exc}", file=sys.stderr)
 
 
 def _maybe_log_mlflow(args: argparse.Namespace, receipt: Mapping[str, object]) -> None:
@@ -272,7 +340,12 @@ def _run_live(args: argparse.Namespace) -> dict[str, object]:
     _require_live_flag()
     load_dotenv(_REPO_ROOT / ".env", override=False)
     settings = require_live_execution()
-    return asyncio.run(_run_live_async(args, settings))
+    tracing_active = _maybe_enable_mlflow_tracing(settings)
+    try:
+        return asyncio.run(_run_live_async(args, settings))
+    finally:
+        if tracing_active:
+            _flush_mlflow_tracing()
 
 
 def main(argv: list[str] | None = None) -> int:

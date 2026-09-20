@@ -47,9 +47,9 @@ def test_canonical_environment_sets_report_a_missing_declaration(tmp_path: Path)
         tmp_path,
         "Canonical Run Environment set: `daytona`.",
     )
-    product_path = tmp_path / "PRODUCT.md"
-    product_path.write_text("# Product\n", encoding="utf-8")
+    architecture_path = tmp_path / "ARCHITECTURE.md"
+    architecture_path.write_text("# Architecture\n", encoding="utf-8")
 
     assert check_canonical_environment_sets(tmp_path) == [
-        "missing canonical Run Environment declaration in PRODUCT.md; expected ['daytona']"
+        "missing canonical Run Environment declaration in ARCHITECTURE.md; expected ['daytona']"
     ]

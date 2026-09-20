@@ -296,6 +296,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
             "labels": {"fleet.runtime": "recursive-child", "fleet.profile": "semantic-child"},
             "with_volume": False,
             "ephemeral": True,
+            "network_block_all": True,
         }
     ]
 

@@ -9,7 +9,14 @@ import dspy
 import pytest
 from dspy.utils.exceptions import LMServerError
 
-from fleet_rlm.rlm.budget import AdapterBudget, BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+from fleet_rlm.rlm.budget import (
+    AdapterBudget,
+    BudgetDimension,
+    BudgetLimits,
+    FinalizationExhausted,
+    TurnBudget,
+    TurnBudgetExhausted,
+)
 from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
@@ -97,7 +104,7 @@ async def test_provider_retry_and_parse_correction_share_finalization_slots(asyn
     source.num_retries = 3
     turn = TurnBudget(deadline=time.monotonic() + 30)
     adapter = FleetJSONAdapter(deadline=turn.deadline, wrap_up_seconds=60, budget=turn)
-    with pytest.raises(TimeoutError, match="wrap-up action"):
+    with pytest.raises(FinalizationExhausted):
         await invoke(adapter, source, asynchronous)
     assert len(source.calls) == turn.snapshot()["provider_attempts"] == 2
     assert adapter.wrap_up_summary()["wrap_up_attempts"] == 2
@@ -295,7 +302,7 @@ async def test_schema_fallback_consumes_finalization_ceiling(asynchronous) -> No
     source = StructuredLM(["", "", GOOD])
     turn = TurnBudget(deadline=time.monotonic() + 30)
     adapter = FleetJSONAdapter(budget=turn, wrap_up_seconds=60)
-    with pytest.raises(TimeoutError, match="wrap-up action"):
+    with pytest.raises(FinalizationExhausted):
         await invoke(adapter, source, asynchronous)
     assert len(source.calls) == turn.snapshot()["provider_attempts"] == 2
     assert adapter.wrap_up_summary()["wrap_up_attempts"] == 2
@@ -390,3 +397,36 @@ def test_truncated_flag_set_when_output_hits_configured_max() -> None:
 
     assert _lm_max_tokens(FakeLM()) == 16384
     assert _lm_max_tokens(object()) is None
+
+
+@pytest.mark.asyncio
+async def test_parse_repair_is_counted_for_turn_telemetry() -> None:
+    """A corrective re-ask is a full provider call and must be reportable.
+
+    Cap-saturated actions cannot close their JSON, so they pay for a second call.
+    Without this counter that recovery is invisible except as an unexplained
+    second LM child span on one action.
+    """
+    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=4))
+    source = _ScriptedLM(["", GOOD])
+    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    adapter = FleetJSONAdapter(budget=turn)
+
+    result = await invoke(adapter, models.root_lm, asynchronous=True)
+
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert adapter.repair_summary()["parse_repairs_used"] == 1
+
+
+@pytest.mark.asyncio
+async def test_parse_repair_counter_stays_zero_without_a_reask() -> None:
+    """A well-formed first response must not report a repair."""
+    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=4))
+    source = _ScriptedLM([GOOD])
+    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    adapter = FleetJSONAdapter(budget=turn)
+
+    result = await invoke(adapter, models.root_lm, asynchronous=True)
+
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert adapter.repair_summary()["parse_repairs_used"] == 0

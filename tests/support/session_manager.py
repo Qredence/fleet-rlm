@@ -41,6 +41,7 @@ class _FakeFilesystem:
         self.uploaded: dict[str, bytes] = {}
         self.created: list[tuple[str, str]] = []
         self.info_failures: dict[str, BaseException] = {}
+        self.create_failures: dict[str, BaseException] = {}
 
     async def get_file_info(self, path: str) -> _FakeFileInfo:
         failure = self.info_failures.pop(path, None)
@@ -53,6 +54,14 @@ class _FakeFilesystem:
         raise FileNotFoundError(path)
 
     async def create_folder(self, path: str, mode: str) -> None:
+        failure = self.create_failures.pop(path, None)
+        if failure is not None:
+            raise failure
+        # Model mkdir: idempotent for an existing directory, but a path already
+        # occupied by a regular file fails. Without this the create-first
+        # volume-layout path would never observe a layout conflict.
+        if path in self.files:
+            raise FileExistsError(path)
         self.directories.add(path)
         self.created.append((path, mode))
 

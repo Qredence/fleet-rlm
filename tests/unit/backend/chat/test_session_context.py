@@ -12,7 +12,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
-    from fleet_rlm.attachments.models import PreparedAttachments
+    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner

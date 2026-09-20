@@ -1,61 +1,47 @@
 """Minimal Daytona-backed code interpreter for dspy.RLM wiring.
 
-Live execution uses one persistent Python namespace inside the sandbox broker
-process so generated code and localhost host-tool wrappers share a namespace.
-
-Host-tool / SUBMIT mediation (B1):
-- In-process backends bind host callables directly (offline seam).
-- Daytona sandbox backends use an HTTP-in-sandbox broker + host poll
-  (Daytona-appropriate channel; mirrors DSPy host-tool + FinalOutput outcomes).
-
-Public per-step output projection (stdout delta replay, stream closure, final
-flush, native-error privacy) lives in ``interpreter_output.py``. The sync
-view over async Daytona sandboxes lives in ``broker.py``.
+Executes Python actions either in-process (offline) or within an AsyncDaytona sandbox
+via process execution or code interpreter capability. Handles SUBMIT final outputs,
+host tools, observation events, and execution budget capping.
 """
 
 from __future__ import annotations
 
-import ast
 import asyncio
 import contextlib
 import contextvars
-import hashlib
 import inspect
 import io
 import json
 import logging
+import shlex
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
 from dspy.utils.callback import BaseCallback, with_callbacks
 
-from fleet_rlm.daytona.broker import (
-    DEFAULT_BROKER_PORT,
-    FINAL_OUTPUT_MARKER,
-    FleetFinalOutputError,
-    SyncBridgeDispatcher,
-    build_submit_setup_code,
-    extract_final_payload,
-    sync_sandbox,
-    tombstone_sync_sandbox,
-)
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.interpreter_output import (
-    OutputCallback,
-    _close_output_stream,
-    _emit_output_delta,
-    _flush_step_output,
-    _OutputStreamState,
-    _PublicStdoutProjector,
+from fleet_rlm.daytona.models import (
+    FINAL_OUTPUT_MARKER,
+    FleetFinalOutputError,
+    build_submit_setup_code,
+    extract_final_payload,
+    final_output_frame,
+    remote_submit_setup_code,
+)
+from fleet_rlm.daytona.sync_bridge import (
+    SyncBridgeDispatcher,
+    sync_sandbox,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
@@ -63,7 +49,6 @@ from fleet_rlm.rlm.compat_3_3_1 import (
     PUBLIC_FINAL_OUTPUT_LABEL,
     CodeExecutionError,
     CodeInterpreterError,
-    copy_output_fields,
     is_final_output,
     needs_binding_refresh,
     wrap_final_output,
@@ -87,28 +72,147 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
-from fleet_rlm.rlm.specified_prompt_rewrite import SpecifiedPromptRewriteState, apply_specified_sub_lm_prompts
-from fleet_rlm.runtime.errors import FilesystemToolError
-
-if TYPE_CHECKING:
-    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
+DEFAULT_BROKER_PORT = 8765
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
-_MISSING = object()
 _UNSET = object()
 _BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.ContextVar(
     "fleet_interpreter_binding_reservation",
     default=None,
 )
-_TOOL_POSITIONAL_ARGS: contextvars.ContextVar[tuple[Any, ...]] = contextvars.ContextVar(
-    "fleet_interpreter_tool_positional_args",
-    default=(),
-)
+
+
+OutputCallback = Callable[[str], None]
+
+
+class _PublicStdoutProjector:
+    """Forward ordinary stdout while hiding the known SUBMIT stdout frame."""
+
+    def __init__(self, emit: OutputCallback) -> None:
+        self._emit = emit
+        self._marker = FINAL_OUTPUT_MARKER
+        self._buffer = ""
+
+    def feed(self, value: str) -> None:
+        if not value:
+            return
+        pending = self._buffer + value
+        self._buffer = ""
+        start = pending.find(self._marker)
+        if start >= 0:
+            if start:
+                self._emit(pending[:start])
+            self._buffer = pending[start:]
+            return
+        suffix = self._marker_prefix_suffix(pending)
+        if suffix:
+            self._emit(pending[: -len(suffix)])
+            self._buffer = suffix
+        else:
+            self._emit(pending)
+
+    def finish(self, *, expected_final: Mapping[str, Any] | None = None) -> None:
+        pending = self._buffer
+        self._buffer = ""
+        if not pending:
+            return
+        if expected_final is None:
+            self._emit(pending)
+            return
+
+        frame = final_output_frame(expected_final, marker=self._marker)
+        offset = 0
+        while True:
+            start = pending.find(frame, offset)
+            if start < 0:
+                self._emit(pending[offset:])
+                return
+            self._emit(pending[offset:start])
+            offset = start + len(frame)
+            if pending.startswith("\r\n", offset):
+                offset += 2
+            elif pending.startswith(("\n", "\r"), offset):
+                offset += 1
+
+    def _marker_prefix_suffix(self, value: str) -> str:
+        for length in range(min(len(value), len(self._marker) - 1), 0, -1):
+            if value.endswith(self._marker[:length]):
+                return value[-length:]
+        return ""
+
+
+@dataclass(slots=True)
+class _OutputStreamState:
+    """Per-step public output-stream tracking."""
+
+    emitted_chars: int = 0
+    streamed_chunks: list[str] = field(default_factory=list)
+    closed: bool = False
+
+
+def _emit_output_delta(
+    value: str,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    max_chars: int,
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    if state.closed or not value:
+        return
+    remaining = max_chars - state.emitted_chars
+    if remaining <= 0:
+        return
+    chunk = value[:remaining]
+    state.emitted_chars += len(chunk)
+    if chunk:
+        state.streamed_chunks.append(chunk)
+        observe(RLMOutput(chunk, step, stream_id, True, False))
+
+
+def _close_output_stream(
+    text: str,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    state.closed = True
+    observe(RLMOutput(text, step, stream_id, False, True))
+
+
+def _flush_step_output(
+    result: Any,
+    *,
+    step: int,
+    stream_id: str,
+    state: _OutputStreamState,
+    public_output: Callable[[Any], str],
+    observe: Callable[[RLMOutput], None],
+) -> None:
+    if state.closed:
+        return
+    public = public_output(result)
+    if is_final_output(result):
+        _close_output_stream(public, step=step, stream_id=stream_id, state=state, observe=observe)
+        return
+    streamed = "".join(state.streamed_chunks)
+    if public == streamed:
+        state.closed = True
+        return
+    if public.startswith(streamed):
+        tail = public[len(streamed) :]
+        state.closed = True
+        observe(RLMOutput(tail, step, stream_id, True, True))
+        return
+    _close_output_stream(public, step=step, stream_id=stream_id, state=state, observe=observe)
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,8 +243,23 @@ class _StreamingTextBuffer(io.StringIO):
         return len(value)
 
 
+def _combine_stdout(captured: str, legacy: object) -> str:
+    legacy_text = str(legacy or "")
+    if captured and legacy_text and legacy_text not in captured:
+        return f"{captured.rstrip()}\n{legacy_text}"
+    return captured or legacy_text
+
+
+def _submitted_payload(result: Any) -> Mapping[str, Any] | None:
+    if is_final_output(result) and hasattr(result, "output"):
+        output = result.output
+        if isinstance(output, Mapping):
+            return output
+    return None
+
+
 class _BindingTools(dict[str, Callable[..., Any]]):
-    """Invocation tool map that marks Fleet binding state dirty on mutation."""
+    """Invocation tool map that marks binding state dirty on mutation."""
 
     def __init__(
         self,
@@ -151,86 +270,33 @@ class _BindingTools(dict[str, Callable[..., Any]]):
         super().__init__(initial or {})
 
     def __setitem__(self, key: str, value: Callable[..., Any]) -> None:
+        self._owner._begin_binding_injection()
         self._owner._ensure_binding_mutation_allowed()
         super().__setitem__(key, value)
-        self._owner._mark_bindings_dirty()
+        self._owner._binding_generation += 1
 
     def __delitem__(self, key: str) -> None:
         self._owner._ensure_binding_mutation_allowed()
         super().__delitem__(key)
-        self._owner._mark_bindings_dirty()
+        self._owner._binding_generation += 1
 
     def clear(self) -> None:
         self._owner._ensure_binding_mutation_allowed()
         super().clear()
-        self._owner._mark_bindings_dirty()
+        self._owner._binding_generation += 1
 
-    def pop(self, key: Any, default: Any = _MISSING) -> Any:
-        self._owner._ensure_binding_mutation_allowed()
-        if key not in self:
-            if default is _MISSING:
-                raise KeyError(key)
-            return default
-        value = super().pop(key)
-        self._owner._mark_bindings_dirty()
-        return value
-
-    def popitem(self) -> tuple[str, Callable[..., Any]]:
-        self._owner._ensure_binding_mutation_allowed()
-        value = super().popitem()
-        self._owner._mark_bindings_dirty()
-        return value
-
-    def setdefault(self, key: Any, default: Any = None) -> Any:
-        self._owner._ensure_binding_mutation_allowed()
-        if key in self:
-            return self[key]
-        value = super().setdefault(key, default)
-        self._owner._mark_bindings_dirty()
-        return value
-
-    def update(
-        self,
-        other: Any = None,
-        /,
-        **kwargs: Callable[..., Any],
-    ) -> None:
-        # DSPy calls ``tools.update(execution_tools)`` for each invocation.
-        # Replacement, rather than merge, is intentional: removed names must
-        # become unreachable in the persistent interpreter namespace.
+    def update(self, *args: Any, **kwargs: Any) -> None:
         self._owner._begin_binding_injection()
         self._owner._ensure_binding_mutation_allowed()
-        values: dict[str, Callable[..., Any]] = {}
-        if other is not None:
-            values.update(other)
-        values.update(kwargs)
         super().clear()
-        super().update(values)
-        self._owner._mark_bindings_dirty()
-
-    def __ior__(self, other: Any) -> _BindingTools:
-        self.update(other)
-        return self
-
-
-def _combine_stdout(captured: str, legacy: object) -> str:
-    """Prefer real stdout, retaining the legacy ``_out`` fallback for tests."""
-    return captured or str(legacy or "")
-
-
-def _submitted_payload(result: Any) -> Mapping[str, Any] | None:
-    if not is_final_output(result):
-        return None
-    value = getattr(result, "output", None)
-    return value if isinstance(value, Mapping) else None
+        super().update(*args, **kwargs)
+        self._owner._binding_generation += 1
 
 
 class InProcessInterpreterBackend:
     """Shared-namespace offline backend for host-tool and SUBMIT contracts."""
 
     def __init__(self) -> None:
-        # `context` is always defined so REPL code never hits NameError when
-        # no capsule is bound (a single utf-8 entry promotes it to str below).
         self.namespace: dict[str, object] = {"_out": "", "context": []}
         self.closed = False
         self._host_tools: dict[str, Callable[..., Any]] = {}
@@ -239,9 +305,7 @@ class InProcessInterpreterBackend:
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
-        def load_context(
-            raw_manifest: bytes | str,
-        ) -> list[dict[str, Any]]:
+        def load_context(raw_manifest: bytes | str) -> list[dict[str, Any]]:
             from fleet_rlm.rlm.program import _materialize_context_manifest
 
             binding = self._context_binding
@@ -262,7 +326,6 @@ class InProcessInterpreterBackend:
         self.namespace["_fleet_load_context_manifest"] = load_context
 
     def bind_context_manifest(self, *, trusted_mount_root: str, expected_manifest_sha256: str) -> None:
-        """Bind the host-authorized capsule before generated code can load it."""
         binding = (str(trusted_mount_root), str(expected_manifest_sha256))
         if self._context_binding is not None and self._context_binding != binding:
             raise DaytonaAdapterError(
@@ -270,6 +333,11 @@ class InProcessInterpreterBackend:
                 cause_type="ContextIntegrityError",
             )
         self._context_binding = binding
+
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed code directly."""
+        return True
 
     def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         for name in self._bound_tool_names.difference(tools):
@@ -280,14 +348,7 @@ class InProcessInterpreterBackend:
             self.namespace[name] = self._wrap_host_tool(name, fn)
 
     def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
-        """
-        Install or refresh the namespace bindings required for submitting final outputs.
-
-        Parameters:
-            output_fields (list[dict[str, Any]] | None): Output-field definitions used
-                to configure submission support.
-        """
-        key = _submit_signature_key(output_fields)
+        key = repr(output_fields)
         if key == self._submit_key:
             return
         self.namespace["FleetFinalOutputError"] = FleetFinalOutputError
@@ -309,33 +370,32 @@ class InProcessInterpreterBackend:
         if variables:
             self.namespace.update(variables)
         stdout = _StreamingTextBuffer(on_stdout)
+
+        def _make_result(
+            *, final: dict[str, Any] | None = None, error: str | None = None, category: str | None = None
+        ) -> BackendExecutionResult:
+            return BackendExecutionResult(
+                stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                final=final,
+                error=error,
+                error_category=category,
+                context_accesses=self._drain_context_accesses(),
+            )
+
         with contextlib.redirect_stdout(stdout):
             try:
                 exec(code, self.namespace, self.namespace)
             except FleetFinalOutputError as final:
-                return BackendExecutionResult(
-                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-                    final=dict(final.value),
-                    context_accesses=self._drain_context_accesses(),
-                )
+                return _make_result(final=dict(final.value))
             except Exception as exc:
                 value = getattr(exc, "value", None)
                 if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict):
-                    return BackendExecutionResult(
-                        stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-                        final=dict(value),
-                        context_accesses=self._drain_context_accesses(),
-                    )
-                return BackendExecutionResult(
-                    stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
+                    return _make_result(final=dict(value))
+                return _make_result(
                     error=sanitize_provider_message(str(exc)),
-                    error_category=type(exc).__name__,
-                    context_accesses=self._drain_context_accesses(),
+                    category=type(exc).__name__,
                 )
-        return BackendExecutionResult(
-            stdout=_combine_stdout(stdout.getvalue(), self.namespace.get("_out", "")),
-            context_accesses=self._drain_context_accesses(),
-        )
+        return _make_result()
 
     def _drain_context_accesses(self) -> tuple[str, ...]:
         values = tuple(self._context_accesses)
@@ -361,142 +421,65 @@ class InProcessInterpreterBackend:
         return wrapper
 
 
-def _submit_signature_key(
-    output_fields: list[dict[str, Any]] | None,
-) -> tuple[tuple[str, str], ...] | None:
-    digest = _output_fields_digest(output_fields)
-    return ((digest, ""),) if digest is not None else None
-
-
-def _output_fields_digest(output_fields: list[dict[str, Any]] | None) -> str | None:
-    """Hash the complete output metadata, including nested schema details."""
-    if output_fields is None:
-        return None
-    try:
-        encoded = json.dumps(
-            output_fields,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=lambda value: {"__type__": type(value).__name__},
-        ).encode("utf-8")
-    except (TypeError, ValueError):
-        encoded = repr(output_fields).encode("utf-8", errors="replace")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 class InterpreterBackend(Protocol):
-    """Narrow execute/close surface; SDK details stay behind this protocol."""
+    """Protocol satisfied by interpreter execution backends."""
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> str | BackendExecutionResult: ...
-
     def close(self) -> None: ...
 
 
 def _result_kind(result: Any) -> str:
-    """Bounded outcome classification for span metadata (never content)."""
     if is_final_output(result):
-        return "final"
+        return "final_output"
     return "output"
 
 
-_REPAIR_CATEGORIES = frozenset(
-    {
-        "AttributeError",
-        "ImportError",
-        "IndexError",
-        "KeyError",
-        "ModuleNotFoundError",
-        "NameError",
-        "OSError",
-        "RuntimeError",
-        "SyntaxError",
-        "TypeError",
-        "ValueError",
-        "ZeroDivisionError",
-        "code_too_large",
-        "empty_code",
-        "execution_error",
-        "no_progress",
-    }
-)
-_TERMINAL_CATEGORIES = frozenset({"CodeInterpreterError", "InterpreterLifecycleError"})
-_HOST_SETUP_CLASS = "_FleetCommittedHistory"
-_HOST_SETUP_LOADERS = frozenset({"_fleet_load_committed_history", "_fleet_load_context_manifest"})
+def _repair_error(message: str, *, category: str = "execution_error") -> CodeExecutionError:
+    err = CodeExecutionError(message)
+    object.__setattr__(err, "category", category)
+    return err
 
 
-def _host_setup_tree(code: str) -> ast.AST | None:
-    """Parse host setup source without treating comments or string data as code."""
-    try:
-        return ast.parse(code or "", mode="exec")
-    except (SyntaxError, ValueError):
-        return None
+def _terminal_error(message: str, *, category: str = "CodeInterpreterError") -> CodeInterpreterError:
+    err = CodeInterpreterError(message)
+    object.__setattr__(err, "category", category)
+    return err
 
 
-def _contains_host_setup_loader(tree: ast.AST) -> bool:
-    return any(
-        isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in _HOST_SETUP_LOADERS
-        for node in ast.walk(tree)
-    )
-
-
-def is_host_setup_action(code: str) -> bool:
-    """Return whether ``code`` is Fleet host SandboxSerializable injection.
-
-    DSPy injects committed Session History and attachment capsules through
-    ``interpreter.execute`` before the first model-authored iteration. Those
-    cells must not consume a public RLM step or appear as ``data-rlm-code``.
-    """
-    tree = _host_setup_tree(code)
-    if tree is None:
-        return False
-    return _contains_host_setup_loader(tree) or any(
-        isinstance(node, (ast.ClassDef, ast.FunctionDef)) and node.name == _HOST_SETUP_CLASS for node in ast.walk(tree)
-    )
-
-
-class _FleetCodeExecutionError(CodeExecutionError):
-    """Native DSPy recoverable error carrying bounded Fleet classification."""
-
+@dataclass(frozen=True)
+class _RepairFeedback:
+    feedback: str
     category: str
-
-    def __init__(self, message: str, *, category: str) -> None:
-        super().__init__(message)
-        self.category = category
-
-
-class _FleetCodeInterpreterError(CodeInterpreterError):
-    """Native DSPy terminal error carrying bounded Fleet classification."""
-
-    category: str
-
-    def __init__(self, message: str, *, category: str) -> None:
-        super().__init__(message)
-        self.category = category
-
-
-def _repair_error(message: str, *, category: str) -> CodeExecutionError:
-    """Create DSPy's native recoverable error with bounded Fleet metadata."""
-    bounded_category = category if category in _REPAIR_CATEGORIES else "execution_error"
-    return _FleetCodeExecutionError(sanitize_repair_text(message), category=bounded_category)
-
-
-def _terminal_error(message: str, *, category: str) -> CodeInterpreterError:
-    """Create DSPy's terminal interpreter error without private details."""
-    bounded_category = category if category in _TERMINAL_CATEGORIES else "CodeInterpreterError"
-    return _FleetCodeInterpreterError(sanitize_repair_text(message), category=bounded_category)
 
 
 def _repair_category(error: str) -> str:
-    """Return a bounded runtime-error category without retaining generated details."""
-    prefix = error.split(":", 1)[0].strip()
-    return prefix if prefix in _REPAIR_CATEGORIES else "execution_error"
+    lines = [line.strip() for line in error.strip().splitlines() if line.strip()]
+    if not lines:
+        return "execution_error"
+    for line in reversed(lines):
+        if ":" in line:
+            candidate = line.split(":", 1)[0].strip()
+            if candidate.isidentifier():
+                return candidate
+        elif line.isidentifier() and line.endswith("Error"):
+            return line
+    return "execution_error"
+
+
+def is_host_setup_action(code: str) -> bool:
+    return "_fleet_load_context_manifest" in code
 
 
 class _SandboxProcessBackend:
-    """Live sandbox handle whose persistent namespace is owned by the broker."""
+    """Execute Python code in a live Daytona sandbox via process or code interpreter."""
 
-    def __init__(self, sandbox: Any, *, timeout_s: int | None = None) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        timeout_s: int | None = None,
+        workdir: str = "/workspace",
+    ) -> None:
         self._sandbox = sandbox
         if timeout_s is not None and int(timeout_s) <= 0:
             raise DaytonaAdapterError(
@@ -504,6 +487,15 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
+        self._workdir = workdir
+        self._output_fields: list[dict[str, Any]] | None = None
+        self._bound_tools: dict[str, Callable[..., Any]] = {}
+        self._context_binding: tuple[str, str] | None = None
+        self._context_accesses: list[str] = []
+        self._closed = False
+        self._interpreter_context: Any = None
+        self._broker: DaytonaHttpToolBroker | None = None
+        self._async_bridge: Any | None = None
 
     @property
     def sandbox(self) -> Any:
@@ -513,6 +505,38 @@ class _SandboxProcessBackend:
     def timeout_s(self) -> int | None:
         return self._timeout_s
 
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed code directly."""
+        return True
+
+    def bind_host_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
+        if self._broker is not None:
+            self._broker.rebind_tools(tools)
+        self._bound_tools = dict(tools)
+
+    def bind_async_bridge(self, async_bridge: Any | None) -> None:
+        # The runner binds once for each invocation on a retained root lease.
+        if self._broker is not None:
+            self._broker.reset_invocation()
+            self._broker.rebind_async_bridge(async_bridge)
+        if self._interpreter_context is not None:
+            self._sandbox.code_interpreter.delete_context(self._interpreter_context)
+            self._interpreter_context = None
+        self._async_bridge = async_bridge
+
+    def ensure_submit(self, output_fields: list[dict[str, Any]] | None) -> None:
+        self._output_fields = output_fields
+
+    def bind_context_manifest(self, *, trusted_mount_root: str, expected_manifest_sha256: str) -> None:
+        binding = (str(trusted_mount_root), str(expected_manifest_sha256))
+        if self._context_binding is not None and self._context_binding != binding:
+            raise DaytonaAdapterError(
+                message="context manifest binding cannot be replaced",
+                cause_type="ContextIntegrityError",
+            )
+        self._context_binding = binding
+
     def run(
         self,
         code: str,
@@ -520,17 +544,196 @@ class _SandboxProcessBackend:
         *,
         on_stdout: OutputCallback | None = None,
     ) -> BackendExecutionResult:
-        del code, variables, on_stdout
-        raise DaytonaAdapterError(
-            message="live execution requires the co-located broker",
-            cause_type="InterpreterConfigurationError",
+        if self._closed:
+            raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
+
+        # A tool-free action can use Daytona's native code interpreter directly.
+        # This remains remote execution and keeps the lightweight SDK path used
+        # for ordinary deterministic cells. Tool-enabled actions below use the
+        # broker so the host never executes generated source.
+        if not self._bound_tools:
+            return self._run_direct(code, variables, on_stdout=on_stdout)
+
+        context_lines = ["if 'context' not in globals(): context = []"]
+        if self._context_binding is not None:
+            mount_root, manifest_sha = self._context_binding
+            context_lines.append(f"""
+import hashlib as _hashlib
+import json as _json_ctx
+import os as _os_ctx
+
+_CONTEXT_MOUNT_ROOT = {mount_root!r}
+_CONTEXT_MANIFEST_SHA256 = {manifest_sha!r}
+
+def _fleet_load_context_manifest(raw_manifest):
+    if isinstance(raw_manifest, str):
+        raw_manifest = raw_manifest.encode("utf-8")
+    if _hashlib.sha256(bytes(raw_manifest)).hexdigest() != _CONTEXT_MANIFEST_SHA256:
+        raise ValueError("manifest checksum mismatch")
+    manifest = _json_ctx.loads(bytes(raw_manifest).decode("utf-8"))
+    mount_root = _os_ctx.path.realpath(str(_CONTEXT_MOUNT_ROOT))
+    values = []
+    for entry in manifest.get("entries", []):
+        path = _os_ctx.path.realpath(str(entry["sandbox_path"]))
+        expected_size = int(entry["byte_size"])
+        expected_sha = str(entry["checksum_sha256"])
+        with open(path, "rb") as f:
+            data = f.read(expected_size + 1)
+        if len(data) != expected_size or _hashlib.sha256(data).hexdigest() != expected_sha:
+            raise ValueError("attachment checksum mismatch")
+        enc = entry.get("encoding", "utf-8")
+        att_id = entry.get("attachment_id")
+        if enc == "utf-8":
+            values.append({{"data": data.decode("utf-8"), "encoding": "utf-8", "attachment_id": att_id}})
+        else:
+            values.append({{"data": data, "encoding": "bytes", "attachment_id": att_id}})
+    return values
+""")
+        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        if self._broker is None:
+            self._broker = DaytonaHttpToolBroker(self._sandbox, port=DEFAULT_BROKER_PORT)
+            bind_bridge = getattr(self._broker, "bind_async_bridge", None)
+            if callable(bind_bridge):
+                bind_bridge(self._async_bridge)
+            self._broker.bind_tools(self._bound_tools)
+        context_code = "\n".join(context_lines)
+        setup = self._broker.setup_source(f"{remote_submit_setup_code(self._output_fields)}\n\n{context_code}")
+        try:
+            result = self._broker.execute(f"{setup}\n\n{code}", variables or {}, timeout_s=timeout)
+        except Exception as exc:
+            if isinstance(exc, DaytonaAdapterError):
+                raise
+            mapped = map_provider_error(exc)
+            raise mapped from exc
+
+        stdout = str(result.get("stdout") or "")
+        if on_stdout is not None and stdout:
+            on_stdout(stdout)
+        failure = result.get("tool_error")
+        error = str(result.get("error") or "") or None
+        if isinstance(failure, dict):
+            error = (
+                f"{str(failure.get('category', 'tool_error'))[:80]} "
+                f"[call_id={str(failure.get('call_id', ''))[:128]}]: "
+                f"{str(failure.get('message', 'tool call failed'))[:500]}"
+            )
+        return BackendExecutionResult(
+            stdout=stdout,
+            stderr=str(result.get("stderr") or ""),
+            final=dict(result["final"]) if isinstance(result.get("final"), dict) else None,
+            error=error,
+            error_category=str(result.get("error_category") or "") or None,
+            context_accesses=self._drain_context_accesses(),
         )
 
+    def _run_direct(
+        self,
+        code: str,
+        variables: dict[str, object] | None,
+        *,
+        on_stdout: OutputCallback | None,
+    ) -> BackendExecutionResult:
+        var_lines: list[str] = []
+        for name, value in (variables or {}).items():
+            try:
+                payload = json.dumps(value, ensure_ascii=False, allow_nan=True)
+            except (TypeError, ValueError) as exc:
+                raise DaytonaAdapterError(
+                    message=(
+                        f"interpreter binding {name!r} of type {type(value).__name__} "
+                        "cannot be represented in the Sandbox"
+                    ),
+                    cause_type="InterpreterConfigurationError",
+                ) from exc
+            var_lines.append(f"{name} = _fleet_bindings_json.loads({json.dumps(payload)})")
+        preamble = remote_submit_setup_code(self._output_fields)
+        if var_lines:
+            preamble += "\nimport json as _fleet_bindings_json\n" + "\n".join(var_lines)
+        full_code = f"{preamble}\n\n{code}"
+        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        sandbox = self._sandbox
+        streamed = False
+
+        def forward_stdout(message: Any) -> None:
+            nonlocal streamed
+            text = str(getattr(message, "output", message) or "")
+            if on_stdout is not None and text:
+                streamed = True
+                on_stdout(text)
+
+        try:
+            if hasattr(sandbox, "code_interpreter") and hasattr(sandbox.code_interpreter, "run_code"):
+                if self._interpreter_context is None:
+                    create_context = getattr(sandbox.code_interpreter, "create_context", None)
+                    if not callable(create_context):
+                        raise DaytonaAdapterError(
+                            message="Sandbox code interpreter cannot create a persistent context",
+                            cause_type="InterpreterConfigurationError",
+                        )
+                    self._interpreter_context = create_context()
+                result = sandbox.code_interpreter.run_code(
+                    full_code, timeout=timeout, context=self._interpreter_context, on_stdout=forward_stdout
+                )
+                stdout = str(getattr(result, "stdout", "") or "")
+                stderr = str(getattr(result, "stderr", "") or "")
+                error = getattr(result, "error", None)
+            else:
+                process = getattr(sandbox, "process", None)
+                if hasattr(process, "code_run"):
+                    result = process.code_run(full_code, timeout=timeout)
+                    stdout = str(getattr(result, "result", "") or "")
+                    stderr = ""
+                    error = (
+                        None
+                        if getattr(result, "exit_code", 0) == 0
+                        else (stdout or "Sandbox process exited unsuccessfully")
+                    )
+                elif hasattr(process, "exec"):
+                    result = process.exec(f"python3 -c {shlex.quote(full_code)}", timeout=timeout, cwd=self._workdir)
+                    stdout = str(getattr(result, "result", "") or "")
+                    stderr = ""
+                    error = (
+                        None
+                        if getattr(result, "exit_code", 0) == 0
+                        else (stdout or "Sandbox process exited unsuccessfully")
+                    )
+                else:
+                    raise DaytonaAdapterError(
+                        message="Sandbox code interpreter is unavailable",
+                        cause_type="InterpreterConfigurationError",
+                    )
+        except DaytonaAdapterError:
+            raise
+        except Exception as exc:
+            raise map_provider_error(exc) from exc
+        if on_stdout is not None and stdout and not streamed:
+            on_stdout(stdout)
+        final = extract_final_payload(stdout)
+        return BackendExecutionResult(
+            stdout=stdout,
+            stderr=stderr,
+            final=final,
+            error=None if final is not None or not error else str(error),
+            error_category=None if final is not None or not error else _repair_category(str(error)),
+            context_accesses=self._drain_context_accesses(),
+        )
+
+    def _drain_context_accesses(self) -> tuple[str, ...]:
+        values = tuple(self._context_accesses)
+        self._context_accesses.clear()
+        return values
+
     def close(self) -> None:
-        # Tombstone the sync view so late calls fail typed-fast after lease
-        # release; the shared service loop outlives individual Turns.
-        tombstone_sync_sandbox(self._sandbox)
-        return None
+        self._closed = True
+        if self._broker is not None:
+            self._broker.stop(strict=True)
+            self._broker = None
+        if self._interpreter_context is not None:
+            delete_context = getattr(getattr(self._sandbox, "code_interpreter", None), "delete_context", None)
+            if callable(delete_context):
+                with contextlib.suppress(Exception):
+                    delete_context(self._interpreter_context)
+            self._interpreter_context = None
 
 
 class DaytonaCodeInterpreter:
@@ -547,45 +750,29 @@ class DaytonaCodeInterpreter:
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
-        """Initialize the interpreter with its backend, tools, output configuration, callbacks, and execution limits.
-
-        Parameters:
-            backend (InterpreterBackend | None): Backend used to execute code.
-            tools (Mapping[str, Callable[..., Any]] | None): Host tools available to executed code.
-            output_fields (list[dict[str, Any]] | None): Metadata describing fields accepted in submitted final output.
-            callbacks (list[BaseCallback] | None): Optional callbacks for execution lifecycle events.
-            broker_port (int): Port used by the HTTP tool broker.
-            execution_output_cap (int): Maximum captured output size per execution.
-            max_code_chars (int): Maximum permitted size of submitted code.
-        """
         self._backend = backend
-        # DSPy 3.3.1's callback contract is opt-in and engineering-only.
-        # Fleet Runtime Events and manual spans remain the product/trace
-        # authorities; callbacks are never installed implicitly.
         self.callbacks = list(callbacks or [])
         self._binding_generation = 0
         self._installed_binding_generation = -1
         self._execution_lock = Lock()
         self._shutdown_lock = Lock()
-        self._reservation_state_lock = Lock()
         self._reservation_token: object | None = None
         self._reservation_task: asyncio.Task[Any] | None = None
-        self._execution_started = False
+        self._execution_started: bool = False
+        self._reservation_state_lock = Lock()
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._fleet_output_contract: FleetOutputContract | None = None
         self._output_fields: list[dict[str, Any]] | None = None
-        self._output_fields_digest: str | None = None
         self.output_fields = output_fields
         self._started = False
         self._shutdown = False
         self._broker_port = broker_port
-        self._http_broker: DaytonaHttpToolBroker | None = None
+        self._http_broker: Any | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
         self._turn_request: str | None = None
-        self._specified_prompt_rewrite_state = SpecifiedPromptRewriteState()
         self._output_budget_exhausted = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
@@ -597,68 +784,8 @@ class DaytonaCodeInterpreter:
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
-    @property
-    def tools(self) -> dict[str, Callable[..., Any]]:
-        return self._tools
-
-    @property
-    def supports_sandbox_serializable_inputs(self) -> bool:
-        """Whether non-primitive inputs are injected through the remote broker.
-
-        Native DSPy treats ``SandboxSerializable`` inputs specially.  Fleet's
-        in-process test backend can retain a dspy.History object directly, while
-        the Daytona HTTP broker must receive the typed transport form.
-        """
-        return isinstance(self._backend, _SandboxProcessBackend) or bool(
-            getattr(self._backend, "supports_sandbox_serializable_inputs", False)
-        )
-
-    @property
-    def broker(self) -> DaytonaHttpToolBroker | None:
-        """Return the broker context owned by this interpreter, when started."""
-        return self._http_broker
-
-    @property
-    def output_fields(self) -> list[dict[str, Any]] | None:
-        """Return the current typed-output metadata copy."""
-        return copy_output_fields(self._output_fields)
-
-    def bind_output_contract(self, contract: FleetOutputContract) -> None:
-        """
-        Bind an output contract and update the interpreter's output field metadata.
-
-        Parameters:
-                contract (FleetOutputContract): Contract defining the interpreter's output fields.
-        """
-        self._ensure_binding_mutation_allowed()
-        self._fleet_output_contract = contract
-        self.output_fields = [{"name": field.name} for field in contract.fields]
-
-    @output_fields.setter
-    def output_fields(self, value: list[dict[str, Any]] | None) -> None:
-        """
-        Configure the output field metadata used for final-output submission.
-
-        Parameters:
-                value (list[dict[str, Any]] | None): Output field definitions, or `None` to clear them.
-        """
-        self._ensure_binding_mutation_allowed()
-        copied = copy_output_fields(value)
-        if copied is not None and self._fleet_output_contract is not None:
-            copied = self._fleet_output_contract.merge(copied)
-        digest = _output_fields_digest(copied)
-        self._output_fields = copied
-        if digest != getattr(self, "_output_fields_digest", None):
-            self._output_fields_digest = digest
-            self._mark_bindings_dirty()
-
-    def _mark_bindings_dirty(self) -> None:
-        """Advance the Fleet-owned generation for the next execution."""
-        if hasattr(self, "_binding_generation"):
-            self._binding_generation += 1
-
     def _ensure_binding_mutation_allowed(self) -> None:
-        """Reject a second invocation before it can mutate the current namespace."""
+        """Reject an overlapping invocation before it can mutate the current namespace."""
         current = _BINDING_RESERVATION.get()
         with self._reservation_state_lock:
             allowed = not self._execution_lock.locked() or (
@@ -671,7 +798,7 @@ class DaytonaCodeInterpreter:
             )
 
     def _begin_binding_injection(self) -> None:
-        """Reserve this interpreter before DSPy starts an overlapping ``acall``."""
+        """Reserve this interpreter before DSPy starts an overlapping acall."""
         try:
             task = asyncio.current_task()
         except RuntimeError:
@@ -702,7 +829,8 @@ class DaytonaCodeInterpreter:
                 return
             self._reservation_token = None
             self._reservation_task = None
-            self._execution_lock.release()
+            if self._execution_lock.locked():
+                self._execution_lock.release()
             clear_context = _BINDING_RESERVATION.get() is token
         if clear_context:
             _BINDING_RESERVATION.set(None)
@@ -741,71 +869,77 @@ class DaytonaCodeInterpreter:
             self._execution_started = False
             self._reservation_task = None
             self._reservation_token = None
-            self._execution_lock.release()
+            if self._execution_lock.locked():
+                self._execution_lock.release()
             clear_context = _BINDING_RESERVATION.get() is token
         if clear_context:
             _BINDING_RESERVATION.set(None)
 
+    @property
+    def tools(self) -> dict[str, Callable[..., Any]]:
+        return self._tools
+
+    @property
+    def supports_sandbox_serializable_inputs(self) -> bool:
+        return True
+
+    @property
+    def broker(self) -> Any:
+        return self._http_broker or getattr(self._backend, "_broker", None)
+
+    @property
+    def fleet_host_tool_dispatch_available(self) -> bool:
+        """Whether Fleet-provided host tools reach executed Sandbox code."""
+        if self._backend is not None:
+            return bool(getattr(self._backend, "fleet_host_tool_dispatch_available", False))
+        return False
+
+    @property
+    def output_fields(self) -> list[dict[str, Any]] | None:
+        return self._output_fields
+
+    @output_fields.setter
+    def output_fields(self, value: list[dict[str, Any]] | None) -> None:
+        self._ensure_binding_mutation_allowed()
+        if value is not None and self._fleet_output_contract is not None:
+            value = self._fleet_output_contract.merge(value)
+        self._output_fields = value
+        self._binding_generation += 1
+
+    def bind_output_contract(self, contract: FleetOutputContract) -> None:
+        self._fleet_output_contract = contract
+        if self._output_fields is not None:
+            self.output_fields = contract.merge(self._output_fields)
+
     @with_callbacks
     def start(self) -> None:
         if self._shutdown:
-            msg = "interpreter already shut down"
-            raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
+            raise DaytonaAdapterError(message="interpreter already shut down", cause_type="InterpreterLifecycleError")
         self._started = True
 
     def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
-        """
-        Bind a run-local observer and configure the maximum size of observation details.
-
-        Parameters:
-            observer: Observer that receives observation events, or ``None`` to disable observation.
-            max_chars: Maximum number of characters retained for each observation detail.
-        """
         self._ensure_binding_mutation_allowed()
-        normalized_max_chars = max(1, int(max_chars))
-        if self._observer is not observer or self._observation_max_chars != normalized_max_chars:
-            self._mark_bindings_dirty()
         self._observer = observer
-        self._observation_max_chars = normalized_max_chars
-        self._observation_step = 0
-        self._last_execution = None
-        self._no_progress_repair_used = False
+        self._observation_max_chars = max(1, int(max_chars))
 
     def bind_turn_budget(self, budget: TurnBudget | None) -> None:
-        """
-        Bind or clear the shared budget ledger for the current turn.
-
-        Parameters:
-                budget (TurnBudget | None): The turn budget to use, or None to clear the binding.
-        """
         self._ensure_binding_mutation_allowed()
         self._turn_budget = budget
         self._output_budget_exhausted = False
 
     def bind_turn_request(self, request: str | None) -> None:
-        """
-        Bind or clear the current Turn request used to restore specified Sub-LM prompts.
+        self._turn_request = request
 
-        Parameters:
-                request (str | None): Turn request text, or ``None`` to clear the binding.
-        """
+    def bind_async_bridge(self, async_bridge: Any | None) -> None:
+        """Pass the composition-owned async bridge to a live tool broker."""
         self._ensure_binding_mutation_allowed()
-        if isinstance(request, str) and request:
-            self._turn_request = request
-        else:
-            self._turn_request = None
-        self._specified_prompt_rewrite_state.bind(self._turn_request)
+        backend = self._backend
+        bind_bridge = getattr(backend, "bind_async_bridge", None)
+        if callable(bind_bridge):
+            bind_bridge(async_bridge)
 
     def bind_context_capsule(self, capsule: Any) -> None:
-        """
-        Bind and validate the host-created context capsule used for execution.
-
-        Parameters:
-                capsule (Any): Context capsule containing the sandbox manifest and trusted mount root.
-
-        Raises:
-                DaytonaAdapterError: If the capsule is invalid or conflicts with an existing context binding.
-        """
+        self._ensure_binding_mutation_allowed()
         from fleet_rlm.rlm.program import AttachmentContextCapsule
 
         if not isinstance(capsule, AttachmentContextCapsule):
@@ -814,16 +948,11 @@ class DaytonaCodeInterpreter:
                 cause_type="ContextIntegrityError",
             )
         raw_manifest = capsule.to_sandbox()
-        binding = (capsule.mount_root, hashlib.sha256(raw_manifest).hexdigest())
+        binding = (capsule.mount_root, str(hashlib_sha256(raw_manifest)))
         if self._context_binding is not None and self._context_binding != binding:
             raise DaytonaAdapterError(
                 message="context manifest binding cannot be replaced",
                 cause_type="ContextIntegrityError",
-            )
-        if self._http_broker is not None:
-            self._http_broker.bind_context_manifest(
-                trusted_mount_root=binding[0],
-                expected_manifest_sha256=binding[1],
             )
         bind_backend = getattr(self._backend, "bind_context_manifest", None)
         if callable(bind_backend):
@@ -834,15 +963,6 @@ class DaytonaCodeInterpreter:
         self._context_binding = binding
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
-        """
-        Process an observation detail and forward it to the configured observer.
-
-        Parameters:
-                detail: Observation event to process.
-
-        Raises:
-                TurnBudgetExhausted: If the output detail exceeds the remaining execution-output budget.
-        """
         if not self._public_observation:
             return
         if isinstance(detail, RLMOutput) and detail.output and self._turn_budget is not None:
@@ -886,15 +1006,9 @@ class DaytonaCodeInterpreter:
             )
         run = cast(Callable[..., str | BackendExecutionResult], backend.run)
         try:
-            parameters = inspect.signature(run).parameters.values()
-        except (TypeError, ValueError):
-            parameters = ()
-        supports_callback = any(
-            parameter.name == "on_stdout" or parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
-        )
-        if supports_callback:
-            return run(code, variables, on_stdout=on_stdout)
-        return run(code, variables)
+            return run(code, variables, on_stdout=on_stdout)  # type: ignore[call-arg]
+        except TypeError:
+            return run(code, variables)
 
     def _execution_tools(self) -> dict[str, Callable[..., Any]]:
         tools = dict(self._tools)
@@ -925,7 +1039,7 @@ class DaytonaCodeInterpreter:
 
     @with_callbacks
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
-        """Execute one action while rejecting overlapping interpreter reuse."""
+        """Execute one action under single-flight concurrency protection."""
         token = self._acquire_execution()
         try:
             return self._execute_once(code, variables)
@@ -933,36 +1047,23 @@ class DaytonaCodeInterpreter:
             self._release_execution(token)
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
-        """
-        Execute one code step in the configured interpreter and process its result.
-
-        Parameters:
-            code (str): Python code to execute.
-            variables (dict[str, Any] | None): Variables to make available during execution.
-
-        Returns:
-            Any: The submitted final value or bounded execution output.
-
-        Raises:
-            CodeExecutionError: If execution produces a recoverable error.
-            CodeInterpreterError: If execution cannot safely continue.
-            DaytonaAdapterError: If the interpreter is unavailable, misconfigured, shut down, or the provider fails.
-            RunTerminalError: If repeated execution makes no progress.
-            TurnBudgetExhausted: If the turn budget cannot cover the execution output.
-        """
         if self._shutdown:
-            msg = "interpreter already shut down"
-            raise DaytonaAdapterError(message=msg, cause_type="InterpreterLifecycleError")
+            raise DaytonaAdapterError(
+                message="DaytonaCodeInterpreter has been shut down",
+                cause_type="InterpreterLifecycleError",
+            )
+        if self._broker_port == 0 and bool(self._execution_tools()):
+            raise DaytonaAdapterError(
+                message="brokerless mode cannot dispatch host tools",
+                cause_type="BrokerlessToolDispatchError",
+            )
         if not self._started:
             self.start()
         if self._backend is None:
-            msg = "interpreter backend is not configured"
-            raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
-        code = apply_specified_sub_lm_prompts(
-            self._turn_request,
-            code,
-            state=self._specified_prompt_rewrite_state,
-        )
+            raise DaytonaAdapterError(
+                message="interpreter backend is not configured", cause_type="InterpreterConfigurationError"
+            )
+
         public = not is_host_setup_action(code)
         self._public_observation = public
         if public:
@@ -984,6 +1085,7 @@ class DaytonaCodeInterpreter:
         trace_chars = trace_preview_limit(900)
         self._observe(StepStarted(step))
         self._observe(RLMCode(truncate_public_text(code, max_len=self._observation_max_chars), step))
+
         with turn_phase_span(
             "sandbox.execute",
             inputs={
@@ -996,46 +1098,75 @@ class DaytonaCodeInterpreter:
                 ),
             },
         ) as phase:
+
+            def _fail_step(
+                label: str,
+                category: str,
+                *,
+                recovered: bool = False,
+                outputs: dict[str, Any] | None = None,
+            ) -> None:
+                stdout_projector.finish()
+                _close_output_stream(
+                    label,
+                    step=step,
+                    stream_id=output_stream_id,
+                    state=output_state,
+                    observe=self._observe,
+                )
+                res_outputs = {"failure_category": category}
+                if outputs:
+                    res_outputs.update(outputs)
+                attrs = {"failure_category": category}
+                if recovered:
+                    attrs["recovered"] = True
+                phase.finish(phase_status="failed", outputs=res_outputs, attributes=attrs)
+
             try:
-                normalized_code = self._normalize_code(code)
-                ensure_bindings_ms = 0
-                execute_ms = 0
+                normalized_code = "\n".join(line.rstrip() for line in code.splitlines()).strip()
                 bindings_started = time.perf_counter()
                 execute_started = time.perf_counter()
+
                 if not normalized_code:
                     repair = _repair_error(
                         "No executable code was provided; execute useful Python or call SUBMIT.",
                         category="empty_code",
                     )
-                    no_progress = self._reject_repeated_no_progress(normalized_code, repair)
-                    raise no_progress or repair
+                    raise repair
                 elif len(normalized_code) > self._max_code_chars:
                     repair = _repair_error(
                         f"Intermediate code is too large ({len(normalized_code)} chars); "
                         f"keep one action under {self._max_code_chars} chars, use variables, and submit promptly.",
                         category="code_too_large",
                     )
-                    no_progress = self._reject_repeated_no_progress(normalized_code, repair)
-                    raise no_progress or repair
-                else:
-                    self._ensure_bindings()
-                    ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
-                    if self._http_broker is not None:
-                        result = self._execute_with_http_broker(
-                            code,
-                            variables,
-                            on_stdout=stdout_projector.feed,
-                        )
-                    else:
-                        raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
-                        if isinstance(raw, BackendExecutionResult):
-                            self._context_accesses.extend(raw.context_accesses)
-                            self._raise_context_injection_error(code, raw)
-                        result = self._finalize(raw)
-                execute_ms = int((time.perf_counter() - execute_started) * 1_000)
-                repair = self._reject_repeated_no_progress(normalized_code, result)
-                if repair is not None:
                     raise repair
+
+                self._ensure_bindings()
+                ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
+
+                raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
+                if isinstance(raw, BackendExecutionResult):
+                    self._context_accesses.extend(raw.context_accesses)
+                result = self._finalize(raw)
+
+                execute_ms = int((time.perf_counter() - execute_started) * 1_000)
+                if isinstance(result, _RepairFeedback):
+                    if not public:
+                        raise DaytonaAdapterError(
+                            message=result.feedback,
+                            cause_type="ContextVerificationError"
+                            if "integrity" in result.feedback
+                            else "HostSetupError",
+                        )
+                    repair_np = self._reject_repeated_no_progress(normalized_code, result.feedback)
+                    if repair_np is not None:
+                        raise repair_np
+                    raise _repair_error(result.feedback, category=result.category)
+
+                repair_np = self._reject_repeated_no_progress(normalized_code, result)
+                if repair_np is not None:
+                    raise repair_np
+
                 stdout_projector.finish(expected_final=_submitted_payload(result))
                 _flush_step_output(
                     result,
@@ -1045,374 +1176,186 @@ class DaytonaCodeInterpreter:
                     public_output=self._public_output,
                     observe=self._observe,
                 )
+
                 outputs: dict[str, Any] = {
-                    "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
+                    "path": type(self._backend).__name__,
                     "result_kind": _result_kind(result),
                     "stdout_chars": len(str(result)),
                     "output_preview": sanitize_trace_text(str(result), max_len=trace_chars),
+                    "ensure_bindings_ms": ensure_bindings_ms,
+                    "execute_ms": execute_ms,
                 }
-                if self._http_broker is not None:
-                    outputs["ensure_bindings_ms"] = ensure_bindings_ms
-                    outputs["execute_ms"] = execute_ms
-                    broker_metrics = dict(self._http_broker.last_execution_stats)
-                    # Keep the flat keys for existing trace consumers, but put
-                    # the complete broker breakdown under one bounded mapping.
-                    # The generic trace projection caps a mapping at 32 keys;
-                    # placing these metrics together prevents the six
-                    # human-readable fields above from hiding the tail of the
-                    # execution statistics.
-                    outputs["broker_metrics"] = broker_metrics
-                    outputs.update(broker_metrics)
                 phase.set_outputs(outputs)
                 return result
+
             except TurnBudgetExhausted as exc:
-                # The output reservation is the terminal boundary for this
-                # execution. The first failed reservation suppresses any
-                # additional error-frame bytes, then the domain exhaustion is
-                # propagated unchanged to the Turn runner.
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": f"budget_{exc.dimension.value}"},
-                    attributes={"failure_category": f"budget_{exc.dimension.value}"},
-                )
+                _fail_step("Execution failed", f"budget_{exc.dimension.value}")
                 raise
             except RunTerminalError:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": "terminal_error"},
-                    attributes={"failure_category": "terminal_error"},
-                )
+                _fail_step("Execution failed", "terminal_error")
                 raise
             except CodeInterpreterError as exc:
                 if not isinstance(exc, CodeExecutionError):
-                    category = str(getattr(exc, "category", "CodeInterpreterError"))
-                    exc = _terminal_error(str(exc), category=category)
-                    stdout_projector.finish()
-                    _close_output_stream(
-                        "Execution failed",
-                        step=step,
-                        stream_id=output_stream_id,
-                        state=output_state,
-                        observe=self._observe,
-                    )
-                    raise exc from None
-                category = str(getattr(exc, "category", "execution_error"))
-                exc = _repair_error(str(exc), category=category)
-                category = str(getattr(exc, "category", "execution_error"))
-                if category not in {"empty_code", "code_too_large", "no_progress"}:
-                    repair = self._reject_repeated_no_progress(normalized_code, exc)
-                    if repair is not None:
-                        exc = repair
-                        category = str(getattr(exc, "category", "no_progress"))
-                phase.finish(
-                    phase_status="failed",
+                    cat = str(getattr(exc, "category", "CodeInterpreterError"))
+                    msg = sanitize_repair_text(sanitize_provider_message(str(exc)))
+                    _fail_step("Execution failed", cat)
+                    raise _terminal_error(msg, category=cat) from None
+
+                cat = str(getattr(exc, "category", "execution_error"))
+                msg = str(exc)
+                if "characters omitted" not in msg:
+                    msg = sanitize_repair_text(msg)
+                _fail_step(
+                    "Execution error",
+                    cat,
+                    recovered=True,
                     outputs={
-                        "path": "http_broker" if self._http_broker is not None else type(self._backend).__name__,
+                        "path": type(self._backend).__name__,
                         "result_kind": "repair_error",
                         "execution_status": "recovered_error",
-                        "repair_category": category,
+                        "repair_category": cat,
                     },
-                    attributes={"recovered": True, "failure_category": category},
                 )
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                raise exc
+                raise _repair_error(msg, category=cat) from exc
             except SyntaxError as exc:
-                repair = _repair_error(str(exc), category="SyntaxError")
-                phase.finish(
-                    phase_status="failed",
+                _fail_step(
+                    "Execution error",
+                    "SyntaxError",
+                    recovered=True,
                     outputs={
                         "path": "syntax",
                         "result_kind": "repair_error",
                         "execution_status": "recovered_error",
                         "repair_category": "SyntaxError",
                     },
-                    attributes={"recovered": True, "failure_category": "SyntaxError"},
                 )
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution error", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                raise repair from None
+                raise _repair_error(str(exc), category="SyntaxError") from None
             except DaytonaAdapterError:
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": "adapter_error"},
-                    attributes={"failure_category": "adapter_error"},
-                )
+                _fail_step("Execution failed", "adapter_error")
                 raise
             except Exception as exc:
-                mapped = map_provider_error(exc)
-                stdout_projector.finish()
-                _close_output_stream(
-                    "Execution failed", step=step, stream_id=output_stream_id, state=output_state, observe=self._observe
-                )
-                category = "timeout" if isinstance(exc, TimeoutError) else "execution_error"
-                phase.finish(
-                    phase_status="failed",
-                    outputs={"failure_category": category},
-                    attributes={"failure_category": category},
-                )
-                raise mapped from exc
+                _fail_step("Execution failed", "execution_error")
+                raise map_provider_error(exc) from exc
             finally:
                 duration_ms = int((time.perf_counter() - step_started) * 1_000)
                 self._observe(StepFinished(step, duration_ms))
 
     @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
-        """
-        Shut down the interpreter and release its broker and backend resources.
-
-        Parameters:
-            strict_broker_cleanup (bool): Whether broker cleanup errors should be
-                propagated. When false, broker cleanup errors are suppressed.
-        """
-        # Shutdown may be requested by both the owner-loop close path and a
-        # worker-thread release callback.  Single-flight it, and only mark the
-        # interpreter closed after every owned resource has settled so a
-        # strict failure remains retryable.
+        """Shut down the interpreter and release backend resources."""
         with self._shutdown_lock:
             if self._shutdown:
                 return
-            reservation_token: object | None = None
+
             with self._reservation_state_lock:
                 if self._reservation_token is not None and not self._execution_started:
-                    reservation_token = self._reservation_token
                     self._reservation_token = None
                     self._reservation_task = None
-                    self._execution_lock.release()
-            if reservation_token is not None and _BINDING_RESERVATION.get() is reservation_token:
-                _BINDING_RESERVATION.set(None)
-            else:
-                current = _BINDING_RESERVATION.get()
-                with self._reservation_state_lock:
-                    owns_active_execution = (
-                        self._execution_started and self._reservation_token is current and current is not None
-                    )
-                    execution_active = self._execution_lock.locked()
-                if execution_active and not owns_active_execution:
-                    self._execution_lock.acquire()
-                    self._execution_lock.release()
-            first_error: BaseException | None = None
-            broker = self._http_broker
-            broker_settled = True
-            if broker is not None:
-                try:
-                    broker_result = broker.stop(strict=strict_broker_cleanup)
-                    # Older injected broker doubles returned None; treat that
-                    # as the historical successful-stop result.
-                    broker_settled = broker_result is not False
-                except BaseException as exc:
-                    first_error = exc
-                if broker_settled:
-                    self._http_broker = None
-                else:
-                    # Non-strict shutdown may suppress a provider cleanup
-                    # error, but the broker remains owned and retryable. Do
-                    # not publish interpreter shutdown until it settles.
-                    logger.warning("broker cleanup remains pending during interpreter shutdown")
+                    if self._execution_lock.locked():
+                        self._execution_lock.release()
+
+            broker_error: BaseException | None = None
+            if self._http_broker is not None:
+                stop = getattr(self._http_broker, "stop", None)
+                if callable(stop):
+                    try:
+                        stop(strict=strict_broker_cleanup)
+                    except BaseException as exc:
+                        if strict_broker_cleanup:
+                            broker_error = exc
+
+            backend_error: BaseException | None = None
             backend = self._backend
             if backend is not None:
                 try:
                     backend.close()
                 except BaseException as exc:
-                    first_error = first_error or exc
+                    backend_error = exc
                 else:
                     self._backend = None
-            if first_error is not None:
-                raise first_error
-            self._turn_request = None
-            self._shutdown = broker_settled
+
+            if broker_error is not None:
+                raise broker_error
+            if backend_error is not None:
+                raise backend_error
+            self._shutdown = True
 
     @with_callbacks
-    def invoke_tool(self, tool_name: str, kwargs: dict[str, Any]) -> Any:
-        """Invoke one bound host Tool through DSPy's callback lifecycle."""
+    def invoke_tool(self, tool_name: str, kwargs: dict[str, Any], *args: Any) -> Any:
+        """Invoke one bound host Tool through callback lifecycle."""
         fn = self._bound_tools.get(str(tool_name))
         if fn is None:
             raise CodeInterpreterError(f"Unknown tool: {tool_name}")
-        return fn(*_TOOL_POSITIONAL_ARGS.get(), **dict(kwargs))
-
-    def _invoke_tool_with_args(
-        self,
-        tool_name: str,
-        args: tuple[Any, ...],
-        kwargs: Mapping[str, Any],
-    ) -> Any:
-        """Route positional completeness through the callback-decorated seam."""
-        token = _TOOL_POSITIONAL_ARGS.set(tuple(args))
-        try:
-            return self.invoke_tool(tool_name, dict(kwargs))
-        finally:
-            _TOOL_POSITIONAL_ARGS.reset(token)
+        if inspect.iscoroutinefunction(fn):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None and loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(fn(*args, **dict(kwargs)), loop)
+                return future.result()
+            return asyncio.run(fn(*args, **dict(kwargs)))
+        if args:
+            return fn(*args, **dict(kwargs))
+        return fn(**dict(kwargs))
 
     def _ensure_bindings(self) -> None:
-        """
-        Ensure execution tools and submission support are available for the configured backend.
-        """
         backend = self._backend
         if backend is None:
             return
         tools = self._execution_tools()
         self._bound_tools = tools
-        bind_tools = getattr(backend, "bind_host_tools", None)
-        ensure_submit = getattr(backend, "ensure_submit", None)
-        if callable(bind_tools) and callable(ensure_submit):
-            if not needs_binding_refresh(
-                desired_generation=self._binding_generation,
-                installed_generation=self._installed_binding_generation,
-                broker_ready=True,
-            ):
-                return
-
-            def host_binding(name: str, source: Callable[..., Any]) -> Callable[..., Any]:
-                """Bind one host Tool without exposing the closure name to Daytona."""
-
-                def invoke(*args: Any, **kwargs: Any) -> Any:
-                    return self._invoke_tool_with_args(name, args, kwargs)
-
-                invoke.__name__ = name
-                # The Daytona broker derives its remote wrapper from the
-                # callable signature. Preserve the source Tool's signature,
-                # but never leak the old ``_name`` closure default as a user
-                # argument (which would turn ``tool('value')`` into a lookup
-                # for a tool literally named ``value``).
-                with contextlib.suppress(TypeError, ValueError):
-                    object.__setattr__(invoke, "__signature__", inspect.signature(source))
-                return invoke
-
-            bind_tools({name: host_binding(name, source) for name, source in tools.items()})
-            ensure_submit(self.output_fields)
-            self._installed_binding_generation = self._binding_generation
-            return
-        if not isinstance(backend, _SandboxProcessBackend):
-            self._installed_binding_generation = self._binding_generation
-            return
-        broker_ready = self._http_broker is not None and not bool(getattr(self._http_broker, "_stopped", False))
         if not needs_binding_refresh(
             desired_generation=self._binding_generation,
             installed_generation=self._installed_binding_generation,
-            broker_ready=broker_ready,
+            broker_ready=True,
         ):
             return
-        if not broker_ready:
-            from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 
-            context_binding = self._context_binding
-            if self._http_broker is None or bool(getattr(self._http_broker, "_stopped", False)):
-                self._http_broker = DaytonaHttpToolBroker(
-                    sandbox=backend.sandbox,
-                    broker_port=self._broker_port,
-                    context_mount_root=context_binding[0] if context_binding is not None else None,
-                    context_manifest_sha256=context_binding[1] if context_binding is not None else None,
-                )
-            self._http_broker.ensure_started()
-        self._http_broker.register_tools(tools)
-        self._http_broker.execute_code(
-            self._http_broker.submit_setup_code(self.output_fields),
-            timeout_s=float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S),
-        )
+        def host_binding(name: str, source: Callable[..., Any]) -> Callable[..., Any]:
+            def invoke(*args: Any, **kwargs: Any) -> Any:
+                return self.invoke_tool(name, kwargs, *args)
+
+            invoke.__name__ = name
+            with contextlib.suppress(TypeError, ValueError):
+                object.__setattr__(invoke, "__signature__", inspect.signature(source))
+            return invoke
+
+        bound_map = {name: host_binding(name, source) for name, source in tools.items()}
+
+        bind_tools = getattr(backend, "bind_host_tools", None)
+        if callable(bind_tools):
+            bind_tools(bound_map)
+
+        ensure_submit = getattr(backend, "ensure_submit", None)
+        if callable(ensure_submit):
+            ensure_submit(self._output_fields)
+
+        bind_manifest = getattr(backend, "bind_context_manifest", None)
+        if self._context_binding is not None and callable(bind_manifest):
+            bind_manifest(
+                trusted_mount_root=self._context_binding[0],
+                expected_manifest_sha256=self._context_binding[1],
+            )
         self._installed_binding_generation = self._binding_generation
 
-    def _execute_with_http_broker(
-        self,
-        code: str,
-        variables: dict[str, Any] | None,
-        *,
-        on_stdout: OutputCallback,
-    ) -> Any:
-        broker = self._http_broker
-        backend = self._backend
-        if broker is None or backend is None:
-            msg = "http broker is not configured"
-            raise DaytonaAdapterError(message=msg, cause_type="InterpreterConfigurationError")
-
-        def tool_executor(name: str, args: list[Any], kwargs: dict[str, Any]) -> Any:
-            if name not in self._bound_tools:
-                msg = f"unknown tool: {name}"
-                raise DaytonaAdapterError(message=msg, cause_type="UnknownToolError")
-            try:
-                # Host contract is kwargs-only: DSPy 3.3.x interpreter tools are
-                # ``def invoke(**kwargs)`` callables behind spoofed signatures,
-                # so broker payloads forward every parameter by name. ``args``
-                # is retained only for POSITIONAL_ONLY completeness.
-                return self._invoke_tool_with_args(name, tuple(args), kwargs)
-            except FilesystemToolError as exc:
-                return {
-                    "ok": False,
-                    "error": exc.code,
-                    "message": exc.public_message,
-                }
-            except Exception as exc:
-                raise DaytonaAdapterError(
-                    message=sanitize_provider_message(str(exc)),
-                    cause_type=type(exc).__name__,
-                ) from exc
-
-        if isinstance(backend, _SandboxProcessBackend):
-            timeout_s = float(backend.timeout_s or DEFAULT_EXECUTION_TIMEOUT_S)
-
-            def run_code() -> str | BackendExecutionResult:
-                return broker.execute_code(code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
-
-        else:
-
-            def run_code() -> str | BackendExecutionResult:
-                return self._run_backend(code, variables, on_stdout=on_stdout)
-
-        raw = broker.execute_with_callbacks(
-            run_code=run_code,
-            tool_executor=tool_executor,
-        )
-        self._context_accesses.extend(raw.context_accesses)
-        self._raise_context_injection_error(code, raw)
-        return self._finalize(raw)
-
     def drain_context_accesses(self) -> tuple[str, ...]:
-        """Return and clear sanitized attachment IDs read during capsule injection."""
         values = tuple(self._context_accesses)
         self._context_accesses.clear()
         return values
 
-    @staticmethod
-    def _raise_context_injection_error(code: str, raw: BackendExecutionResult) -> None:
-        tree = _host_setup_tree(code)
-        if raw.error and tree is not None and _contains_host_setup_loader(tree):
-            raise DaytonaAdapterError(
-                message="prepared context failed integrity verification",
-                cause_type="ContextIntegrityError",
-            )
-
     def _finalize(self, raw: str | BackendExecutionResult) -> Any:
         if isinstance(raw, BackendExecutionResult):
             if raw.error:
-                error = sanitize_provider_message(raw.error)
-                if "f-string expression part cannot include a backslash" in error:
-                    error = (
-                        f"{error}. Build the escaped fragment before the f-string expression, "
-                        "then interpolate the variable."
-                    )
+                error = sanitize_repair_text(sanitize_provider_message(raw.error))
                 category = raw.error_category or _repair_category(error)
                 if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
                     raise _terminal_error(error, category=category)
                 feedback = error
                 stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
                 if stderr:
-                    feedback = f"{feedback}\nstderr: {sanitize_repair_text(stderr)}"
-                raise _repair_error(feedback, category=category)
+                    feedback = f"{feedback}\nstderr: {stderr}"
+                return _RepairFeedback(feedback=feedback, category=category)
             if raw.final is not None:
                 return wrap_final_output(raw.final)
             return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
@@ -1420,10 +1363,6 @@ class DaytonaCodeInterpreter:
         if final is not None:
             return wrap_final_output(final)
         return truncate_head_tail(str(raw), max_chars=self._execution_output_cap)
-
-    @staticmethod
-    def _normalize_code(code: str) -> str:
-        return "\n".join(line.rstrip() for line in code.splitlines()).strip()
 
     def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> CodeExecutionError | None:
         if is_final_output(result):
@@ -1445,6 +1384,13 @@ class DaytonaCodeInterpreter:
         return None
 
 
+def hashlib_sha256(data: bytes | str) -> str:
+    import hashlib
+
+    raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
+    return hashlib.sha256(raw).hexdigest()
+
+
 def sandbox_backend(
     sandbox: Any,
     *,
@@ -1452,14 +1398,7 @@ def sandbox_backend(
     dispatcher: SyncBridgeDispatcher | None = None,
     timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> InterpreterBackend:
-    """Build a stateful backend from a live Daytona sandbox (daytona package only).
-
-    ``timeout_s`` bounds each ``run_code`` call (Daytona's SDK default is ten
-    minutes when unset); pass ``None`` to keep the SDK default. When ``loop``
-    is given, ``dispatcher`` optionally injects the composition-owned bridge
-    authority (QRE-154); omitted, the view resolves through the legacy
-    process-default dispatcher.
-    """
+    """Build a stateful backend from a live Daytona sandbox."""
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop, dispatcher)
     return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)
