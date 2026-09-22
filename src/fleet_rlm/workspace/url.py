@@ -88,8 +88,11 @@ class StoredUrlSource:
 class UrlSourceStore(Protocol):
     """Read and write one Session-scoped normalized URL source."""
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None: ...
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource: ...
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None:
+        raise NotImplementedError
+
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource:
+        raise NotImplementedError
 
 
 class UrlFetcher(Protocol):

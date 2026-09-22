@@ -16,23 +16,25 @@ from tests.support.sqlite_claims import postgres_claim_store
 
 __all__ = ["postgres_claim_store"]
 
+
 # --- from test_contention_scenarios.py --------------------------------
-pytestmark = pytest.mark.asyncio
-
-
+@pytest.mark.asyncio
 @pytest.mark.parametrize("race", ["duplicate", "conflicting_input", "active_run"])
 async def test_postgres_concurrent_claims_have_one_owner(postgres_claim_store, race):
     await claim_scenarios.concurrent_claims_have_one_owner(postgres_claim_store, race)
 
 
+@pytest.mark.asyncio
 async def test_postgres_cancel_settlement_races_commit(postgres_claim_store):
     await claim_scenarios.cancel_settlement_races_commit(postgres_claim_store)
 
 
+@pytest.mark.asyncio
 async def test_postgres_recovery_owner_cas_fences_stale_commit(postgres_claim_store):
     await claim_scenarios.recovery_owner_cas_fences_stale_commit(postgres_claim_store)
 
 
+@pytest.mark.asyncio
 async def test_postgres_outbox_claims_are_disjoint(postgres_claim_store):
     await claim_scenarios.outbox_claims_are_disjoint(postgres_claim_store)
 

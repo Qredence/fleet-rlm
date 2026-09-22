@@ -618,7 +618,9 @@ class DaytonaSessionManager:
         try:
             release_task = asyncio.create_task(asyncio.to_thread(lease.release))
             await _settle_provider_task(release_task)
-        except BaseException:
+        except asyncio.CancelledError:
+            pass
+        except Exception:
             pass
 
         quarantine_error: BaseException | None = None
@@ -635,7 +637,9 @@ class DaytonaSessionManager:
                     run_id=owner.run_id,
                 ),
             )
-        except BaseException as exc:
+        except asyncio.CancelledError as exc:
+            quarantine_error = exc
+        except Exception as exc:
             quarantine_error = exc
 
         if quarantine_error is not None:

@@ -316,8 +316,9 @@ class DaytonaHttpToolBroker:
         # not return (or tear down its broker) until that request has settled,
         # even after a rejected result delivery.  The typed delivery failure is
         # raised only once remote execution has contained its waiting call.
-        if self._delivery_error is not None:
-            raise self._delivery_error
+        delivery_error = self._delivery_error
+        if delivery_error is not None:
+            raise delivery_error
         if not outcome or isinstance(outcome[0], BaseException):
             raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
         response = outcome[0]
