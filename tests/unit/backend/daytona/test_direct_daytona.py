@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleet_rlm.daytona.models import (
+from fleet_rlm.daytona.interpreter import (
     FINAL_OUTPUT_MARKER,
     ExecutionResult,
     extract_final_payload,
@@ -153,8 +153,7 @@ def test_direct_interpreter_code_execution_stdout():
 
 def test_direct_interpreter_code_execution_submit():
     """Verify DaytonaCodeInterpreter extracts SUBMIT output as FinalOutput."""
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-    from fleet_rlm.daytona.models import final_output_frame
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, final_output_frame, sandbox_backend
     from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
     frame = final_output_frame({"answer": "42", "reasoning": "math"})
