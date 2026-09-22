@@ -24,7 +24,7 @@ from typing import Any, cast
 from uuid import uuid4
 
 from fleet_rlm.config.loader import load_runtime_settings
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -41,7 +41,6 @@ from fleet_rlm.daytona.provisioning import (
     volume_mount_spec,
 )
 from fleet_rlm.daytona.runtime import build_daytona_client
-from fleet_rlm.daytona.sync_bridge import sync_sandbox
 
 RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v2"
 WARMUP_CYCLES = 3

@@ -19,7 +19,7 @@ from fleet_rlm.daytona.admission import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
 )
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, SyncBridgeDispatcher, sandbox_backend
 from fleet_rlm.daytona.lifecycle import AbsenceOutcome, confirm_absence
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
@@ -27,7 +27,6 @@ from fleet_rlm.daytona.provisioning import (
     recursive_child_volume_subpath,
 )
 from fleet_rlm.daytona.sandbox import schedule_owned_close
-from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,

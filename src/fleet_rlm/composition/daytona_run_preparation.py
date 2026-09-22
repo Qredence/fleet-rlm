@@ -35,6 +35,7 @@ from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import is_sandbox_not_found
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.platform import (
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
@@ -57,7 +58,6 @@ from fleet_rlm.daytona.session_manager import (
     has_pending_lease_ownership,
     wait_lease_ownership,
 )
-from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory

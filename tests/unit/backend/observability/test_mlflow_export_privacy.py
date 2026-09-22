@@ -14,7 +14,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import Status, StatusCode
 
-from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 from fleet_rlm.observability import tracing
 
 

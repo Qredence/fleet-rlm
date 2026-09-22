@@ -28,7 +28,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.sync_bridge import sync_sandbox
+from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.runtime.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id

@@ -31,6 +31,7 @@ from fleet_rlm.daytona.interpreter import (
     DEFAULT_EXECUTION_OUTPUT_CHARS,
     DEFAULT_EXECUTION_TIMEOUT_S,
     DaytonaCodeInterpreter,
+    SyncBridgeDispatcher,
     sandbox_backend,
 )
 from fleet_rlm.daytona.platform import sandbox_state
@@ -61,7 +62,6 @@ from fleet_rlm.daytona.sandbox import (
     schedule_owned_close,
     wait_lease_ownership,
 )
-from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.runtime.bindings import (
     BindingGenerationAuthority,
     SandboxBinding,

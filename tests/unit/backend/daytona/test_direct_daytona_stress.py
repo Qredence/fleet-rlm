@@ -22,7 +22,13 @@ import pytest
 
 from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import (
+    DaytonaCodeInterpreter,
+    SyncBridgeDispatcher,
+    _sync_await,
+    sandbox_backend,
+    sync_sandbox,
+)
 from fleet_rlm.daytona.lifecycle import (
     AbsenceConfirmation,
     AbsenceProbeError,
@@ -36,11 +42,6 @@ from fleet_rlm.daytona.models import (
     validate_json_value,
 )
 from fleet_rlm.daytona.recursive_child_runtime import cleanup_child_runtime_async
-from fleet_rlm.daytona.sync_bridge import (
-    SyncBridgeDispatcher,
-    _sync_await,
-    sync_sandbox,
-)
 from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
@@ -265,7 +266,7 @@ def test_sync_bridge_direct_loop_reentrancy_fails_typed() -> None:
 
 def test_sync_bridge_non_awaitable_rejected() -> None:
     """_sync_await rejects non-awaitable values with InterpreterBridgeContractError."""
-    from fleet_rlm.daytona.sync_bridge import _SyncBridgeLoop
+    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
 
     owner = _SyncBridgeLoop(caller_loop=None)
     with pytest.raises(DaytonaAdapterError) as exc_info:
