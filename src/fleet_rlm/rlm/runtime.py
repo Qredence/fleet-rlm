@@ -12,7 +12,7 @@ import contextlib
 import contextvars
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -61,7 +61,6 @@ from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
-    RLMFactory,
     RLMModelBundle,
     RLMOptions,
     build_lm,
@@ -633,19 +632,7 @@ def _run_private_event_loop(
 # ---------------------------------------------------------------------------
 
 
-class RLMFactoryLike(Protocol):
-    def create(
-        self,
-        *,
-        models: Any,
-        options: Any,
-        tools: Sequence[dspy.Tool] | None = None,
-        signature: Any = None,
-        verbose: bool = True,
-        host_tool_dispatch: bool = True,
-    ) -> Any:
-        """Construct an RLM with the specified models, options, tools, and signature."""
-        ...
+ProgramBuilder = Callable[..., Any]
 
 
 class RunEventStream:
@@ -822,9 +809,11 @@ class RLMRunner:
     def __init__(
         self,
         *,
-        factory: RLMFactoryLike | None = None,
+        program_builder: ProgramBuilder = build_native_rlm,
+        verbose: bool = True,
     ) -> None:
-        self._factory = factory or RLMFactory()
+        self._program_builder = program_builder
+        self._verbose = verbose
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -1284,12 +1273,13 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
-            rlm = self._factory.create(
-                models=state_context.execution.models,
+            rlm = self._program_builder(
+                signature=spec.signature,
                 options=state_context.execution.options,
                 tools=(all_tools or None) if fleet_dispatch else None,
-                signature=spec.signature,
+                sub_lm=state_context.execution.models.sub_lm,
                 host_tool_dispatch=fleet_dispatch,
+                verbose=self._verbose,
             )
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
             if callable(bind_budget):
@@ -1612,9 +1602,9 @@ __all__ = [
     "PreparationNotice",
     "PreparedCapabilities",
     "ProbeInterpreterFactory",
+    "ProgramBuilder",
     "RLMExecutionContext",
     "RLMExecutionSpec",
-    "RLMFactoryLike",
     "RLMInterpreter",
     "RLMProviderContractError",
     "RLMProviderProbeResult",

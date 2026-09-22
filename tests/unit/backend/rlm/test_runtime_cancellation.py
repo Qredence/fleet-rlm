@@ -60,7 +60,7 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
         ),
         capabilities=EmptyCapabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
 
     async def consume_all() -> None:
         async for _event in stream:
@@ -129,7 +129,7 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
         ),
         capabilities=EmptyCapabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
 
     async def consume_all() -> None:
         async for _event in stream:

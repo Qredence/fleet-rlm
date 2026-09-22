@@ -10,11 +10,18 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.events import observe_tool
-from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.workspace.url import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
+
+
+def _build_native(**kwargs: object):
+    models = kwargs.pop("models", None)
+    if models is not None:
+        kwargs["sub_lm"] = models.sub_lm
+    return build_native_rlm(**kwargs)
 
 
 class _FakeFetcher:
@@ -178,7 +185,7 @@ def _rlm(
         tuple[dspy.RLM, DaytonaCodeInterpreter]: The configured RLM and its caller-owned interpreter.
     """
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    rlm = RLMFactory().create(
+    rlm = _build_native(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
         options=RLMOptions(max_iters=len(action), max_llm_calls=4),
         tools=tools,

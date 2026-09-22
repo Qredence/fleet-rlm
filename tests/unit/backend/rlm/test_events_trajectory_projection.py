@@ -380,7 +380,7 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
         capabilities=EmptyCapabilities(),
     )
 
-    events = [event async for event in RLMRunner(factory=Factory()).stream(context)]
+    events = [event async for event in RLMRunner(program_builder=Factory().create).stream(context)]
 
     assert [event.detail.text for event in events if isinstance(event.detail, RLMReasoning)] == [
         truncate_public_text("first distinct reason", max_len=16),

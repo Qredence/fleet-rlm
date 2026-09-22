@@ -12,7 +12,7 @@ import fleet_rlm.rlm.runtime as runtime_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
-from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.rlm.runtime import (
     DelegationPolicy,
@@ -262,13 +262,9 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     captured: dict[str, object] = {}
 
-    class Factory:
-        def create(self, **kwargs: object):
-            """
-            Create an RLM instance while recording the supplied configuration arguments.
-            """
-            captured.update(kwargs)
-            return RLMFactory().create(**kwargs)
+    def capturing_builder(**kwargs: object):
+        captured.update(kwargs)
+        return build_native_rlm(**kwargs)
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
@@ -297,7 +293,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
         capabilities=EmptyCapabilities(),
     )
 
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=capturing_builder).stream(context)
     _events = [event async for event in stream]
 
     assert stream.outcome is not None and stream.outcome.succeeded

@@ -1,4 +1,4 @@
-"""DSPy RLM program specification, LMs, Signatures, instructions, and input models."""
+"""Native DSPy RLM construction, LMs, signatures, instructions, and input models."""
 
 # ruff: noqa: E501
 
@@ -6,12 +6,11 @@ from __future__ import annotations
 
 import hashlib
 import json
-import keyword
 import math
 import os
 import re
 import time
-from collections.abc import Generator, Mapping, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -1501,178 +1500,78 @@ def build_lm_for_tier(
 
 
 # ---------------------------------------------------------------------------
-# Program Builder & Factory
+# Native program construction
 # ---------------------------------------------------------------------------
-
-
-class FleetToolKind(StrEnum):
-    SANDBOX_LOCAL = "sandbox-local"
-    HOST_AUTHORIZED = "host-authorized"
-    RECURSIVE = "recursive"
-    SETTLEMENT_ONLY = "settlement-only"
-
 
 _DSPY_BUILTIN_TOOLS = frozenset({"llm_query", "llm_query_batched", "print", "SUBMIT"})
 
 
-@dataclass(frozen=True, slots=True)
-class FleetToolEntry:
-    tool: dspy.Tool
-    kind: FleetToolKind
-
-
-@dataclass(frozen=True, slots=True)
-class FleetToolCatalog:
-    """Immutable tool membership and authority; settlement tools never enter RLM."""
-
-    entries: tuple[FleetToolEntry, ...] = ()
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "entries", tuple(self.entries))
-        names: set[str] = set()
-        for entry in self.entries:
-            name = entry.tool.name
-            if not isinstance(entry.kind, FleetToolKind):
-                raise RLMConfigError("tool authority must be an explicit FleetToolKind")
-            if (
-                not isinstance(name, str)
-                or not name.isidentifier()
-                or keyword.iskeyword(name)
-                or name in _DSPY_BUILTIN_TOOLS
-            ):
-                raise RLMConfigError("tool name conflicts with the DSPy execution namespace")
-            if name in names:
-                raise RLMConfigError("duplicate Fleet tool name")
-            names.add(name)
-
-    @classmethod
-    def from_tools(cls, tools: Sequence[dspy.Tool] | None) -> FleetToolCatalog:
-        entries = []
-        for value in tools or ():
-            tool = value if isinstance(value, dspy.Tool) else dspy.Tool(value)
-            kind = (
-                FleetToolKind.RECURSIVE
-                if tool.name in {"rlm_query", "rlm_query_batched"}
-                else FleetToolKind.HOST_AUTHORIZED
-            )
-            entries.append(FleetToolEntry(tool, kind))
-        return cls(tuple(entries))
-
-    def model_tools(self) -> tuple[dspy.Tool, ...]:
-        self.__post_init__()
-        return tuple(entry.tool for entry in self.entries if entry.kind != FleetToolKind.SETTLEMENT_ONLY)
-
-    def validate_constructed(self, rlm: Any) -> None:
-        expected = {tool.name for tool in self.model_tools()}
-        actual = set(rlm.tools)
-        if actual != expected or actual & _DSPY_BUILTIN_TOOLS:
-            raise RLMConfigError("constructed DSPy tool namespace differs from the Fleet catalog")
-
-
-@dataclass(frozen=True, slots=True)
-class FleetProgramSpec:
-    """Full specification for constructing one native DSPy RLM program."""
-
-    signature: type[dspy.Signature] | str = FleetRLMSignature
-    options: RLMOptions = field(default_factory=RLMOptions)
-    tools: Sequence[dspy.Tool] | None = None
-    sub_lm: dspy.LM | None = None
-    skill_instructions: tuple[str, ...] = ()
-    recursion_enabled: bool = False
-    verbose: bool = True
-    tool_catalog: FleetToolCatalog | None = None
-    host_tool_dispatch: bool = True
-
-    def __post_init__(self) -> None:
-        if self.tools is not None and self.tool_catalog is not None:
-            raise RLMConfigError("provide one tool catalog, not both tools and a catalog")
-        catalog = self.tool_catalog or FleetToolCatalog.from_tools(self.tools)
-        object.__setattr__(self, "tool_catalog", catalog)
-        object.__setattr__(self, "tools", catalog.model_tools())
-        object.__setattr__(self, "skill_instructions", tuple(self.skill_instructions))
-
-
-RLMProgramSpec = FleetProgramSpec
+def _native_tools(tools: Sequence[dspy.Tool | Callable[..., Any]] | None) -> list[dspy.Tool]:
+    """Normalize and validate the explicitly authorized model-facing tools."""
+    normalized: list[dspy.Tool] = []
+    names: set[str] = set()
+    for value in tools or ():
+        tool = value if isinstance(value, dspy.Tool) else dspy.Tool(value)
+        name = tool.name
+        if not isinstance(name, str) or not name.isidentifier() or name in _DSPY_BUILTIN_TOOLS:
+            raise RLMConfigError("tool name conflicts with the DSPy execution namespace")
+        if name in names:
+            raise RLMConfigError("duplicate Fleet tool name")
+        names.add(name)
+        normalized.append(tool)
+    return normalized
 
 
 def build_native_rlm(
     *,
-    signature: type[dspy.Signature] | str,
+    signature: type[dspy.Signature] | str = FleetRLMSignature,
     options: RLMOptions,
-    tools: Sequence[dspy.Tool] | None = None,
+    tools: Sequence[dspy.Tool | Callable[..., Any]] | None = None,
     sub_lm: dspy.LM | None = None,
+    skill_instructions: Sequence[str] = (),
+    recursion_enabled: bool = False,
+    host_tool_dispatch: bool = True,
     verbose: bool = True,
 ) -> Any:
-    catalog = FleetToolCatalog.from_tools(tools)
+    """Construct one fresh native DSPy RLM from its invocation inputs.
+
+    Permission selection happens before this call; tool callables still enforce
+    authorization at execution.  There is intentionally no Fleet program
+    specification, catalog, or factory between callers and ``dspy.RLM``.
+    """
+    native_tools = _native_tools(tools)
+    resolved_signature = signature
+    tool_names = frozenset(str(tool.name) for tool in native_tools)
+    if (
+        isinstance(signature, type)
+        and issubclass(signature, dspy.Signature)
+        and (
+            recursion_enabled
+            or skill_instructions
+            or not host_tool_dispatch
+            or _tool_names_need_instruction_overlay(tool_names)
+        )
+    ):
+        resolved_signature = root_signature_for_recursion(
+            signature,
+            recursion_enabled=recursion_enabled,
+            skill_instructions=tuple(skill_instructions),
+            tool_names=tool_names,
+            host_tool_dispatch=host_tool_dispatch,
+        )
     rlm = dspy.RLM(
-        signature,
+        resolved_signature,
         max_iters=options.max_iters,
         max_llm_calls=options.max_llm_calls,
         max_output_chars=options.max_output_chars,
         verbose=verbose,
-        tools=list(catalog.model_tools()),
+        tools=native_tools,
         sub_lm=sub_lm,
         interpreter_factory=daytona_provider_contract,
     )
-    catalog.validate_constructed(rlm)
+    if set(rlm.tools) != set(tool_names) or set(rlm.tools) & _DSPY_BUILTIN_TOOLS:
+        raise RLMConfigError("constructed DSPy tool namespace differs from the authorized tools")
     return rlm
-
-
-def build_program(spec: RLMProgramSpec) -> Any:
-    sig = spec.signature
-    tool_names = frozenset(str(tool.name) for tool in spec.tools or ())
-    if (
-        isinstance(sig, type)
-        and issubclass(sig, dspy.Signature)
-        and (
-            spec.recursion_enabled
-            or spec.skill_instructions
-            or not spec.host_tool_dispatch
-            or _tool_names_need_instruction_overlay(tool_names)
-        )
-    ):
-        sig = root_signature_for_recursion(
-            sig,
-            recursion_enabled=spec.recursion_enabled,
-            skill_instructions=spec.skill_instructions,
-            tool_names=tool_names,
-            host_tool_dispatch=spec.host_tool_dispatch,
-        )
-    return build_native_rlm(
-        signature=sig,
-        options=spec.options,
-        tools=spec.tools,
-        sub_lm=spec.sub_lm,
-        verbose=spec.verbose,
-    )
-
-
-class RLMFactory:
-    """Construction seam for native DSPy RLM instances."""
-
-    def __init__(self, *, verbose: bool = True) -> None:
-        self.verbose = verbose
-
-    def create(
-        self,
-        *,
-        models: Any,
-        options: RLMOptions,
-        tools: Sequence[dspy.Tool] | None = None,
-        signature: type[dspy.Signature] | str | None = None,
-        verbose: bool | None = None,
-        host_tool_dispatch: bool = True,
-    ) -> Any:
-        return build_program(
-            FleetProgramSpec(
-                signature=signature or FleetRLMSignature,
-                options=options,
-                tools=tools,
-                sub_lm=getattr(models, "sub_lm", None),
-                verbose=self.verbose if verbose is None else verbose,
-                host_tool_dispatch=host_tool_dispatch,
-            )
-        )
 
 
 __all__ = [
@@ -1686,17 +1585,11 @@ __all__ = [
     "AttachmentContextEntry",
     "AttachmentInput",
     "FleetInputModel",
-    "FleetProgramSpec",
     "FleetRLMSignature",
-    "FleetToolCatalog",
-    "FleetToolEntry",
-    "FleetToolKind",
     "LMTier",
-    "RLMFactory",
     "RLMInstructionFragments",
     "RLMModelBundle",
     "RLMOptions",
-    "RLMProgramSpec",
     "SessionContextInput",
     "SkillCardInput",
     "TurnPreviewInput",
@@ -1706,7 +1599,6 @@ __all__ = [
     "build_lm_for_tier",
     "build_model_bundle",
     "build_native_rlm",
-    "build_program",
     "build_rlm_input_kwargs",
     "build_session_context_payload",
     "compose_rlm_instructions",

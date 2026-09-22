@@ -25,7 +25,7 @@ from fleet_rlm.rlm.events import (
     RunTimedOut,
     RuntimeEvent,
 )
-from fleet_rlm.rlm.program import RLMFactory, RLMOptions
+from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.runtime import (
     ExecutionRuntime,
     RLMExecutionContext,
@@ -39,6 +39,13 @@ from fleet_rlm.sessions.run_state import ClaimedRun
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
 HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]
+
+
+def _build_native(**kwargs: object):
+    models = kwargs.pop("models", None)
+    if models is not None:
+        kwargs["sub_lm"] = models.sub_lm
+    return build_native_rlm(**kwargs)
 
 
 class _Capabilities:
@@ -92,7 +99,7 @@ class _Factory:
 
     def create(self, **kwargs):
         if self._mode == "native_success":
-            rlm = RLMFactory().create(**kwargs)
+            rlm = _build_native(**kwargs)
             rlm.generate_action = _NativeSuccessActions()
             return rlm
         return _Program(self._mode, self._started)
@@ -163,7 +170,7 @@ class _Harness:
         coordinator = TurnRuntime(
             lifecycle=self.lifecycle,
             preparation=self,
-            runner=RLMRunner(factory=_Factory(self.mode, self.program_started)),
+            runner=RLMRunner(program_builder=_Factory(self.mode, self.program_started).create),
         )
         self.cleanup_supervisor = coordinator._cleanup
         opened = await coordinator.open(

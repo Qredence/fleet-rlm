@@ -36,7 +36,7 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
-from fleet_rlm.rlm.runtime import RLMFactoryLike
+from fleet_rlm.rlm.runtime import ProgramBuilder
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
@@ -120,7 +120,7 @@ def build_local_inventory(
     attachment_lifecycle: AttachmentLifecycle,
     artifact_reader: ArtifactReader,
     preparation: RunPreparation,
-    rlm_factory: RLMFactoryLike,
+    program_builder: ProgramBuilder,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
@@ -155,7 +155,7 @@ def build_local_inventory(
         stale_after_seconds=settings.run_stale_after_seconds,
         cleanup=cleanup,
     )
-    runner = RLMRunner(factory=rlm_factory)
+    runner = RLMRunner(program_builder=program_builder)
     coordinator = TurnRuntime(
         lifecycle=lifecycle,
         preparation=preparation,
@@ -373,12 +373,10 @@ class _TestingRLM:
         return SimpleNamespace(**values, trajectory=[])
 
 
-class TestingRLMFactory:
-    """Deterministic RLM substitute that never calls a provider."""
-
-    def create(self, **kwargs: Any) -> _TestingRLM:
-        signature = kwargs.get("signature", FleetRLMSignature)
-        return _TestingRLM(signature)
+def build_testing_rlm(**kwargs: Any) -> _TestingRLM:
+    """Build a deterministic RLM substitute that never calls a provider."""
+    signature = kwargs.get("signature", FleetRLMSignature)
+    return _TestingRLM(signature)
 
 
 class DeterministicTurnPreparation:
@@ -460,7 +458,7 @@ def install_testing_composition(
             max_artifact_bytes=settings.max_artifact_bytes,
             max_url_bytes=settings.max_url_bytes,
         ),
-        rlm_factory=TestingRLMFactory(),
+        program_builder=build_testing_rlm,
     )
     # Overlay only the host volume adapters; keep the shared local inventory
     # members so new RuntimeInventory fields cannot silently drop here.

@@ -328,7 +328,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
 
 @pytest.mark.asyncio
 async def test_deterministic_composition_runs_data_analysis_signature() -> None:
-    from fleet_rlm.composition.testing import DeterministicTurnPreparation, TestingRLMFactory
+    from fleet_rlm.composition.testing import DeterministicTurnPreparation, build_testing_rlm
     from fleet_rlm.rlm.runtime import RLMRunner
 
     class NoAttachments:
@@ -345,7 +345,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
         _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),)),
         deadline=float("inf"),
     )
-    stream = RLMRunner(factory=TestingRLMFactory()).stream(prepared.execution)
+    stream = RLMRunner(program_builder=build_testing_rlm).stream(prepared.execution)
     _ = [event async for event in stream]
 
     assert stream.outcome is not None and stream.outcome.succeeded

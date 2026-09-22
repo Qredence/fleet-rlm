@@ -491,7 +491,7 @@ async def build_daytona_composition(
         SqlAlchemySandboxBindingStore,
         SqlAlchemySessionCatalog,
     )
-    from fleet_rlm.rlm.program import RLMFactory, build_model_bundle
+    from fleet_rlm.rlm.program import build_model_bundle
     from fleet_rlm.rlm.runtime import RLMRunner
     from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.workspace.paths import volume_paths_from_settings
@@ -673,9 +673,7 @@ async def build_daytona_composition(
             name="fleet-memory-outbox-reconcile",
         )
 
-        runner = RLMRunner(
-            factory=RLMFactory(verbose=resolved.rlm_verbose),
-        )
+        runner = RLMRunner(verbose=resolved.rlm_verbose)
         coordinator = TurnRuntime(
             lifecycle=lifecycle,
             preparation=run_preparation,
