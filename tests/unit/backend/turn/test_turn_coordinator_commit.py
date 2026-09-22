@@ -646,7 +646,7 @@ async def test_replay_bypasses_preparation_and_runner() -> None:
 
     class Never:
         def __getattr__(self, name):
-            raise AssertionError(name)
+            raise AttributeError(name)
 
     command = OpenTurnCommand(TurnAccess(uuid4(), uuid4()), session_id, TurnInput("hi"), "key", run_id)
     opened = await TurnRuntime(lifecycle=Lifecycle(), preparation=Never(), runner=Never()).open(command)

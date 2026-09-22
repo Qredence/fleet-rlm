@@ -88,8 +88,11 @@ class StoredUrlSource:
 class UrlSourceStore(Protocol):
     """Read and write one Session-scoped normalized URL source."""
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None: ...
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource: ...
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None:
+        raise NotImplementedError
+
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource:
+        raise NotImplementedError
 
 
 class UrlFetcher(Protocol):
@@ -466,17 +469,6 @@ class WorkspaceUrlSourceStore:
         if content_bytes > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
 
-        def capacity_refusal() -> StoredUrlSource:
-            if content_bytes > URL_INLINE_CONTENT_MAX_BYTES:
-                raise UrlToolError("cache_unavailable", "URL content could not be persisted")
-            return StoredUrlSource(
-                text=content,
-                durable=False,
-                workspace_path=None,
-                byte_size=content_bytes,
-                checksum_sha256=hashlib.sha256(data).hexdigest(),
-            )
-
         try:
             try:
                 listing = self._workspace.list_entries(
@@ -494,14 +486,14 @@ class WorkspaceUrlSourceStore:
                 raise UrlToolError("cache_unavailable", "URL source cache cannot be verified")
             total_bytes = sum(entry.byte_size or 0 for entry in cache_entries)
             if existing is None and len(cache_entries) >= self._max_entries_total:
-                return capacity_refusal()
+                raise UrlToolError("cache_full", "URL source cache is full")
             existing_bytes = 0
             if existing is not None:
                 if existing.byte_size is None:
                     raise UrlToolError("cache_unavailable", "URL source cache cannot be verified")
                 existing_bytes = existing.byte_size
             if total_bytes - existing_bytes + content_bytes > self._max_bytes_total:
-                return capacity_refusal()
+                raise UrlToolError("cache_full", "URL source cache is full")
             entry = self._workspace.write_text(path, content, overwrite=True)
             if entry.path != path or entry.kind != "file" or entry.byte_size != content_bytes:
                 raise UrlToolError("cache_unavailable", "URL source cache write could not be verified")

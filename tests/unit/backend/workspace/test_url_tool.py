@@ -205,15 +205,9 @@ def test_workspace_url_store_returns_a_bounded_error_when_entry_bound_is_reached
     second = UrlToolHost(session_id=session_id, store=store, max_bytes=1_024, fetcher=fetcher).as_tools()[0]
 
     assert first(url="https://example.com/first")["cache_hit"] is False
-    uncached = second(url="https://example.com/second")
-    uncached_again = second(url="https://example.com/second")
-    assert uncached["cache_hit"] is False
-    assert uncached["content"] == "needle: 42"
-    assert "workspace_path" not in uncached
-    assert uncached_again["cache_hit"] is False
-    assert uncached_again["content"] == "needle: 42"
-    assert "workspace_path" not in uncached_again
-    assert fetcher.calls == ["https://example.com/first", "https://example.com/second", "https://example.com/second"]
+    result = second(url="https://example.com/second")
+    assert result == {"ok": False, "error": "cache_full", "message": "URL source cache is full"}
+    assert fetcher.calls == ["https://example.com/first", "https://example.com/second"]
 
 
 def test_url_tool_returns_content_to_repl_but_projects_metadata_only() -> None:
@@ -320,8 +314,8 @@ def test_workspace_url_tool_rejects_large_result_when_cache_capacity_is_full(
 
     assert result == {
         "ok": False,
-        "error": "cache_unavailable",
-        "message": "URL content could not be persisted",
+        "error": "cache_full",
+        "message": "URL source cache is full",
     }
     assert len(workspace.values) == (1 if seed_existing else 0)
 
