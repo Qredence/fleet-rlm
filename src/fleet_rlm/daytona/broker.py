@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import logging
 import secrets
 import threading
@@ -30,6 +31,14 @@ _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_OUTPUT_CHARS = 64 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
+
+
+def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
+    """Encode the exact result payload accepted by the sandbox broker."""
+    payload = json.dumps(body, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+    if len(payload) > _MAX_REQUEST_BYTES:
+        raise ValueError("tool result exceeds broker request limit")
+    return payload
 
 
 _SERVER_SOURCE = r"""
@@ -406,8 +415,27 @@ class DaytonaHttpToolBroker:
                     },
                 }
             try:
+                payload = _encode_result_envelope(body)
+            except ValueError:
+                if succeeded:
+                    failed = self._tool_failed
+                    if failed is not None:
+                        with contextlib.suppress(Exception):
+                            failed(name, arguments)
+                succeeded = False
+                body = {
+                    "id": request.get("id"),
+                    "lease": request.get("lease"),
+                    "tool_error": {
+                        "category": "ToolResultTooLarge",
+                        "message": "tool result exceeds broker transport limit",
+                        "call_id": str(request.get("id") or ""),
+                    },
+                }
+                payload = _encode_result_envelope(body)
+            try:
                 if not self._stopped and self._client is client:
-                    response = client.post("/result", json=body)
+                    response = client.post("/result", content=payload, headers={"Content-Type": "application/json"})
                     if response.status_code != 200:
                         self._record_delivery_failure(
                             request, phase="result_delivery", category=f"http_{response.status_code}"

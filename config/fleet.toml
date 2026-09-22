@@ -47,6 +47,7 @@ max_llm_calls = 32
 max_provider_attempts = 2048
 max_tool_calls = 256
 max_output_chars = 6000
+max_final_output_chars = 6000
 max_execution_output_chars = 4000
 max_execution_output_bytes = 2000000
 execution_timeout_s = 300

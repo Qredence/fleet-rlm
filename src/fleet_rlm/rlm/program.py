@@ -487,17 +487,19 @@ _MAX_PREVIEW_CHARS = 500
 
 @dataclass(frozen=True, slots=True)
 class RLMOptions:
-    """The three execution limits owned by native ``dspy.RLM``."""
+    """Native DSPy limits plus the Fleet-owned public result limit."""
 
     max_iters: int = 20
     max_llm_calls: int = 50
     max_output_chars: int = 10_000
+    max_final_output_chars: int = 10_000
 
     def __post_init__(self) -> None:
         for name, value in (
             ("max_iters", self.max_iters),
             ("max_llm_calls", self.max_llm_calls),
             ("max_output_chars", self.max_output_chars),
+            ("max_final_output_chars", self.max_final_output_chars),
         ):
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
                 raise RLMConfigError(f"{name} must be a positive integer, got {value!r}")
@@ -508,6 +510,7 @@ def rlm_options(settings: Settings) -> RLMOptions:
         max_iters=settings.rlm_max_iters,
         max_llm_calls=settings.rlm_max_llm_calls,
         max_output_chars=settings.rlm_max_output_chars,
+        max_final_output_chars=settings.rlm_max_final_output_chars,
     )
 
 
@@ -632,9 +635,7 @@ def fleet_rlm_instruction_fragments(
     *,
     recursion_enabled: bool,
     host_tool_dispatch: bool = True,
-    max_output_chars: int = 10_000,
 ) -> RLMInstructionFragments:
-    answer_budget = max(1, max_output_chars * 3 // 4)
     step = 6 if recursion_enabled and host_tool_dispatch else 5
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
@@ -646,9 +647,7 @@ def fleet_rlm_instruction_fragments(
    A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
    or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
    if ``answer`` is a mapping or list, serialize it with ``json.dumps(answer, ensure_ascii=False)``. Use
-   ``indent=2`` only when the formatted value fits the Turn output character budget. Keep the submitted string at
-   or below {answer_budget:,} characters so its serialized output stays below the {max_output_chars:,}-character
-   Turn limit. Never pass a mapping or
+   ``indent=2`` only when the formatted value fits the declared output contract. Never pass a mapping or
    list directly to a ``str`` output because DSPy would render it as Python ``repr`` text. The default call
    is ``SUBMIT(answer=answer)``."""
     return RLMInstructionFragments(
@@ -665,12 +664,10 @@ def compose_rlm_instructions(
     *,
     recursion_enabled: bool,
     host_tool_dispatch: bool = True,
-    max_output_chars: int = 10_000,
 ) -> str:
     return fleet_rlm_instruction_fragments(
         recursion_enabled=recursion_enabled,
         host_tool_dispatch=host_tool_dispatch,
-        max_output_chars=max_output_chars,
     ).compose()
 
 
@@ -729,12 +726,10 @@ def root_signature_for_recursion(
     skill_instructions: tuple[str, ...] = (),
     tool_names: frozenset[str] = frozenset(),
     host_tool_dispatch: bool = True,
-    max_output_chars: int = 10_000,
 ) -> type[dspy.Signature]:
     instructions = compose_rlm_instructions(
         recursion_enabled=recursion_enabled,
         host_tool_dispatch=host_tool_dispatch,
-        max_output_chars=max_output_chars,
     )
     # Workspace guidance is dispatched through the same bridge as the sub-LM
     # tools, so a runtime without that bridge must not receive it either.
@@ -1634,7 +1629,6 @@ def build_program(spec: RLMProgramSpec) -> Any:
             or spec.skill_instructions
             or not spec.host_tool_dispatch
             or _tool_names_need_instruction_overlay(tool_names)
-            or spec.options.max_output_chars != RLMOptions().max_output_chars
         )
     ):
         sig = root_signature_for_recursion(
@@ -1643,7 +1637,6 @@ def build_program(spec: RLMProgramSpec) -> Any:
             skill_instructions=spec.skill_instructions,
             tool_names=tool_names,
             host_tool_dispatch=spec.host_tool_dispatch,
-            max_output_chars=spec.options.max_output_chars,
         )
     return build_native_rlm(
         signature=sig,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any, ClassVar
 from uuid import uuid4
@@ -162,6 +163,12 @@ class _MissingCacheDirectoryWorkspace(_FakeWorkspace):
         raise FileNotFoundError("sources/urls")
 
 
+class _FailingWriteWorkspace(_FakeWorkspace):
+    def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
+        del path, content, overwrite
+        raise OSError("storage unavailable")
+
+
 def test_in_memory_url_store_bounds_entries_across_sessions_with_lru_recency() -> None:
     store = InMemoryUrlSourceStore(max_entries_per_session=8, max_entries_total=2, max_bytes_total=100)
     first_session = uuid4()
@@ -169,13 +176,13 @@ def test_in_memory_url_store_bounds_entries_across_sessions_with_lru_recency() -
 
     store.write(first_session, "sources/urls/first.txt", "first", max_bytes=100)
     store.write(second_session, "sources/urls/second.txt", "second", max_bytes=100)
-    assert store.read(first_session, "sources/urls/first.txt", max_bytes=100) == "first"
+    assert store.read(first_session, "sources/urls/first.txt", max_bytes=100).text == "first"
 
     store.write(second_session, "sources/urls/third.txt", "third", max_bytes=100)
 
-    assert store.read(first_session, "sources/urls/first.txt", max_bytes=100) == "first"
+    assert store.read(first_session, "sources/urls/first.txt", max_bytes=100).text == "first"
     assert store.read(second_session, "sources/urls/second.txt", max_bytes=100) is None
-    assert store.read(second_session, "sources/urls/third.txt", max_bytes=100) == "third"
+    assert store.read(second_session, "sources/urls/third.txt", max_bytes=100).text == "third"
 
 
 def test_in_memory_url_store_bounds_total_cached_bytes() -> None:
@@ -186,10 +193,10 @@ def test_in_memory_url_store_bounds_total_cached_bytes() -> None:
     store.write(session_id, "sources/urls/second.txt", "second", max_bytes=100)
 
     assert store.read(session_id, "sources/urls/first.txt", max_bytes=100) is None
-    assert store.read(session_id, "sources/urls/second.txt", max_bytes=100) == "second"
+    assert store.read(session_id, "sources/urls/second.txt", max_bytes=100).text == "second"
 
 
-def test_workspace_url_store_stops_growing_when_entry_bound_is_reached() -> None:
+def test_workspace_url_store_returns_a_bounded_error_when_entry_bound_is_reached() -> None:
     session_id = uuid4()
     workspace = _FakeWorkspace()
     fetcher = _FakeFetcher([])
@@ -198,10 +205,14 @@ def test_workspace_url_store_stops_growing_when_entry_bound_is_reached() -> None
     second = UrlToolHost(session_id=session_id, store=store, max_bytes=1_024, fetcher=fetcher).as_tools()[0]
 
     assert first(url="https://example.com/first")["cache_hit"] is False
-    assert second(url="https://example.com/second")["cache_hit"] is False
     uncached = second(url="https://example.com/second")
+    uncached_again = second(url="https://example.com/second")
     assert uncached["cache_hit"] is False
     assert uncached["content"] == "needle: 42"
+    assert "workspace_path" not in uncached
+    assert uncached_again["cache_hit"] is False
+    assert uncached_again["content"] == "needle: 42"
+    assert "workspace_path" not in uncached_again
     assert fetcher.calls == ["https://example.com/first", "https://example.com/second", "https://example.com/second"]
 
 
@@ -238,6 +249,19 @@ def test_url_tool_returns_content_to_repl_but_projects_metadata_only() -> None:
     assert "https://example.com/report" not in str(observed)
 
 
+def test_in_memory_url_content_has_no_fictitious_workspace_reference() -> None:
+    result = UrlToolHost(
+        session_id=uuid4(),
+        store=InMemoryUrlSourceStore(),
+        max_bytes=1_024,
+        fetcher=_FakeFetcher([]),
+    ).as_tools()[0](url="https://example.com/report")
+
+    assert result["content"] == "needle: 42"
+    assert "workspace_path" not in result
+    assert "content_available" not in result
+
+
 def test_url_tool_returns_a_workspace_reference_for_large_content() -> None:
     session_id = uuid4()
     content = "x" * (1_024 * 1_024 + 1)
@@ -256,7 +280,7 @@ def test_url_tool_returns_a_workspace_reference_for_large_content() -> None:
     assert result["content_available"] is True
     assert result["content_preview"] == content[:4_000]
     assert result["workspace_path"].startswith("sources/urls/")
-    assert store.read(session_id, result["workspace_path"], max_bytes=len(content) + 1) == content
+    assert store.read(session_id, result["workspace_path"], max_bytes=len(content) + 1).text == content
 
 
 @pytest.mark.parametrize(
@@ -321,7 +345,37 @@ def test_in_memory_url_tool_does_not_evict_cached_content_for_unstorable_large_r
     assert result["error"] == "cache_unavailable"
     assert "content_available" not in result
     assert "workspace_path" not in result
-    assert store.read(session_id, "sources/urls/keep.txt", max_bytes=128) == "keep"
+    assert store.read(session_id, "sources/urls/keep.txt", max_bytes=128).text == "keep"
+
+
+def test_large_content_without_durable_workspace_returns_a_bounded_error() -> None:
+    content = "x" * (1_024 * 1_024 + 1)
+    result = UrlToolHost(
+        session_id=uuid4(),
+        store=InMemoryUrlSourceStore(),
+        max_bytes=len(content.encode("utf-8")) + 1,
+        fetcher=_FakeFetcher([], text=content),
+    ).as_tools()[0](url="https://example.com/large")
+
+    assert result == {
+        "ok": False,
+        "error": "cache_unavailable",
+        "message": "Large URL content requires Session Workspace storage",
+    }
+
+
+def test_large_content_reference_is_readable_and_matches_its_checksum() -> None:
+    content = "line\n" * 300_000
+    workspace = _FakeWorkspace()
+    result = UrlToolHost(
+        session_id=uuid4(),
+        store=WorkspaceUrlSourceStore(workspace),
+        max_bytes=len(content.encode("utf-8")) + 1,
+        fetcher=_FakeFetcher([], text=content),
+    ).as_tools()[0](url="https://example.com/large")
+
+    stored = workspace.values[result["workspace_path"]]
+    assert hashlib.sha256(stored.encode("utf-8")).hexdigest() == result["checksum_sha256"]
 
 
 def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
@@ -359,7 +413,7 @@ def test_workspace_url_store_refetches_when_workspace_content_was_overwritten() 
     assert fetcher.calls == ["https://example.com/report", "https://example.com/report"]
 
 
-def test_workspace_url_store_treats_a_missing_cache_parent_as_a_cache_miss() -> None:
+def test_workspace_url_store_creates_a_cache_when_parent_metadata_is_missing() -> None:
     fetcher = _FakeFetcher([])
     tool = UrlToolHost(
         session_id=uuid4(),
@@ -371,7 +425,6 @@ def test_workspace_url_store_treats_a_missing_cache_parent_as_a_cache_miss() -> 
     result = tool(url="https://example.com/report")
 
     assert result["ok"] is True
-    assert result["cache_hit"] is False
     assert fetcher.calls == ["https://example.com/report"]
 
 
@@ -387,7 +440,18 @@ def test_workspace_url_store_creates_a_cache_when_directory_listing_is_missing()
     result = tool(url="https://example.com/report")
 
     assert result["ok"] is True
-    assert result["cache_hit"] is False
+
+
+def test_workspace_write_failure_never_returns_a_fictitious_reference() -> None:
+    fetcher = _FakeFetcher([])
+    result = UrlToolHost(
+        session_id=uuid4(),
+        store=WorkspaceUrlSourceStore(_FailingWriteWorkspace()),
+        max_bytes=1_024,
+        fetcher=fetcher,
+    ).as_tools()[0](url="https://example.com/report")
+
+    assert result == {"ok": False, "error": "cache_unavailable", "message": "Session Workspace is unavailable"}
     assert fetcher.calls == ["https://example.com/report"]
 
 
