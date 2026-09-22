@@ -331,6 +331,23 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
     )
 
 
+def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any) -> UUID:
+    starts = [chunk for chunk in chunks if chunk.get("type") == "start"]
+    if len(starts) != 1:
+        manager = getattr(resources, "session_manager", None)
+        runtime = getattr(resources, "runtime", None)
+        pending_ownership = bool(getattr(manager, "has_pending_ownership", False))
+        runtime_roots = len(getattr(runtime, "roots", ())) if runtime is not None else 0
+        tracked_sandboxes = len(getattr(resources, "_sandbox_ids", ()))
+        pytest.fail(
+            f"{label}: expected exactly one start event, got {len(starts)}; "
+            f"{_sse_finish_diagnostic(chunks)} "
+            f"cleanup_state={{pending_ownership:{pending_ownership}, runtime_roots:{runtime_roots}, "
+            f"tracked_sandboxes:{tracked_sandboxes}}}"
+        )
+    return UUID(str(starts[0]["messageId"]))
+
+
 def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(tmp_path: Path) -> None:
     settings = _live_settings(tmp_path).model_copy(
         update={
@@ -598,7 +615,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 )
                 assert first.status_code == 200
                 first_chunks, first_done = _sse_chunks(first)
-                first_run_id = UUID(str(next(chunk["messageId"] for chunk in first_chunks if chunk["type"] == "start")))
+                first_run_id = _run_id_from_sse(first_chunks, label="first_turn", resources=resources)
                 assert first_delta_probe.first_delta_at is not None, _sse_finish_diagnostic(first_chunks)
                 first_delta_ms = int((first_delta_probe.first_delta_at - first_started) * 1000)
                 _assert_skill_lifecycle(first_chunks, skill_id=skill.card.id, version=skill.card.version)
@@ -725,9 +742,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 )
                 assert second.status_code == 200
                 second_chunks, second_done = _sse_chunks(second)
-                second_run_id = UUID(
-                    str(next(chunk["messageId"] for chunk in second_chunks if chunk["type"] == "start"))
-                )
+                second_run_id = _run_id_from_sse(second_chunks, label="second_turn", resources=resources)
                 first_stream_count, first_stream_fields = _streaming_evidence(first_chunks)
                 second_stream_count, second_stream_fields = _streaming_evidence(second_chunks)
                 _assert_skill_lifecycle(second_chunks, skill_id=skill.card.id, version=skill.card.version)

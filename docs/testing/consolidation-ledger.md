@@ -179,7 +179,7 @@ Each of these is a decision, not an oversight.
 1. **Live canary filenames keep their phase numbers.**
    `tests/live/backend/test_phase1_daytona_stream.py` and
    `test_phase2_daytona_recursive.py` are named in an operator command in
-   [P36 ownership and deletion contract](../how-to-guides/p36-ownership-deletion-inventory.md).
+   [Testing Strategy](../how-to-guides/testing-strategy.md).
    Renaming them would break a documented operator entry point, which the
    testing strategy explicitly protects.
 
@@ -197,9 +197,9 @@ Each of these is a decision, not an oversight.
 
 4. **Historical ledgers were not rewritten.**
    [Phase 3 consolidation ledger](phase3-consolidation-ledger.md),
-   [ADR 006 implementation status](../decisions/006-implementation-status.md),
+   [Performance Budget](../reference/performance-budget.md),
    and
-   [P42 Session-state behavior freeze](../reference/p42-session-state-behavior-freeze.md)
+   [P41 behavior freeze](../reference/behavior-freeze.md)
    reference pre-move paths. They are dated evidence of what was true when
    written. Current-guidance documents
    ([Testing Strategy](../how-to-guides/testing-strategy.md),

@@ -50,8 +50,8 @@ applies migrations; use `uv run python scripts/db_init.py` or Alembic directly.
 `runtime.live_enabled` controls live admission. The Daytona interpreter executes
 generated source remotely and brokers authorized Fleet and DSPy semantic tools
 through the authenticated preview connection. Policies
-containing the removed `runtime.variant` key are rejected. See
-[ADR 005](../decisions/005-runtime-variant.md).
+ containing the removed `runtime.variant` key are rejected. See the current
+[architecture](../../ARCHITECTURE.md) for the supported runtime boundary.
 
 `config/fleet.toml` deep-merges `[defaults]` into the selected
 `[profiles.<name>]`. It centralizes application identity; runtime timeouts,

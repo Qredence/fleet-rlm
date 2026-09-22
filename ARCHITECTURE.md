@@ -33,8 +33,10 @@ JSON-only tool requests to the host and returns sanitized results; it does not
 move model code into the Fleet process. The broker lifecycle is owned by the
 interpreter and closes with its Sandbox lease. Reused root leases reset the
 execution namespace and invocation credential between Turns. DSPy's native
-semantic tools use the same broker path as Fleet tools. Consult the [ADR 006 status ledger](docs/decisions/006-implementation-status.md)
-for dated evidence and open operational gates.
+semantic tools use the same broker path as Fleet tools. Consult the
+[testing strategy](docs/how-to-guides/testing-strategy.md) for validation lanes
+and the [performance budget](docs/reference/performance-budget.md) for dated
+performance evidence.
 
 ## Ownership map
 
