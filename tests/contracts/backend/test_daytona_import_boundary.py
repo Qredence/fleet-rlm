@@ -24,7 +24,6 @@ EXPECTED_DAYTONA_MODULES = {
     "runtime.py",
     "sandbox.py",
     "session_manager.py",
-    "sync_bridge.py",
 }
 
 
