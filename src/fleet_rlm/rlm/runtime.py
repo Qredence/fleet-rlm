@@ -58,7 +58,7 @@ from fleet_rlm.rlm.events import (
     reconcile_trajectory,
     recursive_summary,
 )
-from fleet_rlm.rlm.output_contract import bind_output_contract
+from fleet_rlm.rlm.output_contract import FleetOutputContract, bind_output_contract
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
@@ -1265,41 +1265,79 @@ class RLMRunner:
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
             fresh_interpreter = getattr(state_context.execution.interpreter, "new_invocation", None)
+            if not callable(fresh_interpreter) and self._program_builder is build_native_rlm:
+                # Serving path: a real native RLM requires the
+                # invocation-scoped factory. The rejecting contract is never
+                # a serving fallback; tests injecting a fake program builder
+                # keep the explicit in-process/test boundary below.
+                raise RLMConfigError("native RLM execution requires an invocation-scoped interpreter factory")
+            invocation_factory = fresh_interpreter
+            supports_invocation_bindings = bool(
+                getattr(state_context.execution.interpreter, "invocation_scoped_bindings", False)
+            )
+            if callable(fresh_interpreter) and supports_invocation_bindings:
+                # The retained Daytona adapter is a resource template only.
+                # Capture every Run-local binding in DSPy's zero-argument
+                # invocation factory rather than rebinding that template.
+                output_contract = FleetOutputContract.from_signature(spec.signature)
+
+                def invocation_factory() -> Any:
+                    return fresh_interpreter(
+                        observer=observations.publish,
+                        observation_max_chars=state_context.execution.options.max_output_chars,
+                        turn_budget=getattr(state_context.execution.models, "budget", None),
+                        turn_request=state_context.session.request,
+                        async_bridge=getattr(state_context.execution, "async_bridge", None),
+                        tool_settled=(
+                            lambda name, arguments, result: (
+                                guards.integrity.completed(name, arguments, result)
+                                if broker_acknowledges_tools
+                                else None
+                            )
+                        ),
+                        tool_failed=guards.integrity.failed if broker_acknowledges_tools else None,
+                        context_capsule=state_context.session.attachment_context,
+                        output_contract=output_contract,
+                    )
+
             rlm = self._program_builder(
                 signature=spec.signature,
                 options=state_context.execution.options,
                 tools=(all_tools or None) if fleet_dispatch else None,
                 sub_lm=state_context.execution.models.sub_lm,
                 host_tool_dispatch=fleet_dispatch,
-                interpreter_factory=fresh_interpreter if callable(fresh_interpreter) else daytona_provider_contract,
+                interpreter_factory=invocation_factory if callable(invocation_factory) else daytona_provider_contract,
                 verbose=self._verbose,
             )
-            bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
-            if callable(bind_budget):
-                bind_budget(getattr(state_context.execution.models, "budget", None))
-            bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
-            if callable(bind_request):
-                bind_request(state_context.session.request)
-            bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
-            if callable(bind_async_bridge):
-                bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
-            bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
-            if broker_acknowledges_tools and callable(bind_tool_outcomes):
-                bind_tool_outcomes(
-                    tool_settled=lambda name, arguments, result: guards.integrity.completed(name, arguments, result),
-                    tool_failed=guards.integrity.failed,
+            if not supports_invocation_bindings:
+                bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
+                if callable(bind_budget):
+                    bind_budget(getattr(state_context.execution.models, "budget", None))
+                bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
+                if callable(bind_request):
+                    bind_request(state_context.session.request)
+                bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
+                if callable(bind_async_bridge):
+                    bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
+                bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
+                if broker_acknowledges_tools and callable(bind_tool_outcomes):
+                    bind_tool_outcomes(
+                        tool_settled=lambda name, arguments, result: guards.integrity.completed(
+                            name, arguments, result
+                        ),
+                        tool_failed=guards.integrity.failed,
+                    )
+                self._bind_observer(
+                    state_context.execution.interpreter,
+                    observations.publish,
+                    state_context.execution.options.max_output_chars,
+                    deadline=state_context.execution.deadline,
                 )
-            self._bind_observer(
-                state_context.execution.interpreter,
-                observations.publish,
-                state_context.execution.options.max_output_chars,
-                deadline=state_context.execution.deadline,
-            )
-            self._bind_context_capsule(state_context)
-            bind_output_contract(
-                state_context.execution.interpreter,
-                getattr(rlm, "signature", None),
-            )
+                self._bind_context_capsule(state_context)
+                bind_output_contract(
+                    state_context.execution.interpreter,
+                    getattr(rlm, "signature", None),
+                )
             self._bind_observer(
                 rlm,
                 observations.publish,
