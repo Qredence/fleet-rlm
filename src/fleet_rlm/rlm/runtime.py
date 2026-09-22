@@ -35,6 +35,7 @@ from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
 from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
+    daytona_provider_contract,
     is_native_rlm,
 )
 from fleet_rlm.rlm.events import (
@@ -1273,12 +1274,14 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
+            fresh_interpreter = getattr(state_context.execution.interpreter, "new_invocation", None)
             rlm = self._program_builder(
                 signature=spec.signature,
                 options=state_context.execution.options,
                 tools=(all_tools or None) if fleet_dispatch else None,
                 sub_lm=state_context.execution.models.sub_lm,
                 host_tool_dispatch=fleet_dispatch,
+                interpreter_factory=fresh_interpreter if callable(fresh_interpreter) else daytona_provider_contract,
                 verbose=self._verbose,
             )
             bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)

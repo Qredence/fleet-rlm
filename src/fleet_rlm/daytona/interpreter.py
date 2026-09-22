@@ -802,6 +802,37 @@ class DaytonaCodeInterpreter:
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
+    def new_invocation(self) -> DaytonaCodeInterpreter:
+        """Create an invocation-scoped adapter without retiring its Sandbox.
+
+        DSPy owns factory-created adapter shutdown.  The returned adapter gets a
+        new backend and broker/context state, while the existing retained root
+        adapter—and therefore its session Sandbox lease—remains owned by Fleet.
+        Production root calls still pass their caller-owned adapter directly.
+        """
+        backend = self._backend
+        if isinstance(backend, InProcessInterpreterBackend):
+            fresh_backend: InterpreterBackend | None = InProcessInterpreterBackend()
+        elif isinstance(backend, _SandboxProcessBackend):
+            fresh_backend = _SandboxProcessBackend(
+                backend.sandbox,
+                timeout_s=backend.timeout_s,
+                workdir=backend._workdir,
+            )
+        else:
+            raise DaytonaAdapterError(
+                message="interpreter cannot create an invocation-scoped adapter",
+                cause_type="InterpreterConfigurationError",
+            )
+        return DaytonaCodeInterpreter(
+            backend=fresh_backend,
+            output_fields=list(self._output_fields) if self._output_fields is not None else None,
+            callbacks=list(self.callbacks),
+            broker_port=self._broker_port,
+            execution_output_cap=self._execution_output_cap,
+            max_code_chars=self._max_code_chars,
+        )
+
     def _ensure_binding_mutation_allowed(self) -> None:
         """Reject an overlapping invocation before it can mutate the current namespace."""
         current = _BINDING_RESERVATION.get()
