@@ -1,15 +1,21 @@
-"""Private RLM execution-trace contracts."""
+"""Private RLM execution-trace and observation-session contracts.
+
+* ``test_events_execution_trace.py``: Private RLM execution-trace contracts.
+* ``test_events_observation.py``: Private RLM observation-session contracts.
+"""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.rlm.events import record_phase_failure
+from fleet_rlm.rlm.events import ObservationSession, RLMOutput, RunStarted, Status, record_phase_failure
 from fleet_rlm.rlm.result import observed_usage, validate_rlm_usage
 
 
+# --- from test_events_execution_trace.py ------------------------------
 def test_record_phase_failure_preserves_sanitized_last_lm_call_structure() -> None:
     outputs: list[dict[str, object]] = []
     phase = SimpleNamespace(set_outputs=outputs.append)
@@ -460,3 +466,16 @@ def test_phase_trace_omits_parse_repair_diagnostics_when_absent() -> None:
     record_phase_failure(phase, 0.0, None, None, TimeoutError("deadline"))
 
     assert "parse_repairs_used" not in outputs[-1]
+
+
+# --- from test_events_observation.py ----------------------------------
+@pytest.mark.asyncio
+async def test_observation_session_separates_stream_envelopes_from_execution_details() -> None:
+    session = ObservationSession(uuid4(), uuid4())
+
+    started = session.record_event(RunStarted(delivery="live"))
+    status = session.record_event(Status("execution", "running"))
+    detail = session.record(RLMOutput("answer", 1))
+
+    assert [started.sequence, status.sequence, detail.sequence] == [1, 2, 3]
+    assert session.details == [RLMOutput("answer", 1)]

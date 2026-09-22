@@ -92,10 +92,17 @@ def _directly_calls_lm_forward(path: Path) -> list[str]:
     return violations
 
 
-@pytest.mark.parametrize("py_file", _iter_python_files(_SRC_ROOT), ids=lambda p: str(p.relative_to(_SRC_ROOT)))
-def test_no_direct_litellm_usage(py_file: Path) -> None:
-    """No source file in fleet_rlm may import or call litellm directly."""
-    violations = _directly_imports_or_uses_litellm(py_file)
+def test_no_direct_litellm_usage() -> None:
+    """No source file in fleet_rlm may import or call litellm directly.
+
+    Aggregates every offending file into one failure so a policy violation
+    reports the full list instead of one node ID per source file.
+    """
+    violations = [
+        violation
+        for py_file in _iter_python_files(_SRC_ROOT)
+        for violation in _directly_imports_or_uses_litellm(py_file)
+    ]
     assert not violations, (
         "fleet-rlm must not use litellm directly — go through dspy.LM / dspy.settings.lm. "
         "Found violations:\n  " + "\n  ".join(violations)

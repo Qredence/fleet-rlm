@@ -4,23 +4,23 @@ Behavior-only evidence that the recursive executor and Runner honor the
 contracted child-runtime owner (deterministic owner lanes live in
 ``tests/unit/backend/daytona/test_child_lease_cleanup_ownership.py``):
 
-- VAL-REC-012: batch cancellation stops queued acquisition before any lease
+- Batch cancellation stops queued acquisition before any lease
   is acquired while a running sibling stays owned until cleanup settles.
-- VAL-REC-016: parent/caller cancellation uses the same authorization fence:
+- Parent/caller cancellation uses the same authorization fence:
   queued siblings never acquire, the terminal outcome is cancellation (never
   timeout or success), and the owned close join settles only after the
   running child's cleanup completes.
-- VAL-REC-017: one absolute deadline covers model forks, batch join, and
+- One absolute deadline covers model forks, batch join, and
   acquisition; an expired deadline performs no allocation; a blocked batch
   reports ``recursive child batch deadline exceeded`` bounded by the same
   deadline; the parent outcome is timeout rather than success.
-- VAL-REC-026: DSPy never shuts down caller-owned child interpreters through
+- DSPy never shuts down caller-owned child interpreters through
   native completion, extraction fallback, generated-code error, terminal
   interpreter failure, or cancellation; the Fleet lease owner shuts the
   interpreter down exactly once. This lane shares its evidence lane with
   VAL-RLM-007 (Root-scope shutdown authority in ``test_dspy_contract.py``);
   the child-scope assertion remains independently claimable here.
-- VAL-REC-030: a cleanup failure after a syntactically valid child answer is
+- A cleanup failure after a syntactically valid child answer is
   recorded as fatal, re-observed by the executor without rerunning cleanup,
   and prevents child and Root success (Runner scope:
   ``test_recursive_runner_flow.py::test_failed_child_cleanup_prevents_successful_root_outcome``).
@@ -164,10 +164,10 @@ def _executor(
     )
 
 
-def test_val_rec_012_authority_failure_cancels_queued_acquisition_before_any_lease(
+def test_authority_failure_cancels_queued_acquisition_before_any_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-012 (first-failure trigger): with one worker slot, a
+    """First-failure trigger: with one worker slot, a
     fast-failing first child cancels the queued sibling before lease
     acquisition; the batch fails all-or-nothing with the child's cause and
     ownership settles clean."""
@@ -245,10 +245,10 @@ def test_val_rec_012_authority_failure_cancels_queued_acquisition_before_any_lea
     assert summary.call_count == 2
 
 
-def test_val_rec_012_deadline_cancels_queued_acquisition_and_join_waits_for_running_lease(
+def test_deadline_cancels_queued_acquisition_and_join_waits_for_running_lease(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-012 (deadline trigger): a blocked first worker with queued
+    """Deadline trigger: a blocked first worker with queued
     siblings returns at the deadline; only the running index reaches the
     factory, lease-close observation reports pending ownership, and the owned
     join completes only after the running lease closes."""
@@ -294,10 +294,10 @@ def test_val_rec_012_deadline_cancels_queued_acquisition_and_join_waits_for_runn
     assert recorder.close_calls.get(1) == 1
 
 
-def test_val_rec_016_revoked_authority_cancels_queued_sibling_and_retains_running_child(
+def test_revoked_authority_cancels_queued_sibling_and_retains_running_child(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-016 (executor fence): revoking Run authority while one child
+    """Executor fence: revoking Run authority while one child
     runs and another is queued cancels the queued acquisition, discards the
     running child's answer through the same fence, yields no successful batch
     output, and still settles the running lease's cleanup exactly once."""
@@ -356,10 +356,10 @@ def test_val_rec_016_revoked_authority_cancels_queued_sibling_and_retains_runnin
 
 
 @pytest.mark.asyncio
-async def test_val_rec_016_runner_cancellation_terminal_outcome_with_same_fence(
+async def test_runner_cancellation_terminal_outcome_with_same_fence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-016 (Runner scope): cancelling while one child runs and another
+    """Runner scope: cancelling while one child runs and another
     is queued revokes authority before new acquisition, produces one cancelled
     terminal outcome (never timeout or success), and the owned join settles
     only after the running child's cleanup completes with its permit
@@ -473,8 +473,8 @@ async def test_val_rec_016_runner_cancellation_terminal_outcome_with_same_fence(
     assert permits_released == 1
 
 
-def test_val_rec_017_expired_deadline_performs_no_allocation() -> None:
-    """VAL-REC-017: an already-expired Turn deadline performs no reservation,
+def test_expired_deadline_performs_no_allocation() -> None:
+    """An already-expired Turn deadline performs no reservation,
     no factory call, and no lease acquisition for either recursive surface."""
     recorder = _Recorder()
     executor = _executor(
@@ -495,10 +495,10 @@ def test_val_rec_017_expired_deadline_performs_no_allocation() -> None:
     executor.raise_if_cleanup_failed()
 
 
-def test_val_rec_017_one_absolute_deadline_covers_fork_and_batch_join(
+def test_one_absolute_deadline_covers_fork_and_batch_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-017: the model fork and the batch join both receive the one
+    """The model fork and the batch join both receive the one
     absolute Root deadline; a blocked batch reports the deadline error within
     a bounded tolerance and the retained child still settles."""
     import fleet_rlm.rlm.recursion as recursive_calls
@@ -568,8 +568,8 @@ class _RecordingLM:
         return object()
 
 
-def test_val_rec_017_child_receives_only_remaining_time_on_forked_lm() -> None:
-    """VAL-REC-017: forked child LMs derive their per-call timeout from the
+def test_child_receives_only_remaining_time_on_forked_lm() -> None:
+    """Forked child LMs derive their per-call timeout from the
     same absolute deadline and reject calls once it has expired."""
     deadline = time.monotonic() + 5
     child = RLMModelBundle(_RecordingLM(), _RecordingLM()).fork_for_child(deadline=deadline)
@@ -621,13 +621,13 @@ def test_val_rec_017_child_receives_only_remaining_time_on_forked_lm() -> None:
     ids=["typed_submit", "generated_code_error", "extraction_fallback", "terminal_interpreter_error"],
 )
 @pytest.mark.asyncio
-async def test_val_rec_026_dspy_native_child_paths_never_shut_down_caller_owned_interpreter(
+async def test_dspy_native_child_paths_never_shut_down_caller_owned_interpreter(
     behavior: str,
     lm_actions: list[dict[str, str]],
     child_max_iters: int,
     expected_answer: str | None,
 ) -> None:
-    """VAL-REC-026 (native child scope, paired with VAL-RLM-007): through
+    """Native child scope, paired with VAL-RLM-007: through
     typed completion, generated-code error recovery, extraction fallback, and
     terminal interpreter failure, a native child RLM performs zero shutdown
     calls on the caller-owned interpreter; the Fleet lifecycle owner then
@@ -655,8 +655,8 @@ async def test_val_rec_026_dspy_native_child_paths_never_shut_down_caller_owned_
 
 
 @pytest.mark.asyncio
-async def test_val_rec_026_cancellation_never_shuts_down_caller_owned_child_interpreter() -> None:
-    """VAL-REC-026 (cancellation, paired with VAL-RLM-007): cancelling a
+async def test_cancellation_never_shuts_down_caller_owned_child_interpreter() -> None:
+    """Cancellation, paired with VAL-RLM-007: cancelling a
     native child mid-execution performs no DSPy-originated shutdown; the
     Fleet owner alone closes the interpreter."""
     entered_second_action = asyncio.Event()
@@ -720,8 +720,8 @@ async def test_val_rec_026_cancellation_never_shuts_down_caller_owned_child_inte
     assert interpreter.shutdown_calls == 1
 
 
-def test_val_rec_026_fleet_executor_closes_child_lease_exactly_once() -> None:
-    """VAL-REC-026 (executor scope): a valid child answer is delivered through
+def test_fleet_executor_closes_child_lease_exactly_once() -> None:
+    """Executor scope: a valid child answer is delivered through
     a real native child, and the Fleet executor, as the sole lifecycle owner,
     closes the lease exactly once before the answer reaches Root code."""
     recorder = _Recorder()
@@ -741,8 +741,8 @@ def test_val_rec_026_fleet_executor_closes_child_lease_exactly_once() -> None:
     assert interpreter.shutdown_calls == 1
 
 
-def test_val_rec_026_executor_terminal_child_failure_still_settles_lease_once() -> None:
-    """VAL-REC-026 (executor failure scope): a terminal interpreter failure
+def test_executor_terminal_child_failure_still_settles_lease_once() -> None:
+    """Executor failure scope: a terminal interpreter failure
     propagates to Root without any DSPy-originated shutdown, and the Fleet
     owner still settles the lease exactly once on the failure path."""
     recorder = _Recorder()
@@ -765,8 +765,8 @@ def test_val_rec_026_executor_terminal_child_failure_still_settles_lease_once() 
     assert interpreter.shutdown_calls == 1
 
 
-def test_val_rec_030_valid_child_answer_cannot_override_failed_cleanup() -> None:
-    """VAL-REC-030 (executor scope): after a syntactically valid child answer,
+def test_valid_child_answer_cannot_override_failed_cleanup() -> None:
+    """Executor scope: after a syntactically valid child answer,
     a lease close failure is recorded as fatal and re-observed by the executor
     without rerunning cleanup; the child call fails closed."""
     recorder = _Recorder()

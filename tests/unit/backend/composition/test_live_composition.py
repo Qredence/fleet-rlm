@@ -1,0 +1,931 @@
+"""Runtime composition lifecycle and fail-closed startup behavior."""
+
+from __future__ import annotations
+
+import ast
+import asyncio
+import contextlib
+import json
+from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from pydantic import SecretStr
+
+from fleet_rlm.app import create_app
+from fleet_rlm.composition import CompositionError, require_daytona_settings
+from fleet_rlm.composition.inventory import (
+    RuntimeInventory,
+    RuntimeInventoryError,
+    clear_runtime_inventory,
+    install_runtime_inventory,
+)
+from fleet_rlm.composition.testing import create_testing_app
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.skills.catalog import SkillCatalog
+
+
+def _complete_runtime_inventory() -> RuntimeInventory:
+    return RuntimeInventory(
+        turn_runtime=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        session_catalog=object(),
+        session_lifecycle=object(),
+        run_lifecycle=object(),
+        config_policy=object(),
+        workspace_volume_gateway=object(),
+        workspace_file_service=object(),
+    )
+
+
+def test_composition_module_imports_without_credentials() -> None:
+    import fleet_rlm.composition as composition
+
+    assert composition.require_daytona_settings is not None
+    assert composition.build_daytona_composition is not None
+
+
+@pytest.mark.asyncio
+async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+
+    session_id = uuid4()
+    fence_calls: list[object] = []
+
+    class TurnState:
+        async def reconcile_settling(self, fence, *, deadline=None):  # noqa: ARG002
+            with pytest.raises(asyncio.TimeoutError):
+                await fence(session_id)
+            return ReconciliationSummary(candidates=1, fence_failures=1)
+
+    class SessionManager:
+        async def fence_session(self, value):
+            fence_calls.append(value)
+            await asyncio.sleep(60)
+
+    await composition._reconcile_daytona_settling(
+        TurnState(),
+        SessionManager(),
+        fence_timeout=0.01,
+        deadline=asyncio.get_running_loop().time() + 1,
+    )
+
+    assert fence_calls == [session_id]
+
+
+@pytest.mark.asyncio
+async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Partial live composition cleanup must also run for task cancellation."""
+    import fleet_rlm.composition.daytona_run_preparation as run_environment
+    import fleet_rlm.composition.live as composition
+    import fleet_rlm.daytona.provisioning as provisioning
+    import fleet_rlm.persistence.database as database
+    import fleet_rlm.rlm.compat_3_3_1 as dspy_contract
+
+    class Engine:
+        def __init__(self) -> None:
+            self.disposed = False
+
+        async def dispose(self) -> None:
+            self.disposed = True
+
+    engine = Engine()
+    monkeypatch.setattr(dspy_contract, "assert_dspy_version", lambda: None)
+    monkeypatch.setattr(composition, "require_daytona_settings", lambda _settings: None)
+    monkeypatch.setattr(run_environment, "resolve_settings", lambda settings: settings)
+    monkeypatch.setattr(provisioning, "sandbox_spec_from_settings", lambda _settings: object())
+    monkeypatch.setattr(database, "create_async_engine_from_url", lambda _url: engine)
+
+    async def cancel_startup(*_args, **_kwargs) -> None:
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(composition, "ensure_database_compatible", cancel_startup)
+
+    with pytest.raises(asyncio.CancelledError):
+        await composition.build_daytona_composition(
+            SimpleNamespace(database_url="sqlite+aiosqlite:///:memory:"),
+            skill_catalog=SkillCatalog(()),
+        )
+
+    assert engine.disposed is True
+
+
+@pytest.mark.asyncio
+async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Cancellation from composition build must not leave bridge loop authority."""
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+
+    seen: list[SyncBridgeDispatcher] = []
+
+    async def cancelled_build(_settings, *, skill_catalog, dispatcher=None):
+        del skill_catalog
+        assert dispatcher is not None
+        seen.append(dispatcher)
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(composition, "build_daytona_composition", cancelled_build)
+    app = SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(())))
+
+    with pytest.raises(asyncio.CancelledError):
+        await composition.install_daytona_composition(app, object())
+
+    assert len(seen) == 1
+    assert seen[0].service_loop() is None
+
+
+@pytest.mark.asyncio
+async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+
+    session_ids = [uuid4(), uuid4()]
+    fence_calls: list[object] = []
+
+    class TurnState:
+        async def reconcile_settling(self, fence, *, deadline=None):
+            failures = 0
+            for session_id in session_ids:
+                if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                    return ReconciliationSummary(
+                        candidates=len(session_ids),
+                        fence_failures=failures,
+                        skipped=len(session_ids) - len(fence_calls),
+                        budget_exhausted=True,
+                    )
+                try:
+                    await fence(session_id)
+                except TimeoutError:
+                    failures += 1
+            return ReconciliationSummary(candidates=len(session_ids), fence_failures=failures)
+
+    class SessionManager:
+        async def fence_session(self, value):
+            fence_calls.append(value)
+            await asyncio.sleep(60)
+
+    deadline = asyncio.get_running_loop().time() + 0.01
+    summary = await composition._reconcile_daytona_settling(
+        TurnState(),
+        SessionManager(),
+        fence_timeout=0.05,
+        deadline=deadline,
+    )
+
+    assert fence_calls == [session_ids[0]]
+    assert summary.budget_exhausted is True
+    assert summary.skipped == 1
+
+
+@pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])
+def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
+    import fleet_rlm.composition.testing as common
+    from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
+    from fleet_rlm.attachments import LocalAttachmentCatalog
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+
+    builder = getattr(common, "build_local_storage_adapters", None)
+    assert builder is not None
+
+    sql_attachment_blobs = object()
+    sql_attachment_paths = object()
+    sql_artifact_blobs = object()
+    adapters = builder(
+        Settings(data_root=str(tmp_path)),
+        session_factory=session_factory,
+        volume_paths=None,
+        sql_attachment_blobs=sql_attachment_blobs,
+        sql_attachment_paths=sql_attachment_paths,
+        sql_artifact_blobs=sql_artifact_blobs,
+    )
+
+    if session_factory is None:
+        assert isinstance(adapters.attachment_lifecycle._catalog, LocalAttachmentCatalog)
+        assert isinstance(adapters.artifact_reader._catalog, LocalArtifactReaderCatalog)
+    else:
+        assert isinstance(adapters.attachment_lifecycle._catalog, SqlAlchemyAttachmentCatalog)
+        assert adapters.attachment_lifecycle._blobs is sql_attachment_blobs
+        assert adapters.attachment_lifecycle._paths is sql_attachment_paths
+        assert isinstance(adapters.artifact_reader._catalog, SqlAlchemyArtifactCatalog)
+        assert adapters.artifact_reader._blobs is sql_artifact_blobs
+
+
+def test_require_daytona_settings_fails_closed_without_deps(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(CompositionError, match="DAYTONA_API_KEY"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr(""),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    with pytest.raises(CompositionError, match="DAYTONA_SNAPSHOT"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    with pytest.raises(CompositionError, match="provider API key"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr(""),
+                root_llm_api_key_env="MISSING_ROOT_KEY",
+                sub_llm_api_key_env="MISSING_SUB_KEY",
+            )
+        )
+    with pytest.raises(CompositionError, match="DATABASE_URL"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+    with pytest.raises(CompositionError, match="Databricks MLflow gateway base URL"):
+        monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                root_model="databricks-deepseek-v4-flash-0731",
+                sub_model="databricks-deepseek-v4-flash-0731",
+                root_llm_api_key_env="DATABRICKS_TOKEN",
+                sub_llm_api_key_env="DATABRICKS_TOKEN",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+
+
+def test_require_daytona_settings_accepts_databricks_mlflow_gateway_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+    settings = Settings(
+        run_environment="daytona",
+        database_url="sqlite+aiosqlite:///:memory:",
+        daytona_api_key=SecretStr("daytona-key"),
+        daytona_org_id="test-daytona-org",
+        daytona_snapshot="fleet-test-v1",
+        root_model="databricks-deepseek-v4-flash-0731",
+        sub_model="databricks-deepseek-v4-flash-0731",
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+        root_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1",
+        sub_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1/",
+        llm_api_key=SecretStr("llm-key"),
+    )
+
+    require_daytona_settings(settings)
+
+
+def test_require_daytona_settings_requires_daytona_org_id() -> None:
+    with pytest.raises(CompositionError, match="FLEET_DAYTONA_ORG_ID"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+            )
+        )
+
+
+def test_require_daytona_settings_requires_semantic_snapshot_when_recursion_is_enabled() -> None:
+    with pytest.raises(CompositionError, match="FLEET_DAYTONA_CHILD_SNAPSHOT"):
+        require_daytona_settings(
+            Settings(
+                run_environment="daytona",
+                database_url="sqlite+aiosqlite:///:memory:",
+                daytona_api_key=SecretStr("daytona-key"),
+                daytona_snapshot="fleet-test-v1",
+                llm_api_key=SecretStr("llm-key"),
+                rlm_recursion_enabled=True,
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://gateway.example.test",
+        "https://gateway.example.test/ai-gateway/openai/v1",
+        "gateway.example.test/ai-gateway/mlflow/v1",
+        "https://[bad/ai-gateway/mlflow/v1",
+    ],
+)
+def test_require_daytona_settings_rejects_non_mlflow_databricks_chat_base(
+    monkeypatch: pytest.MonkeyPatch, base_url: str
+) -> None:
+    monkeypatch.setenv("DATABRICKS_TOKEN", "databricks-key")
+    settings = Settings(
+        run_environment="daytona",
+        database_url="sqlite+aiosqlite:///:memory:",
+        daytona_api_key=SecretStr("daytona-key"),
+        daytona_snapshot="fleet-test-v1",
+        root_model="databricks-deepseek-v4-flash-0731",
+        sub_model="databricks-deepseek-v4-flash-0731",
+        root_llm_api_key_env="DATABRICKS_TOKEN",
+        sub_llm_api_key_env="DATABRICKS_TOKEN",
+        root_llm_base_url=base_url,
+        sub_llm_base_url="https://gateway.example.test/ai-gateway/mlflow/v1",
+        llm_api_key=SecretStr("llm-key"),
+    )
+
+    with pytest.raises(CompositionError, match="Databricks MLflow gateway base URL") as raised:
+        require_daytona_settings(settings)
+    assert "databricks-key" not in str(raised.value)
+    assert "gateway.example.test" not in str(raised.value)
+
+
+def test_daytona_environment_fails_closed_without_secrets() -> None:
+    app = create_app(
+        settings=Settings(
+            run_environment="daytona",
+            daytona_api_key=SecretStr(""),
+            llm_api_key=SecretStr(""),
+            database_url="",
+        )
+    )
+    with pytest.raises(CompositionError, match="required settings"), TestClient(app):
+        pass
+
+
+def test_testing_app_composes_only_inside_lifespan() -> None:
+    app = create_testing_app()
+    assert app.state.composition_ready is False
+    assert app.state.runtime_inventory is None
+    with TestClient(app) as client:
+        assert app.state.composition_ready is True
+        inventory = app.state.runtime_inventory
+        assert isinstance(inventory, RuntimeInventory)
+        assert inventory.turn_runtime is not None
+        assert inventory.attachment_lifecycle is not None
+        assert inventory.artifact_reader is not None
+        assert app.state.skill_catalog is not None
+        # The clean-break API never creates an implicit Session.
+        response = client.post(
+            f"/api/sessions/{uuid4()}/turns",
+            json={"text": "ping"},
+            headers={"Idempotency-Key": "testing-composition"},
+        )
+        # The unknown Session is now an in-stream failure: 200 + closed frames.
+        assert response.status_code == 200
+        frames = [line.removeprefix("data: ") for line in response.text.splitlines() if line.startswith("data: ")]
+        chunks = [json.loads(value) for value in frames if value != "[DONE]"]
+        assert chunks[-2:] == [
+            {"type": "error", "errorText": "Session not found"},
+            {"type": "finish", "finishReason": "error"},
+        ]
+
+    assert app.state.composition_ready is False
+    assert app.state.runtime_inventory is None
+    assert app.state.skill_catalog is not None
+
+
+def test_runtime_inventory_publish_sets_readiness_last() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    app = SimpleNamespace(state=RecordingState())
+    inventory = _complete_runtime_inventory()
+
+    installed = install_runtime_inventory(app, inventory)
+
+    assert installed is inventory
+    assert events == [("runtime_inventory", inventory), ("composition_ready", True)]
+    assert app.state.runtime_inventory is inventory
+    assert app.state.composition_ready is True
+
+
+def test_runtime_inventory_rejects_incomplete_graph_without_readiness() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        composition_ready = False
+        runtime_inventory = None
+
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    app = SimpleNamespace(state=RecordingState())
+
+    with pytest.raises(RuntimeInventoryError, match="turn_runtime"):
+        install_runtime_inventory(app, RuntimeInventory())
+
+    assert events == []
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+
+
+def test_runtime_inventory_clear_marks_unready_and_detaches_inventory() -> None:
+    events: list[tuple[str, object]] = []
+
+    class RecordingState:
+        def __setattr__(self, name: str, value: object) -> None:
+            events.append((name, value))
+            super().__setattr__(name, value)
+
+    inventory = RuntimeInventory()
+    state = RecordingState()
+    state.runtime_inventory = inventory
+    state.composition_ready = True
+    events.clear()
+    app = SimpleNamespace(state=state)
+
+    detached = clear_runtime_inventory(app)
+
+    assert detached is inventory
+    assert events == [("composition_ready", False), ("runtime_inventory", None)]
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+
+
+@pytest.mark.asyncio
+async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
+    import fleet_rlm.composition.live as composition
+
+    observations: list[tuple[str, object, object]] = []
+    app = SimpleNamespace(state=SimpleNamespace())
+
+    def record(phase: str) -> None:
+        observations.append(
+            (
+                phase,
+                getattr(app.state, "composition_ready", None),
+                getattr(app.state, "runtime_inventory", None),
+            )
+        )
+
+    class Cleanup:
+        async def shutdown(self, *, drain_seconds: int) -> None:
+            assert drain_seconds == 30
+            record("cleanup")
+
+    class Resources:
+        engine = None
+        session_manager = object()
+        models = object()
+
+        async def adispose(self) -> None:
+            record("resources")
+
+    class Gateway:
+        async def close(self) -> None:
+            record("gateway")
+
+    inventory = RuntimeInventory(
+        run_cleanup_supervisor=Cleanup(),
+        run_environment_resources=Resources(),
+        workspace_volume_gateway=Gateway(),
+    )
+    app.state.runtime_inventory = inventory
+    app.state.composition_ready = True
+
+    await composition.dispose_daytona_composition(app)
+
+    assert observations == [
+        ("cleanup", False, None),
+        ("resources", False, None),
+        ("gateway", False, None),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -> None:
+    """Unsettled preparation must keep the bridge fenced for deferred disposal."""
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            return False
+
+    class Resources:
+        session_manager = object()
+
+        async def adispose(self) -> None:
+            raise AssertionError("resources must not dispose while preparation is unsettled")
+
+    class Gateway:
+        async def close(self) -> None:
+            raise AssertionError("gateway must not close while preparation is unsettled")
+
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    inventory = RuntimeInventory(
+        run_preparation=Preparation(),
+        run_environment_resources=Resources(),
+        workspace_volume_gateway=Gateway(),
+        bridge_dispatcher=dispatcher,
+    )
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.runtime_inventory = inventory
+    app.state.composition_ready = True
+
+    await composition.dispose_daytona_composition(app)
+
+    assert app.state.runtime_inventory is None
+    assert app.state.composition_ready is False
+    assert dispatcher.service_loop() is asyncio.get_running_loop()
+    assert composition._COMPOSITION_DISPOSAL_TASKS or composition._COMPOSITION_DISPOSAL_MONITORS
+
+    # Settle deferred ownership so later tests do not inherit fenced tasks.
+    pending = list(composition._COMPOSITION_DISPOSAL_TASKS)
+    for task in pending:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, BaseException):
+            _ = await task
+    composition._COMPOSITION_DISPOSAL_TASKS.clear()
+    dispatcher.clear_loop(asyncio.get_running_loop())
+
+
+@pytest.mark.asyncio
+async def test_close_inventory_services_drains_all_phases_after_cancellation() -> None:
+    from fleet_rlm.composition.inventory import close_inventory_services
+
+    phases: list[str] = []
+
+    class Cleanup:
+        async def shutdown(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("cleanup")
+            raise asyncio.CancelledError
+
+    class Runner:
+        async def aclose(self, *, drain_seconds: int) -> None:
+            del drain_seconds
+            phases.append("runner")
+            raise asyncio.CancelledError
+
+    class Preparation:
+        async def aclose(self) -> bool:
+            phases.append("preparation")
+            raise asyncio.CancelledError
+
+    result = await close_inventory_services(
+        RuntimeInventory(
+            run_cleanup_supervisor=Cleanup(),
+            runner=Runner(),
+            run_preparation=Preparation(),
+        )
+    )
+
+    assert phases == ["cleanup", "runner", "preparation"]
+    assert isinstance(result.cancellation, asyncio.CancelledError)
+    assert result.preparation_settled is False
+
+
+@pytest.mark.asyncio
+async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each app lifespan owns its bridge dispatcher (QRE-154).
+
+    Sync Daytona bridges post SDK coroutines to the dispatcher's registered
+    loop (the one loop-affine to every Daytona SDK object, which never
+    performs nested synchronous waits); disposal clears only this
+    composition's dispatcher. The legacy process-default dispatcher seam
+    was removed in P33.
+    """
+    import fleet_rlm.composition.live as composition
+    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+
+    inventory = RuntimeInventory(
+        turn_runtime=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        session_catalog=object(),
+        session_lifecycle=object(),
+        run_lifecycle=object(),
+        run_preparation=object(),
+        run_state_store=object(),
+        model_bundle=object(),
+        run_environment_resources=object(),
+        workspace_volume_gateway=object(),
+        workspace_file_service=object(),
+    )
+
+    async def fake_build(
+        _settings: object,
+        *,
+        skill_catalog: SkillCatalog,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> RuntimeInventory:
+        assert skill_catalog is app.state.skill_catalog
+        assert dispatcher is not None
+        # The install path registers the composition loop before building.
+        assert dispatcher.service_loop() is asyncio.get_running_loop()
+        return replace(inventory, bridge_dispatcher=dispatcher)
+
+    from dataclasses import replace
+
+    monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
+    monkeypatch.setattr("fleet_rlm.config.policy.ConfigPolicyService.from_settings", lambda *_a, **_k: object())
+    monkeypatch.setattr("fleet_rlm.config.loader.active_profile", lambda _settings: "test-profile")
+
+    app = SimpleNamespace(state=SimpleNamespace())
+    app.state.skill_catalog = SkillCatalog(())
+
+    installed = await composition.install_daytona_composition(app, object())
+    dispatcher = installed.bridge_dispatcher
+    assert isinstance(dispatcher, SyncBridgeDispatcher)
+    assert dispatcher.service_loop() is asyncio.get_running_loop()
+    assert installed is app.state.runtime_inventory
+
+    await composition.dispose_daytona_composition(app)
+    assert dispatcher.service_loop() is None
+
+
+def test_testing_database_is_created_and_closed_by_lifespan() -> None:
+    app = create_testing_app(
+        settings=Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+    assert app.state.runtime_inventory is None
+
+    with TestClient(app):
+        inventory = app.state.runtime_inventory
+        assert isinstance(inventory, RuntimeInventory)
+        assert inventory.db_engine is not None
+        assert inventory.session_catalog is not None
+
+    assert app.state.runtime_inventory is None
+
+
+def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
+    from fleet_rlm.composition.inventory import no_provider_recovery_fence
+    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+
+    calls: list[object] = []
+
+    async def reconcile(self, fence=None):
+        calls.append(self)
+        assert fence is no_provider_recovery_fence
+
+    monkeypatch.setattr(SqlAlchemyRunStateStore, "reconcile_settling", reconcile)
+    app = create_testing_app(
+        settings=Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+
+    with TestClient(app):
+        pass
+
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("database_url", [None, "sqlite+aiosqlite:///:memory:"])
+def test_local_composition_installs_once_for_in_memory_and_sql(monkeypatch, database_url) -> None:
+    import fleet_rlm.composition.testing as testing_composition
+
+    calls: list[object | None] = []
+    original = testing_composition.install_testing_composition
+
+    def track_install(app, settings, *, database=None):
+        calls.append(database.session_factory if database is not None else None)
+        return original(app, settings, database=database)
+
+    monkeypatch.setattr(testing_composition, "install_testing_composition", track_install)
+    app = testing_composition.create_testing_app(
+        settings=Settings(
+            database_url=database_url,
+        )
+    )
+
+    assert calls == []
+    with TestClient(app):
+        assert len(calls) == 1
+        assert (calls[0] is None) is (database_url is None)
+    assert len(calls) == 1
+
+
+def test_local_startup_failure_rolls_back_partial_inventory(monkeypatch) -> None:
+    import fleet_rlm.composition.testing as testing_composition
+
+    def fail_install(app, _settings, *, database=None):
+        del database
+        app.state.runtime_inventory = RuntimeInventory(turn_runtime=object())
+        app.state.composition_ready = True
+        raise RuntimeError("local wiring unavailable")
+
+    monkeypatch.setattr(testing_composition, "install_testing_composition", fail_install)
+    app = testing_composition.create_testing_app(
+        settings=Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="local wiring unavailable"), TestClient(app):
+        pass
+
+    assert app.state.composition_ready is False
+    assert app.state.runtime_inventory is None
+
+
+def test_unready_composition_never_builds_route_dependencies() -> None:
+    app = create_testing_app()
+    with TestClient(app) as client:
+        app.state.composition_ready = False
+        response = client.post(
+            f"/api/sessions/{uuid4()}/turns",
+            json={"text": "ping"},
+            headers={"Idempotency-Key": "live-readiness-test"},
+        )
+        assert response.status_code == 503
+        assert response.json()["code"] == "turn_unavailable"
+
+
+def test_app_py_top_level_avoids_dspy_daytona() -> None:
+    app_path = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "app.py"
+    tree = ast.parse(app_path.read_text(encoding="utf-8"))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".", maxsplit=1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            imported.add(node.module.split(".", maxsplit=1)[0])
+    assert "dspy" not in imported
+    assert "daytona" not in imported
+
+
+def test_main_exports_single_app_factory(monkeypatch) -> None:
+    monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona")
+    monkeypatch.setenv("FLEET_RUN_ENVIRONMENT", "daytona")
+    from fleet_rlm import main as main_mod
+
+    assert callable(main_mod.create_app)
+    assert main_mod.app is not None
+
+
+@pytest.mark.asyncio
+async def test_install_daytona_composition_does_not_create_schema(monkeypatch) -> None:
+    import fleet_rlm.composition.live as composition
+    import fleet_rlm.persistence.database as database
+
+    class Resources:
+        engine = object()
+        session_manager = object()
+        models = object()
+
+    class Gateway:
+        pass
+
+    preparation = object()
+    inventory = RuntimeInventory(
+        run_environment_resources=Resources(),
+        turn_runtime=object(),
+        session_catalog=object(),
+        session_lifecycle=object(),
+        run_lifecycle=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        workspace_volume_gateway=Gateway(),
+        workspace_file_service=object(),
+        run_preparation=preparation,
+    )
+
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+        assert dispatcher is not None  # the install path always injects one (QRE-154)
+        assert isinstance(skill_catalog, SkillCatalog)
+        return inventory
+
+    async def fail_tables(_engine):
+        raise AssertionError("live startup must not create the schema")
+
+    monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
+    monkeypatch.setattr(database, "create_tables", fail_tables)
+
+    app = SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(())))
+    installed = await composition.install_daytona_composition(app, Settings(run_environment="daytona"))
+
+    assert installed is app.state.runtime_inventory
+    assert installed.run_preparation is preparation
+    assert app.state.composition_ready is True
+
+
+def test_offline_lifespan_disposes_engine_when_table_creation_fails(monkeypatch) -> None:
+    import fleet_rlm.persistence.database as database
+
+    disposed: list[str] = []
+
+    class Engine:
+        async def dispose(self) -> None:
+            disposed.append("engine")
+
+    def fake_engine(_url: str):
+        return Engine()
+
+    def fake_factory(_engine):
+        return object()
+
+    async def fail_tables(_engine):
+        raise RuntimeError("schema unavailable")
+
+    monkeypatch.setattr(database, "create_async_engine_from_url", fake_engine)
+    monkeypatch.setattr(database, "create_session_factory", fake_factory)
+    monkeypatch.setattr(database, "create_tables", fail_tables)
+    app = create_testing_app(settings=Settings(database_url="sqlite+aiosqlite:///:memory:"))
+
+    with pytest.raises(RuntimeError, match="schema unavailable"), TestClient(app):
+        pass
+
+    assert disposed == ["engine"]
+
+
+@pytest.mark.asyncio
+async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(monkeypatch) -> None:
+    """Preserve the original startup failure while completing all available cleanup."""
+    import fleet_rlm.composition.live as composition
+
+    disposed: list[str] = []
+    orphan_cleanup_cancelled = asyncio.Event()
+
+    async def run_orphan_cleanup() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            orphan_cleanup_cancelled.set()
+
+    orphan_cleanup_task = asyncio.create_task(run_orphan_cleanup())
+    memory_outbox_cancelled = asyncio.Event()
+
+    async def run_memory_outbox() -> None:
+        try:
+            await asyncio.Event().wait()
+        finally:
+            memory_outbox_cancelled.set()
+
+    memory_outbox_task = asyncio.create_task(run_memory_outbox())
+    await asyncio.sleep(0)
+
+    class Resources:
+        session_manager = object()
+        models = object()
+        engine = object()
+
+        async def adispose(self) -> None:
+            assert orphan_cleanup_cancelled.is_set()
+            disposed.append("resources")
+
+    class Gateway:
+        async def close(self) -> None:
+            disposed.append("gateway")
+            raise RuntimeError("cleanup failed")
+
+    inventory = RuntimeInventory(
+        run_environment_resources=Resources(),
+        turn_runtime=object(),
+        session_catalog=object(),
+        session_lifecycle=object(),
+        run_lifecycle=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        workspace_volume_gateway=Gateway(),
+        orphan_cleanup_task=orphan_cleanup_task,
+        memory_outbox_task=memory_outbox_task,
+    )
+
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+        assert dispatcher is not None  # the install path always injects one (QRE-154)
+        assert isinstance(skill_catalog, SkillCatalog)
+        return inventory
+
+    def fail_publish(_app, _inventory):
+        raise RuntimeError("wiring unavailable")
+
+    monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
+    monkeypatch.setattr(composition, "install_runtime_inventory", fail_publish)
+
+    with pytest.raises(RuntimeError, match="wiring unavailable"):
+        await composition.install_daytona_composition(
+            SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(()))), Settings(run_environment="daytona")
+        )
+
+    assert disposed == ["resources", "gateway"]
+    assert orphan_cleanup_task.cancelled()
+    assert memory_outbox_task.cancelled()
+    assert memory_outbox_cancelled.is_set()

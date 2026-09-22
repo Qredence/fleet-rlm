@@ -263,8 +263,8 @@ def _authorized_executor(
     )
 
 
-def test_val_rec_015_claim_loss_before_allocation_performs_no_reservation_or_acquisition() -> None:
-    """VAL-REC-015: claim loss before allocation rejects the recursive call at
+def test_claim_loss_before_allocation_performs_no_reservation_or_acquisition() -> None:
+    """Claim loss before allocation rejects the recursive call at
     the authorization fence with no reservation, no call index, no factory
     acquisition, and no budget mutation."""
     authority = RunAuthority()
@@ -287,8 +287,8 @@ def test_val_rec_015_claim_loss_before_allocation_performs_no_reservation_or_acq
     assert summary.delegation_metrics.recursive_child_calls == 0
 
 
-def test_val_rec_015_claim_loss_rejects_every_subsequent_recursive_call() -> None:
-    """VAL-REC-015: after claim loss, no subsequent recursive call may
+def test_claim_loss_rejects_every_subsequent_recursive_call() -> None:
+    """After claim loss, no subsequent recursive call may
     reserve or acquire: the first call completed while the claim was held,
     and every later call (single and batched) is rejected at the fence."""
     authority = RunAuthority()
@@ -316,10 +316,10 @@ def test_val_rec_015_claim_loss_rejects_every_subsequent_recursive_call() -> Non
 
 
 @pytest.mark.asyncio
-async def test_val_rec_015_claim_loss_during_blocked_child_discards_result_and_fails_parent(
+async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-015 (Runner scope): claim loss while a child is blocked
+    """Runner scope: claim loss while a child is blocked
     discards the child's late result through the same authorization fence,
     produces a failed parent outcome with no successful structured result or
     terminal completion, performs no further allocation, and settles the

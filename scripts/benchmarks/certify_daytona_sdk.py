@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SCHEMA = "fleet.daytona-sdk-compatibility/v1"
 MAX_RECEIPT_BYTES = 128 * 1024
 UNIT_TESTS = (
-    "tests/unit/backend/test_daytona_platform.py",
+    "tests/unit/backend/daytona/test_runtime.py",
     "tests/unit/backend/daytona/test_native_sdk_contract.py",
     "tests/unit/backend/daytona/test_sdk_resource_errors.py",
     "tests/unit/scripts/test_daytona_snapshot.py",
