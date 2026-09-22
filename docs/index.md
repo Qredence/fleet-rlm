@@ -23,15 +23,12 @@ interpreter cutover is not selected.
 8. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
 9. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 10. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
-11. [Phase 6 promotion and rollback](how-to-guides/phase6-promotion.md)
 
 ## Current runtime and active migration
 
-- [Session-scoped RLM state ADR](decisions/ADR-session-scoped-rlm-state.md) — historical Session-state decision; current ownership is recorded in ADR 006.
-- [Turn interpreter context target (ADR 004)](decisions/004-turn-interpreter-context.md) — gated target.
-- [Retired runtime selector (ADR 005)](decisions/005-runtime-variant.md) — historical migration contract.
-- [Native runtime and MLflow evidence (ADR 006)](decisions/006-native-turn-scoped-runtime-and-evaluation.md) — retained-broker architecture, historical target decisions, and open gates.
-- [ADR 006 implementation status](decisions/006-implementation-status.md) — dated results and verification ledger.
+The supported runtime boundary and ownership map are maintained in
+[ARCHITECTURE.md](../ARCHITECTURE.md). Validation lanes and evidence limits are
+defined by the [testing strategy](how-to-guides/testing-strategy.md).
 
 The configured Daytona path reuses a healthy Root Sandbox for submitted source
 and serializable bindings, resetting the execution namespace and invocation
@@ -45,11 +42,7 @@ as a current guarantee.
 ## Historical baselines and evidence
 
 - [Maintainability freeze](how-to-guides/maintainability-freeze.md)
-- [P35-D callback observability decision](how-to-guides/p35d-callback-observability-decision.md)
-- [P36 ownership and deletion contract](how-to-guides/p36-ownership-deletion-inventory.md)
 - [P41 behavior freeze](reference/behavior-freeze.md)
-- [P42 Session-state behavior freeze](reference/p42-session-state-behavior-freeze.md)
-- [P42 module-subtraction ledger](reference/p42-module-subtraction-ledger.md)
 
 ## Reference
 
@@ -74,7 +67,7 @@ profile matrix, must be regenerated from its source rather than edited by hand.
 - schema: `migrations/`
 - validation: `Makefile`, `tests/`, and TUI tests
 
-The maintained [ADR 006 implementation status ledger](decisions/006-implementation-status.md)
-tracks implementation separately from live certification and rollout authorization.
+The maintained architecture, testing strategy, and performance budget track
+current implementation ownership, validation scope, and dated measurements.
 Historical baselines preserve their original evidence scope and do not override
 current code, policy, or generated contracts.

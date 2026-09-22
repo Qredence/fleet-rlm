@@ -1102,6 +1102,89 @@ async def test_replace_keeps_volume_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_replace_closes_retained_root_before_retiring_sandbox() -> None:
+    mgr, platform, store, _volumes = _manager()
+    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    request = _request()
+    first_spec = RootSessionSpec(
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        run_id=request.run_id,
+    )
+
+    retained = await runtime.acquire_root_session(first_spec)
+    current = await store.get(request.session_id)
+    assert current is not None
+
+    replacement = await mgr.replace(
+        replace(current, provider_state="unrecoverable"),
+        workspace_id=request.workspace_id,
+        user_id=request.user_id,
+    )
+
+    assert retained.closed
+    assert retained.sandbox_id in platform.deleted
+    assert mgr.active_leases.holder(request.session_id, workspace_id=request.workspace_id) is None
+    assert not mgr.has_pending_ownership
+
+    next_root = await runtime.acquire_root_session(
+        RootSessionSpec(
+            workspace_id=request.workspace_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            run_id=uuid4(),
+        )
+    )
+    assert next_root.sandbox_id == replacement.sandbox_id
+    assert next_root.sandbox_id != retained.sandbox_id
+
+    await runtime.aclose()
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_replace_retains_root_and_binding_when_root_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mgr, platform, store, _volumes = _manager()
+    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    request = _request()
+    retained = await runtime.acquire_root_session(
+        RootSessionSpec(
+            workspace_id=request.workspace_id,
+            session_id=request.session_id,
+            user_id=request.user_id,
+            run_id=request.run_id,
+        )
+    )
+    current = await store.get(request.session_id)
+    assert current is not None
+
+    async def fail_release(_lease: Any) -> None:
+        raise RuntimeError("controlled root close failure")
+
+    monkeypatch.setattr(mgr, "release", fail_release)
+    with pytest.raises(RuntimeError, match="controlled root close failure"):
+        await mgr.replace(
+            replace(current, provider_state="unrecoverable"),
+            workspace_id=request.workspace_id,
+            user_id=request.user_id,
+        )
+
+    assert runtime.roots == (retained,)
+    assert retained.failed
+    assert retained.sandbox_id not in platform.deleted
+    assert await store.get(request.session_id) == current
+    assert mgr.active_leases.holder(request.session_id, workspace_id=request.workspace_id) is not None
+
+    monkeypatch.undo()
+    await runtime.discard_stale_root_session(request.workspace_id, request.session_id)
+    assert runtime.roots == ()
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
 async def test_replace_rejects_zero_user_id() -> None:
     mgr, _plat, store, _volumes = _manager()
     req = _request()

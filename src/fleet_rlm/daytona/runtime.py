@@ -7,7 +7,6 @@ disposable child Environments for recursive execution.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import inspect
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -423,13 +422,20 @@ class DaytonaRuntime:
         *,
         deadline: float | None = None,
     ) -> None:
-        """Drop a resident root after external replacement."""
+        """Close and drop a resident root after external replacement.
+
+        The registry entry remains authoritative until the provider lease has
+        closed successfully.  A replacement must not retire the remote
+        Sandbox while this retained Root still owns its SessionManager lease.
+        """
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
         async with self._lock:
-            owner = self._roots.pop(key, None)
-        if owner is not None:
-            with contextlib.suppress(Exception):
-                await owner.close(notify=False, deadline=deadline)
+            owner = self._roots.get(key)
+            if owner is None:
+                return
+            await owner.close(notify=False, deadline=deadline)
+            if self._roots.get(key) is owner:
+                self._roots.pop(key, None)
 
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""

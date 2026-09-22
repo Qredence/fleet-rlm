@@ -1,9 +1,10 @@
 # P41 behavior freeze
 
-Historical baseline: the per-Turn Root row below was superseded by the
-[Session-state contract](p42-session-state-behavior-freeze.md). Current
-ownership is in [ARCHITECTURE.md](../../ARCHITECTURE.md); ADR 006 tracks the
-next gated migration. Preserve the recorded baseline when comparing behavior.
+Historical baseline: the per-Turn Root row below was superseded by the current
+Session ownership model. Current ownership is in
+[ARCHITECTURE.md](../../ARCHITECTURE.md); validation scope is in the
+[testing strategy](../how-to-guides/testing-strategy.md). Preserve the
+recorded baseline when comparing behavior.
 
 Status: **sealed** — integrated P41 delivery. The freeze is certified at one
 Git SHA per delivery; the same-SHA receipts that seal it live in the private
@@ -44,10 +45,9 @@ the behaviors below keep passing their lanes.
 
 Private implementation structure stays free to change: internal module and
 helper boundaries, orchestration seams that never cross the public surface,
-test-only instrumentation, and the number or names of source files. The
-inventory lane
-`docs/how-to-guides/p36-ownership-deletion-inventory.md` records which
-internal owners changed under this contract.
+test-only instrumentation, and the number or names of source files. Internal
+ownership changes remain implementation details; current ownership is recorded
+in [ARCHITECTURE.md](../../ARCHITECTURE.md).
 
 ## Explicitly unsupported: cross-Sandbox Memory append coordination
 
