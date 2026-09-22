@@ -557,25 +557,15 @@ async def invoke_native_rlm(
     kwargs: Mapping[str, Any],
 ) -> Any:
     """
-    Invoke the RLM operation using the caller-owned interpreter when required.
+    Invoke the RLM operation using its invocation-scoped interpreter factory.
 
-    Parameters:
-        rlm (Any): RLM object to invoke.
-        context (RLMExecutionContext): Execution context containing the caller-owned interpreter.
-        kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM operation.
-
-    Returns:
-        Any: Result produced by the RLM operation.
-
-    Raises:
-        RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
+    Native DSPy creates, binds, and shuts down a fresh interpreter for this
+    invocation. The retained session adapter is only the factory template; it
+    continues to own the Sandbox lease and is never passed to ``acall``.
+    Deterministic substitute RLMs retain their ordinary keyword-only call.
     """
-    native_call_args: tuple[Any, ...] = ()
-    if is_native_rlm(rlm):
-        if context.execution.interpreter is None:
-            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        native_call_args = (context.execution.interpreter,)
-    return await rlm.acall(*native_call_args, **dict(kwargs))
+    del context
+    return await rlm.acall(**dict(kwargs))
 
 
 def start_rlm_worker(

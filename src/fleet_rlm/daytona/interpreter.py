@@ -824,7 +824,7 @@ class DaytonaCodeInterpreter:
                 message="interpreter cannot create an invocation-scoped adapter",
                 cause_type="InterpreterConfigurationError",
             )
-        return DaytonaCodeInterpreter(
+        fresh = DaytonaCodeInterpreter(
             backend=fresh_backend,
             output_fields=list(self._output_fields) if self._output_fields is not None else None,
             callbacks=list(self.callbacks),
@@ -832,6 +832,25 @@ class DaytonaCodeInterpreter:
             execution_output_cap=self._execution_output_cap,
             max_code_chars=self._max_code_chars,
         )
+        fresh._fleet_output_contract = self._fleet_output_contract
+        fresh.bind_observer(self._observer, max_chars=self._observation_max_chars)
+        fresh.bind_turn_budget(self._turn_budget)
+        fresh.bind_turn_request(self._turn_request)
+        source_backend = self._backend
+        fresh.bind_async_bridge(getattr(source_backend, "_async_bridge", None))
+        fresh.bind_tool_outcomes(
+            tool_settled=getattr(source_backend, "_tool_settled", None),
+            tool_failed=getattr(source_backend, "_tool_failed", None),
+        )
+        if self._context_binding is not None:
+            fresh._context_binding = self._context_binding
+            bind_manifest = getattr(fresh_backend, "bind_context_manifest", None)
+            if callable(bind_manifest):
+                bind_manifest(
+                    trusted_mount_root=self._context_binding[0],
+                    expected_manifest_sha256=self._context_binding[1],
+                )
+        return fresh
 
     def _ensure_binding_mutation_allowed(self) -> None:
         """Reject an overlapping invocation before it can mutate the current namespace."""
