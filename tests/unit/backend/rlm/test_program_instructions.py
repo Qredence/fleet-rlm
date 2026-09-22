@@ -72,6 +72,24 @@ def test_fragment_composition_preserves_established_instruction_text() -> None:
     assert DISCOVERY_RLM_INSTRUCTIONS in disabled
 
 
+def test_recursive_instruction_reserves_the_first_batch_for_explicit_child_counts() -> None:
+    instructions = compose_rlm_instructions(recursion_enabled=True)
+
+    assert "make that complete batch\n   the first recursive call" in instructions
+    assert "Do not spend a recursive call on a diagnostic or exploratory probe" in instructions
+
+
+def test_root_instruction_includes_a_conservative_configured_output_budget() -> None:
+    signature = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        max_output_chars=6_000,
+    )
+
+    assert "at\n   or below 4,500 characters" in signature.instructions
+    assert "below the 6,000-character\n   Turn limit" in signature.instructions
+
+
 def test_batch_read_instruction_requires_the_registered_tool() -> None:
     absent = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
     present = root_signature_for_recursion(
@@ -224,6 +242,18 @@ def test_build_program_threads_host_tool_dispatch_into_the_signature() -> None:
 
     assert "Fleet recursion, URL-fetch, or Workspace host tool" in without.signature.instructions
     assert "Fleet recursion, URL-fetch, or Workspace host tool" not in with_dispatch.signature.instructions
+
+
+def test_build_program_threads_a_nondefault_output_budget_into_the_signature() -> None:
+    program = build_program(
+        FleetProgramSpec(
+            signature=FleetRLMSignature,
+            options=RLMOptions(max_iters=1, max_llm_calls=1, max_output_chars=6_000),
+        )
+    )
+
+    assert "or below 4,500 characters" in program.signature.instructions
+    assert "below the 6,000-character" in program.signature.instructions
 
 
 def test_dspy_native_semantic_tools_survive_fleet_no_dispatch_overlay() -> None:

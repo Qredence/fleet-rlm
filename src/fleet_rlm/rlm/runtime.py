@@ -319,7 +319,7 @@ def _fingerprint(tool_name: str, arguments: Mapping[str, Any], result: object) -
 
 
 _WORKSPACE_PATH_RE = re.compile(
-    r"(?<![\w.-])(?:(?:workspace|projects)/)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?![\w.-])"
+    r"(?<![\w.-])(?:(?:workspace|projects)/)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z][A-Za-z0-9]{0,15}(?![\w.-])"
 )
 
 # Host tool name -> stable guard-target namespace. Fingerprints for existing
@@ -1289,6 +1289,7 @@ class RLMRunner:
                 recursion_enabled=context.delegation.recursive_options.enabled,
                 skill_instructions=spec.skill_instructions,
                 tool_names=frozenset(str(tool.name) for tool in spec.tools),
+                max_output_chars=context.execution.options.max_output_chars,
             ),
         )
 
