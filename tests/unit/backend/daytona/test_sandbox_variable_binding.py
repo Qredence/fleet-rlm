@@ -10,6 +10,7 @@ replayed per execution.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -266,8 +267,9 @@ def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> Non
         def get(self, _path: str) -> _Response:
             return _Response({"requests": self._requests})
 
-        def post(self, _path: str, *, json: dict[str, object]) -> _Response:
-            self.posts.append(json)
+        def post(self, _path: str, *, content: bytes, headers: dict[str, str]) -> _Response:
+            assert headers == {"Content-Type": "application/json"}
+            self.posts.append(json.loads(content))
             return _Response({"status": "ok"})
 
     async def async_tool() -> dict[str, object]:

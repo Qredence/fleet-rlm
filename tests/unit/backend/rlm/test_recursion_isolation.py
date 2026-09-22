@@ -564,7 +564,7 @@ async def test_root_oversized_submit_fails_with_the_same_closed_category() -> No
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iters=2, max_llm_calls=2, max_output_chars=100),
+            options=RLMOptions(max_iters=2, max_llm_calls=2, max_output_chars=100, max_final_output_chars=100),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=never_cancelled,

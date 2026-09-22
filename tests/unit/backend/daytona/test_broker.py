@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import socket
 import subprocess
 import sys
@@ -225,11 +226,55 @@ def test_poll_delivers_async_host_tool_result_through_application_bridge() -> No
     broker._poll_once()
 
     assert broker._delivery_error is None
-    assert client.post.call_args.kwargs["json"] == {
+    assert json.loads(client.post.call_args.kwargs["content"]) == {
         "id": "call-1",
         "lease": "lease-1",
         "result": {"ok": True, "path": "notes/findings.md", "bytes": 7},
     }
+    assert client.post.call_args.kwargs["headers"] == {"Content-Type": "application/json"}
+
+
+@pytest.mark.parametrize("text", ("line\n" * 100, "\\" * 100, '"' * 100, "\u0001" * 100, "é🚀" * 100))
+def test_result_envelope_uses_compact_utf8_json_for_escaped_text(text: str) -> None:
+    payload = broker_module._encode_result_envelope({"id": "call", "lease": "lease", "result": {"text": text}})
+
+    assert payload == json.dumps(
+        {"id": "call", "lease": "lease", "result": {"text": text}},
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+
+
+def test_result_envelope_accepts_the_exact_limit_and_rejects_one_byte_more() -> None:
+    empty = {"id": "call", "lease": "lease", "result": ""}
+    overhead = len(broker_module._encode_result_envelope(empty))
+    at_limit = {**empty, "result": "x" * (broker_module._MAX_REQUEST_BYTES - overhead)}
+
+    assert len(broker_module._encode_result_envelope(at_limit)) == broker_module._MAX_REQUEST_BYTES
+    with pytest.raises(ValueError, match="request limit"):
+        broker_module._encode_result_envelope({**at_limit, "result": at_limit["result"] + "x"})
+
+
+def test_poll_returns_a_typed_error_when_a_tool_result_exceeds_the_envelope() -> None:
+    failed: list[tuple[str, dict[str, object]]] = []
+    broker = DaytonaHttpToolBroker(
+        object(),
+        port=1,
+        tool_failed=lambda name, args: failed.append((name, dict(args))),
+    )
+    client = MagicMock()
+    client.get.return_value.json.return_value = {
+        "requests": [{"id": "call-1", "lease": "lease-1", "tool_name": "answer", "args": [], "kwargs": {}}]
+    }
+    client.post.return_value.status_code = 200
+    broker._client = client
+    broker.bind_tools({"answer": lambda: "x" * broker_module._MAX_REQUEST_BYTES})
+
+    broker._poll_once()
+
+    assert failed == [("answer", {})]
+    assert json.loads(client.post.call_args.kwargs["content"])["tool_error"]["category"] == "ToolResultTooLarge"
 
 
 def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> None:

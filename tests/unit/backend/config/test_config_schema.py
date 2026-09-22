@@ -188,6 +188,14 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ),
     ("rlm.finalization_attempts", "RLM", "Finalization attempts", "number", (), "rlm_finalization_attempts"),
     (
+        "rlm.max_final_output_chars",
+        "RLM",
+        "Maximum final output characters",
+        "number",
+        (),
+        "rlm_max_final_output_chars",
+    ),
+    (
         "mlflow.trace_content_enabled",
         "MLflow",
         "Capture sanitized trace content",

@@ -437,6 +437,17 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=10_000, gt=0)
+    rlm_max_final_output_chars: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.max_final_output_chars",
+            group="RLM",
+            label="Maximum final output characters",
+            editor="number",
+            rank=77,
+            required_in_policy=True,
+        ),
+    ] = Field(default=10_000, gt=0)
     rlm_max_execution_output_chars: Annotated[
         int,
         FleetFieldPolicy(
