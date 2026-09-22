@@ -28,7 +28,7 @@ import pytest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted
-from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
 )
@@ -106,7 +106,7 @@ def _context(
     recursive_options: RecursiveRLMOptions,
     root_options: RLMOptions | None = None,
     deadline: float | None = None,
-    runner_factory: RLMFactory | None = None,
+    runner_factory: Callable[..., object] | None = None,
 ) -> tuple[RLMExecutionContext, RLMRunner]:
     async def not_cancelled() -> bool:
         return False
@@ -131,7 +131,7 @@ def _context(
         ),
         capabilities=EmptyCapabilities(),
     )
-    return context, RLMRunner(factory=runner_factory) if runner_factory is not None else RLMRunner()
+    return context, RLMRunner(program_builder=runner_factory) if runner_factory is not None else RLMRunner()
 
 
 def test_public_composition_fixes_root_depth_zero() -> None:
@@ -279,10 +279,9 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
     by their public names."""
     captured: dict[str, object] = {}
 
-    class CapturingFactory:
-        def create(self, **kwargs: object) -> object:
-            captured.update(kwargs)
-            return RLMFactory().create(**kwargs)
+    def capturing_builder(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return build_native_rlm(**kwargs)
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"reasoning": "direct", "code": "SUBMIT(answer='direct')"}], adapter=adapter)
@@ -293,7 +292,7 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
         factory=_RecordingFactory(),
         recursive_options=RecursiveRLMOptions(enabled=enabled),
         root_options=RLMOptions(max_iters=2, max_llm_calls=2),
-        runner_factory=CapturingFactory(),  # type: ignore[arg-type]
+        runner_factory=capturing_builder,
     )
 
     async def drive() -> None:
@@ -331,18 +330,17 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
         rlm.forward = forward
         return rlm
 
-    class RootFactory:
-        def create(self, **kwargs: object) -> object:
-            rlm = RLMFactory().create(**kwargs)
-            root_types.append(type(rlm))
-            original_acall = rlm.acall
+    def root_builder(**kwargs: object) -> object:
+        rlm = build_native_rlm(**kwargs)
+        root_types.append(type(rlm))
+        original_acall = rlm.acall
 
-            async def acall(interpreter: object, /, **input_args: object) -> object:
-                root_invocations.append((type(rlm), interpreter, dict(input_args)))
-                return await original_acall(interpreter, **input_args)
+        async def acall(interpreter: object, /, **input_args: object) -> object:
+            root_invocations.append((type(rlm), interpreter, dict(input_args)))
+            return await original_acall(interpreter, **input_args)
 
-            rlm.acall = acall
-            return rlm
+        rlm.acall = acall
+        return rlm
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
@@ -361,7 +359,7 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
         factory=factory,
         recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
         root_options=RLMOptions(max_iters=4, max_llm_calls=4),
-        runner_factory=RootFactory(),  # type: ignore[arg-type]
+        runner_factory=root_builder,
     )
 
     recursive_calls.build_native_rlm = recording_build

@@ -132,7 +132,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
     )
 
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     events = [event async for event in stream]
 
     assert [event.kind for event in events] == [
@@ -293,7 +293,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         ),
         capabilities=capabilities,
     )
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     capabilities.spec = RLMExecutionSpec(
         skill_cards=(
             SkillCard(
@@ -424,7 +424,7 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
         capabilities=EmptyCapabilities(),
     )
 
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     _events = [event async for event in stream]
 
     assert stream.outcome is not None and stream.outcome.succeeded
@@ -484,7 +484,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
         ),
     )
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     _events = [event async for event in stream]
 
     assert factory.program.acall_calls == 0
@@ -588,7 +588,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         ),
         capabilities=capabilities,
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
     kinds = [event.kind for event in events]
 
@@ -707,7 +707,7 @@ async def test_sequential_runs_use_fresh_programs_and_committed_history() -> Non
     session_id, workspace_id = uuid4(), uuid4()
     interpreter = _Interpreter()
     factory = _Factory()
-    runner = RLMRunner(factory=factory)
+    runner = RLMRunner(program_builder=factory.create)
     first_history = dspy.History(messages=[{"request": "prior", "answer": "stored"}])
     second_history = dspy.History(
         messages=[

@@ -10,10 +10,9 @@ from fleet_rlm.rlm.program import (
     TOOL_RLM_INSTRUCTIONS,
     TOOL_RLM_INSTRUCTIONS_NO_DISPATCH,
     WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
-    FleetProgramSpec,
     FleetRLMSignature,
     RLMOptions,
-    build_program,
+    build_native_rlm,
     compose_rlm_instructions,
     fleet_rlm_instruction_fragments,
     root_signature_for_recursion,
@@ -221,24 +220,19 @@ def test_host_tool_dispatch_still_emits_workspace_guidance_only_when_dispatched(
     assert "read_workspace_text_batch" not in undispatchable.instructions
 
 
-def test_build_program_threads_host_tool_dispatch_into_the_signature() -> None:
-    """The spec capability reaches the built program's instructions."""
+def test_native_builder_threads_host_tool_dispatch_into_the_signature() -> None:
     options = RLMOptions(max_iters=1, max_llm_calls=1)
-    without = build_program(FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=False))
-    with_dispatch = build_program(
-        FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
-    )
+    without = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
+    with_dispatch = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
 
     assert "Fleet recursion, URL-fetch, or Workspace host tool" in without.signature.instructions
     assert "Fleet recursion, URL-fetch, or Workspace host tool" not in with_dispatch.signature.instructions
 
 
 def test_nondefault_observation_budget_preserves_the_original_signature() -> None:
-    program = build_program(
-        FleetProgramSpec(
-            signature=FleetRLMSignature,
-            options=RLMOptions(max_iters=1, max_llm_calls=1, max_output_chars=6_000),
-        )
+    program = build_native_rlm(
+        signature=FleetRLMSignature,
+        options=RLMOptions(max_iters=1, max_llm_calls=1, max_output_chars=6_000),
     )
 
     assert program.signature is FleetRLMSignature
@@ -249,7 +243,7 @@ def test_dspy_native_semantic_tools_survive_fleet_no_dispatch_overlay() -> None:
     from dspy.predict.rlm import ACTION_INSTRUCTIONS_TEMPLATE
 
     options = RLMOptions(max_iters=1, max_llm_calls=1)
-    rlm = build_program(FleetProgramSpec(signature=FleetRLMSignature, options=options, host_tool_dispatch=False))
+    rlm = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
 
     assert "``llm_query``" not in rlm.signature.instructions
     assert "llm_query(prompt)" in ACTION_INSTRUCTIONS_TEMPLATE

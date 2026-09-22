@@ -153,7 +153,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
             return Program()
 
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(prepared.execution)
+    stream = RLMRunner(program_builder=factory.create).stream(prepared.execution)
     _events = [event async for event in stream]
 
     assert factory.kwargs is not None
@@ -354,7 +354,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
             return Program()
 
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(prepared.execution)
+    stream = RLMRunner(program_builder=factory.create).stream(prepared.execution)
     _events = [event async for event in stream]
 
     assert factory.kwargs is not None
@@ -487,7 +487,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
             return program
 
     factory = Factory()
-    runner = RLMRunner(factory=factory)
+    runner = RLMRunner(program_builder=factory.create)
 
     # Turn 1: stream through the runner, then commit the runner outcome.
     turn_one = await lifecycle.begin(RunClaim(access, session.id, TurnInput("turn one"), "key-1", uuid4()))

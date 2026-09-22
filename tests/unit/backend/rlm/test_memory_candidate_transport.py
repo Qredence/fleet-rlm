@@ -67,7 +67,7 @@ async def test_runner_attaches_drained_memory_candidates_only_to_completed_outco
 
     drains: list[int] = []
     context = _context(drain_calls=drains, returned_candidates=(candidate,))
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
 
     _ = [event async for event in stream]
 
@@ -86,7 +86,7 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
 
     drains: list[int] = []
     context = _context(drain_calls=drains)
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
 
     _ = [event async for event in stream]
 
@@ -118,7 +118,7 @@ async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -
     candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
     drains: list[int] = []
     context = _context(drain_calls=drains, returned_candidates=(candidate,), cancelled=True)
-    stream = RLMRunner(factory=SimpleNamespace(create=lambda **_kwargs: object())).stream(context)
+    stream = RLMRunner(program_builder=SimpleNamespace(create=lambda **_kwargs: object()).create).stream(context)
 
     _ = [event async for event in stream]
 

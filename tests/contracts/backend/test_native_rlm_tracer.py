@@ -24,7 +24,7 @@ from fleet_rlm.rlm.events import (
     ToolStarted,
     observe_tool,
 )
-from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.runtime import (
     ExecutionRuntime,
     RLMExecutionSpec,
@@ -33,6 +33,13 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
 )
 from fleet_rlm.sessions.models import TurnAccess
+
+
+def _build_native(**kwargs: object):
+    models = kwargs.pop("models", None)
+    if models is not None:
+        kwargs["sub_lm"] = models.sub_lm
+    return build_native_rlm(**kwargs)
 
 
 class _ActionPredictor(dspy.Predict):
@@ -180,7 +187,7 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interpreter.bind_observer(observed.append, max_chars=1_000)
-    rlm = RLMFactory().create(
+    rlm = _build_native(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iters=2),
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
@@ -223,7 +230,7 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
 async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> None:
     models = RLMModelBundle(root_lm=object(), sub_lm=object())  # type: ignore[arg-type]
     first_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    first = RLMFactory().create(
+    first = _build_native(
         models=models,
         options=RLMOptions(max_iters=3),
         signature="request -> answer: str",
@@ -248,7 +255,7 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
     assert len(actions.histories) == 3
 
     second_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    second = RLMFactory().create(
+    second = _build_native(
         models=models,
         options=RLMOptions(max_iters=1),
         signature="request -> answer: str",
@@ -271,7 +278,7 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
 async def test_native_extract_fallback_receives_accumulated_repl_history() -> None:
     extractor = _CapturingExtract()
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    rlm = RLMFactory().create(
+    rlm = _build_native(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iters=2),
         signature="request -> answer: str",
@@ -294,7 +301,7 @@ async def test_native_extract_fallback_receives_accumulated_repl_history() -> No
 async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() -> None:
     models = RLMModelBundle(root_lm=object(), sub_lm=object())  # type: ignore[arg-type]
     repaired_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    repaired = RLMFactory().create(
+    repaired = _build_native(
         models=models,
         options=RLMOptions(max_iters=2),
         signature="request -> answer: str",
@@ -303,7 +310,7 @@ async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() ->
     repaired_prediction = await repaired.acall(repaired_interpreter, request="repair")
 
     extracted_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    extracted = RLMFactory().create(
+    extracted = _build_native(
         models=models,
         options=RLMOptions(max_iters=1),
         signature="request -> answer: str",
@@ -332,7 +339,7 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interpreter.bind_observer(observed.append, max_chars=1_000)
-    rlm = RLMFactory().create(
+    rlm = _build_native(
         models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iters=2),
         tools=(observe_tool(dspy.Tool(helper), observed.append, ToolEventView.metadata_only()),),
@@ -370,7 +377,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
 
     class NativeFactory:
         def create(self, **kwargs):
-            rlm = RLMFactory().create(**kwargs)
+            rlm = _build_native(**kwargs)
             if fallback:
                 rlm.generate_action = _NeverSubmit()
                 rlm.extract = _TypedExtract()
@@ -399,7 +406,7 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
         ),
         capabilities=Capabilities(),
     )
-    stream = RLMRunner(factory=NativeFactory()).stream(context)
+    stream = RLMRunner(program_builder=NativeFactory().create).stream(context)
     events = [event async for event in stream]
 
     assert stream.outcome is not None

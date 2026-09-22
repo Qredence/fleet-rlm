@@ -1,12 +1,16 @@
-"""Behavior contracts for program factory."""
+"""Behavior contracts for native DSPy program construction."""
 
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import MagicMock
 
+import dspy
 import pytest
 from dspy.utils.exceptions import LMAuthError, LMInvalidRequestError, LMServerError
+
+from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.result import RLMConfigError
 
 
 class _CopyableLM:
@@ -327,25 +331,17 @@ def test_child_copy_cannot_extend_turn_budget_deadline(monkeypatch: pytest.Monke
     assert shorter_child.root_lm.calls[-1]["timeout"] == 0.5
 
 
-def test_factory_passes_explicit_constructor_kwargs() -> None:
+def test_native_builder_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
-    from fleet_rlm.rlm.program import FleetRLMSignature, RLMFactory, RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, build_native_rlm
 
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
-    options = RLMOptions(
-        max_iters=7,
-        max_llm_calls=11,
-        max_output_chars=2048,
-    )
+    options = RLMOptions(max_iters=7, max_llm_calls=11, max_output_chars=2048)
     models = RLMModelBundle(root_lm=root, sub_lm=sub)
 
-    rlm = RLMFactory().create(
-        models=models,
-        options=options,
-        tools=[host_echo],
-    )
+    rlm = build_native_rlm(options=options, tools=[host_echo], sub_lm=models.sub_lm)
 
     assert isinstance(rlm, dspy.RLM)
     assert type(rlm) is dspy.RLM
@@ -358,29 +354,22 @@ def test_factory_passes_explicit_constructor_kwargs() -> None:
     assert not hasattr(rlm, "_interpreter")
     assert "host_echo" in rlm.tools
     assert rlm.signature is FleetRLMSignature
-    # Root is owned by the bundle for the runner; factory does not hide it in RLM ctor.
     assert models.root_lm is root
 
 
-def test_each_factory_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+def test_each_native_builder_call_returns_new_rlm_instance() -> None:
+    from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 
-    factory = RLMFactory()
-    models = RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock())
-    options = RLMOptions()
-    first = factory.create(models=models, options=options)
-    second = factory.create(models=models, options=options)
+    first = build_native_rlm(options=RLMOptions())
+    second = build_native_rlm(options=RLMOptions())
 
     assert first is not second
 
 
-def test_factory_accepts_policy_controlled_host_verbosity() -> None:
-    from fleet_rlm.rlm.program import RLMFactory, RLMModelBundle, RLMOptions
+def test_native_builder_accepts_policy_controlled_host_verbosity() -> None:
+    from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 
-    rlm = RLMFactory(verbose=False).create(
-        models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
-        options=RLMOptions(),
-    )
+    rlm = build_native_rlm(options=RLMOptions(), verbose=False)
 
     assert rlm.verbose is False
 
@@ -485,3 +474,26 @@ def test_rlm_options_reject_nonpositive_values(field: str, value: int) -> None:
 
     with pytest.raises(RLMConfigError, match=field):
         RLMOptions(**{field: value})
+
+
+def _tool(name):
+    """Create a test tool with the specified name."""
+    return dspy.Tool(lambda: "ok", name=name)
+
+
+@pytest.mark.parametrize("name", ["llm_query", "llm_query_batched", "print", "SUBMIT", "not-valid"])
+def test_native_builder_rejects_namespace_collisions(name):
+    with pytest.raises(RLMConfigError):
+        build_native_rlm(signature="question -> answer", options=RLMOptions(), tools=[_tool(name)])
+
+
+def test_native_builder_rejects_duplicate_names_and_keeps_authorized_tools():
+    rlm = build_native_rlm(signature="question -> answer", options=RLMOptions(), tools=[_tool("read_data")])
+
+    assert set(rlm.tools) == {"read_data"}
+    with pytest.raises(RLMConfigError, match="duplicate"):
+        build_native_rlm(
+            signature="question -> answer",
+            options=RLMOptions(),
+            tools=[_tool("read_data"), _tool("read_data")],
+        )
