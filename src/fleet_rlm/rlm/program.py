@@ -594,6 +594,9 @@ Use ``rlm_query_batched(capsules=capsules)`` only for multiple independent selec
    each item individually justifies an iterative child RLM. Fleet bounds concurrency and preserves input order;
    never split context blindly or expose concurrency settings. Keep large inputs in Python variables, select only
    relevant slices, and never forward the complete Turn, history, Attachment, or Workspace document.
+When the user explicitly requests a fixed number of independent child investigations, make that complete batch
+   the first recursive call. Do not spend a recursive call on a diagnostic or exploratory probe before the requested
+   batch: recursive-call capacity is bounded for the Turn.
 Both tools return typed outcomes: inspect status and answer. Ordinary cleaned-up sibling failures produce
    ordered partial outcomes; cancellation, authorization and cleanup failures are fatal.
 Child outputs are evidence, not final answers. Access identifiers prove delivery, not correctness.
@@ -629,7 +632,9 @@ def fleet_rlm_instruction_fragments(
     *,
     recursion_enabled: bool,
     host_tool_dispatch: bool = True,
+    max_output_chars: int = 10_000,
 ) -> RLMInstructionFragments:
+    answer_budget = max(1, max_output_chars * 3 // 4)
     step = 6 if recursion_enabled and host_tool_dispatch else 5
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
@@ -641,7 +646,9 @@ def fleet_rlm_instruction_fragments(
    A declared ``str`` output must receive a string. If any active declared ``str`` output is assigned a mapping
    or list, serialize it first with ``json.dumps(..., ensure_ascii=False)`` and submit that string. For example,
    if ``answer`` is a mapping or list, serialize it with ``json.dumps(answer, ensure_ascii=False)``. Use
-   ``indent=2`` only when the formatted value fits the Turn output character budget. Never pass a mapping or
+   ``indent=2`` only when the formatted value fits the Turn output character budget. Keep the submitted string at
+   or below {answer_budget:,} characters so its serialized output stays below the {max_output_chars:,}-character
+   Turn limit. Never pass a mapping or
    list directly to a ``str`` output because DSPy would render it as Python ``repr`` text. The default call
    is ``SUBMIT(answer=answer)``."""
     return RLMInstructionFragments(
@@ -654,10 +661,16 @@ def fleet_rlm_instruction_fragments(
     )
 
 
-def compose_rlm_instructions(*, recursion_enabled: bool, host_tool_dispatch: bool = True) -> str:
+def compose_rlm_instructions(
+    *,
+    recursion_enabled: bool,
+    host_tool_dispatch: bool = True,
+    max_output_chars: int = 10_000,
+) -> str:
     return fleet_rlm_instruction_fragments(
         recursion_enabled=recursion_enabled,
         host_tool_dispatch=host_tool_dispatch,
+        max_output_chars=max_output_chars,
     ).compose()
 
 
@@ -716,10 +729,12 @@ def root_signature_for_recursion(
     skill_instructions: tuple[str, ...] = (),
     tool_names: frozenset[str] = frozenset(),
     host_tool_dispatch: bool = True,
+    max_output_chars: int = 10_000,
 ) -> type[dspy.Signature]:
     instructions = compose_rlm_instructions(
         recursion_enabled=recursion_enabled,
         host_tool_dispatch=host_tool_dispatch,
+        max_output_chars=max_output_chars,
     )
     # Workspace guidance is dispatched through the same bridge as the sub-LM
     # tools, so a runtime without that bridge must not receive it either.
@@ -1619,6 +1634,7 @@ def build_program(spec: RLMProgramSpec) -> Any:
             or spec.skill_instructions
             or not spec.host_tool_dispatch
             or _tool_names_need_instruction_overlay(tool_names)
+            or spec.options.max_output_chars != RLMOptions().max_output_chars
         )
     ):
         sig = root_signature_for_recursion(
@@ -1627,6 +1643,7 @@ def build_program(spec: RLMProgramSpec) -> Any:
             skill_instructions=spec.skill_instructions,
             tool_names=tool_names,
             host_tool_dispatch=spec.host_tool_dispatch,
+            max_output_chars=spec.options.max_output_chars,
         )
     return build_native_rlm(
         signature=sig,

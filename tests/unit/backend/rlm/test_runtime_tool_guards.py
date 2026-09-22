@@ -164,6 +164,17 @@ def test_project_obligations_use_the_projects_prefix_and_coexist_with_session_ta
     assert workspace_obligations("update workspace/notes/report.md") == frozenset({"session_workspace:notes/report.md"})
 
 
+@pytest.mark.parametrize("version", ("2.0", "0.7.10", "release-0.7.10"))
+def test_workspace_obligations_do_not_treat_version_tokens_as_files(version: str) -> None:
+    assert workspace_obligations(f"assess release {version} before deciding") is None
+
+
+def test_workspace_obligations_continue_to_recognize_relative_files() -> None:
+    assert workspace_obligations("write notes/report.md with the decision") == frozenset(
+        {"session_workspace:notes/report.md"}
+    )
+
+
 def test_project_tools_join_obligations_through_the_ledger_and_progress_guard() -> None:
     guards = RunToolGuards(required_targets=workspace_obligations("deliver the report to projects/fleet-rlm/review.md"))
 
