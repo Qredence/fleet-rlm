@@ -41,7 +41,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fleet_rlm.daytona.models import _EXECUTION_STAT_KEYS
+from fleet_rlm.daytona.interpreter import _EXECUTION_STAT_KEYS
 from scripts.benchmarks import judges as _judges
 from scripts.benchmarks.campaign import CampaignPreflight, CampaignPreflightError
 from scripts.benchmarks.corpus_chain import (
