@@ -32,7 +32,12 @@ Sandbox. When a Run has authorized Fleet tools, a sandbox-local broker forwards
 JSON-only tool requests to the host and returns sanitized results; it does not
 move model code into the Fleet process. The broker lifecycle is owned by the
 interpreter and closes with its Sandbox lease. Reused root leases reset the
-execution namespace and invocation credential between Turns. DSPy's native
+execution namespace and invocation credential between Turns. `DaytonaRuntime`
+is the sole application-facing owner of reusable root records and disposable
+child leases: it coordinates per-session acquisition without holding a
+runtime-wide lock across provider calls, tracks late acquisitions until
+their Sandboxes settle, and supplies the invocation-scoped interpreter
+factory that native DSPy calls per RLM invocation. DSPy's native
 semantic tools use the same broker path as Fleet tools. Consult the
 [testing strategy](docs/how-to-guides/testing-strategy.md) for validation lanes
 and the [performance budget](docs/reference/performance-budget.md) for dated

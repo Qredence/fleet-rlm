@@ -56,6 +56,21 @@ def test_factory_created_adapter_is_invocation_scoped_and_does_not_close_retaine
     assert retained.execute("value = 1") == ""
 
 
+def test_factory_created_adapter_keeps_run_bindings_off_retained_template() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    observed: list[object] = []
+    observer = observed.append
+
+    fresh = retained.new_invocation(observer=observer, turn_request="one isolated turn")
+
+    assert fresh._observer is observer
+    assert fresh._turn_request == "one isolated turn"
+    assert retained._observer is None
+    assert retained._turn_request is None
+
+
 def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
     from dspy.primitives.code_interpreter import CodeExecutionError
 
