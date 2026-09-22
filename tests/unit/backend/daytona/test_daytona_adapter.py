@@ -42,6 +42,20 @@ def test_execute_returns_string_and_preserves_state() -> None:
     assert result == "41"
 
 
+def test_factory_created_adapter_is_invocation_scoped_and_does_not_close_retained_backend() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    retained_backend = InProcessInterpreterBackend()
+    retained = DaytonaCodeInterpreter(backend=retained_backend)
+
+    fresh = retained.new_invocation()
+    fresh.shutdown()
+
+    assert fresh is not retained
+    assert retained_backend.closed is False
+    assert retained.execute("value = 1") == ""
+
+
 def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
     from dspy.primitives.code_interpreter import CodeExecutionError
 

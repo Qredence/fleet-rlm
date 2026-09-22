@@ -1531,6 +1531,7 @@ def build_native_rlm(
     skill_instructions: Sequence[str] = (),
     recursion_enabled: bool = False,
     host_tool_dispatch: bool = True,
+    interpreter_factory: Callable[[], Any] = daytona_provider_contract,
     verbose: bool = True,
 ) -> Any:
     """Construct one fresh native DSPy RLM from its invocation inputs.
@@ -1567,7 +1568,7 @@ def build_native_rlm(
         verbose=verbose,
         tools=native_tools,
         sub_lm=sub_lm,
-        interpreter_factory=daytona_provider_contract,
+        interpreter_factory=interpreter_factory,
     )
     if set(rlm.tools) != set(tool_names) or set(rlm.tools) & _DSPY_BUILTIN_TOOLS:
         raise RLMConfigError("constructed DSPy tool namespace differs from the authorized tools")
