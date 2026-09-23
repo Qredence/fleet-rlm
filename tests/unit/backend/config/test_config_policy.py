@@ -52,10 +52,6 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert content_limit["value"] == 10_000
     assert content_limit["editor"] == "number"
 
-    url_limit = _field(service.read(), "daytona-recursive", "storage.max_url_bytes")
-    assert url_limit["value"] == 10 * 1024 * 1024
-    assert url_limit["editor"] == "number"
-
     live_enabled = _field(service.read(), "defaults", "runtime.live_enabled")
     assert live_enabled["value"] is True
     assert live_enabled["editor"] == "boolean"

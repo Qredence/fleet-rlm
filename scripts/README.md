@@ -52,6 +52,7 @@ snapshot, enable paid capacity, or certify a deployment by themselves.
 | Script | Purpose |
 | --- | --- |
 | `live_daytona_verify.py` | Run the broader Daytona MVP and durability verifier. |
+| `live_phase5_verify.py` | Prove sandbox research, dependency recovery, repository work, volume replacement, and cleanup in disposable Daytona Sandboxes. |
 | `verify_child_sandboxes_turn.py` | Run the maintained two-child recursive-batch canary with an explicit new receipt path. |
 | `benchmark_daytona_lifecycle.py` | Measure Daytona lifecycle behavior. |
 | `benchmarks/run_rlm_latency.py` / `run_routing_eval.py` | Run bounded latency, quality, or routing evaluations. |

@@ -112,7 +112,7 @@ def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
 
     by_name = {card["name"]: card for card in payload["skill_cards"]}  # type: ignore[attr-defined]
     assert by_name["dspy-rlm"]["affordances"] == ["interpreter", "llm_query"]
-    assert by_name["long-context"]["affordances"] == ["fetch_url", "llm_query_batched", "workspace.files"]
+    assert by_name["long-context"]["affordances"] == ["sandbox.search", "llm_query_batched", "workspace.files"]
     assert by_name["workspace-files"]["affordances"] == ["workspace.files", "artifacts.publish"]
     assert by_name["data-analysis"]["affordances"] == ["artifacts.publish", "llm_query_batched"]
     assert by_name["report-builder"]["affordances"] == ["workspace.files", "artifacts.publish"]
@@ -154,11 +154,14 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
         {
             "id": "015a133e-7b90-50c7-bb61-4b2772f57c1c",
             "name": "long-context",
-            "description": "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
+            "description": (
+                "Discover public sources and analyze large documents, transcripts, code, or datasets "
+                "with sandbox Python."
+            ),
             "scope": "system",
-            "version": "2.0.1",
+            "version": "2.1.0",
             "trust": "system",
-            "affordances": ["fetch_url", "llm_query_batched", "workspace.files"],
+            "affordances": ["sandbox.search", "llm_query_batched", "workspace.files"],
             "resources_available": True,
         },
         {
@@ -546,7 +549,6 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         "artifacts/tools.py",
         "workspace/memory.py",
         "workspace/projects.py",
-        "workspace/url.py",
         "workspace/workspace.py",
     }
     offenders: list[str] = []

@@ -124,7 +124,6 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("rlm.verbose", "RLM", "DSPy host verbose logging", "boolean", (), "rlm_verbose"),
     ("storage.data_root", "Storage", "Data root", "text", (), "data_root"),
     ("storage.max_upload_bytes", "Storage", "Maximum upload bytes", "number", (), "max_upload_bytes"),
-    ("storage.max_url_bytes", "Storage", "Maximum URL source bytes", "number", (), "max_url_bytes"),
     ("storage.max_artifact_bytes", "Storage", "Maximum artifact bytes", "number", (), "max_artifact_bytes"),
     ("storage.database_url_env", "Storage", "Database URL environment variable", "text", (), None),
     ("daytona.api_key_env", "Daytona", "API key environment variable", "text", (), None),

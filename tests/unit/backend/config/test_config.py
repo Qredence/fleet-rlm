@@ -397,7 +397,6 @@ verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
 max_upload_bytes = 10
-max_url_bytes = 30
 max_artifact_bytes = 20
 [defaults.daytona]
 volume_name = "fleet-volume"
@@ -437,7 +436,6 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.run_environment == "daytona"
     assert settings.live_enabled is True
     assert settings.rlm_max_iters == 3
-    assert settings.max_url_bytes == 30
     assert settings.root_lm.model == "openai/root"
     assert settings.sub_lm.temperature == 0.2
     assert settings.lm_roles.root.model == "openai/root"
@@ -756,10 +754,6 @@ def test_deadline_reserve_must_leave_time_inside_the_turn() -> None:
 def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
     assert Settings().live_enabled is True
     assert Settings(live_enabled=False).live_enabled is False
-
-
-def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
-    assert Settings().max_url_bytes == 10 * 1024 * 1024
 
 
 def test_mlflow_tracing_field_defaults_to_disabled() -> None:

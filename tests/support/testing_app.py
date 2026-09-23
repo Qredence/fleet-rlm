@@ -7,10 +7,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, cast
-
-if TYPE_CHECKING:
-    from fleet_rlm.workspace.url import UrlFetchResult
+from typing import Any, cast
 
 import dspy
 from fastapi import FastAPI
@@ -276,19 +273,6 @@ class TestingRunEnvironmentProvider(RunEnvironmentProvider):
         return RunEnvironment(TestingInterpreter(), sink, sink, release)
 
 
-class _TestingCacheOnlyUrlFetcher:
-    """Deterministic cache-only fetcher: private tests never open the network."""
-
-    def fetch(self, url: str, *, max_bytes: int) -> UrlFetchResult:
-        from fleet_rlm.workspace.url import UrlToolError
-
-        del url, max_bytes
-        raise UrlToolError(
-            "unavailable",
-            "URL fetching is disabled in the deterministic test composition",
-        )
-
-
 class TestingCapabilityPreparer:
     def __init__(
         self,
@@ -297,18 +281,13 @@ class TestingCapabilityPreparer:
         models: RLMModelBundle,
         options: RLMOptions,
         max_artifact_bytes: int = 10_000_000,
-        max_url_bytes: int = 10 * 1024 * 1024,
         artifact_reader: ArtifactReader | None = None,
     ) -> None:
-        """Initialize a testing capability preparer with configured source limits."""
-        from fleet_rlm.workspace.url import InMemoryUrlSourceStore
-
+        """Initialize a testing capability preparer."""
         del models, options
         self._skill_catalog = skill_catalog
         self._artifact_reader = artifact_reader
         self._max_artifact_bytes = max_artifact_bytes
-        self._max_url_bytes = max(1, int(max_url_bytes))
-        self._url_store = InMemoryUrlSourceStore()
 
     async def prepare(
         self,
@@ -320,7 +299,6 @@ class TestingCapabilityPreparer:
     ) -> PreparedHostCapabilities:
         """Prepare host capabilities for one turn within the execution deadline."""
         from fleet_rlm.attachments import AttachmentToolHost
-        from fleet_rlm.workspace.url import UrlToolHost
 
         sink = environment.attachment_sink
         if not isinstance(sink, TestingRunSink):
@@ -333,19 +311,11 @@ class TestingCapabilityPreparer:
         )
         attachment_tools = attachment_host.as_tools()
         attachment_event_views = dict(attachment_host.event_views())
-        url_host = UrlToolHost(
-            session_id=run.session_id,
-            store=self._url_store,
-            max_bytes=self._max_url_bytes,
-            fetcher=_TestingCacheOnlyUrlFetcher(),
-        )
-        url_tools = url_host.as_tools()
-        url_event_views = url_host.event_views()
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=run,
             skill_catalog=self._skill_catalog,
-            base_tools=(*attachment_tools, *url_tools),
-            base_event_views={**attachment_event_views, **url_event_views},
+            base_tools=attachment_tools,
+            base_event_views=attachment_event_views,
             workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
             artifact_reader=self._artifact_reader,
             deadline=deadline,
@@ -390,7 +360,6 @@ class DeterministicTurnPreparation:
         options: RLMOptions | None = None,
         wrap_up_seconds: float = 300.0,
         max_artifact_bytes: int = 10_000_000,
-        max_url_bytes: int = 10 * 1024 * 1024,
         artifact_reader: ArtifactReader | None = None,
     ) -> None:
         resolved_options = options or RLMOptions()
@@ -407,7 +376,6 @@ class DeterministicTurnPreparation:
                 models=models,
                 options=resolved_options,
                 max_artifact_bytes=max_artifact_bytes,
-                max_url_bytes=max_url_bytes,
                 artifact_reader=artifact_reader,
             ),
         )
@@ -458,7 +426,6 @@ def build_testing_services(
             options=rlm_options(settings),
             wrap_up_seconds=settings.rlm_wrap_up_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
-            max_url_bytes=settings.max_url_bytes,
         ),
         program_builder=build_testing_rlm,
     )
