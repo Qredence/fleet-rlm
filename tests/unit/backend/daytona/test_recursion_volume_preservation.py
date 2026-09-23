@@ -159,8 +159,8 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = f"/tmp/fleet/{run_id}/1"
-    b_scope = f"/tmp/fleet/{run_id}/2"
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(
         files={
@@ -207,7 +207,11 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     # A's nested regular files were deleted first, then directories in
     # deepest-first order.
     assert child_a_fs.files == {}
-    assert child_a_fs.directories == {"/tmp/fleet", f"/tmp/fleet/{run_id}"}
+    assert child_a_fs.directories == {
+        "/tmp/fleet",
+        "/tmp/fleet/child-data",
+        f"/tmp/fleet/child-data/{run_id}",
+    }
     assert child_a_fs.deleted == [
         f"{a_scope}/a-nested/deep/file.txt",
         f"{a_scope}/a-top.txt",
@@ -241,8 +245,8 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = f"/tmp/fleet/{run_id}/1"
-    b_scope = f"/tmp/fleet/{run_id}/2"
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(files={f"{MOUNT}/workspaces/{workspace_id}/root-marker.txt": b"root-content-fail"})
     child_a_fs = _VolumeFs(
@@ -299,8 +303,8 @@ async def test_cancellation_preserves_volume_state_and_allocates_nothing_further
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = f"/tmp/fleet/{run_id}/1"
-    b_scope = f"/tmp/fleet/{run_id}/2"
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(files={f"{MOUNT}/workspaces/{workspace_id}/root-marker.txt": b"root-content-cancel"})
     child_a_fs = _VolumeFs(files={f"{a_scope}/a-top.txt": b"child-a-cancel-scope"})

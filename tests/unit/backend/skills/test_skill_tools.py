@@ -55,6 +55,22 @@ def test_load_is_idempotent_and_emits_lifecycle_once() -> None:
     assert host.drain_public_events() == []
 
 
+def test_loaded_definition_snapshot_excludes_unloaded_skills_and_pins_versions() -> None:
+    catalog = build_bundled_skill_catalog()
+    host = SkillToolHost(catalog)
+    preselected = catalog.require(stable_skill_id("long-context"))
+    progressive = catalog.require(stable_skill_id("workspace-files"))
+
+    assert host.loaded_definitions() == ()
+    host.mark_preloaded(preselected)
+    assert host.loaded_definitions() == (preselected,)
+    assert host.load_skill(str(progressive.card.id), progressive.card.version)["ok"] is True
+    loaded = host.loaded_definitions()
+    assert {skill.card.id for skill in loaded} == {preselected.card.id, progressive.card.id}
+    assert {skill.card.version for skill in loaded} == {preselected.card.version, progressive.card.version}
+    assert all(skill is catalog.require(skill.card.id) for skill in loaded)
+
+
 def test_load_rejects_closed_identity_and_capacity_errors() -> None:
     catalog = build_bundled_skill_catalog()
     host = SkillToolHost(catalog)

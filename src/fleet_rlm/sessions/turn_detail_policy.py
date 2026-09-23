@@ -10,6 +10,7 @@ from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.observability.tracing import current_turn_trace_id
 from fleet_rlm.rlm.events import (
     AttachmentRead,
+    ChildProgress,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -26,6 +27,7 @@ from fleet_rlm.rlm.result import RLMOutcome
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
+    ChildProgressPart,
     CodePart,
     CommittedPart,
     CommittedTurn,
@@ -56,6 +58,7 @@ class _NormalizeState:
     parts: list[CommittedPart | None]
     pending: dict[str, _PendingToolCall]
     streaming_outputs: dict[str, int]
+    child_progress: dict[str, int]
 
 
 def _append_step_started(detail: StepStarted, state: _NormalizeState) -> None:
@@ -168,6 +171,26 @@ def _append_warning(detail: WarningEvent, state: _NormalizeState) -> None:
     state.parts.append(WarningPart(message=detail.message, code=detail.code))
 
 
+def _append_child_progress(detail: ChildProgress, state: _NormalizeState) -> None:
+    if detail.state == "running":
+        return
+    part = ChildProgressPart(
+        child_id=detail.child_id,
+        task_label=detail.task_label,
+        state=detail.state,
+        elapsed_ms=detail.elapsed_ms,
+        outcome=detail.outcome,
+        cleanup_state=detail.cleanup_state,
+        parent_run_id=detail.parent_run_id,
+    )
+    position = state.child_progress.get(detail.child_id)
+    if position is None:
+        state.child_progress[detail.child_id] = len(state.parts)
+        state.parts.append(part)
+    else:
+        state.parts[position] = part
+
+
 _DetailHandler = Callable[[Any, _NormalizeState], None]
 
 _DETAIL_HANDLERS: dict[type, _DetailHandler] = {
@@ -183,11 +206,12 @@ _DETAIL_HANDLERS: dict[type, _DetailHandler] = {
     SkillLoaded: _append_skill_loaded,
     AttachmentRead: _append_attachment_read,
     WarningEvent: _append_warning,
+    ChildProgress: _append_child_progress,
 }
 
 
 def _normalize_execution(outcome: RLMOutcome) -> list[CommittedPart]:
-    state = _NormalizeState(parts=[], pending={}, streaming_outputs={})
+    state = _NormalizeState(parts=[], pending={}, streaming_outputs={}, child_progress={})
 
     for detail in outcome.execution_details:
         handler = _DETAIL_HANDLERS.get(type(detail))

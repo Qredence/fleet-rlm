@@ -1,7 +1,7 @@
 [config]
 schema_version = 1
-# The committed policy is [defaults] itself; profiles override only deployment-specific values.
-default_profile = "daytona-recursive"
+# The native-only profile is the default; select daytona-recursive to opt in to Fleet children.
+default_profile = "daytona-native"
 
 [defaults.application]
 name = "fleet-rlm"
@@ -38,9 +38,8 @@ temperature = 0
 num_retries = 3
 cache = false
 
-# Operator-selected recursive execution. This operational opt-in does not
-# supersede the Phase 4 failed retain gates or establish recursive value.
-# Native llm_query remains available; recursive depth stays a fixed invariant.
+# Native-only behavior is the base policy. Profiles opt in to Fleet child
+# execution explicitly; native llm_query remains available in either mode.
 [defaults.rlm]
 max_iters = 12
 max_llm_calls = 32
@@ -53,7 +52,7 @@ max_execution_output_bytes = 2000000
 execution_timeout_s = 300
 wrap_up_seconds = 300
 finalization_attempts = 2
-recursion_enabled = true
+recursion_enabled = false
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
@@ -101,11 +100,15 @@ enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
-# The local/disposable profile inherits the complete default policy: native
-# DSPy RLM with native and recursive tools, local MLflow tracing, and the
-# Root/Sub model pair above. The managed profile below
-# overrides only the production database contract.
+# The default local/disposable profile inherits the base policy: native DSPy
+# RLM tools, local MLflow tracing, and the Root/Sub model pair above.
+[profiles.daytona-native]
+
+# Explicit opt-in for bounded Fleet child execution. This does not supersede
+# the Phase 4 failed retain gates or establish recursive value.
 [profiles.daytona-recursive]
+[profiles.daytona-recursive.rlm]
+recursion_enabled = true
 
 # Explicit, non-default policy for the retained Phase 4 four-arm certification.
 # It preserves the configured provider model and deterministic child decoding,
@@ -192,8 +195,8 @@ recursion_enabled = false
 max_active_daytona_leases = 2
 turn_timeout_seconds = 90
 
-# Explicit managed-production profile. Keep the local/disposable profile above
-# as the default until the Lakebase maintenance-window rehearsal and native
+# Explicit managed-production profile. Keep the native-only local/disposable
+# profile as the default until the Lakebase maintenance-window rehearsal and native
 # containment gates are complete; operators select this profile by changing
 # [config] default_profile in the deployment artifact.
 # Managed deployment keeps the Databricks Unity AI Gateway transport even though

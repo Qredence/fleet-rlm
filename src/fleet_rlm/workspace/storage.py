@@ -849,6 +849,7 @@ class DaytonaSandboxWorkspaceStorage:
                 target.relative_to(self._volume_root)
             except ValueError as exc:
                 raise UnsafePathError("workspace path escapes trusted volume") from exc
+        self._assert_no_symlink(str(target))
         return str(target), normalized
 
     @staticmethod
@@ -865,6 +866,61 @@ class DaytonaSandboxWorkspaceStorage:
                 return None
             raise
         return value.encode("utf-8") if isinstance(value, str) else bytes(value)
+
+    @staticmethod
+    def _info_value(info: Any, name: str) -> Any:
+        value = getattr(info, name, None)
+        if value is not None:
+            return value
+        if isinstance(info, Mapping):
+            value = info.get(name)
+            if value is not None:
+                return value
+        additional = getattr(info, "additional_properties", None)
+        if isinstance(additional, Mapping):
+            return additional.get(name)
+        return None
+
+    @classmethod
+    def _is_symlink_info(cls, info: Any) -> bool:
+        """Recognize symlink indicators exposed by Daytona file metadata."""
+        if info is None:
+            return False
+        if bool(cls._info_value(info, "is_symlink")) or bool(cls._info_value(info, "symlink")):
+            return True
+        kind = cls._info_value(info, "type")
+        if isinstance(kind, str) and kind.lower() in {"symlink", "symbolic_link", "symbolic link"}:
+            return True
+        mode = cls._info_value(info, "mode")
+        if isinstance(mode, str):
+            try:
+                mode = int(mode.strip(), 0 if mode.strip().startswith("0o") else 8)
+            except ValueError:
+                return False
+        # Daytona's FileInfo represents mode as an octal string. Preserve the
+        # file-type bits when the provider returns a full POSIX st_mode value.
+        return isinstance(mode, int) and mode & 0o170000 == 0o120000
+
+    def _assert_no_symlink(self, full_path: str) -> None:
+        """Check each existing path component with the SDK's metadata API."""
+        get_info = getattr(self._fs, "get_file_info", None)
+        if not callable(get_info):
+            raise WorkspaceStorageError("Daytona filesystem cannot verify workspace path safety")
+        target = PurePosixPath(full_path)
+        parts = target.parts
+        current = PurePosixPath(parts[0]) if target.is_absolute() else PurePosixPath()
+        for part in parts[1:] if target.is_absolute() else parts:
+            current /= part
+            try:
+                info = get_info(str(current))
+            except Exception as exc:
+                if self._is_not_found(exc):
+                    # A missing component cannot be a traversed symlink. The
+                    # eventual operation will report missing or create it.
+                    break
+                raise
+            if self._is_symlink_info(info):
+                raise UnsafePathError("workspace path contains unsafe symlink")
 
     def _ensure_parent(self, full_path: str) -> None:
         execute = getattr(getattr(self._sandbox, "process", None), "exec", None)
@@ -883,6 +939,7 @@ class DaytonaSandboxWorkspaceStorage:
         return str(value) if value is not None else datetime.now(UTC).isoformat()
 
     def _entry(self, full_path: str, path: str, *, checksum: bool = False) -> WorkspaceEntry:
+        self._assert_no_symlink(full_path)
         try:
             info = self._fs.get_file_info(full_path)
         except AttributeError:
@@ -910,6 +967,7 @@ class DaytonaSandboxWorkspaceStorage:
         if limit < 1 or limit > MAX_STORAGE_LIST_LIMIT:
             raise ValueError(f"limit must be in 1..{MAX_STORAGE_LIST_LIMIT}")
         full_path, normalized = self._path(path, allow_root=True)
+        self._assert_no_symlink(full_path)
         try:
             items = self._fs.list_files(full_path, depth=1)
         except Exception as exc:
@@ -921,10 +979,18 @@ class DaytonaSandboxWorkspaceStorage:
         entries: list[WorkspaceEntry] = []
         for item in items or ():
             item_path = str(getattr(item, "path", item.get("path") if isinstance(item, Mapping) else ""))
+            if self._is_symlink_info(item):
+                raise UnsafePathError("workspace listing contains unsafe symlink")
             try:
-                relative = str(PurePosixPath(item_path).relative_to(self._root))
-            except ValueError:
-                continue
+                item_posix = PurePosixPath(item_path)
+                relative = str(item_posix.relative_to(self._root))
+            except ValueError as exc:
+                raise UnsafePathError("workspace listing escapes trusted root") from exc
+            if relative in {"..", ""} or relative.startswith("../"):
+                raise UnsafePathError("workspace listing escapes trusted root")
+            # Some SDK listing records omit symlink metadata, so verify each
+            # candidate through get_file_info before projecting it.
+            self._assert_no_symlink(str(item_posix))
             if "/" in relative or relative.startswith(".fleet"):
                 continue
             is_dir = getattr(item, "is_dir", item.get("is_dir", False) if isinstance(item, Mapping) else False)
@@ -1679,9 +1745,18 @@ class AsyncDaytonaVolumeFS:
         download = getattr(self.fs, "download_file", None)
         if not callable(download):
             raise FileNotFoundError(logical_path)
-        res = download(logical_path)
-        if inspect.isawaitable(res):
-            res = await res
+        try:
+            res = download(logical_path)
+            if inspect.isawaitable(res):
+                res = await res
+        except Exception as exc:
+            # The Volume FS exposes the SDK's typed file-absence error here.
+            # A generic 404 can also mean a missing Sandbox or provider route,
+            # and must remain visible to the lifecycle owner.
+            exc_type = type(exc)
+            if exc_type.__module__ == "daytona.common.errors" and exc_type.__name__ == "DaytonaFileNotFoundError":
+                raise FileNotFoundError(logical_path) from exc
+            raise
         if isinstance(res, str):
             res = res.encode("utf-8")
         if max_bytes is not None and len(res) > max_bytes:

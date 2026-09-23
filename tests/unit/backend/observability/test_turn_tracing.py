@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -123,11 +125,12 @@ def _install_fake_mlflow(
     return calls
 
 
-def _in_process_child_runtime(call_index: int):
+def _in_process_child_runtime(call_index: int, *, profile: str):
     """Create an in-process child runtime lease for recursive execution tests.
 
     Parameters:
         call_index (int): Index used to identify the child runtime and workspace.
+        profile (str): Requested bounded child runtime profile.
 
     Returns:
         ChildRuntimeLease: A lease backed by an in-process interpreter.
@@ -139,10 +142,26 @@ def _in_process_child_runtime(call_index: int):
     return ChildRuntimeLease(
         interpreter,
         f"child-{call_index}",
-        "test-volume",
-        f"recursive/test-workspace/test-run/{call_index}",
+        f"test-volume-{profile}",
+        f"recursive/{profile}/test-run/{call_index}",
         interpreter.shutdown,
+        _stage_files=lambda _files: None,
     )
+
+
+def _install_successful_native_child(monkeypatch: pytest.MonkeyPatch, answer: str) -> None:
+    """Keep trace tests focused on Fleet spans instead of DSPy adapter semantics."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    class Child:
+        signature = recursive_calls.RecursiveSubtaskSignature
+
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            return dspy.Prediction(answer=answer, evidence=[], gaps=[], result_files=[], trajectory=[{}])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
 
 
 def test_turn_trace_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -279,6 +298,91 @@ def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.Mo
             "fleet.image_identity": "image-digest",
         }.items()
     )
+
+
+def test_execution_trace_records_only_bounded_attempt_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        attempt_metadata={
+            "fleet.root_model": "provider/root api_key=trace-secret",
+            "fleet.sub_model": "provider/sub",
+            "fleet.checkpoint_version": "7",
+            "fleet.skill_versions": "skill-id@2.2.0",
+            "fleet.source_revision": "A" * 40,
+            "fleet.unapproved": "secret",
+            "fleet.source_revision_path": "/private/repository/customer-data.csv",
+        },
+    ):
+        pass
+    update = next(kwargs for kwargs in calls.update_kwargs if "tags" in kwargs)
+    assert "trace-secret" not in update["metadata"]["fleet.root_model"]
+    assert update["metadata"]["fleet.sub_model"] == "provider/sub"
+    assert update["metadata"]["fleet.checkpoint_version"] == "7"
+    assert update["metadata"]["fleet.skill_versions"] == "skill-id@2.2.0"
+    assert update["metadata"]["fleet.source_revision"] == "a" * 40
+    assert "fleet.unapproved" not in update["metadata"]
+    assert "fleet.source_revision_path" not in update["metadata"]
+
+
+@pytest.mark.parametrize("revision", ["main", "customer/project@abc1234", "x" * 257, "123456"])
+def test_execution_trace_rejects_non_opaque_source_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    revision: str,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        attempt_metadata={"fleet.source_revision": revision},
+    ):
+        pass
+    update = next(kwargs for kwargs in calls.update_kwargs if "tags" in kwargs)
+    assert "fleet.source_revision" not in update["metadata"]
+
+
+def test_concurrent_execution_traces_keep_session_context_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+    current_span: ContextVar[object | None] = ContextVar("test_mlflow_current_span", default=None)
+    next_trace_id = 0
+
+    @contextmanager
+    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        nonlocal next_trace_id
+        del name, span_type
+        next_trace_id += 1
+        span = SimpleNamespace(request_id=f"tr-session-{next_trace_id}", span_id=f"span-{next_trace_id}")
+        token = current_span.set(span)
+        try:
+            yield span
+        finally:
+            current_span.reset(token)
+
+    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = current_span.get  # type: ignore[attr-defined]
+
+    async def trace_session() -> tuple[str | None, str | None]:
+        with turn_trace(uuid4(), uuid4(), enabled=True):
+            before_yield = current_turn_trace_id()
+            await asyncio.sleep(0)
+            after_yield = current_turn_trace_id()
+            return before_yield, after_yield
+
+    async def run_sessions() -> tuple[tuple[str | None, str | None], tuple[str | None, str | None]]:
+        first_session, second_session = await asyncio.gather(trace_session(), trace_session())
+        return first_session, second_session
+
+    first, second = asyncio.run(run_sessions())
+    assert first[0] == first[1]
+    assert second[0] == second[1]
+    assert first[0] != second[0]
+    assert calls.update_kwargs
 
 
 def test_execution_trace_rejects_unbounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -869,11 +973,17 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
+    _install_successful_native_child(monkeypatch, "child-ok")
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -884,7 +994,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
+        assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
 
     assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
     recursive_inputs = [
@@ -896,7 +1006,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
         {
             "recursive_depth": 1,
             "call_index": 1,
-            "prompt_chars": 180,
+            "prompt_chars": 57,
         }
     ]
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
@@ -920,17 +1030,23 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     class Child:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
-            return dspy.Prediction(answer="child-ok", trajectory=[])
+            return dspy.Prediction(answer="child-ok", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -941,7 +1057,10 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert [item["answer"] for item in executor.batched_tool(capsules=[{"task": "first"}, {"task": "second"}])] == [
+        assert [
+            item["answer"]
+            for item in executor.batched_tool(tasks=[{"task": "first", "inputs": []}, {"task": "second", "inputs": []}])
+        ] == [
             "child-ok",
             "child-ok",
         ]
@@ -966,10 +1085,16 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
+    _install_successful_native_child(monkeypatch, "child-ok")
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -989,7 +1114,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
         pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised,
         turn_trace(uuid4(), uuid4(), enabled=True),
     ):
-        executor.tool(capsule={"task": "classify selected row"})
+        executor.tool(task="classify selected row", inputs=[])
 
     assert trace_failure_category(raised.value) == "cleanup_failed"
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
@@ -1009,7 +1134,8 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def _raise_setup_error(_call_index: int) -> None:
+    def _raise_setup_error(_call_index: int, *, profile: str) -> None:
+        del profile
         raise RuntimeError("interpreter setup failed")
 
     executor = RecursiveRLMExecutor(
@@ -1023,7 +1149,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "slice"})["status"] == "failed"
+        assert executor.tool(task="slice", inputs=[])["status"] == "failed"
 
     failed_outputs = [
         payload
@@ -1044,12 +1170,16 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
+    _install_successful_native_child(monkeypatch, "semantic-answer")
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
                 [
                     {"reasoning": "semantic", "code": "value = llm_query('selected judgment')"},
-                    {"reasoning": "submit", "code": "SUBMIT(answer=value)"},
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer=value, evidence=[], gaps=[], result_files=[])",
+                    },
                 ],
                 adapter=adapter,
             ),
@@ -1061,7 +1191,7 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert "semantic-answer" in executor.tool(capsule={"task": "outer slice"})["answer"]
+        assert "semantic-answer" in executor.tool(task="outer slice", inputs=[])["answer"]
 
     assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
     outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
@@ -1080,7 +1210,8 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def timeout_factory(_call_index: int):
+    def timeout_factory(_call_index: int, *, profile: str):
+        del profile
         raise TimeoutError("child acquisition timed out")
 
     executor = RecursiveRLMExecutor(
@@ -1094,7 +1225,7 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "slice"})["status"] == "timed_out"
+        assert executor.tool(task="slice", inputs=[])["status"] == "timed_out"
 
     failed_outputs = [
         payload

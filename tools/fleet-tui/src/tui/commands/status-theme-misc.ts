@@ -7,6 +7,7 @@ import { committedTokenCounts } from "../usage-summary.js";
 
 import { listCommands, type CommandSpec } from "./registry.js";
 import { appendSystem, errorMessage, notifySuccess } from "./shared.js";
+import { FleetApiError } from "../../fleet-api-client.js";
 
 export const helpCommand: CommandSpec = {
   name: "help",
@@ -103,15 +104,20 @@ export const redoCommand: CommandSpec = {
 
 export const traceCommand: CommandSpec = {
   name: "trace",
-  description: "Show the full MLflow trace ID for the current Run",
+  description: "Show the trace ID and Run ID for the current or latest attempt",
   usage: "/trace",
   handler: (_args, ctx) => {
     const state = ctx.store.getState();
-    const traceId = state.run.traceId ?? state.lastTraceId;
-    appendSystem(
-      ctx.store,
-      traceId ? `Trace: ${traceId}` : "No trace ID recorded for the current Session.",
-    );
+    const target = state.run.id
+      ? { traceId: state.run.traceId, runId: state.run.id }
+      : { traceId: state.lastTraceId, runId: state.lastTraceRunId };
+    if (target.traceId) {
+      appendSystem(ctx.store, `Run: ${target.runId ?? "—"}\nTrace: ${target.traceId}`);
+    } else if (state.run.id) {
+      appendSystem(ctx.store, `Tracing is unavailable for Run ${state.run.id}.`);
+    } else {
+      appendSystem(ctx.store, "No trace ID is recorded for the current Session.");
+    }
   },
 };
 
@@ -130,9 +136,16 @@ export const feedbackCommand: CommandSpec = {
       appendSystem(ctx.store, "Feedback requires an active Session.");
       return;
     }
-    const traceId = state.run.traceId ?? state.lastTraceId;
-    if (!traceId) {
-      appendSystem(ctx.store, "No completed execution trace is available for feedback.");
+    const target = state.run.id
+      ? { traceId: state.run.traceId, runId: state.run.id }
+      : { traceId: state.lastTraceId, runId: state.lastTraceRunId };
+    if (!target.traceId) {
+      appendSystem(
+        ctx.store,
+        state.run.id
+          ? `No trace is recorded for Run ${state.run.id}; tracing may be unavailable.`
+          : "No completed execution trace is available for feedback.",
+      );
       return;
     }
     const direction = args[0]?.toLowerCase();
@@ -143,15 +156,19 @@ export const feedbackCommand: CommandSpec = {
     const comment = args.slice(1).join(" ").trim();
     try {
       const response = await ctx.client.submitTraceFeedback(sessionId, {
-        trace_id: traceId,
+        trace_id: target.traceId,
         value: direction === "up",
         ...(comment ? { comment } : {}),
       });
       notifySuccess(
         ctx,
-        `Feedback recorded for trace ${response.trace_id}: ${response.value ? "up" : "down"}.`,
+        `Feedback recorded for Run ${target.runId ?? "—"}, trace ${response.trace_id}: ${response.value ? "up" : "down"}.`,
       );
     } catch (error) {
+      if (error instanceof FleetApiError && error.status === 503) {
+        appendSystem(ctx.store, "Trace feedback is unavailable; no assessment was recorded.");
+        return;
+      }
       appendSystem(ctx.store, `Could not record feedback: ${errorMessage(error)}`);
     }
   },

@@ -23,6 +23,7 @@ const REGISTRATION_ORDER = [
   "artifacts",
   "redo",
   "reload",
+  "task",
   "trace",
   "feedback",
   "theme",

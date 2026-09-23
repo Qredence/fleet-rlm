@@ -106,6 +106,23 @@ export interface paths {
         patch: operations["update_session"];
         trace?: never;
     };
+    "/api/sessions/{session_id}/task": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Session Task */
+        get: operations["get_session_task"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/attachments": {
         parameters: {
             query?: never;
@@ -483,6 +500,17 @@ export interface components {
              */
             type: "data-attachment";
         };
+        /** DataChildProgressUIMessagePart */
+        DataChildProgressUIMessagePart: {
+            data: components["schemas"]["JsonValue"];
+            /** Id */
+            id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "data-child-progress";
+        };
         /** DataRLMCodeUIMessagePart */
         DataRLMCodeUIMessagePart: {
             data: components["schemas"]["JsonValue"];
@@ -690,6 +718,28 @@ export interface components {
             created_at?: string | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * SessionTaskResponse
+         * @description Authorized read-only projection of the existing Session checkpoint.
+         */
+        SessionTaskResponse: {
+            /** Revision */
+            revision: number;
+            /** Goal */
+            goal: string;
+            /** Decisions */
+            decisions: string[];
+            /** Relevant Paths */
+            relevant_paths: string[];
+            /** Source Revisions */
+            source_revisions: {
+                [key: string]: string;
+            };
+            /** Completed Work */
+            completed_work: string[];
+            /** Pending Work */
+            pending_work: string[];
         };
         /** SessionTurnPageResponse */
         SessionTurnPageResponse: {
@@ -909,7 +959,7 @@ export interface components {
              */
             role: "user" | "assistant";
             /** Parts */
-            parts: (components["schemas"]["TextUIMessagePart"] | components["schemas"]["ReasoningUIMessagePart"] | components["schemas"]["DynamicToolUIMessagePart"] | components["schemas"]["StepStartUIMessagePart"] | components["schemas"]["DataStatusUIMessagePart"] | components["schemas"]["DataStepUIMessagePart"] | components["schemas"]["DataRLMCodeUIMessagePart"] | components["schemas"]["DataRLMOutputUIMessagePart"] | components["schemas"]["DataSkillUIMessagePart"] | components["schemas"]["DataAttachmentUIMessagePart"] | components["schemas"]["DataWarningUIMessagePart"] | components["schemas"]["DataArtifactUIMessagePart"] | components["schemas"]["DataUsageUIMessagePart"] | components["schemas"]["DataStructuredResultUIMessagePart"])[];
+            parts: (components["schemas"]["TextUIMessagePart"] | components["schemas"]["ReasoningUIMessagePart"] | components["schemas"]["DynamicToolUIMessagePart"] | components["schemas"]["StepStartUIMessagePart"] | components["schemas"]["DataStatusUIMessagePart"] | components["schemas"]["DataChildProgressUIMessagePart"] | components["schemas"]["DataStepUIMessagePart"] | components["schemas"]["DataRLMCodeUIMessagePart"] | components["schemas"]["DataRLMOutputUIMessagePart"] | components["schemas"]["DataSkillUIMessagePart"] | components["schemas"]["DataAttachmentUIMessagePart"] | components["schemas"]["DataWarningUIMessagePart"] | components["schemas"]["DataArtifactUIMessagePart"] | components["schemas"]["DataUsageUIMessagePart"] | components["schemas"]["DataStructuredResultUIMessagePart"])[];
             /** Metadata */
             metadata?: {
                 [key: string]: components["schemas"]["JsonValue"];
@@ -1098,6 +1148,39 @@ export interface components {
                 detail?: string | null;
                 /** Message */
                 message?: string | null;
+            };
+            /** Transient */
+            transient?: boolean | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "data-child-progress";
+            /** Id */
+            id?: string;
+            /** ChildProgressData */
+            data: {
+                /** Child Id */
+                child_id: string;
+                /** Task Label */
+                task_label: string;
+                /**
+                 * State
+                 * @enum {string}
+                 */
+                state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
+                /** Elapsed Ms */
+                elapsed_ms: number;
+                /** Outcome */
+                outcome?: string | null;
+                /**
+                 * Cleanup State
+                 * @enum {string}
+                 */
+                cleanup_state: "pending" | "complete" | "failed" | "not_required";
+                /** Parent Run Id */
+                parent_run_id?: string | null;
             };
             /** Transient */
             transient?: boolean | null;
@@ -1742,6 +1825,55 @@ export interface operations {
                 };
             };
             /** @description Service is not ready, or Session retirement is pending */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_session_task: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionTaskResponse"];
+                };
+            };
+            /** @description Session or task checkpoint not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Task checkpoint unavailable */
             503: {
                 headers: {
                     [name: string]: unknown;

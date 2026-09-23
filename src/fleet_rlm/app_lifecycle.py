@@ -277,7 +277,7 @@ async def build_daytona_composition(
         # cleanup scope so the engine above is always disposed on failure.
         await ensure_database_compatible(
             resolved.database_url or "",
-            repo_root=Path(__file__).resolve().parents[3],
+            repo_root=Path(__file__).resolve().parents[2],
         )
         session_factory = create_session_factory(engine)
         database_lifecycle = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
@@ -466,6 +466,7 @@ async def build_daytona_composition(
             runner=runner,
             session_catalog=session_catalog,
             session_lifecycle=session_lifecycle,
+            session_task_service=task_service,
             run_lifecycle=lifecycle,
             attachment_lifecycle=attachment_lifecycle,
             artifact_reader=artifact_reader,

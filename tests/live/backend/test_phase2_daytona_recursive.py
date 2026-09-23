@@ -178,9 +178,11 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
     """Instrument child-runtime acquisition and cleanup to record evidence for the test."""
-    original = recursive_child_runtime._acquire_child_runtime
+    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
 
-    async def observed(**kwargs: object) -> recursive_child_runtime.ChildRuntimeLease:
+    async def observed(
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: object
+    ) -> recursive_child_runtime.ChildRuntimeLease:
         """
         Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
 
@@ -192,7 +194,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
                 recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
         """
         evidence.started_at = time.perf_counter()
-        lease = await original(**kwargs)  # type: ignore[arg-type]
+        lease = await original(owner, **kwargs)  # type: ignore[arg-type]
         evidence.created += 1
         expected_scope = f"recursive/{kwargs['workspace_id']}/{kwargs['run_id']}/{kwargs['call_index']}"
         evidence.same_volume_sibling_scope = (
@@ -222,7 +224,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         lease._close = observed_close
         return lease
 
-    monkeypatch.setattr(recursive_child_runtime, "_acquire_child_runtime", observed)
+    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
@@ -325,8 +327,13 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
-        preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
         try:
+            assert client.portal is not None
             created = client.post("/api/sessions", json={"title": "Phase 2 Daytona recursive canary"})
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
@@ -336,10 +343,11 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "text": (
                         "Execute the narrow native DSPy Phase 2 recursive proof. Run exactly one recursive"
                         ' Daytona proof. First set root_marker = "root-only". Then make exactly one'
-                        " outcome = rlm_query(capsule={'task': ...}) call; the capsule task must tell the fresh"
+                        " outcome = rlm_query(task=..., inputs=[], context='...') call; the task must tell the fresh"
                         " child interpreter to determine whether the Python name root_marker exists, return"
                         " exactly absent when it does not, and use typed SUBMIT(answer="
-                        '"absent"); do not call rlm_query inside the child. After return, assert that'
+                        '"absent", evidence=[], gaps=[], result_files=[]); do not call rlm_query inside the child.'
+                        " After return, assert that"
                         " outcome['status'] is completed, set child_result = outcome['answer'], and assert"
                         " root_marker is still root-only and child_result is exactly absent. Call"
                         " verify_phase2 exactly once with those values and require its ok result. Finally"
@@ -392,6 +400,6 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
         finally:
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
-    assert cleanup_failures == ()
+            assert cleanup_failures == (), "Phase 2 canary cleanup did not settle"
     assert pending_receipt is not None
     _write_receipt(pending_receipt)

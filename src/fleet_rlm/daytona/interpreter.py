@@ -491,13 +491,27 @@ class _SandboxProcessBackend:
         self._run_scratch_path: str | None = None
 
     def bind_run_scratch(self, path: str) -> None:
-        """Bind one validated Run-local scratch directory for this invocation."""
+        """Bind one validated Run-local or child-local scratch directory."""
         from pathlib import PurePosixPath
+        from uuid import UUID
 
         candidate = PurePosixPath(path)
-        if len(candidate.parts) not in {4, 5} or candidate.parts[:3] != ("/", "tmp", "fleet"):
-            raise ValueError("Run scratch must be under /tmp/fleet/<run-id>")
-        if candidate.parts[3] in {"", ".", ".."}:
+        if candidate.parts[:3] != ("/", "tmp", "fleet"):
+            raise ValueError("Run scratch must be under /tmp/fleet")
+        if len(candidate.parts) == 4:
+            run_id = candidate.parts[3]
+        elif len(candidate.parts) == 6 and candidate.parts[3] == "child-data":
+            run_id = candidate.parts[4]
+            call_index = candidate.parts[5]
+            if not call_index.isdecimal() or int(call_index) <= 0:
+                raise ValueError("child scratch call index is invalid")
+        else:
+            raise ValueError("Run scratch path shape is invalid")
+        try:
+            parsed_run_id = UUID(run_id)
+        except ValueError as exc:
+            raise ValueError("Run scratch identity is invalid") from exc
+        if parsed_run_id.int == 0 or str(parsed_run_id) != run_id:
             raise ValueError("Run scratch identity is invalid")
         self._run_scratch_path = str(candidate)
 
@@ -1084,8 +1098,9 @@ class DaytonaCodeInterpreter:
         if call_index is not None:
             if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
                 raise ValueError("call_index must be positive")
-            suffix = f"{suffix}/{call_index}"
-        path = f"/tmp/fleet/{suffix}"
+            path = f"/tmp/fleet/child-data/{suffix}/{call_index}"
+        else:
+            path = f"/tmp/fleet/{suffix}"
         bind = getattr(self._backend, "bind_run_scratch", None)
         if callable(bind):
             bind(path)

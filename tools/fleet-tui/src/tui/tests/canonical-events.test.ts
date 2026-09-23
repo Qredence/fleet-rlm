@@ -12,7 +12,11 @@ import { describe, expect, it } from "vitest";
 import type { FleetTurn } from "../../fleet-api-client.js";
 import type { FleetUIMessageChunk } from "../../sse.js";
 import { serializeCanonicalEvent, type CanonicalEvent } from "../canonical.js";
-import { adaptDurableTurns, latestDurableTraceId } from "../durable-adapter.js";
+import {
+  adaptDurableTurns,
+  latestDurableTraceId,
+  latestDurableTraceTarget,
+} from "../durable-adapter.js";
 import { adaptLiveChunk } from "../live-adapter.js";
 import { projectDurableTurns } from "../durable-projection.js";
 import { LiveTurnProjector } from "../live-projection.js";
@@ -144,5 +148,9 @@ describe("durable trace targeting", () => {
     ] as unknown as FleetTurn[];
 
     expect(latestDurableTraceId(turns)).toBe("trace:last");
+    expect(latestDurableTraceTarget(turns)).toEqual({
+      traceId: "trace:last",
+      runId: "assistant-2",
+    });
   });
 });

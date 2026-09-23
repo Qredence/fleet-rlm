@@ -794,7 +794,7 @@ def test_lm_trace_previews_keep_system_prompt_text_and_redact_urls() -> None:
     assert "[redacted-url]" in preview
 
 
-def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lm_trace_callback_keeps_diagnostics_without_duplicate_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
@@ -871,14 +871,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     assert calls.inputs["call_index"] == 1
     assert calls.inputs["prompt_chars"] == len("child-prompt-sentinel")
     assert calls.inputs["history_length_before"] == 1
-    assert calls.outputs[-1]["token_usage"] == {
-        "prompt_tokens": 7,
-        "completion_tokens": 3,
-        "total_tokens": 10,
-        "completion_tokens_details": {"reasoning_tokens": 2},
-        "cache_read_input_tokens": 4,
-        "prompt_cache_hit_tokens": 4,
-    }
+    assert "token_usage" not in calls.outputs[-1]
     assert calls.outputs[-1]["response_keys"] == ["code", "content", "reasoning"]
     assert calls.outputs[-1]["wall_time_ms"] == 500.0
     # P38-RLM-006: private provider timing/identity fields are gone.
@@ -899,14 +892,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
         "history_length_before": 1,
         "recursive_depth": 1,
     }
-    assert calls.attributes[1] == {
-        "mlflow.chat.tokenUsage": {
-            "input_tokens": 7,
-            "output_tokens": 3,
-            "total_tokens": 10,
-            "cache_read_tokens": 4,
-        }
-    }
+    assert len(calls.attributes) == 1
 
 
 def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1154,20 +1140,15 @@ def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
     )
 
 
-def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Observed per-call usage must reach the span and the delegation metrics.
-
-    Regression coverage for traces where completed RLM.*_lm spans carried no
-    ``mlflow.chat.tokenUsage`` attribute and metrics emitted all-zero
-    ``lm_token_totals`` despite no provider usage ever being reported.
-    """
+def test_lm_trace_callback_avoids_duplicate_mlflow_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fleet metrics retain observed usage while DSPy autolog owns the LLM span."""
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
     from fleet_rlm.rlm.recursion import DelegationMetrics
 
-    captured = SimpleNamespace(outputs=[], attributes={})
+    captured = SimpleNamespace(outputs=[], attributes={}, span_types=[])
 
     class Span:
         def set_inputs(self, payload):
@@ -1210,7 +1191,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span=lambda **kwargs: (captured.span_types.append(kwargs.get("span_type")), SpanContext())[1],
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -1224,19 +1205,16 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
     observed_outputs = ["ok"]
     token = turn_tracing._fleet_trace_active.set(True)
     try:
-        # A call whose provider reports usage: attribute + token_usage output.
+        # A call whose provider reports usage is counted once in Fleet metrics.
         callback.on_lm_start("call-observed", root, {"prompt": "p"})
         root.history.append({"outputs": observed_outputs, "usage": {"prompt_tokens": 4, "completion_tokens": 2}})
         callback.on_lm_end("call-observed", observed_outputs)
     finally:
         turn_tracing._fleet_trace_active.reset(token)
 
-    assert captured.outputs[-1]["token_usage"] == {"prompt_tokens": 4, "completion_tokens": 2}
-    assert captured.attributes["mlflow.chat.tokenUsage"] == {
-        "input_tokens": 4,
-        "output_tokens": 2,
-        "total_tokens": 6,
-    }
+    assert "token_usage" not in captured.outputs[-1]
+    assert "mlflow.chat.tokenUsage" not in captured.attributes
+    assert captured.span_types == ["CHAIN"]
     assert metrics.snapshot().lm_token_totals == (("root", 0, 4, 2, 6),)
     assert metrics.snapshot().token_usage_status == "observed"
 

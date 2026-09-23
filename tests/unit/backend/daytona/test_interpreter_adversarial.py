@@ -614,14 +614,8 @@ class TestSandboxIsolationInvariants:
             )
 
     @pytest.mark.asyncio
-    async def test_child_sandbox_network_block_all_isolation(self) -> None:
-        """EMPIRICAL CHALLENGE: Child sandboxes must execute with network_block_all=True.
-
-        Requirement R1 & Acceptance Criteria:
-        'Manage root sandboxes (session-scoped with /workspace volume mount)
-         and ephemeral child sandboxes (network_block_all=True).'
-        'Child sandboxes execute with network_block_all=True and clean up reliably.'
-        """
+    async def test_semantic_child_requests_network_block_all(self) -> None:
+        """Verify the adapter requests network blocking; provider enforcement is unverified."""
         loop = asyncio.get_running_loop()
         mock_platform = MagicMock()
         mock_platform.create = AsyncMock()
@@ -652,7 +646,4 @@ class TestSandboxIsolationInvariants:
         mock_platform.create.assert_awaited_once()
         call_kwargs = mock_platform.create.call_args.kwargs
 
-        # EMPIRICAL ASSERTION: Verify that network_block_all=True was passed
-        assert call_kwargs.get("network_block_all") is True, (
-            f"Child sandbox created without network_block_all=True! Received: {call_kwargs.get('network_block_all')}"
-        )
+        assert call_kwargs.get("network_block_all") is True

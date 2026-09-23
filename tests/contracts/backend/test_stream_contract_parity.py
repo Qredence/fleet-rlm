@@ -24,6 +24,7 @@ def test_canonical_result_and_live_transport_have_separate_complete_vocabularies
         "attachment",
         "warning",
         "status",
+        "child_progress",
         "artifact",
         "usage",
         "structured_result",

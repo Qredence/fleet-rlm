@@ -18,6 +18,7 @@ from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     RunClaim,
 )
+from fleet_rlm.sessions.task import TaskCheckpoint, TaskCheckpointMissingError
 from tests.support.testing_app import create_testing_app
 
 
@@ -67,6 +68,58 @@ def test_sessions_crud_happy_path() -> None:
         )
         assert archived.status_code == 200
         assert archived.json()["status"] == "archived"
+
+
+def test_task_checkpoint_route_uses_the_authorized_existing_service() -> None:
+    class _TaskService:
+        async def read(self, session_id, *, user_id, workspace_id):
+            assert session_id == requested_session
+            assert user_id == LocalScope().user_id
+            assert workspace_id == LocalScope().workspace_id
+            return TaskCheckpoint(
+                revision=2,
+                goal="Review the report",
+                decisions=("Use revision abc",),
+                relevant_paths=("report.md",),
+                source_revisions={"report.md": "abc"},
+                completed_work=("Read sources",),
+                pending_work=("Verify conclusion",),
+            )
+
+    app = create_testing_app()
+    with TestClient(app) as client:
+        requested_session = UUID(client.post("/api/sessions", json={}).json()["id"])
+        inventory = app.state.runtime_inventory
+        install_runtime_inventory(app, replace(inventory, session_task_service=_TaskService()))
+        response = client.get(f"/api/sessions/{requested_session}/task")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "revision": 2,
+        "goal": "Review the report",
+        "decisions": ["Use revision abc"],
+        "relevant_paths": ["report.md"],
+        "source_revisions": {"report.md": "abc"},
+        "completed_work": ["Read sources"],
+        "pending_work": ["Verify conclusion"],
+    }
+
+
+def test_missing_task_checkpoint_is_reported_without_creating_one() -> None:
+    class _TaskService:
+        async def read(self, _session_id, *, user_id, workspace_id):
+            del user_id, workspace_id
+            raise TaskCheckpointMissingError("not seeded")
+
+    app = create_testing_app()
+    with TestClient(app) as client:
+        session_id = client.post("/api/sessions", json={}).json()["id"]
+        inventory = app.state.runtime_inventory
+        install_runtime_inventory(app, replace(inventory, session_task_service=_TaskService()))
+        response = client.get(f"/api/sessions/{session_id}/task")
+
+    assert response.status_code == 404
+    assert response.json() == {"code": "task_not_found", "message": "Task checkpoint not found"}
 
 
 def test_archive_returns_pending_when_provider_retirement_fails() -> None:

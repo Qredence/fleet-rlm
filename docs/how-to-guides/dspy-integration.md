@@ -24,22 +24,19 @@ separate validation gates.
 - Every Turn receives the complete committed `dspy.History` for its claimed
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
-- `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=capsules)`
+- `rlm_query(task=task, inputs=inputs, context="")` and Root-only
+  `rlm_query_batched(tasks=tasks)`
   are recursive primitives exposed when the selected policy enables recursion.
-  Under that enabled policy, Root code keeps large input-specific
-  data in REPL variables and passes only the smallest sufficient slice to a
-  child; the parent retains authority over public output and final `SUBMIT`.
-- A native depth-1 child uses a dedicated, disposable Daytona Sandbox with
-  ordinary Daytona network policy. It mounts the same Volume ID only at the
-  private sibling scope `recursive/<workspace-id>/<run-id>/<call-index>`, never
-  at the Root's `workspaces/<workspace-id>` scope. The child receives no
-  Session/Workspace/Attachment/Artifact/Skill capability, broker, credentials,
-  or mutable Root globals; it receives an immutable committed Session
-  History snapshot, bounded Session metadata, selected capsule input,
-  and DSPy's native semantic Sub-LM tools. Capsule children do not receive
-  Fleet recursive tools. Its scope is purged and its Sandbox
-  deleted before a successful Root Turn can commit. A child's further recursive request is a
-  depth-2 Sub-LM fallback and does not create another Sandbox.
+  Root code selects bounded authorized relative file or directory references;
+  the host copies their checked contents into child-private scratch. The
+  parent retains authority over public output and final `SUBMIT`.
+- A native depth-1 child uses a dedicated, disposable volume-less Daytona
+  Sandbox. It receives a fresh interpreter, only selected files, bounded
+  context, and DSPy's native semantic Sub-LM tools. It cannot access parent
+  Session files, credentials, mutable Root globals, or Fleet recursive tools.
+  Declared result files are checked and persisted into the parent Run before
+  child cleanup; unresolved cleanup blocks successful Root settlement. Full
+  grandchildren are unavailable.
 - A later Turn receives a fresh request/capability binding, output metadata,
   budget, and DSPy `REPLHistory`; it may reuse the same healthy Session
   interpreter and Sandbox after the previous Turn commits.
@@ -270,12 +267,9 @@ generated code already executes in the same Sandbox.
 The isolation lane is the dedicated child Sandbox exposed as `rlm_query` and
 Root-only `rlm_query_batched` under the committed recursive policy. Each
 native depth-1 delegation provisions its own ephemeral Sandbox running a full
-native RLM, mounted at the sibling Volume scope
-`recursive/<workspace>/<run>/<call-index>` with no ordinary Fleet capabilities,
-credentials, mutable Root state, or Root broker state. Legacy children receive
-an immutable committed Session History snapshot and bounded metadata; strict
-child cleanup gates Root success.
-A depth-2 delegation uses the bounded Sub-LM fallback instead. Child Root/Sub
+native RLM, with private staged inputs and no Session Volume mount, ordinary
+Fleet capabilities, credentials, mutable Root state, or Root broker state.
+Strict child cleanup gates Root success. Child Root/Sub
 DSPy runtimes are copied per sibling to isolate mutable model histories and
 callback bookkeeping.
 Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3

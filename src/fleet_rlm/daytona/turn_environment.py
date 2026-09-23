@@ -8,6 +8,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import partial
+from hashlib import sha256
 from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
@@ -482,8 +483,30 @@ class _DaytonaEnvironmentProvider:
                 execution_output_cap=self.settings.rlm_max_execution_output_chars,
                 is_authorized=lambda: not run.authority.revoked,
                 semantic_child_available=bool(getattr(self.settings, "daytona_child_snapshot", None)),
-                semantic_child_fallback=True,
             )
+
+            async def write_child_result(call_index: int, relative_path: str, data: bytes) -> str:
+                if run.authority.revoked or not isinstance(call_index, int) or call_index < 1:
+                    raise ValueError("child result is no longer authorized")
+                path = PurePosixPath(relative_path)
+                if (
+                    not relative_path
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or "\\" in relative_path
+                    or ":" in relative_path
+                ):
+                    raise ValueError("child result path is invalid")
+                if sink.scratch_root is None:
+                    raise RuntimeError("parent Run scratch is unavailable")
+                destination = str(PurePosixPath(sink.scratch_root) / "children" / str(call_index) / path)
+                await sink.write_private(destination, data)
+                if run.authority.revoked:
+                    raise ValueError("child result is no longer authorized")
+                persisted = await sink.read(destination, max_bytes=len(data))
+                if sha256(persisted).digest() != sha256(data).digest():
+                    raise ValueError("child result persistence checksum mismatch")
+                return destination
 
             sandbox_spec = getattr(self.resources, "sandbox_spec", None)
             image_identity = environment_manifest(sandbox_spec).digest if sandbox_spec is not None else None
@@ -497,6 +520,7 @@ class _DaytonaEnvironmentProvider:
                 release=release_preparation,
                 result_snapshot_sink=sink,
                 child_runtime_factory=child_runtime_factory,
+                child_result_writer=write_child_result,
                 context_mount_path=(sink.scratch_root if host_io is not None else str(paths.mount_path)),
                 workspace_memory_store=memory_store,
                 post_commit_memory_promotion=memory_promotion,

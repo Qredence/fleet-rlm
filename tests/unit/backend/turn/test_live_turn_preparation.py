@@ -66,6 +66,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     volume_root.mkdir()
 
     class SandboxFs:
+        async def get_file_info(self, path: str) -> dict[str, object]:
+            if path in volume:
+                return {"type": "file"}
+            raise FileNotFoundError(path)
+
         async def create_folder(self, path: str, mode: str | None = None) -> None:
             del path, mode
 

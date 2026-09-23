@@ -522,7 +522,11 @@ BASE_RLM_INSTRUCTIONS = """Recursive turn: choose the smallest sufficient execut
 
 ``dspy.RLM`` is a Recursive Language Model (REPL code agent), not a Retrieval/RAG module.
 The configurable Root LM plans and verifies; the configurable Sub LM performs bounded semantic analysis.
-Neither model substitutes for deterministic computation in the REPL."""
+Neither model substitutes for deterministic computation in the REPL. Explore large evidence in the
+interpreter and show only selected observations to the model. Use native ``llm_query`` for a semantic
+judgment and Fleet full-child delegation, when its tool is available, only when a subproblem needs
+its own iterative investigation.
+Check source locations and gaps before the final ``SUBMIT``; a child finding is not verification."""
 
 REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is answered with sufficient evidence:"""
 
@@ -556,7 +560,12 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    already specifies the prompt string, pass that string unchanged.
 4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
    self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
-   Prefer the cheapest sufficient mechanism."""
+   Check each returned item for an error or invalid extraction before reducing results in Python. Prefer the
+   cheapest sufficient mechanism.
+5. Choose a search strategy from the task: for a sparse question, search and expand only promising regions;
+   for exhaustive extraction, track every required partition and report incomplete coverage; for dependent
+   reasoning, resolve prerequisites before parallel work. Keep source revision and location with each
+   intermediate result, and verify important claims against the original source."""
 
 # Fleet-provided recursion and Workspace tools require executable
 # host bindings. A remote Sandbox currently receives source and serializable
@@ -580,7 +589,8 @@ TOOL_RLM_INSTRUCTIONS_NO_DISPATCH = """1. Use the Python standard library for de
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
-relevant paths, keep each page bounded, and never crawl an entire Workspace."""
+relevant paths, and keep each page bounded. Cover every file in a selected exhaustive scope, but do not
+crawl unrelated Workspace content."""
 
 WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
     {
@@ -595,23 +605,21 @@ WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspac
 result before ``SUBMIT``. Files outside the mounted ``/workspace`` are not Session Workspace. A successful verification helper does not
 complete the request if a named write or publish remains."""
 
-RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative
-   Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
-   parsing, aggregation, or independent semantic excerpts.
-The capsule contains task, fragments, authorized_references, evidence_requirements, and allocation_bytes.
-   Pass only selected input. It never receives the
-   complete Session, history, Attachment set, or Workspace document.
-Use ``rlm_query_batched(capsules=capsules)`` only for multiple independent selected subproblems where
-   each item individually justifies an iterative child RLM. Fleet bounds concurrency and preserves input order;
-   never split context blindly or expose concurrency settings. Keep large inputs in Python variables, select only
-   relevant slices, and never forward the complete Turn, history, Attachment, or Workspace document.
+RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(task=task, inputs=inputs, context="")`` only when one selected
+   subproblem needs its own iterative Python exploration. ``inputs`` is a short list of relative authorized
+   Session Workspace or Project file/directory paths. The host checks authority and stages a bounded private
+   copy before starting a child; do not put file bodies, URLs, credentials, or the complete Session in ``context``.
+   Use native semantic calls for independent excerpts, and Python for extraction, counting, parsing, and aggregation.
+Use ``rlm_query_batched(tasks=[{"task": task, "inputs": inputs, "context": context}, ...])`` only for multiple
+   independent subproblems where each item individually justifies an iterative child RLM. Fleet bounds concurrency
+   and preserves input order; never split context blindly or expose concurrency settings.
 When the user explicitly requests a fixed number of independent child investigations, make that complete batch
    the first recursive call. Do not spend a recursive call on a diagnostic or exploratory probe before the requested
    batch: recursive-call capacity is bounded for the Turn.
-Both tools return typed outcomes: inspect status and answer. Ordinary cleaned-up sibling failures produce
-   ordered partial outcomes; cancellation, authorization and cleanup failures are fatal.
-Child outputs are evidence, not final answers. Access identifiers prove delivery, not correctness.
-Root must reconcile disagreement, verify the relevant evidence,
+Both tools return typed outcomes: inspect runtime status and child-submitted answer, located evidence, gaps, and
+   persisted result_files. Ordinary contained sibling failures produce ordered partial outcomes; cancellation,
+   authorization and cleanup failures are fatal. Child findings are candidates, not final answers. Root must
+   reconcile disagreement, verify evidence against its source revision and location,
    and remain the only authority that issues the final ``SUBMIT``."""
 
 DISCOVERY_RLM_INSTRUCTIONS = """Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
@@ -644,7 +652,9 @@ def fleet_rlm_instruction_fragments(
     recursion_enabled: bool,
     host_tool_dispatch: bool = True,
 ) -> RLMInstructionFragments:
-    step = 6 if recursion_enabled and host_tool_dispatch else 5
+    step = 4
+    if host_tool_dispatch:
+        step = 7 if recursion_enabled else 6
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in

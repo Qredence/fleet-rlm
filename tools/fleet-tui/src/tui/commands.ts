@@ -23,6 +23,7 @@ import {
   renameCommand,
   resumeCommand,
   sessionsCommand,
+  taskCommand,
 } from "./commands/sessions.js";
 import {
   profilesCommand,
@@ -79,6 +80,7 @@ for (const spec of [
   artifactsCommand,
   redoCommand,
   reloadCommand,
+  taskCommand,
   traceCommand,
   feedbackCommand,
   themeCommand,

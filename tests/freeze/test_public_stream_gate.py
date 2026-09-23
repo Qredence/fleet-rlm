@@ -51,6 +51,7 @@ _FIXTURE = (
 _RUNTIME_TYPES = {
     "run.started",
     "status",
+    "child.progress",
     "step.started",
     "step.finished",
     "rlm.reasoning",
@@ -85,6 +86,7 @@ def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
         "reasoning-delta",
         "reasoning-end",
         "data-status",
+        "data-child-progress",
         "data-skill",
         "data-rlm-code",
         "data-rlm-output",
@@ -114,6 +116,7 @@ def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
         "attachment",
         "warning",
         "status",
+        "child_progress",
         "artifact",
         "usage",
         "structured_result",

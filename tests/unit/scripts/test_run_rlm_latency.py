@@ -21,6 +21,7 @@ from scripts.benchmarks.run_rlm_latency import (
     CampaignLimitError,
     _aggregate,
     _attach_trace_identity,
+    _baseline_evidence_quality,
     _campaign_preflight,
     _enforce_campaign_observations,
     _eval_otpm_backoff_seconds,
@@ -163,6 +164,41 @@ def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() ->
         "outputs": ["FINAL submitted"],
     }
     assert row["termination_mode"] == "typed_submit"
+    assert row["recursive_calls"] == 0
+    assert row["concurrency_observed"] is True
+
+
+def test_baseline_quality_uses_frozen_rubric_without_persisting_answer() -> None:
+    answer = (
+        "Yes. The 30-day receipt deadline is 2025-03-02; receipt on 2025-02-28 was timely. "
+        "A1, A3, A4, A6, A8, and A10 control or corroborate; A2 does not apply and A5, A7, and A9 "
+        "are overridden or non-binding. Delivery validity remains conditional on the mailbox evidence "
+        "being authentic and contractually valid."
+    )
+
+    quality = _baseline_evidence_quality(answer, termination_mode="typed_submit")
+
+    assert quality["method"] == "deterministic_text_heuristic"
+    assert quality["correctness"] is True
+    assert quality["grounded_evidence"] is True
+    assert quality["evidence_coverage"] == 1.0
+    assert quality["uncertainty_explicit"] is True
+    assert quality["task_completion"] is True
+    assert "answer" not in quality
+
+
+def test_baseline_quality_marks_missing_evidence_and_fallback_unknowns() -> None:
+    quality = _baseline_evidence_quality(
+        "Yes, notice was timely before the deadline; 45-day rule controls.",
+        termination_mode="native_extraction_fallback",
+    )
+
+    assert quality["correctness"] is False
+    assert quality["grounded_evidence"] is False
+    assert quality["evidence_coverage"] == 0.0
+    assert quality["uncertainty_explicit"] is False
+    assert quality["task_completion"] is False
+    assert quality["forbidden_claims_detected"] == ["45-day rule controls"]
 
 
 def test_run_turn_fails_closed_when_stream_consumption_crosses_campaign_deadline(
@@ -343,6 +379,50 @@ def test_aggregate_excludes_failed_samples_from_latency_percentiles() -> None:
     assert summary["first_runtime_event_ms"] == {"p50": 10.0, "p95": 20.0}
 
 
+def test_aggregate_reports_baseline_quality_and_lifecycle_evidence() -> None:
+    summary = _aggregate(
+        [
+            {
+                "sample_kind": "measured",
+                "duration_ms": 120.0,
+                "first_event_ms": 15.0,
+                "baseline_quality": {
+                    "correctness": True,
+                    "grounded_evidence": True,
+                    "evidence_coverage": 1.0,
+                    "uncertainty_explicit": True,
+                    "task_completion": True,
+                },
+                "trace_diagnostics": {
+                    "phase_durations_ms": {
+                        "environment_acquisition": 20.0,
+                        "attachment_staging": 3.0,
+                        "capability_staging": 2.0,
+                        "turn_cleanup": 5.0,
+                    },
+                    "turn_cleanup_status": "confirmed",
+                    "provider_request_span_count": 2,
+                    "root_lm_span_count": 1,
+                    "sub_lm_span_count": 1,
+                },
+            }
+        ]
+    )
+
+    assert summary["quality_complete"] is True
+    assert summary["baseline_quality"]["correctness_pass_rate"] == 1.0
+    assert summary["baseline_quality"]["grounded_evidence_pass_rate"] == 1.0
+    assert summary["baseline_quality"]["evidence_coverage_mean"] == 1.0
+    assert summary["provider_request_span_count"] == 2
+    assert summary["root_lm_span_count"] == 1
+    assert summary["sub_lm_span_count"] == 1
+    assert summary["lifecycle"]["phase_durations_ms"]["environment_acquisition"] == {
+        "observed_count": 1,
+        "mean_ms": 20.0,
+    }
+    assert summary["lifecycle"]["turn_cleanup_status"] == "confirmed"
+
+
 def test_execution_trace_diagnostics_exposes_wall_time_and_parse_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -380,12 +460,88 @@ def test_execution_trace_diagnostics_exposes_wall_time_and_parse_failure(
     assert diagnostics["root_lm_wall_time_ms"] == 320.0
     assert diagnostics["root_lm_slowest_wall_time_ms"] == 220.0
     assert diagnostics["root_lm_max_context_chars"] == 24
+    assert diagnostics["provider_request_span_count"] == 0
+    assert diagnostics["preparation_trace_status"] == "not_linked"
+    assert diagnostics["phase_durations_ms"] == {
+        "environment_acquisition": None,
+        "attachment_staging": None,
+        "capability_staging": None,
+        "turn_cleanup": None,
+    }
+    assert diagnostics["turn_cleanup_status"] == "unknown"
     assert diagnostics["adapter_parse_error_count"] == 1
     assert diagnostics["last_lm_response_keys"] == []
     assert diagnostics["repair_error_count"] == 0
     assert diagnostics["detail_overflowed"] is False
     assert diagnostics["sandbox_execute_span_count"] == 0
     assert all(value == 0 for value in diagnostics["broker_metrics"].values())
+
+
+def test_execution_trace_diagnostics_reads_lifecycle_and_provider_request_spans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preparation_spans = [
+        SimpleNamespace(
+            name="Turn.acquire_environment",
+            span_type="CHAIN",
+            start_time_ns=1_000_000,
+            end_time_ns=4_000_000,
+            outputs={"phase_status": "completed"},
+        ),
+        SimpleNamespace(
+            name="Turn.stage_attachments",
+            span_type="CHAIN",
+            start_time_ns=5_000_000,
+            end_time_ns=8_500_000,
+            outputs={"phase_status": "completed"},
+        ),
+        SimpleNamespace(
+            name="Turn.prepare_capabilities",
+            span_type="CHAIN",
+            start_time_ns=9_000_000,
+            end_time_ns=10_000_000,
+            outputs={"phase_status": "completed"},
+        ),
+    ]
+    execution_spans = [
+        SimpleNamespace(
+            name="Turn.cleanup",
+            span_type="CHAIN",
+            start_time_ns=11_000_000,
+            end_time_ns=15_250_000,
+            outputs={"phase_status": "completed"},
+        ),
+        SimpleNamespace(name="provider.request", span_type="LLM", start_time_ns=0, end_time_ns=1),
+        SimpleNamespace(name="provider.request", span_type="LLM", start_time_ns=0, end_time_ns=1),
+        SimpleNamespace(name="RLM.root_lm", span_type="CHAIN", inputs={}, outputs={}),
+        SimpleNamespace(name="RLM.sub_lm", span_type="CHAIN", inputs={}, outputs={}),
+    ]
+    traces = {
+        "trace-1": SimpleNamespace(
+            info=SimpleNamespace(tags={"fleet.preparation_trace_id": "prep-1"}),
+            data=SimpleNamespace(spans=execution_spans),
+        ),
+        "prep-1": SimpleNamespace(data=SimpleNamespace(spans=preparation_spans)),
+    }
+    fake_mlflow = SimpleNamespace(
+        set_tracking_uri=lambda _url: None,
+        get_trace=lambda trace_id: traces[trace_id],
+    )
+    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
+
+    diagnostics = _execution_trace_diagnostics("http://localhost:5001", "trace-1")
+
+    assert diagnostics["phase_durations_ms"] == {
+        "environment_acquisition": 3.0,
+        "attachment_staging": 3.5,
+        "capability_staging": 1.0,
+        "turn_cleanup": 4.25,
+    }
+    assert diagnostics["turn_cleanup_status"] == "confirmed"
+    assert diagnostics["preparation_trace_status"] == "available"
+    assert diagnostics["provider_request_span_count"] == 2
+    assert diagnostics["root_lm_span_count"] == 1
+    assert diagnostics["sub_lm_span_count"] == 1
 
 
 def test_execution_trace_diagnostics_reads_nested_broker_metrics(
@@ -414,6 +570,7 @@ def test_execution_trace_diagnostics_reads_nested_broker_metrics(
     diagnostics = _execution_trace_diagnostics("http://localhost:5001", "trace-1")
 
     assert diagnostics["sandbox_execute_span_count"] == 1
+    assert diagnostics["provider_request_span_count"] == 0
     assert diagnostics["broker_metrics"]["poll_count"] == 3
     assert diagnostics["broker_metrics"]["output_release_count"] == 1
     assert diagnostics["broker_metrics"]["poll_latency_max_ms"] == 7
@@ -622,6 +779,36 @@ def test_live_benchmark_preflight_rejects_missing_operator_limits() -> None:
         _campaign_preflight(args)
 
 
+def test_live_benchmark_requires_per_trial_cost_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    args = build_parser().parse_args(
+        [
+            "benchmark",
+            "--campaign",
+            "test-campaign",
+            "--target",
+            "local-daytona",
+            "--max-elapsed-seconds",
+            "1200",
+            "--max-admissions",
+            "1",
+            "--max-sandbox-concurrency",
+            "1",
+            "--spend-cap",
+            "1",
+            "--warmups",
+            "0",
+            "--runs",
+            "1",
+            "--output",
+            "receipt.json",
+        ]
+    )
+
+    with pytest.raises(BenchmarkError, match="per-sample spend reservation"):
+        run_benchmark(args)
+
+
 def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
     output = tmp_path / "failed.json"
     assert main(["compare", "--output", str(output)]) == 1
@@ -697,6 +884,7 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
                 "last_lm_call": {"response_keys": ["invalid"]},
             },
         ),
+        SimpleNamespace(name="Turn.cleanup", outputs={"phase_status": "completed"}),
     ]
 
     fake_mlflow = SimpleNamespace(
@@ -717,8 +905,12 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
             "local-daytona",
             "--max-elapsed-seconds",
             "60",
-            "--max-admissions",
+            "--cleanup-reserve-seconds",
+            "15",
+            "--max-trial-cost-usd",
             "1",
+            "--max-admissions",
+            "2",
             "--max-sandbox-concurrency",
             "1",
             "--spend-cap",
@@ -726,7 +918,9 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
             "--warmups",
             "0",
             "--runs",
-            "1",
+            "2",
+            "--timeout",
+            "10",
             "--output",
             "receipt.json",
         ]
@@ -737,9 +931,9 @@ def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeyp
         receipt = run_benchmark(args)
 
     aggregate = receipt["aggregate"]
-    assert aggregate["sample_count"] == 1
+    assert aggregate["sample_count"] == 2
     assert aggregate["error_rate"] == 1.0
-    assert aggregate["adapter_parse_error_count"] == 1
+    assert aggregate["adapter_parse_error_count"] == 2
 
 
 def test_quality_dataset_is_scoped_to_selected_experiment() -> None:

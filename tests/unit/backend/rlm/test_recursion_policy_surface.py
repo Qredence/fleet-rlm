@@ -55,7 +55,8 @@ class _RecordingFactory:
         self.interpreters: list[DaytonaCodeInterpreter] = []
         self.close_counts: dict[int, int] = {}
 
-    def __call__(self, call_index: int) -> ChildRuntimeLease:
+    def __call__(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         self.call_indexes.append(call_index)
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         self.interpreters.append(interpreter)
@@ -142,12 +143,17 @@ def test_public_composition_fixes_root_depth_zero() -> None:
     events: list[object] = []
     factory = _RecordingFactory()
     executor = _executor(
-        [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+        [
+            {
+                "reasoning": "submit",
+                "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+            }
+        ],
         factory,
         observer=events.append,
     )
 
-    assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
+    assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
     completed = next(event for event in events if isinstance(event, ToolCompleted))
     assert completed.output["recursive_depth"] == 1
     statuses = [event for event in events if isinstance(event, Status)]
@@ -174,10 +180,10 @@ async def test_public_runner_first_child_reservation_reports_depth_one() -> None
     # iterator: Root action, then the child action it triggers, and so on.
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "single", "code": "a = rlm_query(capsule={'task': 'slice one'})['answer']"},
-            {"reasoning": "child one", "code": "SUBMIT(answer='one-done')"},
-            {"reasoning": "batch", "code": "b = rlm_query_batched(capsules=[{'task': 'slice two'}])"},
-            {"reasoning": "child two", "code": "SUBMIT(answer='two-done')"},
+            {"reasoning": "single", "code": "a = rlm_query(task='slice one', inputs=[])['answer']"},
+            {"reasoning": "child one", "code": "SUBMIT(answer='one-done', evidence=[], gaps=[], result_files=[])"},
+            {"reasoning": "batch", "code": "b = rlm_query_batched(tasks=[{'task': 'slice two', 'inputs': []}])"},
+            {"reasoning": "child two", "code": "SUBMIT(answer='two-done', evidence=[], gaps=[], result_files=[])"},
             {"reasoning": "submit", "code": "SUBMIT(answer=a + b[0]['answer'])"},
         ],
         adapter=adapter,
@@ -251,7 +257,7 @@ def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
                     "    batch_result = 'resolved'\n"
                     "except NameError:\n"
                     "    batch_result = 'unresolved'\n"
-                    "SUBMIT(answer=batch_result)"
+                    "SUBMIT(answer=batch_result, evidence=[], gaps=[], result_files=[])"
                 ),
             },
         ],
@@ -259,7 +265,7 @@ def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
         options=RecursiveRLMOptions(max_calls=4),
     )
 
-    assert executor.tool(capsule={"task": "outer slice"})["answer"] == "unresolved"
+    assert executor.tool(task="outer slice", inputs=[])["answer"] == "unresolved"
     # Exactly one native child was allocated; the child's batch attempt never
     # reached reservation or allocation, and the Root-only batch counter
     # stayed at zero.
@@ -275,7 +281,7 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
     enabled: bool,
 ) -> None:
     """The Root native RLM composed through the public Runner
-    receives the approved recursive Tools, including the strict capsule path,
+    receives the approved recursive Tools, including the selected-input path,
     by their public names."""
     captured: dict[str, object] = {}
 
@@ -307,23 +313,31 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
 
 
 @pytest.mark.asyncio
-async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter() -> None:
+async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> None:
     """Root and native child are both exact native ``dspy.RLM``
-    instances built through the certified constructor; both are invoked with
-    the positional caller-owned interpreter plus named inputs; both produce
-    native Predictions with trajectory evidence."""
+    instances built through the certified constructor. The child uses DSPy's
+    invocation factory while Root retains its caller-owned interpreter."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
     child_invocations: list[tuple[type, object, dict[str, object]]] = []
+    child_interpreters: list[object] = []
     root_invocations: list[tuple[type, object, dict[str, object]]] = []
     root_types: list[type] = []
     real_build = recursive_calls.build_native_rlm
 
     def recording_build(**kwargs: object) -> object:
+        original_factory = kwargs["interpreter_factory"]
+
+        def recording_factory() -> object:
+            interpreter = original_factory()
+            child_interpreters.append(interpreter)
+            return interpreter
+
+        kwargs["interpreter_factory"] = recording_factory
         rlm = real_build(**kwargs)
         original_forward = rlm.forward
 
-        def forward(interpreter: object, /, **input_args: object) -> object:
+        def forward(interpreter: object = None, /, **input_args: object) -> object:
             child_invocations.append((type(rlm), interpreter, dict(input_args)))
             return original_forward(interpreter, **input_args)
 
@@ -345,8 +359,11 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "delegate", "code": "answer = rlm_query(capsule={'task': 'native marker child'})['answer']"},
-            {"reasoning": "child submit", "code": "SUBMIT(answer='child-native-ok')"},
+            {"reasoning": "delegate", "code": "answer = rlm_query(task='native marker child', inputs=[])['answer']"},
+            {
+                "reasoning": "child submit",
+                "code": "SUBMIT(answer='child-native-ok', evidence=[], gaps=[], result_files=[])",
+            },
             {"reasoning": "submit", "code": "SUBMIT(answer=answer)"},
         ],
         adapter=adapter,
@@ -378,13 +395,15 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
     assert len(child_invocations) == 1
     assert child_invocations[0][0] is dspy.RLM
 
-    # Both invocations pass the caller-owned interpreter positionally with
-    # named inputs only; the child interpreter is the lease's fresh
-    # interpreter and distinct from the Root interpreter.
+    # Root passes its retained interpreter; DSPy obtains and shuts down a
+    # fresh child adapter through the factory while Fleet owns the lease.
     assert len(root_invocations) == 1
-    assert child_invocations[0][1] is factory.interpreters[0]
+    assert child_invocations[0][1] is None
+    assert len(child_interpreters) == 1
+    assert child_interpreters[0] is not factory.interpreters[0]
+    assert child_interpreters[0]._shutdown
     assert root_invocations[0][1] is not factory.interpreters[0]
-    # Capsule children receive only selected input; Root keeps Session state.
+    # Child RLMs receive only selected input; Root keeps Session state.
     child_inputs = child_invocations[0][2]
     assert set(child_inputs) == {"prompt"}
     assert "request" in root_invocations[0][2]

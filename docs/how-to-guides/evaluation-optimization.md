@@ -146,11 +146,26 @@ evaluation on any interpreter.
 
 The maintained static dataset is the five `QUALITY_RECORDS` in
 `scripts/benchmarks/run_rlm_latency.py`. The separate
-`scripts/benchmarks/phase6_cases.json` corpus currently has fixture validation
-only: neither `prepare-evaluation` nor static dataset ingestion loads it.
-Its presence does not establish a runnable Phase 6 campaign. Corpus integration,
-per-case recursion classifications, and matched quality/cost evidence remain
-distinct work with its own evaluation receipts and validation gates. See the
+`scripts/benchmarks/phase6_evaluation_cases.json` manifest freezes six task
+families with hashes for each input and rubric. The existing runner can emit a
+planning receipt or an explicitly unexecuted paired schedule:
+
+```bash
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-plan \
+  --output .scratch/evals/phase6-plan.json
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-dry-run \
+  --output .scratch/evals/phase6-dry-run.json
+```
+
+`phase6-plan` records the proposed A/B/C arms, paired trials, cold/warm labels,
+and required observations. `phase6-dry-run` materializes the schedule with all
+quality, timing, usage, safety, and cleanup observations unknown. Neither
+command calls Fleet, a model provider, Daytona, or MLflow. The runner does not
+execute the A/B/C arms or control isolated Session state or cold/warm cache
+conditions; these receipts are planning artifacts, not campaign results. The
+manifest is not loaded by `prepare-evaluation` or static dataset ingestion, and
+does not justify child promotion. Matched execution, judged quality, observed
+costs, and cleanup evidence remain open. See the
 [testing strategy](testing-strategy.md) for the current evidence boundaries.
 
 ```bash

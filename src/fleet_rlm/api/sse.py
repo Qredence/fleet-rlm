@@ -19,6 +19,7 @@ from fleet_rlm.api.ui_stream import fleet_ui_chunk_payload
 from fleet_rlm.rlm.events import (
     ArtifactCreated,
     AttachmentRead,
+    ChildProgress,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -51,6 +52,7 @@ FLEET_UI_CHUNK_TYPES = (
     "reasoning-delta",
     "reasoning-end",
     "data-status",
+    "data-child-progress",
     "data-skill",
     "data-rlm-code",
     "data-rlm-output",
@@ -102,6 +104,8 @@ class AISDKUIProjector:
         data = _detail_data(detail)
         if isinstance(detail, RunStarted):
             return self._project_run_started(event, detail)
+        if isinstance(detail, ChildProgress):
+            return [self._data("child-progress", data, part_id=detail.child_id)]
         if isinstance(detail, (Status, SkillActivated, SkillLoaded, StepStarted, StepFinished)):
             return self._project_progress_event(detail, data)
         if isinstance(detail, (RLMReasoning, RLMCode, RLMOutput)):

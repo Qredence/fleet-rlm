@@ -1282,6 +1282,7 @@ def turn_trace(
     preparation_span_id: str | None = None,
     program_fingerprint: str | None = None,
     image_identity: str | None = None,
+    attempt_metadata: Mapping[str, str] | None = None,
 ) -> Iterator[TraceHandle]:
     """
     Open a root ``fleet_turn`` span for a Fleet turn when tracing is available.
@@ -1299,6 +1300,7 @@ def turn_trace(
             cross-trace Span Link. This is internal-only and is never exposed by the handle.
         program_fingerprint: Optional opaque program digest for an execution trace.
         image_identity: Optional opaque immutable image identity for an execution trace.
+        attempt_metadata: Optional bounded model, checkpoint, loaded Skill, and source revision identity.
 
     Yields:
         TraceHandle: The root trace identifier when tracing succeeds and exposure is enabled;
@@ -1383,6 +1385,8 @@ def turn_trace(
             tags[_PREPARATION_TRACE_ID_TAG] = bounded_id
             metadata[_PREPARATION_TRACE_ID_TAG] = bounded_id
         if trace_phase == "execution":
+            from fleet_rlm.rlm.result import sanitize_trace_text
+
             for key, value in (
                 ("fleet.program_fingerprint", program_fingerprint),
                 ("fleet.image_identity", image_identity),
@@ -1390,6 +1394,29 @@ def turn_trace(
                 if isinstance(value, str) and value and len(value) <= 256:
                     tags[key] = value
                     metadata[key] = value
+            for key, value in (attempt_metadata or {}).items():
+                if (
+                    key
+                    in {
+                        "fleet.root_model",
+                        "fleet.sub_model",
+                        "fleet.checkpoint_version",
+                        "fleet.skill_versions",
+                    }
+                    and isinstance(value, str)
+                    and value
+                    and len(value) <= 256
+                ):
+                    metadata[key] = sanitize_trace_text(value, max_len=256)
+                elif (
+                    key == "fleet.source_revision"
+                    and isinstance(value, str)
+                    and re.fullmatch(r"[0-9a-fA-F]{7,64}", value) is not None
+                ):
+                    # Source identifiers may be exported only as an opaque
+                    # commit digest. Paths, branch names, and arbitrary source
+                    # labels can reveal repository or customer information.
+                    metadata[key] = value.lower()
         span_id: str | None = None
         try:
             mlflow.update_current_trace(

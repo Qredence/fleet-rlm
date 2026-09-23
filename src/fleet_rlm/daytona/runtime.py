@@ -12,7 +12,7 @@ import inspect
 import logging
 import math
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
 from concurrent.futures import Future, wait
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -43,6 +43,7 @@ from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeFactory,
+    ChildRuntimeNotStartedError,
 )
 from fleet_rlm.sessions.bindings import (
     BindingGenerationAuthority,
@@ -69,7 +70,12 @@ DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
 CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
 CHILD_DELETE_CONFIRM_TIMEOUT_S = 120.0
 CHILD_DELETE_CONFIRM_POLL_S = 1.0
+_CHILD_ADMISSION_WAIT_SECONDS = 5.0
 _CHILD_CLEANUP_RESULT_TIMEOUT_S = CHILD_CLEANUP_RESULT_TIMEOUT_S
+_CHILD_STAGE_MAX_FILES = 256
+_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
+_CHILD_RESULT_MAX_BYTES = 16 * 1024 * 1024
+_CHILD_RESULT_MAX_ENTRIES = 1024
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
@@ -285,7 +291,22 @@ def require_volume_mount_subpath(subpath: str) -> str:
     try:
         return require_scoped_volume_subpath(subpath)
     except ValueError:
+        pass
+    try:
         return require_recursive_child_volume_subpath(subpath)
+    except ValueError:
+        pass
+
+    normalized = subpath.strip().strip("/")
+    parts = normalized.split("/")
+    if len(parts) != 5 or parts[0] != "workspaces" or parts[2] != "sessions" or parts[4] != "workspace":
+        raise ValueError("VolumeMount subpath is not a supported Fleet namespace") from None
+    try:
+        workspace_id = UUID(parts[1])
+        session_id = UUID(parts[3])
+    except ValueError:
+        raise ValueError("Session workspace VolumeMount subpath must contain canonical UUIDs") from None
+    return require_session_workspace_subpath(normalized, workspace_id=workspace_id, session_id=session_id)
 
 
 def volume_mount_spec(config: VolumeConfig, volume_id: str, *, workspace_id: UUID) -> dict[str, str]:
@@ -2206,6 +2227,11 @@ class ChildRuntimeLease:
     volume_id: str
     volume_subpath: str
     _close: Callable[[], None] = field(repr=False)
+    _data_path: str = field(default="", repr=False, kw_only=True)
+    _stage_files: Callable[[Mapping[str, bytes]], None] | None = field(default=None, repr=False, kw_only=True)
+    _read_result_files: Callable[[Sequence[str]], Mapping[str, bytes]] | None = field(
+        default=None, repr=False, kw_only=True
+    )
     _on_closed: Callable[[ChildRuntimeLease], None] | None = field(default=None, repr=False)
     _state: ChildRuntimeLeaseState = field(default=ChildRuntimeLeaseState.OPEN, init=False, repr=False)
     _close_error: BaseException | None = field(default=None, init=False, repr=False)
@@ -2216,6 +2242,29 @@ class ChildRuntimeLease:
     def state(self) -> ChildRuntimeLeaseState:
         with self._condition:
             return self._state
+
+    @property
+    def data_path(self) -> str:
+        """Absolute child-local directory used by staging and result harvesting."""
+        return self._data_path
+
+    def stage_files(self, files: Mapping[str, bytes]) -> None:
+        """Copy bounded relative inputs into this child's private data directory."""
+        self._require_open()
+        if self._stage_files is None:
+            raise RuntimeError("child lease does not support private file staging")
+        self._stage_files(files)
+
+    def read_result_files(self, paths: Sequence[str]) -> Mapping[str, bytes]:
+        """Read bounded relative result files before the child lease is closed."""
+        self._require_open()
+        if self._read_result_files is None:
+            raise RuntimeError("child lease does not support result file harvesting")
+        return self._read_result_files(paths)
+
+    def _require_open(self) -> None:
+        if self.state is not ChildRuntimeLeaseState.OPEN:
+            raise RuntimeError("child lease file operations require an open lease")
 
     @property
     def close_error(self) -> BaseException | None:
@@ -2611,6 +2660,94 @@ def sandbox_id_for(sandbox: Any) -> str:
     return value
 
 
+def _validate_child_relative_paths(paths: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(paths, (str, bytes)):
+        raise TypeError("child file paths must be a sequence of relative paths")
+    normalized: list[str] = []
+    for raw_path in paths:
+        if not isinstance(raw_path, str) or not raw_path or "\\" in raw_path:
+            raise ValueError("child file paths must be non-empty relative POSIX paths")
+        path = PurePosixPath(raw_path)
+        if path.is_absolute() or any(part in {"", ".", ".."} for part in raw_path.split("/")):
+            raise ValueError(f"child file path is not safely relative: {raw_path}")
+        normalized_path = str(path)
+        if normalized_path in normalized:
+            raise ValueError("child file paths must be unique")
+        normalized.append(normalized_path)
+    if len(normalized) > _CHILD_STAGE_MAX_FILES:
+        raise ValueError("too many child files")
+    return tuple(normalized)
+
+
+def _validate_child_file_mapping(files: Mapping[str, bytes], *, max_bytes: int) -> dict[str, bytes]:
+    if not isinstance(files, Mapping):
+        raise TypeError("child files must be a mapping of relative paths to bytes")
+    paths = _validate_child_relative_paths(tuple(files))
+    if len(paths) > _CHILD_STAGE_MAX_FILES:
+        raise ValueError("too many child files")
+    validated: dict[str, bytes] = {}
+    total = 0
+    for path in paths:
+        content = files[path]
+        if not isinstance(content, bytes):
+            raise TypeError("child file contents must be bytes")
+        total += len(content)
+        if total > max_bytes:
+            raise ValueError("child files exceed the configured size limit")
+        validated[path] = content
+    return validated
+
+
+def _file_info_value(info: Any, name: str) -> Any:
+    value = getattr(info, name, None)
+    if value is not None:
+        return value
+    if isinstance(info, Mapping):
+        value = info.get(name)
+        if value is not None:
+            return value
+    additional = getattr(info, "additional_properties", None)
+    if isinstance(additional, Mapping):
+        return additional.get(name)
+    return None
+
+
+def _file_info_is_symlink(info: Any) -> bool:
+    if info is None:
+        return False
+    if bool(_file_info_value(info, "is_symlink")) or bool(_file_info_value(info, "symlink")):
+        return True
+    kind = _file_info_value(info, "type")
+    if isinstance(kind, str) and kind.lower() in {"symlink", "symbolic_link", "symbolic link"}:
+        return True
+    mode = _file_info_value(info, "mode")
+    if isinstance(mode, str):
+        try:
+            normalized_mode = int(mode.strip(), 0 if mode.strip().startswith("0o") else 8)
+        except ValueError:
+            return False
+    else:
+        normalized_mode = mode
+    return isinstance(normalized_mode, int) and normalized_mode & 0o170000 == 0o120000
+
+
+async def _assert_no_child_symlink(fs: Any, root: str, relative: str = "") -> None:
+    """Fail closed unless every existing result-path component is a regular path."""
+    get_info = getattr(fs, "get_file_info", None)
+    if not callable(get_info):
+        raise ValueError("child result filesystem cannot verify symlink safety")
+    current = PurePosixPath(root)
+    paths = [str(current)]
+    if relative:
+        for part in PurePosixPath(relative).parts:
+            current /= part
+            paths.append(str(current))
+    for path in paths:
+        info = await _maybe_await(get_info(path))
+        if _file_info_is_symlink(info):
+            raise ValueError("child result path contains an unsafe symlink")
+
+
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
     if is_authorized is not None and not is_authorized():
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
@@ -2634,7 +2771,6 @@ def _build_child_runtime_factory(
     is_authorized: Callable[[], bool] | None = None,
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
     semantic_child_available: bool = True,
-    semantic_child_fallback: bool = False,
 ) -> ChildRuntimeFactory:
     late_owner = LateCleanupOwner(loop=loop, wait_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
 
@@ -2647,9 +2783,7 @@ def _build_child_runtime_factory(
         if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
             chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
         if chosen_profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and not semantic_child_available:
-            if not semantic_child_fallback:
-                raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
-            chosen_profile = DaytonaEnvironmentProfile.WORKSPACE_CHILD
+            raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
         acquisition_coroutine = owner._acquire_child_runtime(
             loop=loop,
             dispatcher=dispatcher,
@@ -2680,6 +2814,8 @@ def _build_child_runtime_factory(
         try:
             return acquisition.result(timeout=max(0.0, deadline - time.monotonic()))
         except DaytonaAdmissionTimeoutError:
+            if time.monotonic() < deadline:
+                raise ChildRuntimeNotStartedError("child capacity is unavailable") from None
             raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
         except TimeoutError:
             late_owner.adopt_late_acquisition(acquisition, lambda lease: lease.close())
@@ -2742,7 +2878,7 @@ async def write_file(sandbox: Any, path: str, data: bytes) -> None:
     await _maybe_await(_sandbox_fs(sandbox).upload_file(data, path))
 
 
-async def list_files(sandbox: Any, path: str, *, depth: int = 1) -> list[Any]:
+async def list_files(sandbox: Any, path: str, *, depth: int | None = 1) -> list[Any]:
     fs = _sandbox_fs(sandbox)
     try:
         entries = await _maybe_await(fs.list_files(path, depth=depth))
@@ -4259,7 +4395,8 @@ class DaytonaRuntime:
             raise ValueError("WorkspaceChild requires a Volume binding")
         if not semantic:
             assert session_id is not None
-        permit = await admission.acquire(deadline=deadline)
+        admission_deadline = min(deadline, time.monotonic() + _CHILD_ADMISSION_WAIT_SECONDS)
+        permit = await admission.acquire(deadline=admission_deadline)
         sandbox: Any | None = None
         sandbox_id: str | None = None
         if semantic:
@@ -4267,7 +4404,11 @@ class DaytonaRuntime:
         else:
             assert session_id is not None
             subpath = session_workspace_volume_subpath(workspace_id, session_id)
-        scratch_path = f"/tmp/fleet/{run_id}/{call_index}"
+        scratch_path = f"/tmp/fleet/child-data/{run_id}/{call_index}"
+        # Keep staged inputs and child outputs in the interpreter's
+        # invocation-scoped scratch so model code can resolve the relative
+        # paths from FLEET_RUN_SCRATCH.
+        child_files_path = scratch_path
         try:
             authorization_check(is_authorized)
             labels = {"fleet.runtime": "recursive-child"}
@@ -4308,7 +4449,12 @@ class DaytonaRuntime:
                 fs = _sandbox_filesystem(sandbox)
                 await _ensure_directories(
                     fs,
-                    ("/tmp/fleet", f"/tmp/fleet/{run_id}", scratch_path),
+                    (
+                        "/tmp/fleet",
+                        "/tmp/fleet/child-data",
+                        str(PurePosixPath(scratch_path).parent),
+                        scratch_path,
+                    ),
                 )
             interpreter = interpreter_factory(
                 backend=sandbox_backend_factory(
@@ -4319,8 +4465,75 @@ class DaytonaRuntime:
                 ),
                 execution_output_cap=execution_output_cap,
             )
-            if not semantic:
-                interpreter.bind_run_scratch(run_id, call_index=call_index)
+            interpreter.bind_run_scratch(run_id, call_index=call_index)
+
+            def run_fs(operation: Coroutine[Any, Any, Any]) -> Any:
+                try:
+                    future = asyncio.run_coroutine_threadsafe(operation, loop)
+                except BaseException:
+                    operation.close()
+                    raise
+                return future.result(timeout=max(0.0, deadline - time.monotonic()))
+
+            def stage_child_files(files: Mapping[str, bytes]) -> None:
+                validated = _validate_child_file_mapping(files, max_bytes=_CHILD_STAGE_MAX_BYTES)
+
+                async def stage() -> None:
+                    fs = _sandbox_filesystem(sandbox)
+                    await _ensure_directories(
+                        fs,
+                        (
+                            "/tmp/fleet",
+                            "/tmp/fleet/child-data",
+                            str(PurePosixPath(child_files_path).parent),
+                            child_files_path,
+                        ),
+                    )
+                    for relative, content in validated.items():
+                        destination = f"{child_files_path}/{relative}"
+                        parent = str(PurePosixPath(destination).parent)
+                        await _ensure_directories(fs, (parent,))
+                        await write_file(sandbox, destination, content)
+
+                run_fs(stage())
+
+            def read_child_results(paths: Sequence[str]) -> Mapping[str, bytes]:
+                validated_paths = _validate_child_relative_paths(paths)
+
+                async def read() -> Mapping[str, bytes]:
+                    await _assert_no_child_symlink(_sandbox_filesystem(sandbox), child_files_path)
+                    entries = await list_files(sandbox, child_files_path, depth=None)
+                    if len(entries) > _CHILD_RESULT_MAX_ENTRIES:
+                        raise ValueError("child result directory contains too many entries")
+                    by_path: dict[str, Any] = {}
+                    for entry in entries:
+                        path = getattr(entry, "path", None)
+                        if isinstance(path, str):
+                            by_path[path.rstrip("/")] = entry
+                    output: dict[str, bytes] = {}
+                    total = 0
+                    for relative in validated_paths:
+                        target = f"{child_files_path}/{relative}"
+                        entry = by_path.get(target)
+                        if entry is None or bool(getattr(entry, "is_dir", False)):
+                            raise ValueError(f"child result file is missing or not a file: {relative}")
+                        await _assert_no_child_symlink(_sandbox_filesystem(sandbox), child_files_path, relative)
+                        if _file_info_is_symlink(entry):
+                            raise ValueError("child result path contains an unsafe symlink")
+                        declared_size = getattr(entry, "size", None)
+                        if isinstance(declared_size, int) and not isinstance(declared_size, bool):
+                            if declared_size < 0 or declared_size > _CHILD_RESULT_MAX_BYTES:
+                                raise ValueError("child result files exceed the configured size limit")
+                            if total + declared_size > _CHILD_RESULT_MAX_BYTES:
+                                raise ValueError("child result files exceed the configured size limit")
+                        content = await read_file(sandbox, target)
+                        total += len(content)
+                        if len(content) > _CHILD_STAGE_MAX_BYTES or total > _CHILD_RESULT_MAX_BYTES:
+                            raise ValueError("child result files exceed the configured size limit")
+                        output[relative] = content
+                    return output
+
+                return run_fs(read())
 
             def close() -> None:
                 try:
@@ -4343,6 +4556,9 @@ class DaytonaRuntime:
                 "" if semantic else (volume_id or ""),
                 subpath,
                 close,
+                _data_path=child_files_path,
+                _stage_files=stage_child_files,
+                _read_result_files=read_child_results,
             )
         except BaseException:
             if permit is None:

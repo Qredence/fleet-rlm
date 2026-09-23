@@ -53,107 +53,93 @@ def _executor(
     )
 
 
-def test_child_acall_wait_is_fenced_by_the_absolute_deadline(
+def test_child_call_wait_is_fenced_by_the_absolute_deadline(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A native child whose async invocation never completes cannot hold the
-    synchronous recursive Tool past the one absolute deadline: the call fails
-    with the bounded timeout classification within a bounded tolerance, the
-    child lease still settles exactly once, and ownership observes clean."""
+    """The synchronous child call returns at the deadline and retains cleanup."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = ChildLeaseRecorder()
     entered = threading.Event()
+    release = threading.Event()
 
     class HangingChild:
-        async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
-            del interpreter, prompt
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
             entered.set()
-            await asyncio.sleep(30)
-            raise AssertionError("the fence must cancel the hanging child wait")
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: HangingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     deadline = time.monotonic() + 0.2
     events: list[object] = []
     executor = _executor(recorder, deadline=deadline, observer=events.append)
 
     began = time.monotonic()
-    outcome = executor.tool(capsule={"task": "hanging child"})
+    outcome = executor.tool(task="hanging child", inputs=[])
     assert outcome["status"] == "timed_out"
     elapsed = time.monotonic() - began
 
     # Bounded by the one absolute deadline, never unbounded.
     assert entered.is_set()
     assert 0.1 <= elapsed < 1.5
-    # The lease settled exactly once through the lifecycle owner.
+    # A running synchronous call cannot be killed locally; ownership retains it.
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.raise_if_cleanup_failed()
+    release.set()
+    executor.wait_owned()
     assert recorder.close_calls.get(1) == 1
     assert recorder.interpreters[1]._shutdown
-    # The failure surfaced the bounded timeout classification, with no answer.
     failed = [event for event in events if isinstance(event, Status) and event.status == "child_failed"]
     assert len(failed) == 1
     assert failed[0].message is not None
     assert "failure_category=timeout" in failed[0].message
     assert "cleanup_status=completed" in failed[0].message
     assert executor.summary().termination_modes == ("child_error",)
-    executor.wait_owned()
     executor.raise_if_cleanup_failed()
 
 
 @pytest.mark.asyncio
-async def test_cancellation_swallowing_child_is_retained_not_blocking(
+async def test_uninterruptible_sync_child_is_retained_not_blocking(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A child that swallows cancellation cannot block the Tool past the
-    deadline: the wait is retained under cleanup ownership (observable as
-    pending), the lease closes anyway, and the owned join settles only once
-    the retained child future completes."""
+    """A timed-out synchronous child remains owned until it can settle."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    monkeypatch.setattr(recursive_calls, "_CHILD_FENCE_SETTLE_GRACE_S", 0.05)
     recorder = ChildLeaseRecorder()
     entered = threading.Event()
     release = threading.Event()
 
     class SwallowingChild:
-        def __init__(self) -> None:
-            self.cancelled = 0
-
-        async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
-            del interpreter, prompt
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
             entered.set()
-            # Swallow every cancellation; unwind only on explicit release,
-            # which models a child that refuses to honor cooperative cancel.
-            while not release.is_set():
-                try:
-                    await asyncio.sleep(0.02)
-                except asyncio.CancelledError:
-                    self.cancelled += 1
-                    continue
-            return dspy.Prediction(answer="late", trajectory=[])
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     child = SwallowingChild()
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: child)
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     deadline = time.monotonic() + 0.1
     executor = _executor(recorder, deadline=deadline)
 
     began = time.monotonic()
-    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
-        executor.tool(capsule={"task": "swallowing child"})
+    outcome = executor.tool(task="swallowing child", inputs=[])
     elapsed = time.monotonic() - began
 
-    # The fence fired and the Tool returned bounded; cancellation was sent
-    # but swallowed, so the child was retained, not joined inline.
+    # The fence returned without claiming remote termination or cleanup.
     assert entered.is_set()
     assert elapsed < 1.5
-    assert child.cancelled >= 1
-    # The lease closed even though the child future was still pending.
-    assert recorder.close_calls.get(1) == 1
+    assert outcome["status"] == "timed_out"
+    assert recorder.close_calls.get(1) is None
     # Ownership remains pending while the swallowed child is retained.
     with pytest.raises(ChildRuntimeCleanupError, match="cleanup is still pending"):
         executor.raise_if_cleanup_failed()
     # The owned join completes only after the retained child future settles.
     release.set()
     await asyncio.to_thread(executor.wait_owned)
+    assert recorder.close_calls.get(1) == 1
     executor.raise_if_cleanup_failed()
 
 
@@ -161,20 +147,20 @@ async def test_cancellation_swallowing_child_is_retained_not_blocking(
 async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """In a batch, the fenced child wait returns at the absolute deadline and
-    the batch settles all-or-nothing with the bounded timeout cause; the
-    hanging child's lease still settles and ownership joins clean."""
+    """A timed-out batch retains the synchronous child until owned cleanup."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = ChildLeaseRecorder()
+    release = threading.Event()
 
     class HangingChild:
-        async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
-            del interpreter, prompt
-            await asyncio.sleep(30)
-            raise AssertionError("the fence must cancel the hanging child wait")
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: HangingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     deadline = time.monotonic() + 0.2
     executor = _executor(recorder, deadline=deadline)
 
@@ -182,12 +168,13 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     from fleet_rlm.rlm.recursion import RecursiveBatchError
 
     with pytest.raises((TimeoutError, RecursiveBatchError)) as raised:
-        executor.batched_tool(capsules=[{"task": task} for task in ["hanging"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["hanging"]])
     if isinstance(raised.value, RecursiveBatchError):
         assert isinstance(raised.value.__cause__, TimeoutError)
     assert time.monotonic() - began < 2.0
-    # The hanging child's lease settles through ownership, not through an
-    # unbounded Tool block.
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.raise_if_cleanup_failed()
+    release.set()
     await asyncio.to_thread(executor.wait_owned)
     executor.raise_if_cleanup_failed()
     assert recorder.close_calls.get(1) == 1
@@ -203,15 +190,16 @@ def test_completed_child_is_not_disturbed_by_the_fence(
     recorder = ChildLeaseRecorder()
 
     class PromptChild:
-        async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> dspy.Prediction:
-            del interpreter
-            await asyncio.sleep(0)
-            return dspy.Prediction(answer=f"echo:{json.loads(prompt)['task']}", trajectory=[])
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            return dspy.Prediction(
+                answer=f"echo:{json.loads(prompt)['task']}", evidence=[], gaps=[], result_files=[], trajectory=[]
+            )
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: PromptChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    assert executor.tool(capsule={"task": "fast child"})["answer"] == "echo:fast child"
+    assert executor.tool(task="fast child", inputs=[])["answer"] == "echo:fast child"
     assert recorder.close_calls.get(1) == 1
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
@@ -228,15 +216,15 @@ def test_child_lm_deadline_error_keeps_its_own_classification(
     recorder = ChildLeaseRecorder()
 
     class LmDeadlineChild:
-        async def acall(self, interpreter: Any = None, *, prompt: str, **_kwargs: object) -> Any:
-            del interpreter, prompt
-            await asyncio.sleep(0)
+        def __call__(self, *, prompt: str) -> Any:
+            del prompt
             raise TimeoutError("recursive child LM deadline exceeded")
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: LmDeadlineChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(recorder, deadline=time.monotonic() + 10)
 
-    outcome = executor.tool(capsule={"task": "lm deadline child"})
+    outcome = executor.tool(task="lm deadline child", inputs=[])
     assert outcome["status"] == "timed_out"
     assert outcome["error_category"] == "timeout"
     assert recorder.close_calls.get(1) == 1
@@ -271,13 +259,13 @@ def test_claim_loss_before_allocation_performs_no_reservation_or_acquisition() -
     recorder = ChildLeaseRecorder()
     executor = _authorized_executor(
         recorder,
-        [{"reasoning": "submit", "code": "SUBMIT(answer='never-runs')"}],
+        [{"reasoning": "submit", "code": "SUBMIT(answer='never-runs', evidence=[], gaps=[], result_files=[])"}],
         authority=authority,
     )
     authority.revoke()
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(capsule={"task": "claimed slice"})
+        executor.tool(task="claimed slice", inputs=[])
 
     assert recorder.call_indexes == []
     summary = executor.summary()
@@ -295,18 +283,18 @@ def test_claim_loss_rejects_every_subsequent_recursive_call() -> None:
     recorder = ChildLeaseRecorder()
     executor = _authorized_executor(
         recorder,
-        [{"reasoning": "submit", "code": "SUBMIT(answer='held-ok')"}],
+        [{"reasoning": "submit", "code": "SUBMIT(answer='held-ok', evidence=[], gaps=[], result_files=[])"}],
         authority=authority,
         options=RecursiveRLMOptions(max_calls=4),
     )
 
-    assert executor.tool(capsule={"task": "held slice"})["answer"] == "held-ok"
+    assert executor.tool(task="held slice", inputs=[])["answer"] == "held-ok"
     authority.revoke()
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.tool(capsule={"task": "late single"})
+        executor.tool(task="late single", inputs=[])
     with pytest.raises(RuntimeError, match="no longer authorized"):
-        executor.batched_tool(capsules=[{"task": task} for task in ["late batch"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["late batch"]])
 
     # The completed call is the only reservation and acquisition ever made.
     assert recorder.call_indexes == [1]
@@ -330,19 +318,20 @@ async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
     release = threading.Event()
 
     class BlockedChild:
-        async def acall(self, *, interpreter: object, prompt: str) -> dspy.Prediction:
-            del interpreter, prompt
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
             started.set()
-            await asyncio.to_thread(release.wait, 10)
+            release.wait(10)
             # This answer is produced after the claim was lost and must be
             # discarded by the fence instead of settling as a success.
             return dspy.Prediction(answer="late-claimed-answer", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockedChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
-        [{"reasoning": "delegate", "code": "answer = rlm_query(capsule={'task': 'claimed slice'})"}],
+        [{"reasoning": "delegate", "code": "answer = rlm_query(task='claimed slice', inputs=[])"}],
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)

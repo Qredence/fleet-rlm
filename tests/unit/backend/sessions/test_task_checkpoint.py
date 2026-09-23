@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from hashlib import sha256
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,6 +15,7 @@ from fleet_rlm.sessions.task import (
     TaskCheckpointCorruptError,
     TaskCheckpointMissingError,
 )
+from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
 
 
 @dataclass(frozen=True)
@@ -131,6 +135,61 @@ async def test_checkpoint_updates_are_serialized_and_invalid_data_rejected(
     assert sum(isinstance(item, TaskCheckpointConflictError) for item in results) == 1
     with pytest.raises(ValueError):
         await service.update(session_id, user_id=user_id, workspace_id=workspace_id, expected_revision=2, goal="   ")
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_round_trips_through_mounted_volume_gateway() -> None:
+    class _Fs:
+        def __init__(self) -> None:
+            self.files: dict[str, bytes] = {}
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            self.files[path] = bytes(data)
+
+        async def download_file(self, path: str) -> bytes:
+            try:
+                return self.files[path]
+            except KeyError as exc:
+                raise FileNotFoundError(path) from exc
+
+    class _MountedGateway:
+        def __init__(self) -> None:
+            self.sandbox = SimpleNamespace(fs=_Fs())
+
+        @asynccontextmanager
+        async def open_sandbox(self, workspace_id: UUID, *, purpose: str):
+            del workspace_id, purpose
+            yield self.sandbox
+
+    session_id, workspace_id, user_id = uuid4(), uuid4(), uuid4()
+    catalog = _Catalog(session_id, workspace_id)
+    mounted = _MountedGateway()
+    paths = VolumePaths.from_mount("/mnt/fleet")
+    volume = DaytonaWorkspaceVolumeGateway(mounted, mount_path=str(paths.mount_path))  # type: ignore[arg-type]
+    service = SessionTaskService(catalog, volume, paths)  # type: ignore[arg-type]
+    first_request = "Résumé 🚀 — 東京"
+
+    seeded = await service.seed(
+        session_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        first_request=first_request,
+    )
+    logical_path = str(paths.session_dir(session_id) / "task.json")
+    stored = mounted.sandbox.fs.files[logical_path]
+    transferred = await volume.read_bytes(workspace_id, logical_path)
+
+    # Compare only bounded metadata so a failed assertion never prints checkpoint bytes.
+    assert len(transferred) == len(stored)
+    assert sha256(transferred).digest() == sha256(stored).digest()
+
+    loaded = await SessionTaskService(catalog, volume, paths).read(
+        session_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+    )
+    assert loaded.revision == seeded.revision == 1
+    assert sha256(loaded.goal.encode("utf-8")).digest() == sha256(first_request.encode("utf-8")).digest()
 
 
 async def asyncio_gather_updates(

@@ -10,11 +10,40 @@ from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
+from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
 
 from fleet_rlm.daytona.runtime import SandboxLeasePolicy
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
 from fleet_rlm.workspace.paths import UnsafePathError
+from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
+
+
+@pytest.mark.asyncio
+async def test_volume_read_maps_typed_missing_file_without_swallowing_provider_failure() -> None:
+    class MissingFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise DaytonaFileNotFoundError("missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingFs()))
+    with pytest.raises(FileNotFoundError):
+        await volume.read_bytes("/volume/task.json")
+
+    class BrokenFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise RuntimeError("provider unavailable")
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=BrokenFs()))
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await volume.read_bytes("/volume/task.json")
+
+    class MissingProviderRouteFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise DaytonaNotFoundError("provider route missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingProviderRouteFs()))
+    with pytest.raises(DaytonaNotFoundError, match="provider route missing"):
+        await volume.read_bytes("/volume/task.json")
 
 
 # --- from test_workspace_volume_gateway.py ----------------------------

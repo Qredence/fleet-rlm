@@ -68,6 +68,7 @@ def test_openapi_stream_schema_is_derived_as_one_inline_discriminated_contract()
             "reasoning-delta",
             "reasoning-end",
             "data-status",
+            "data-child-progress",
             "data-skill",
             "data-rlm-code",
             "data-rlm-output",

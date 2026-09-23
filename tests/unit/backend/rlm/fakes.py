@@ -54,7 +54,8 @@ class ChildLeaseRecorder:
         self._sandbox_prefix = sandbox_prefix
         self._volume = volume
 
-    def factory(self, call_index: int) -> ChildRuntimeLease:
+    def factory(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         self.call_indexes.append(call_index)
         backend = InProcessInterpreterBackend()
         interpreter = DaytonaCodeInterpreter(backend=backend)

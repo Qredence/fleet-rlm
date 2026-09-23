@@ -21,6 +21,7 @@ from fleet_rlm.observability.feedback import TraceFeedbackService
 from fleet_rlm.observability.mlflow import MLflowRuntime
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
@@ -96,6 +97,13 @@ def get_session_lifecycle(request: Request) -> SessionLifecycle:
     return get_ready_route_services(request).session_lifecycle
 
 
+def get_session_task_service(request: Request) -> SessionTaskService:
+    service = get_ready_route_services(request).session_task_service
+    if service is None:
+        raise _composition_unavailable()
+    return service
+
+
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
     """Return the composed Daytona runtime's pre-warm scheduler, if present.
 
@@ -154,6 +162,7 @@ ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 SessionLifecycleDep = Annotated[SessionLifecycle, Depends(get_session_lifecycle)]
+SessionTaskServiceDep = Annotated[SessionTaskService, Depends(get_session_task_service)]
 SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
 RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -175,6 +184,7 @@ __all__ = [
     "SessionCatalogDep",
     "SessionLifecycleDep",
     "SessionPrewarmDep",
+    "SessionTaskServiceDep",
     "SettingsDep",
     "SkillCatalogDep",
     "TraceFeedbackServiceDep",

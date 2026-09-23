@@ -284,7 +284,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
     tools_by_name = {str(tool.name): tool for tool in prepared.spec.tools}
     assert tools_by_name["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
     assert prepared.spec.output_schema_id == "skill.data-analysis"
-    assert prepared.spec.output_schema_version == "1.0.0"
+    assert prepared.spec.output_schema_version == "1.1.0"
     assert prepared.spec.signature.output_fields["answer"].annotation is str
     assert set(prepared.spec.signature.output_fields) == {"answer", "findings", "metrics", "anomalies"}
     assert {str(tool.name) for tool in prepared.spec.tools} == {
@@ -353,7 +353,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 
     projected = validate_prediction(stream.outcome.prediction, stream.outcome.result_contract)
     assert projected.schema_id == "skill.data-analysis"
-    assert projected.schema_version == "1.0.0"
+    assert projected.schema_version == "1.1.0"
     assert set(projected.outputs) == {"answer", "findings", "metrics", "anomalies"}
     await prepared.aclose()
 

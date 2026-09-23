@@ -3,7 +3,7 @@ name: dspy-rlm
 description: Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.
 compatibility: Requires Fleet RLM with a Python interpreter. Durable long reports use Daytona Session Workspace.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   affordances:
     - interpreter
     - llm_query
@@ -30,6 +30,9 @@ or implementing `dspy.RLM`; ordinary RLM Turns do not need it.
    for deterministic work. Use `llm_query` for one bounded semantic judgment and
    `llm_query_batched` for multiple independent semantic judgments with
    self-contained prompts.
+   Use Fleet children only for an independent bounded REPL task with explicit
+   authorized relative input paths. A Skill cannot expand file authority,
+   available tools, recursion depth, or the Turn budget.
 4. Ground any semantic prompts in the extracted contract string. Do not invent
    DSPy RLM APIs from training priors.
 5. For long writeups when Session Workspace is available, follow report-builder

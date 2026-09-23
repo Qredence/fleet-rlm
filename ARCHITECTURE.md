@@ -49,11 +49,14 @@ semantic tools use the same broker path as Fleet tools. Consult the
 and the [performance budget](docs/reference/performance-budget.md) for dated
 performance evidence.
 
-Root and recursive execution Sandboxes mount only the authorized Session
-workspace at `/workspace`. Ordinary Python and Session workspace tools address
-those same files. Each Run uses local `/tmp/fleet/<run_id>` scratch; recursive
-children use a child directory there. Scratch is removed by its owned
-interpreter or child cleanup. Workspace memory, task checkpoints, original
+Root execution Sandboxes mount only the authorized Session workspace at
+`/workspace`. Ordinary Python and Session workspace tools address those same
+files. Each Run uses local `/tmp/fleet/<run_id>` scratch. Recursive children
+can receive a bounded copy of authorized relative files under a unique private
+`/tmp/fleet/child-data/<id>` directory and harvest declared result files through
+their open lease before cleanup. That directory is local to the child Sandbox;
+the parent Session Volume is not mounted for isolated child execution. Scratch
+is removed by its owned interpreter or child cleanup. Workspace memory, task checkpoints, original
 attachments, Artifact staging, and result snapshots stay outside the execution
 mount and are accessed through short-lived host I/O leases. One Daytona slot
 is reserved for that I/O while execution leases are active. An older

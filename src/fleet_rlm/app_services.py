@@ -24,6 +24,7 @@ from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.turn_preparation import RunPreparation, TurnPreparationPlan, close_turn_preparation
 from fleet_rlm.turn_settlement import RunLifecycle
 from fleet_rlm.turns import TurnRuntime
@@ -144,6 +145,7 @@ class RuntimeInventory:
     # compatibility with provider-neutral inventory construction.
     runner: object | None = None
     session_lifecycle: SessionLifecycle | None = None
+    session_task_service: SessionTaskService | None = None
 
     _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
         "turn_runtime",
@@ -187,6 +189,7 @@ class RouteServices:
     workspace_volume_gateway: WorkspaceVolumeGateway
     workspace_file_service: WorkspaceFileService
     daytona_runtime: DaytonaRuntimeSurface | None
+    session_task_service: SessionTaskService | None = None
 
     @classmethod
     def from_inventory(cls, inventory: RuntimeInventory) -> RouteServices:
@@ -201,6 +204,7 @@ class RouteServices:
             workspace_volume_gateway=cast(WorkspaceVolumeGateway, inventory.workspace_volume_gateway),
             workspace_file_service=cast(WorkspaceFileService, inventory.workspace_file_service),
             daytona_runtime=inventory.daytona_runtime,
+            session_task_service=inventory.session_task_service,
         )
 
 

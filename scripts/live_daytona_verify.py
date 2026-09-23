@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import (
     ProfileEnvironmentContract,
-    active_profile_contract,
+    load_profile_environment_contracts,
     require_live_execution,
 )
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
@@ -31,6 +31,7 @@ _LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_da
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _LIVE_ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
 _LIVE_SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
+_LIVE_PROFILE = "daytona-recursive"
 _MAX_MODEL_ID_CHARS = 256
 _DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
 DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
@@ -730,6 +731,17 @@ def _required_provider_environment(contract: ProfileEnvironmentContract) -> tupl
     return contract.provider_environment_names
 
 
+def _live_profile_contract() -> ProfileEnvironmentContract:
+    """Return the recursive policy contract this verifier qualifies."""
+    contract = next(
+        (candidate for candidate in load_profile_environment_contracts() if candidate.name == _LIVE_PROFILE),
+        None,
+    )
+    if contract is None:
+        raise FleetConfigurationError(f"required live proof profile is missing: {_LIVE_PROFILE}")
+    return contract
+
+
 def _models_are_valid(models: object) -> bool:
     """Validate a bounded Root/Sub model pair without a production allowlist."""
     return bool(
@@ -764,8 +776,8 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_PRECONDITION
     _load_repo_env()
     try:
-        settings = require_live_execution()
-        contract = active_profile_contract()
+        settings = require_live_execution(profile=_LIVE_PROFILE)
+        contract = _live_profile_contract()
     except FleetConfigurationError:
         _write_failure(
             output,
@@ -812,6 +824,7 @@ def main(argv: list[str] | None = None) -> int:
     child_env = os.environ.copy()
     child_env.pop("FLEET_ROOT_MODEL", None)
     child_env.pop("FLEET_SUB_MODEL", None)
+    child_env["FLEET_CONFIG_PROFILE"] = _LIVE_PROFILE
     child_env[_LIVE_ROOT_MODEL_ENV] = models["root"]
     child_env[_LIVE_SUB_MODEL_ENV] = models["sub"]
     normalized_session_snapshot: str | None = None

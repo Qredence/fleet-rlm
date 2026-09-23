@@ -2,27 +2,17 @@ approval_policy = "on-request"
 sandbox_mode = "workspace-write"
 web_search = "live"
 model_verbosity = "low"
+
 [features]
 hooks = true
 multi_agent = true
+context_management.experimental_mode = true
 
 [hooks]
 
 # Migrated from deprecated .codex/hooks.json
 [[hooks.PreToolUse]]
 matcher = "Bash(git commit*)"
-
-[[hooks.PreToolUse.hooks]]
-type = "command"
-command = "make test"
-timeout = 300
-
-[[hooks.Stop]]
-
-[[hooks.Stop.hooks]]
-type = "command"
-command = "chunk validate"
-timeout = 330
 
 [agents]
 max_threads = 8

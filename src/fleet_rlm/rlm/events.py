@@ -99,6 +99,36 @@ class Status:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildProgress:
+    """Bounded progress snapshot for one recursive child invocation."""
+
+    kind: ClassVar[Literal["child.progress"]] = "child.progress"
+    child_id: str
+    task_label: str
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int
+    outcome: str | None = None
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
+    parent_run_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.child_id.strip() or len(self.child_id) > 128:
+            raise ValueError("child_id must contain 1 to 128 non-blank characters")
+        if not self.task_label.strip() or len(self.task_label) > 240:
+            raise ValueError("task_label must contain 1 to 240 non-blank characters")
+        if self.state not in ("not_started", "running", "completed", "failed", "cancelled", "timed_out"):
+            raise ValueError("unsupported child progress state")
+        if self.cleanup_state not in ("pending", "complete", "failed", "not_required"):
+            raise ValueError("unsupported child cleanup state")
+        if not isinstance(self.elapsed_ms, int) or isinstance(self.elapsed_ms, bool) or self.elapsed_ms < 0:
+            raise ValueError("elapsed_ms must be a non-negative integer")
+        if self.outcome is not None and len(self.outcome) > 500:
+            raise ValueError("outcome must not exceed 500 characters")
+        if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
+            raise ValueError("parent_run_id must contain 1 to 128 non-blank characters")
+
+
+@dataclass(frozen=True, slots=True)
 class StepStarted:
     kind: ClassVar[Literal["step.started"]] = "step.started"
     step: int
@@ -172,7 +202,15 @@ class ToolFailed:
 
 
 ObservationDetail: TypeAlias = (
-    StepStarted | StepFinished | RLMReasoning | RLMCode | RLMOutput | ToolStarted | ToolCompleted | ToolFailed
+    StepStarted
+    | StepFinished
+    | RLMReasoning
+    | RLMCode
+    | RLMOutput
+    | ToolStarted
+    | ToolCompleted
+    | ToolFailed
+    | ChildProgress
 )
 ObservationObserver: TypeAlias = Callable[[ObservationDetail], None]
 
@@ -294,6 +332,7 @@ class RunTimedOut:
 RuntimeEventDetail: TypeAlias = (
     RunStarted
     | Status
+    | ChildProgress
     | StepStarted
     | StepFinished
     | RLMReasoning
@@ -320,6 +359,7 @@ RuntimeEventDetail: TypeAlias = (
 RUNTIME_DETAIL_TYPES = (
     RunStarted,
     Status,
+    ChildProgress,
     StepStarted,
     StepFinished,
     RLMReasoning,
@@ -1419,6 +1459,7 @@ class ExecutionTraceAssembler:
 
 MAX_DETAIL_EVENTS = 1024
 _RETAINED_DETAIL_TYPES = (
+    ChildProgress,
     SkillActivated,
     SkillLoaded,
     StepStarted,

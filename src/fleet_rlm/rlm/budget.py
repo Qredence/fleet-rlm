@@ -91,7 +91,7 @@ class BudgetLimits:
 
 
 class TurnBudget:
-    """Atomic monotonic reservations; failed work is charged, never refunded.
+    """Atomic reservations; admitted work is charged, not pre-start refusals.
 
     Finalization is an explicit caller capability, not a global mutable mode:
     concurrent child exploration cannot borrow the root's reserved capacity.
@@ -170,6 +170,13 @@ class TurnBudget:
                 self._exploration_attempts += count
             self._used[dimension] += count
             return remaining
+
+    def release_unstarted_recursive_child(self) -> None:
+        """Undo one child reservation when capacity refused it before start."""
+        with self._lock:
+            if self._used[BudgetDimension.RECURSIVE_CHILDREN] <= 0:
+                raise RuntimeError("no unstarted child reservation to release")
+            self._used[BudgetDimension.RECURSIVE_CHILDREN] -= 1
 
     def _remaining(self, *, finalization: bool) -> float:
         """

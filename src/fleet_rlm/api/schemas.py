@@ -118,6 +118,18 @@ class SessionSummaryResponse(BaseModel):
     updated_at: str | None = None
 
 
+class SessionTaskResponse(BaseModel):
+    """Authorized read-only projection of the existing Session checkpoint."""
+
+    revision: int
+    goal: str
+    decisions: list[str]
+    relevant_paths: list[str]
+    source_revisions: dict[str, str]
+    completed_work: list[str]
+    pending_work: list[str]
+
+
 class SessionDetailResponse(SessionSummaryResponse):
     """Session detail — same public shape as the summary today."""
 
@@ -186,6 +198,10 @@ class DataStatusUIMessagePart(DataUIMessagePart):
     type: Literal["data-status"] = "data-status"
 
 
+class DataChildProgressUIMessagePart(IdentifiedDataUIMessagePart):
+    type: Literal["data-child-progress"] = "data-child-progress"
+
+
 class DataStepUIMessagePart(DataUIMessagePart):
     type: Literal["data-step"] = "data-step"
 
@@ -228,6 +244,7 @@ UIMessagePart = Annotated[
     | DynamicToolUIMessagePart
     | StepStartUIMessagePart
     | DataStatusUIMessagePart
+    | DataChildProgressUIMessagePart
     | DataStepUIMessagePart
     | DataRLMCodeUIMessagePart
     | DataRLMOutputUIMessagePart

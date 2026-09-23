@@ -3,7 +3,7 @@ name: data-analysis
 description: Compute and verify descriptive statistics, trends, and qualified anomalies.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "1.0.0"
+  version: "1.1.0"
   affordances:
     - artifacts.publish
     - llm_query_batched
@@ -15,9 +15,10 @@ resources: []
 
 # Data analysis
 
-Use Python for deterministic calculations over data supplied in the request or
-through an authorized Attachment. Do not use host paths, `open()`, shell
-commands, or invented Attachment IDs.
+Use Python for deterministic calculations over authorized data. Never invent
+Attachment IDs or host paths. Large intermediate tables may live in private
+interpreter files; a child result file is an input candidate until the root
+checks its source revision, coverage, and values.
 
 ## Prepare the data
 
@@ -27,8 +28,9 @@ commands, or invented Attachment IDs.
    ID present in the Turn's Attachment metadata. Require `ok: true`; use
    `content` when `encoding` is `utf-8`, and decode `content_base64` in memory
    when `encoding` is `base64`.
-3. Keep the source and derived values in the existing Python interpreter. Do
-   not treat a Python-local file as a durable Workspace file or Artifact.
+3. Keep the source and derived values in interpreter variables or files according
+   to size and reuse. Do not treat a Python-local file as a durable Workspace file
+   or Artifact.
 
 ## Analyze and verify
 
@@ -48,6 +50,11 @@ Before submitting, recompute and compare all reported counts, extrema, sums,
 means, medians, dispersion values, and anomaly comparisons against the original
 data. If the data is insufficient, say what is missing instead of guessing;
 use empty `metrics` and `anomalies` lists when appropriate.
+
+For a partitioned dataset, record processed and missing partitions. Use
+`llm_query_batched` only for independent semantic classifications, validate
+each returned item, then aggregate in Python. Report incomplete coverage and
+unresolved child gaps explicitly.
 
 ## Submit
 
