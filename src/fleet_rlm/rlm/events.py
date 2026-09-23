@@ -110,12 +110,20 @@ class ChildProgress:
     outcome: str | None = None
     cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
     parent_run_id: str | None = None
+    evidence: tuple[str, ...] = ()
+    gaps: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.child_id.strip() or len(self.child_id) > 128:
             raise ValueError("child_id must contain 1 to 128 non-blank characters")
         if not self.task_label.strip() or len(self.task_label) > 240:
             raise ValueError("task_label must contain 1 to 240 non-blank characters")
+        if (
+            len(self.evidence) > 8
+            or len(self.gaps) > 8
+            or any(not isinstance(item, str) or len(item) > 200 for item in (*self.evidence, *self.gaps))
+        ):
+            raise ValueError("child progress details exceed their bounds")
         if self.state not in ("not_started", "running", "completed", "failed", "cancelled", "timed_out"):
             raise ValueError("unsupported child progress state")
         if self.cleanup_state not in ("pending", "complete", "failed", "not_required"):

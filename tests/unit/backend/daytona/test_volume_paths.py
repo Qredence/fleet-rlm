@@ -174,6 +174,26 @@ async def test_get_or_create_volume_id_uses_injected_client() -> None:
     assert client.calls == [("my-vol", True)]
 
 
+@pytest.mark.asyncio
+async def test_get_or_create_volume_id_recovers_concurrent_create_conflict() -> None:
+    from daytona.common.errors import DaytonaConflictError
+
+    class _Client:
+        def __init__(self) -> None:
+            self.calls: list[bool] = []
+
+        async def get(self, name: str, *, create: bool = False) -> object:
+            assert name == "my-vol"
+            self.calls.append(create)
+            if create:
+                raise DaytonaConflictError("Volume already exists", status_code=409)
+            return type("Volume", (), {"id": "vid-1"})()
+
+    client = _Client()
+    assert await get_or_create_volume_id(client, VolumeConfig(name="my-vol")) == "vid-1"
+    assert client.calls == [True, False]
+
+
 def test_settings_volume_fields() -> None:
     from fleet_rlm.config.settings import Settings
 

@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import dspy
 import pytest
+from daytona.common.errors import DaytonaNotFoundError
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
@@ -23,7 +24,7 @@ from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import runtime as recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
-from tests.live.backend._cleanup import _strict_cleanup
+from tests.live.backend._cleanup import _retry_cleanup, _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
@@ -140,7 +141,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     copied_policy.write_text(
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1),
+        .replace('default_profile = "daytona-native"', 'default_profile = "daytona-recursive"', 1),
         encoding="utf-8",
     )
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
@@ -292,6 +293,30 @@ def _write_receipt(payload: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+async def _delete_sandboxes_on_canary_volume(resources: Any, volume_name: str) -> bool:
+    """Delete provider-visible sandboxes mounting this canary's unique volume."""
+    daytona = resources.runtime._client
+    try:
+        volume = await daytona.volume.get(volume_name, create=False)
+    except DaytonaNotFoundError:
+        return True
+    except Exception:
+        return False
+    try:
+        matching = [
+            sandbox
+            async for sandbox in daytona.list()
+            if any(mount.volume_id == volume.id for mount in sandbox.volumes or ())
+        ]
+    except Exception:
+        return False
+    succeeded = True
+    for sandbox in matching:
+        if not await _retry_cleanup(lambda sandbox=sandbox: daytona.delete(sandbox, wait=True)):
+            succeeded = False
+    return succeeded
+
+
 def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Run the live Daytona recursive canary through the FastAPI application.
@@ -399,7 +424,10 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             }
         finally:
             assert client.portal is not None
+            sandbox_cleanup_succeeded = client.portal.call(
+                _delete_sandboxes_on_canary_volume, resources, settings.volume_name
+            )
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
-            assert cleanup_failures == (), "Phase 2 canary cleanup did not settle"
+            assert sandbox_cleanup_succeeded and cleanup_failures == (), "Phase 2 canary cleanup did not settle"
     assert pending_receipt is not None
     _write_receipt(pending_receipt)

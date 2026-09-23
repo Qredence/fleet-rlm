@@ -126,6 +126,8 @@ def _details(part: CommittedPart):
                 state=part.state,
                 elapsed_ms=part.elapsed_ms,
                 outcome=part.outcome,
+                evidence=part.evidence,
+                gaps=part.gaps,
                 cleanup_state=part.cleanup_state,
                 parent_run_id=part.parent_run_id,
             ),

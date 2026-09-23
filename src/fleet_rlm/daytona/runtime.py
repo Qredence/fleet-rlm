@@ -320,7 +320,14 @@ def volume_mount_spec(config: VolumeConfig, volume_id: str, *, workspace_id: UUI
 
 
 async def get_or_create_volume_id(client: VolumeClient, config: VolumeConfig) -> str:
-    volume = await client.get(config.name, create=True)
+    from daytona.common.errors import DaytonaConflictError
+
+    try:
+        volume = await client.get(config.name, create=True)
+    except DaytonaConflictError:
+        # The SDK's get(create=True) performs a read followed by create. Two
+        # concurrent callers can both miss and one create receives a 409.
+        volume = await client.get(config.name, create=False)
     volume_id = getattr(volume, "id", None)
     if volume_id is None:
         raise RuntimeError("volume client returned an object without id")

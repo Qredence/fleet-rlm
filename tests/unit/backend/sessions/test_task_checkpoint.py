@@ -99,6 +99,18 @@ async def test_seed_once_and_round_trip_update(
 
 
 @pytest.mark.asyncio
+async def test_long_initial_request_seeds_readable_checkpoint(
+    services: tuple[SessionTaskService, _Catalog, _Volume, UUID, UUID, UUID],
+) -> None:
+    service, _, _, session_id, workspace_id, user_id = services
+    request = "  Investigate " + "evidence " * 90
+    seeded = await service.seed(session_id, user_id=user_id, workspace_id=workspace_id, first_request=request)
+    assert seeded.goal == request
+    assert seeded.pending_work == (f"{request.strip()[:497]}...",)
+    assert await service.read(session_id, user_id=user_id, workspace_id=workspace_id) == seeded
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_stale_revision_and_unseeded_checkpoint(
     services: tuple[SessionTaskService, _Catalog, _Volume, UUID, UUID, UUID],
 ) -> None:

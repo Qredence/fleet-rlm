@@ -92,6 +92,9 @@ class SessionTaskService:
     ) -> TaskCheckpoint:
         """Create the initial pending goal once; preserve an existing checkpoint."""
         request = _bounded_text(first_request, "first_request", _MAX_GOAL_CHARS, nonempty=True)
+        pending = request.strip()
+        if len(pending) > _MAX_ITEM_CHARS:
+            pending = f"{pending[: _MAX_ITEM_CHARS - 3]}..."
         await self._authorize(session_id, user_id=user_id, workspace_id=workspace_id)
         path = self._logical_path(session_id)
         async with self._write_lock:
@@ -105,7 +108,7 @@ class SessionTaskService:
                     relevant_paths=(),
                     source_revisions={},
                     completed_work=(),
-                    pending_work=(request,),
+                    pending_work=(pending,),
                 )
                 await self._write(workspace_id, path, checkpoint)
                 return checkpoint

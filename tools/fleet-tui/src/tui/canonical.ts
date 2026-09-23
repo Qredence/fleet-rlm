@@ -138,6 +138,8 @@ export interface ChildProgressEvent {
   state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
   elapsedMs: number;
   outcome?: string | undefined;
+  evidence?: string[] | undefined;
+  gaps?: string[] | undefined;
   cleanupState: "pending" | "complete" | "failed" | "not_required";
   messageId?: string | undefined;
 }

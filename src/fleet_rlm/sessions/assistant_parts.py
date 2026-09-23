@@ -181,6 +181,8 @@ class ChildProgressAssistantPart(AssistantPartModel):
     state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
     elapsed_ms: int = Field(ge=0)
     outcome: str | None = Field(default=None, max_length=500)
+    evidence: tuple[str, ...] = Field(default=(), max_length=8)
+    gaps: tuple[str, ...] = Field(default=(), max_length=8)
     cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
     parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -188,6 +190,13 @@ class ChildProgressAssistantPart(AssistantPartModel):
     @classmethod
     def _valid_parent_run_id(cls, value: str | None) -> str | None:
         return None if value is None else _require_nonblank(value, "parent_run_id")
+
+    @field_validator("evidence", "gaps")
+    @classmethod
+    def _bounded_details(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(len(item) > 200 for item in value):
+            raise ValueError("child progress detail exceeds 200 characters")
+        return value
 
 
 class ArtifactAssistantPart(AssistantPartModel):
@@ -350,6 +359,8 @@ def assistant_part_to_model(part: CommittedPart) -> AssistantPart:
             state=part.state,
             elapsed_ms=part.elapsed_ms,
             outcome=part.outcome,
+            evidence=part.evidence,
+            gaps=part.gaps,
             cleanup_state=part.cleanup_state,
             parent_run_id=part.parent_run_id,
         )
@@ -424,6 +435,8 @@ def assistant_part_from_model(part: AssistantPart) -> CommittedPart:
             state=part.state,
             elapsed_ms=part.elapsed_ms,
             outcome=part.outcome,
+            evidence=part.evidence,
+            gaps=part.gaps,
             cleanup_state=part.cleanup_state,
             parent_run_id=part.parent_run_id,
         )

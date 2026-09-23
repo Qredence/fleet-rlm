@@ -1156,6 +1156,8 @@ class RecursiveRLMExecutor:
         failure_category: str | None = None,
         task_label: str = "Child investigation",
         child_answer: str | None = None,
+        child_evidence: tuple[str, ...] = (),
+        child_gaps: tuple[str, ...] = (),
     ) -> None:
         if self._observer is None:
             return
@@ -1203,6 +1205,8 @@ class RecursiveRLMExecutor:
             state=state,
             elapsed_ms=duration_ms,
             outcome=_child_progress_outcome(child_answer, failure_category) if status != "child_started" else None,
+            evidence=tuple(sanitize_public_text(item, max_len=200) for item in child_evidence[:8]),
+            gaps=tuple(sanitize_public_text(item, max_len=200) for item in child_gaps[:8]),
             cleanup_state=cleanup_state,
             parent_run_id=self._parent_run_id,
         )
@@ -1540,6 +1544,8 @@ class RecursiveRLMExecutor:
         completion_outputs: dict[str, object] | None,
         failure_category: str | None,
         child_answer: str | None,
+        child_evidence: tuple[str, ...],
+        child_gaps: tuple[str, ...],
     ) -> None:
         cleanup_error: BaseException | None = None
         if lease is not None:
@@ -1593,6 +1599,8 @@ class RecursiveRLMExecutor:
             failure_category=(failure_category if failed or progress_status == "child_not_started" else None),
             task_label=call.task_label,
             child_answer=child_answer,
+            child_evidence=child_evidence if not failed and cleanup_error is None else (),
+            child_gaps=child_gaps if not failed and cleanup_error is None else (),
         )
         if cleanup_error is not None and not primary_failed:
             raise cleanup_error
@@ -1616,6 +1624,8 @@ class RecursiveRLMExecutor:
         cleanup_status = "not_required"
         failure_category: str | None = None
         child_answer: str | None = None
+        child_evidence: tuple[str, ...] = ()
+        child_gaps: tuple[str, ...] = ()
         primary_failed = False
         child_started = False
         child_budget_reserved = False
@@ -1728,6 +1738,8 @@ class RecursiveRLMExecutor:
                 batch_cancelled,
             )
             child_answer = outcome.answer
+            child_evidence = outcome.evidence
+            child_gaps = outcome.gaps
             return outcome
         except ChildRuntimeNotStartedError:
             cleanup_status = "not_acquired"
@@ -1757,6 +1769,8 @@ class RecursiveRLMExecutor:
                     completion_outputs=completion_outputs,
                     failure_category=failure_category,
                     child_answer=child_answer,
+                    child_evidence=child_evidence,
+                    child_gaps=child_gaps,
                 )
             finally:
                 if child_started:
