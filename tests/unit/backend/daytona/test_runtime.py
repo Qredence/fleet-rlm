@@ -142,6 +142,7 @@ async def test_child_runtime_uses_configured_rlm_execution_settings(
     runtime = DaytonaRuntime(resources)
     spec = ChildEnvironmentSpec(
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         volume_id="volume",
         mount_path="/home/daytona/fleet",
@@ -357,6 +358,12 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
     confirmed = False
 
     class Fs:
+        async def create_folder(self, _path: str, _mode: str) -> None:
+            return None
+
+        async def delete_file(self, _path: str, *, recursive: bool = False) -> None:
+            del recursive
+
         async def list_files(self, _path: str, *, depth: int | None) -> list[object]:
             assert depth is None
             return []
@@ -376,6 +383,9 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             pass
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup
@@ -397,6 +407,7 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
         volume_id="volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 5,
         execution_timeout_s=30,

@@ -15,10 +15,11 @@ def test_admission_rejects_more_than_eight_direct_leases() -> None:
 
 
 @pytest.mark.asyncio
-async def test_eight_leases_enter_and_ninth_waits_until_release() -> None:
+async def test_execution_reserves_one_of_eight_leases_for_host_io() -> None:
     admission = DaytonaAdmission(max_active_leases=8)
     deadline = asyncio.get_running_loop().time() + 10
-    permits = [await admission.acquire(deadline=deadline) for _ in range(8)]
+    permits = [await admission.acquire(deadline=deadline) for _ in range(7)]
+    io_permit = await admission.acquire(deadline=deadline, host_io=True)
 
     ninth = asyncio.create_task(admission.acquire(deadline=deadline))
     await asyncio.sleep(0)
@@ -29,6 +30,7 @@ async def test_eight_leases_enter_and_ninth_waits_until_release() -> None:
     ninth_permit.release()
     for permit in permits[1:]:
         permit.release()
+    io_permit.release()
 
 
 @pytest.mark.asyncio

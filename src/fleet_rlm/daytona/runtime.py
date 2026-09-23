@@ -49,6 +49,8 @@ from fleet_rlm.sessions.bindings import (
     SandboxBinding,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
+    require_session_workspace_subpath,
+    session_workspace_volume_subpath,
     workspace_volume_subpath,
 )
 from fleet_rlm.snapshot_contract import validate_snapshot_name
@@ -79,6 +81,7 @@ SESSION_RESOURCES: tuple[int, int, int] = (4, 8, 8)
 SEMANTIC_CHILD_RESOURCES: tuple[int, int, int] = (2, 4, 4)
 _DIRECTORY_MODE = "700"
 _ZERO_UUID = UUID(int=0)
+EXECUTION_MOUNT_PATH = "/workspace"
 
 
 class DaytonaEnvironmentProfile(StrEnum):
@@ -207,6 +210,7 @@ class ExpectedWorkspaceMount:
     volume_subpath: str
     mount_path: str
     workspace_id: UUID
+    session_id: UUID | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "mount_path", str(self.mount_path))
@@ -426,6 +430,13 @@ async def ensure_volume_layout(
     await _ensure_directories(fs, required_volume_directories(paths, session_id=session_id, run_id=run_id))
 
 
+async def ensure_execution_layout(sandbox: Any, *, run_id: UUID) -> None:
+    """Create only the shared Session workspace mount and Run-local scratch."""
+    fs = _sandbox_filesystem(sandbox)
+    await _require_directory(fs, EXECUTION_MOUNT_PATH, create=False)
+    await _ensure_directories(fs, ("/tmp/fleet", f"/tmp/fleet/{run_id}"))
+
+
 def _mount_field(mount: Any, key: str) -> str | None:
     value = mount.get(key) if isinstance(mount, dict) else getattr(mount, key, None)
     return None if value is None else str(value)
@@ -511,9 +522,17 @@ class SandboxProvisioner:
             return await self._platform.create(
                 volume_id=expected.volume_id,
                 mount_path=str(expected.mount_path),
-                volume_subpath=require_scoped_volume_subpath(
-                    expected.volume_subpath,
-                    workspace_id=expected.workspace_id,
+                volume_subpath=(
+                    require_session_workspace_subpath(
+                        expected.volume_subpath,
+                        workspace_id=expected.workspace_id,
+                        session_id=expected.session_id,
+                    )
+                    if expected.session_id is not None
+                    else require_scoped_volume_subpath(
+                        expected.volume_subpath,
+                        workspace_id=expected.workspace_id,
+                    )
                 ),
                 labels=labels,
                 ephemeral=ephemeral,
@@ -534,12 +553,15 @@ class SandboxProvisioner:
         run_id: UUID,
     ) -> None:
         self.verify(sandbox, expected)
-        await ensure_volume_layout(
-            sandbox,
-            self._volume_config.paths(),
-            session_id=session_id,
-            run_id=run_id,
-        )
+        if expected.session_id is not None:
+            await ensure_execution_layout(sandbox, run_id=run_id)
+        else:
+            await ensure_volume_layout(
+                sandbox,
+                self._volume_config.paths(),
+                session_id=session_id,
+                run_id=run_id,
+            )
 
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
@@ -886,6 +908,7 @@ class DaytonaAdmissionPermit:
 
     _semaphore: asyncio.BoundedSemaphore
     _loop: asyncio.AbstractEventLoop | None = None
+    _execution_semaphore: asyncio.BoundedSemaphore | None = None
     _released: bool = field(default=False, init=False)
     _release_lock: Lock = field(default_factory=Lock, init=False, repr=False)
 
@@ -898,6 +921,8 @@ class DaytonaAdmissionPermit:
         loop = self._loop or getattr(self._semaphore, "_loop", None)
         if loop is None or loop.is_closed() or not loop.is_running():
             self._semaphore.release()
+            if self._execution_semaphore is not None:
+                self._execution_semaphore.release()
             return
         try:
             current = asyncio.get_running_loop()
@@ -905,11 +930,17 @@ class DaytonaAdmissionPermit:
             current = None
         if current is loop:
             self._semaphore.release()
+            if self._execution_semaphore is not None:
+                self._execution_semaphore.release()
             return
         try:
             loop.call_soon_threadsafe(self._semaphore.release)
+            if self._execution_semaphore is not None:
+                loop.call_soon_threadsafe(self._execution_semaphore.release)
         except RuntimeError:
             self._semaphore.release()
+            if self._execution_semaphore is not None:
+                self._execution_semaphore.release()
 
 
 class DaytonaAdmission:
@@ -921,14 +952,29 @@ class DaytonaAdmission:
         if max_active_leases > 8:
             raise ValueError("max_active_leases must be at most 8")
         self._semaphore = asyncio.BoundedSemaphore(max_active_leases)
+        self._execution_semaphore = asyncio.BoundedSemaphore(max(1, max_active_leases - 1))
 
-    async def acquire(self, *, deadline: float) -> DaytonaAdmissionPermit:
+    async def acquire(self, *, deadline: float, host_io: bool = False) -> DaytonaAdmissionPermit:
+        execution_acquired = False
         try:
             async with asyncio.timeout_at(deadline):
+                if not host_io:
+                    await self._execution_semaphore.acquire()
+                    execution_acquired = True
                 await self._semaphore.acquire()
         except TimeoutError:
+            if execution_acquired:
+                self._execution_semaphore.release()
             raise DaytonaAdmissionTimeoutError("Daytona admission unavailable") from None
-        return DaytonaAdmissionPermit(self._semaphore, asyncio.get_running_loop())
+        except BaseException:
+            if execution_acquired:
+                self._execution_semaphore.release()
+            raise
+        return DaytonaAdmissionPermit(
+            self._semaphore,
+            asyncio.get_running_loop(),
+            self._execution_semaphore if execution_acquired else None,
+        )
 
 
 # --- Confirmed Sandbox Deletion Lifecycle ---
@@ -2445,6 +2491,8 @@ async def cleanup_child_runtime_async(
     try:
         if mount_path:
             await purge_fn(sandbox, mount_path)
+            if mount_path.startswith("/tmp/fleet/"):
+                await sandbox.fs.delete_file(mount_path, recursive=True)
         delete_error: Exception | None = None
         try:
             await platform.delete(sandbox_id)
@@ -2579,6 +2627,7 @@ def _build_child_runtime_factory(
     mount_path: str | None,
     workspace_id: UUID,
     run_id: UUID,
+    session_id: UUID | None = None,
     deadline: float,
     execution_timeout_s: int,
     execution_output_cap: int,
@@ -2610,6 +2659,7 @@ def _build_child_runtime_factory(
             mount_path=mount_path,
             profile=chosen_profile,
             workspace_id=workspace_id,
+            session_id=session_id,
             run_id=run_id,
             call_index=call_index,
             deadline=deadline,
@@ -3120,7 +3170,14 @@ def _build_interpreter(
 def binding_matches_expected(binding: SandboxBinding, expected: ExpectedWorkspaceMount) -> bool:
     try:
         require_non_zero_workspace_id(binding.workspace_id)
-        require_scoped_volume_subpath(binding.volume_subpath, workspace_id=binding.workspace_id)
+        if expected.session_id is None:
+            require_scoped_volume_subpath(binding.volume_subpath, workspace_id=binding.workspace_id)
+        else:
+            require_session_workspace_subpath(
+                binding.volume_subpath,
+                workspace_id=binding.workspace_id,
+                session_id=expected.session_id,
+            )
     except (TypeError, ValueError):
         return False
     return (
@@ -3406,6 +3463,17 @@ class DaytonaRuntime:
                     or key in self._tainted
                     or spec.force_new
                     or _lease_fingerprint(current) != spec.context_fingerprint
+                    or (
+                        binding is not None
+                        and (
+                            binding.volume_subpath
+                            != session_workspace_volume_subpath(
+                                _coerce_uuid(spec.workspace_id, "workspace_id"),
+                                _coerce_uuid(spec.session_id, "session_id"),
+                            )
+                            or binding.mount_path != EXECUTION_MOUNT_PATH
+                        )
+                    )
                 )
                 if current is None and key in self._tainted:
                     must_replace = True
@@ -3778,7 +3846,7 @@ class DaytonaRuntime:
             raise RuntimeError("Daytona Workspace I/O is not configured")
         volume_id = await get_or_create_volume_id(self._volume_client, self._volume_config)
         expected = self._provisioner.expected_mount(volume_id=volume_id, workspace_id=workspace_id)
-        permit = await self._admission.acquire(deadline=float("inf"))
+        permit = await self._admission.acquire(deadline=float("inf"), host_io=True)
         if self._state is not DaytonaRuntimeState.OPEN:
             permit.release()
             raise RuntimeError("Daytona runtime closed during Workspace I/O admission")
@@ -4167,6 +4235,7 @@ class DaytonaRuntime:
         profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
         workspace_id: UUID,
         run_id: UUID,
+        session_id: UUID | None = None,
         call_index: int,
         deadline: float,
         execution_timeout_s: int,
@@ -4186,12 +4255,19 @@ class DaytonaRuntime:
         if not isinstance(profile, DaytonaEnvironmentProfile):
             profile = DaytonaEnvironmentProfile(str(profile))
         semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
-        if not semantic and (not volume_id or not mount_path):
+        if not semantic and (not volume_id or not mount_path or session_id is None):
             raise ValueError("WorkspaceChild requires a Volume binding")
+        if not semantic:
+            assert session_id is not None
         permit = await admission.acquire(deadline=deadline)
         sandbox: Any | None = None
         sandbox_id: str | None = None
-        subpath = "" if semantic else recursive_child_volume_subpath(workspace_id, run_id, call_index)
+        if semantic:
+            subpath = ""
+        else:
+            assert session_id is not None
+            subpath = session_workspace_volume_subpath(workspace_id, session_id)
+        scratch_path = f"/tmp/fleet/{run_id}/{call_index}"
         try:
             authorization_check(is_authorized)
             labels = {"fleet.runtime": "recursive-child"}
@@ -4200,7 +4276,7 @@ class DaytonaRuntime:
             create_kwargs: dict[str, Any] = {
                 "profile": profile,
                 "volume_id": None if semantic else volume_id,
-                "mount_path": None if semantic else mount_path,
+                "mount_path": None if semantic else EXECUTION_MOUNT_PATH,
                 "volume_subpath": None if semantic else subpath,
                 "labels": labels,
                 "with_volume": not semantic,
@@ -4217,7 +4293,7 @@ class DaytonaRuntime:
                     creation,
                     platform=platform,
                     permit=permit,
-                    mount_path=None if semantic else mount_path,
+                    mount_path=None if semantic else scratch_path,
                     retain_pending_cleanup=retain_pending_cleanup,
                 )
                 permit = None
@@ -4225,9 +4301,15 @@ class DaytonaRuntime:
             sandbox_id = sandbox_id_resolver(sandbox)
             child_sandbox_id = sandbox_id
             self._child_cleanup_records[child_sandbox_id] = _ChildCleanupRecord(
-                platform, sandbox, child_sandbox_id, None if semantic else mount_path, permit
+                platform, sandbox, child_sandbox_id, None if semantic else scratch_path, permit
             )
             authorization_check(is_authorized)
+            if not semantic:
+                fs = _sandbox_filesystem(sandbox)
+                await _ensure_directories(
+                    fs,
+                    ("/tmp/fleet", f"/tmp/fleet/{run_id}", scratch_path),
+                )
             interpreter = interpreter_factory(
                 backend=sandbox_backend_factory(
                     sandbox,
@@ -4237,6 +4319,8 @@ class DaytonaRuntime:
                 ),
                 execution_output_cap=execution_output_cap,
             )
+            if not semantic:
+                interpreter.bind_run_scratch(run_id, call_index=call_index)
 
             def close() -> None:
                 try:
@@ -4245,7 +4329,7 @@ class DaytonaRuntime:
                         platform=platform,
                         sandbox=sandbox,
                         sandbox_id=child_sandbox_id,
-                        mount_path=None if semantic else (mount_path or ""),
+                        mount_path=None if semantic else scratch_path,
                         interpreter=interpreter,
                         permit=permit,
                         retain_pending_cleanup=retain_pending_cleanup,
@@ -4270,7 +4354,7 @@ class DaytonaRuntime:
                     self._unidentified_child_sandboxes.append((platform, sandbox, permit))
             if sandbox is not None and sandbox_id is not None and sandbox_id not in self._child_cleanup_records:
                 self._child_cleanup_records[sandbox_id] = _ChildCleanupRecord(
-                    platform, sandbox, sandbox_id, None if semantic else mount_path, permit
+                    platform, sandbox, sandbox_id, None if semantic else scratch_path, permit
                 )
             try:
                 cleanup = OwnedEffect.start(cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit))
@@ -4290,7 +4374,9 @@ class DaytonaRuntime:
             raise RuntimeError("Daytona child specification is incomplete")
         if spec.workspace_id is None or spec.run_id is None:
             raise RuntimeError("Daytona child specification is incomplete")
-        if spec.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD and (not spec.volume_id or not spec.mount_path):
+        if spec.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD and (
+            not spec.volume_id or not spec.mount_path or spec.session_id is None
+        ):
             raise RuntimeError("WorkspaceChild specification requires a Volume binding")
 
         loop = asyncio.get_running_loop()
@@ -4303,6 +4389,7 @@ class DaytonaRuntime:
             volume_id=spec.volume_id,
             mount_path=spec.mount_path,
             workspace_id=_coerce_uuid(spec.workspace_id, "workspace_id"),
+            session_id=(_coerce_uuid(spec.session_id, "session_id") if spec.session_id is not None else None),
             run_id=_coerce_uuid(spec.run_id, "run_id"),
             deadline=spec.deadline if spec.deadline is not None else float("inf"),
             execution_timeout_s=(
@@ -4486,6 +4573,17 @@ class DaytonaRuntime:
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
         return self._provisioner.expected_mount(volume_id=volume_id, workspace_id=workspace_id)
+
+    def _expected_execution_mount(
+        self, *, volume_id: str, workspace_id: UUID, session_id: UUID
+    ) -> ExpectedWorkspaceMount:
+        return ExpectedWorkspaceMount(
+            volume_id=str(volume_id),
+            volume_subpath=session_workspace_volume_subpath(workspace_id, session_id),
+            mount_path=EXECUTION_MOUNT_PATH,
+            workspace_id=workspace_id,
+            session_id=session_id,
+        )
 
     def _sandbox_retirement_lease(
         self,
@@ -5031,7 +5129,11 @@ class DaytonaRuntime:
         self, request: LeaseRequest, *, deadline: float | None = None
     ) -> _AcquisitionContext:
         volume_id = await self._resolve_volume_id(deadline=deadline)
-        expected = self._expected_mount(volume_id=volume_id, workspace_id=request.workspace_id)
+        expected = self._expected_execution_mount(
+            volume_id=volume_id,
+            workspace_id=request.workspace_id,
+            session_id=request.session_id,
+        )
         binding = await self._get_binding_for_workspace(request.session_id, request.workspace_id, deadline=deadline)
         if binding is not None and binding.provider_state == "fencing":
             raise DaytonaAdapterError(
@@ -5072,8 +5174,14 @@ class DaytonaRuntime:
         if binding is None or not binding.sandbox_id or binding.provider_state in {"quarantined", "unrecoverable"}:
             return None
         if not binding_matches_expected(binding, context.expected):
+            if (
+                binding.workspace_id == request.workspace_id
+                and binding.volume_subpath == workspace_volume_subpath(request.workspace_id)
+                and binding.mount_path == self._volume_config.mount_path
+            ):
+                return await self._replace_bound_sandbox(binding, request, deadline=deadline)
             raise DaytonaAdapterError(
-                message="sandbox binding does not match workspace scope",
+                message="sandbox binding does not match Session workspace scope",
                 cause_type="WorkspaceMountMismatch",
             )
         if force_new:
@@ -5737,9 +5845,20 @@ class DaytonaRuntime:
                 cause_type="SandboxReplaceIdentityError",
             )
         volume_id = binding.volume_id or await self._resolve_volume_id(deadline=deadline)
-        expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
+        expected = self._expected_execution_mount(
+            volume_id=volume_id,
+            workspace_id=resolved_workspace,
+            session_id=binding.session_id,
+        )
         if binding.sandbox_id:
             await self.discard_stale_root_session(resolved_workspace, binding.session_id, deadline=deadline)
+            fenced = await _provider_call(
+                self._bindings.upsert(replace(binding, provider_state="fencing", last_verified_at=None)),
+                deadline=deadline,
+                operation="Sandbox replacement fence",
+                owner=self._provider_tasks,
+            )
+            self._observe_binding(fenced)
             retirement = self._sandbox_retirement_lease(binding.sandbox_id)
             retirement_attempted = True
             try:
@@ -5857,6 +5976,7 @@ class DaytonaRuntime:
             volume_subpath=volume_subpath,
             mount_path=mount_path,
             workspace_id=request.workspace_id,
+            session_id=request.session_id if mount_path == EXECUTION_MOUNT_PATH else None,
         )
         try:
             return await _provider_call(

@@ -65,7 +65,6 @@ class VolumeBlobFs(Protocol):
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes: ...
 
     def exists(self, logical_path: str) -> bool: ...
@@ -86,7 +85,7 @@ class VolumeTreeFs(VolumeBlobFs, Protocol):
 class AsyncVolumeStorage(Protocol):
     async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None: ...
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes: ...
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes: ...
 
     async def exists(self, logical_path: str) -> bool: ...
 
@@ -104,7 +103,7 @@ class AsyncVolumeStorage(Protocol):
 class VolumeStorage(Protocol):
     def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None: ...
 
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes: ...
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes: ...
 
     def exists(self, logical_path: str) -> bool: ...
 
@@ -265,13 +264,6 @@ class WorkspaceVolumeGateway(Protocol):
         max_depth: int = 10,
         max_files: int = 1000,
     ) -> tuple[VolumeFile, ...]: ...
-
-
-class VolumeFSCacheState:
-    """Lightweight compatibility token for callers expecting cache handles."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
 
 
 def _validate_workspace_roots(
@@ -767,8 +759,7 @@ class WorkspaceStorage:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
 
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         target = self._resolve(logical_path)
         if not target.is_file():
             raise FileNotFoundError(logical_path)
@@ -1130,8 +1121,8 @@ class AsyncWorkspaceStorage:
     async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         await asyncio.to_thread(self._sync.delete_path, path, expected_sha256=expected_sha256)
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        return await asyncio.to_thread(self._sync.read_bytes, logical_path, max_bytes=max_bytes, use_cache=use_cache)
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
+        return await asyncio.to_thread(self._sync.read_bytes, logical_path, max_bytes=max_bytes)
 
     async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
         await asyncio.to_thread(self._sync.write_bytes, logical_path, data, max_bytes=max_bytes)
@@ -1191,9 +1182,7 @@ class HostVolumeMirror:
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes:
-        del use_cache
         destination = self.host_path_for(logical_path)
         if not destination.is_file():
             raise FileNotFoundError(logical_path)
@@ -1253,11 +1242,8 @@ class _HostWorkspaceVolumeSession:
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes:
-        return await asyncio.to_thread(
-            self._mirror.read_bytes, logical_path, max_bytes=max_bytes or self._max_bytes, use_cache=use_cache
-        )
+        return await asyncio.to_thread(self._mirror.read_bytes, logical_path, max_bytes=max_bytes or self._max_bytes)
 
     async def exists(self, logical_path: str) -> bool:
         return await asyncio.to_thread(self._mirror.exists, logical_path)
@@ -1556,8 +1542,7 @@ class DaytonaSandboxVolumeFs:
         self.sandbox = sandbox
         self.fs = getattr(sandbox, "fs", None)
 
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         if self.fs is None:
             raise FileNotFoundError(logical_path)
         download = getattr(self.fs, "download_file", None)
@@ -1689,8 +1674,7 @@ class AsyncDaytonaVolumeFS:
             res = await res
         return _convert_to_volume_files(res, max_files=max_files)
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         if self.fs is None:
             raise FileNotFoundError(logical_path)
         download = getattr(self.fs, "download_file", None)
@@ -1742,9 +1726,6 @@ AgentAsyncStorageSession = AsyncWorkspaceStorage
 AgentVolumeStorage = DaytonaSandboxVolumeFs
 AgentAsyncVolumeStorage = AsyncDaytonaVolumeFS
 
-DaytonaSessionWorkspaceFS = WorkspaceStorage
-AsyncDaytonaSessionWorkspaceFS = AsyncWorkspaceStorage
-
 __all__ = [
     "MAX_FILE_BYTES",
     "MAX_STORAGE_LIST_LIMIT",
@@ -1755,20 +1736,17 @@ __all__ = [
     "AgentAsyncVolumeStorage",
     "AgentStorageSession",
     "AgentVolumeStorage",
-    "AsyncDaytonaSessionWorkspaceFS",
     "AsyncDaytonaVolumeFS",
     "AsyncStorageSession",
     "AsyncVolumeStorage",
     "AsyncWorkspaceStorage",
     "DaytonaSandboxVolumeFs",
-    "DaytonaSessionWorkspaceFS",
     "HostVolumeMirror",
     "HostWorkspaceAccessGateway",
     "OfflineHostVolumeGateway",
     "OrphanCleanupReport",
     "StorageSession",
     "VolumeBlobFs",
-    "VolumeFSCacheState",
     "VolumeFile",
     "VolumeStorage",
     "VolumeTreeFs",

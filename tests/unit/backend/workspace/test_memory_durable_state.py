@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.memory import WorkspaceMemory
 from fleet_rlm.workspace.models import (
     WorkspaceMemoryConflictError,
@@ -110,3 +111,95 @@ def test_tail_budget_reports_full_size_without_returning_over_budget(tmp_path) -
     assert result.truncated is True
     assert result.total_bytes > result.byte_budget
     assert result.bytes_returned <= result.byte_budget
+
+
+def test_edit_appends_provenance_record_and_supersedes_original(tmp_path) -> None:
+    store = _memory(tmp_path)
+    original, _ = format_workspace_memory_record(
+        "Keep the report detailed", "Project", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    original_id = parse_workspace_memory_record(original).memory_id
+    store.append_record(original)
+
+    replacement = store.edit_entry(original_id, "Keep the report concise")
+    parsed_replacement = parse_workspace_memory_record(replacement)
+    entries = store.list_entries(limit=10).entries
+
+    assert len(entries) == 2
+    assert entries[0].memory_id == original_id
+    assert entries[0].active is False
+    assert entries[1].memory_id == parsed_replacement.memory_id
+    assert entries[1].active is True
+    assert entries[1].supersedes_id == original_id
+    assert entries[1].source == "user_explicit"
+
+
+def test_injection_prefers_lexical_matches_then_recent_active_records_within_budget(tmp_path) -> None:
+    store = _memory(tmp_path)
+    old, _ = format_workspace_memory_record(
+        "operator report evidence is authoritative", "Project", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    old_id = parse_workspace_memory_record(old).memory_id
+    latest, _ = format_workspace_memory_record(
+        "Remember to use the newer formatting", "Preference", timestamp=datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    )
+    superseding = format_workspace_memory_v3_record(
+        "operator report evidence stays compact",
+        "Project",
+        memory_id="bbbb0002",
+        created_at="2026-09-22T10:00:00Z",
+        updated_at="2026-09-22T10:00:00Z",
+        source="operator_import",
+        supersedes_id=old_id,
+    )
+    store.append_record(old)
+    store.append_record(latest)
+    store.append_record(superseding)
+
+    digest = store.read_injection_digest(request="operator report evidence")
+
+    assert "operator report evidence stays compact" in digest
+    assert "operator report evidence is authoritative" not in digest
+    assert digest.index("operator report evidence stays compact") < digest.index("Remember to use")
+    assert "source:operator_import" in digest
+    assert len(digest.encode("utf-8")) <= 4_096
+
+
+def test_injection_does_not_truncate_a_record_to_fit_budget(tmp_path) -> None:
+    store = _memory(tmp_path)
+    record, _ = format_workspace_memory_record(
+        "x" * 2_000, "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    second, _ = format_workspace_memory_record(
+        "y" * 2_000, "General", timestamp=datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    )
+    store.append_record(record)
+    store.append_record(second)
+
+    digest = store.read_injection_digest(request="x")
+    assert digest == record
+
+
+def test_delete_uses_checksum_precondition(tmp_path) -> None:
+    volume = WorkspaceStorage(root=tmp_path)
+
+    class RacyStorage:
+        def __getattr__(self, name):
+            return getattr(volume, name)
+
+        def write_text(self, path, content, *, overwrite=True, expected_sha256=None):
+            if expected_sha256 is not None:
+                volume.write_text(path, "# Fleet Memory v2\nexternal change\n", overwrite=True)
+            return volume.write_text(path, content, overwrite=overwrite, expected_sha256=expected_sha256)
+
+    store = WorkspaceMemory(RacyStorage())
+    record, _ = format_workspace_memory_record(
+        "delete me", "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    memory_id = parse_workspace_memory_record(record).memory_id
+    store.append_record(record)
+
+    with pytest.raises(WorkspaceConflictError, match="checksum mismatch"):
+        store.delete_entry(memory_id)
+
+    assert (tmp_path / "memory" / "MEMORIES.md").read_text(encoding="utf-8").endswith("external change\n")

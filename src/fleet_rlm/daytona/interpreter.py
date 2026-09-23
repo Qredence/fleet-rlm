@@ -488,6 +488,35 @@ class _SandboxProcessBackend:
         self._async_bridge: Any | None = None
         self._tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None
         self._tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None
+        self._run_scratch_path: str | None = None
+
+    def bind_run_scratch(self, path: str) -> None:
+        """Bind one validated Run-local scratch directory for this invocation."""
+        from pathlib import PurePosixPath
+
+        candidate = PurePosixPath(path)
+        if len(candidate.parts) not in {4, 5} or candidate.parts[:3] != ("/", "tmp", "fleet"):
+            raise ValueError("Run scratch must be under /tmp/fleet/<run-id>")
+        if candidate.parts[3] in {"", ".", ".."}:
+            raise ValueError("Run scratch identity is invalid")
+        self._run_scratch_path = str(candidate)
+
+    def cleanup_run_scratch(self) -> None:
+        path = self._run_scratch_path
+        if path is None:
+            return
+        fs = getattr(self._sandbox, "fs", None)
+        delete = getattr(fs, "delete_file", None)
+        if not callable(delete):
+            raise DaytonaAdapterError(
+                message="Sandbox filesystem cannot remove Run scratch",
+                cause_type="InterpreterConfigurationError",
+            )
+        try:
+            delete(path, recursive=True)
+        except TypeError:
+            delete(path)
+        self._run_scratch_path = None
 
     @property
     def sandbox(self) -> Any:
@@ -558,6 +587,12 @@ class _SandboxProcessBackend:
             return self._run_direct(code, variables, on_stdout=on_stdout)
 
         context_lines = ["if 'context' not in globals(): context = []"]
+        if self._run_scratch_path is not None:
+            context_lines.append(
+                "import os as _fleet_scratch_os; "
+                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+            )
         if self._context_binding is not None:
             mount_root, manifest_sha = self._context_binding
             context_lines.append(f"""
@@ -655,6 +690,12 @@ def _fleet_load_context_manifest(raw_manifest):
                 ) from exc
             var_lines.append(f"{name} = _fleet_bindings_json.loads({json.dumps(payload)})")
         preamble = remote_submit_setup_code(self._output_fields)
+        if self._run_scratch_path is not None:
+            preamble += (
+                "\nimport os as _fleet_scratch_os\n"
+                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True)\n"
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+            )
         if var_lines:
             preamble += "\nimport json as _fleet_bindings_json\n" + "\n".join(var_lines)
         full_code = f"{preamble}\n\n{code}"
@@ -1030,6 +1071,32 @@ class DaytonaCodeInterpreter:
                 expected_manifest_sha256=binding[1],
             )
         self._context_binding = binding
+
+    def bind_run_scratch(self, run_id: Any, *, call_index: int | None = None) -> str:
+        """Bind scratch beneath /tmp/fleet for one Run or recursive call."""
+        self._ensure_binding_mutation_allowed()
+        from uuid import UUID
+
+        parsed = UUID(str(run_id))
+        if parsed.int == 0:
+            raise ValueError("run_id must be a non-zero UUID")
+        suffix = str(parsed)
+        if call_index is not None:
+            if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
+                raise ValueError("call_index must be positive")
+            suffix = f"{suffix}/{call_index}"
+        path = f"/tmp/fleet/{suffix}"
+        bind = getattr(self._backend, "bind_run_scratch", None)
+        if callable(bind):
+            bind(path)
+        return path
+
+    def cleanup_run_scratch(self) -> None:
+        """Remove this Run's scratch after its owned execution has settled."""
+        self._ensure_binding_mutation_allowed()
+        cleanup = getattr(self._backend, "cleanup_run_scratch", None)
+        if callable(cleanup):
+            cleanup()
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
         if not self._public_observation:

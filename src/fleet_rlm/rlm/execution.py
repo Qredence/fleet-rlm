@@ -252,6 +252,7 @@ class SessionView:
     attachment_context: AttachmentContextCapsule | None = None
     preparation_notices: tuple[PreparationNotice, ...] = ()
     workspace_memory_digest: str = ""
+    active_task_summary: str = ""
     # Canonical committed Session conversation materialized from the
     # claimed checkpoint. Defaults to an empty ``dspy.History`` so
     # ``dspy.RLM._validate_inputs`` always sees a real instance for the
@@ -1352,6 +1353,7 @@ class RLMRunner:
                 attachment_context=state_context.session.attachment_context,
                 workspace=spec.workspace,
                 workspace_memory_digest=state_context.session.workspace_memory_digest,
+                active_task_summary=state_context.session.active_task_summary,
                 history=state_context.session.history,
                 signature=spec.signature,
             )

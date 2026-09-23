@@ -532,6 +532,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
     source_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
     allowed_tool_adapters = {
         "sessions/history_tools.py",
+        "sessions/task_tools.py",
         # P43.7 narrow SandboxSerializable transport for committed Session
         # conversation; the dspy coupling is sanctioned by the plan and
         # required for the Daytona broker, which cannot inject a raw

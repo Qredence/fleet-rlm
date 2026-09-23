@@ -34,6 +34,9 @@ class _Fs:
         assert depth is None
         return [SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)]
 
+    async def create_folder(self, _path: str, _mode: str) -> None:
+        return None
+
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         del recursive
         self.files.discard(path)
@@ -82,6 +85,9 @@ class _RecordingInterpreter:
         self._error = error
         self.shutdown_calls = 0
 
+    def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+        del call_index
+
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         assert strict_broker_cleanup is True
         self.shutdown_calls += 1
@@ -114,6 +120,7 @@ def _factory(
         volume_id="shared-volume",
         mount_path=_MOUNT,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=deadline if deadline is not None else loop.time() + 30,
         execution_timeout_s=30,
@@ -125,8 +132,12 @@ def _factory(
 async def _full_capacity_restored(admission: DaytonaAdmission, *, capacity: int) -> bool:
     permits = []
     try:
-        for _ in range(capacity):
-            permits.append(await admission.acquire(deadline=asyncio.get_running_loop().time() + 1))
+        for index in range(capacity):
+            permits.append(
+                await admission.acquire(
+                    deadline=asyncio.get_running_loop().time() + 1, host_io=index == capacity - 1 and capacity > 1
+                )
+            )
     except RuntimeError:
         return False
     finally:
@@ -165,7 +176,7 @@ async def test_broker_shutdown_failure_fails_close_but_remaining_steps_still_run
         "delete:child-sandbox",
         "probe:child-sandbox",
     ]
-    assert child.fs.files == set()
+    assert child.fs.files == {f"{_MOUNT}/child.txt"}
     assert platform.deleted == ["child-sandbox"]
     assert platform.probes == ["child-sandbox"]
     # The close failure is re-observed on every later close attempt without
@@ -195,6 +206,9 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             platform.steps.append("interpreter_shutdown")
@@ -210,6 +224,7 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
         volume_id="shared-volume",
         mount_path=_MOUNT,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 30,
         execution_timeout_s=30,
@@ -231,7 +246,7 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     await asyncio.to_thread(factory.wait_owned)
     assert platform.deleted == ["child-sandbox"]
     assert platform.probes == ["child-sandbox"]
-    assert child.fs.files == set()
+    assert child.fs.files == {f"{_MOUNT}/child.txt"}
     assert await _full_capacity_restored(admission, capacity=1)
 
 
@@ -297,6 +312,7 @@ async def test_admission_restored_exactly_once_on_every_path(
         volume_id="shared-volume",
         mount_path=_MOUNT,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + (0.05 if path == "admission_timeout" else 30),
         execution_timeout_s=30,
@@ -583,6 +599,9 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             platform.steps.append("interpreter_shutdown")
@@ -601,6 +620,7 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
         volume_id="shared-volume",
         mount_path=_MOUNT,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 30,
         execution_timeout_s=30,
@@ -615,7 +635,7 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
     await asyncio.to_thread(factory.wait_owned)
     assert thread_starts == 0
     assert platform.deleted == ["child-sandbox"]
-    assert child.fs.files == set()
+    assert child.fs.files == {f"{_MOUNT}/child.txt"}
     assert await _full_capacity_restored(admission, capacity=1)
 
 

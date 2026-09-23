@@ -237,7 +237,7 @@ async def build_daytona_composition(
     from fleet_rlm.api.local_scope import LocalScope
     from fleet_rlm.attachments import (
         AttachmentLifecycleService,
-        WorkspaceAttachmentPathPolicy,
+        DaytonaRunAttachmentPathPolicy,
     )
     from fleet_rlm.daytona.errors import map_provider_error
     from fleet_rlm.daytona.runtime import sandbox_spec_from_settings
@@ -253,6 +253,7 @@ async def build_daytona_composition(
     from fleet_rlm.rlm.execution import RLMRunner
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.program import build_model_bundle
+    from fleet_rlm.sessions.task import SessionTaskService
     from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
     from fleet_rlm.turns import TurnRuntime
     from fleet_rlm.workspace.mounted_gateway import (
@@ -307,7 +308,7 @@ async def build_daytona_composition(
         attachment_lifecycle = AttachmentLifecycleService(
             catalog=SqlAlchemyAttachmentCatalog(session_factory),
             blobs=gateway,
-            paths=WorkspaceAttachmentPathPolicy(volume_paths),
+            paths=DaytonaRunAttachmentPathPolicy(volume_paths),
             max_bytes=resolved.max_upload_bytes,
         )
         artifact_catalog = SqlAlchemyArtifactCatalog(session_factory)
@@ -317,6 +318,8 @@ async def build_daytona_composition(
         )
         workspace_file_service = WorkspaceFileService(cast(WorkspaceAccessGateway, mounted_workspace_gateway))
         local_scope = LocalScope()
+        session_catalog = SqlAlchemySessionCatalog(session_factory)
+        task_service = SessionTaskService(session_catalog, gateway, volume_paths)
         startup_started = asyncio.get_running_loop().time()
         startup_deadline = startup_started + _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
         run_preparation = build_run_preparation(
@@ -326,12 +329,14 @@ async def build_daytona_composition(
             settings=resolved,
             models=model_bundle,
             artifact_reader=artifact_reader,
+            workspace_gateway=mounted_workspace_gateway,
+            volume_gateway=gateway,
+            task_service=task_service,
         )
         run_state = SqlAlchemyRunStateStore(
             session_factory,
             stale_after_seconds=resolved.run_stale_after_seconds,
         )
-        session_catalog = SqlAlchemySessionCatalog(session_factory)
         memory_outbox = SqlAlchemyMemoryPromotionOutbox(session_factory)
         settlement = RunSettlementPlan(
             run_state,
@@ -603,6 +608,9 @@ def build_run_preparation(
     settings: Settings,
     models: RLMModelBundle,
     artifact_reader: ArtifactReader | None = None,
+    workspace_gateway: Any | None = None,
+    volume_gateway: Any | None = None,
+    task_service: Any | None = None,
 ) -> TurnPreparationPlan:
     """
     Create a Daytona run preparer configured with models, runtime limits,
@@ -637,8 +645,18 @@ def build_run_preparation(
             finalization_seconds=settings.rlm_wrap_up_seconds,
         ),
         attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(resources, settings),
+        environments=_DaytonaEnvironmentProvider(
+            resources,
+            settings,
+            workspace_gateway=workspace_gateway,
+            volume_gateway=volume_gateway,
+            task_service=task_service,
+        ),
         capabilities=_LiveCapabilityPreparer(
-            settings, skill_catalog, volume_paths=resources.volume_paths, artifact_reader=artifact_reader
+            settings,
+            skill_catalog,
+            volume_paths=resources.volume_paths,
+            artifact_reader=artifact_reader,
+            task_service=task_service,
         ),
     )

@@ -122,7 +122,9 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
 
 def _is_storage_transport_exception(relative: Path, imported: str) -> bool:
     """Whether a storage import is the one permitted Daytona transport edge."""
-    return relative.as_posix() == "workspace/storage.py" and matches(imported, _ALLOWED_STORAGE_TRANSPORT)
+    if relative.as_posix() == "workspace/storage.py":
+        return matches(imported, _ALLOWED_STORAGE_TRANSPORT)
+    return relative.as_posix() == "workspace/host_io.py" and matches(imported, "fleet_rlm.daytona.interpreter")
 
 
 def _content_violations(path: Path, root: Path) -> Iterable[BoundaryViolation]:

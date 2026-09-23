@@ -173,6 +173,13 @@ def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
     return digest
 
 
+def _active_task_summary(capabilities: PreparedCapabilities) -> str:
+    summary = getattr(capabilities, "active_task_summary", "")
+    if not isinstance(summary, str) or len(summary) > 2048:
+        return ""
+    return summary
+
+
 def claim_history_records(
     claim: ClaimedRun,
 ) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
@@ -483,6 +490,7 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
             attachment_context=attachment_context,
             preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
             workspace_memory_digest=_workspace_memory_digest(capabilities),
+            active_task_summary=_active_task_summary(capabilities),
             history=(
                 environment.history_transport
                 if environment.history_transport is not None

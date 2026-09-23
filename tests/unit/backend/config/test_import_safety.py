@@ -91,11 +91,16 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
     ]
     candidates.extend((root / "turns.py", root / "turn_preparation.py", root / "turn_settlement.py"))
 
-    # ``workspace/storage.py`` is the one documented raw Workspace Agent
-    # transport exception; all other provider imports stay below composition.
-    storage = root / "workspace" / "storage.py"
+    # Workspace storage's agent transport and host I/O bridge are the two
+    # narrow provider edges; domain policy stays in Workspace.
+    provider_edges = {
+        root / "workspace" / "storage.py",
+        root / "workspace" / "host_io.py",
+    }
     violations = [
-        str(path) for path in candidates if path != storage and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
+        str(path)
+        for path in candidates
+        if path not in provider_edges and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
     ]
 
     assert violations == []
