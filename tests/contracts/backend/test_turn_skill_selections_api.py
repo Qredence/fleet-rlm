@@ -11,14 +11,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.dependencies import get_turn_runtime
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.events import RuntimeEvent
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
+from fleet_rlm.turns import OpenTurnCommand
 
 
 class _EmptyOpenedTurn:
@@ -42,7 +42,7 @@ class _CapturingCoordinator:
         self.error = error
 
     def open_owned(self, command: OpenTurnCommand):
-        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+        from fleet_rlm.turns import OpenedTurnStream
 
         self.command = command
         if self.error is not None:
@@ -58,8 +58,7 @@ class _CapturingCoordinator:
 def _client(coordinator: _CapturingCoordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
-    app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
+    app.dependency_overrides[get_turn_runtime] = lambda: coordinator
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

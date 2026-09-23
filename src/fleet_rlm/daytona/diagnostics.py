@@ -36,7 +36,7 @@ from fleet_rlm.daytona.runtime import (
     volume_config_from_settings,
 )
 from fleet_rlm.persistence.database import ensure_database_compatible
-from fleet_rlm.runtime.bindings import workspace_volume_subpath
+from fleet_rlm.sessions.bindings import workspace_volume_subpath
 
 _SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
 _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
@@ -599,7 +599,7 @@ class _ProductionDaytonaDoctorDependencies:
         await self._client.close()
 
     async def check_rlm_readiness(self, settings: Settings) -> None:
-        from fleet_rlm.rlm.runtime import probe_configured_root_lm
+        from fleet_rlm.rlm.execution import probe_configured_root_lm
 
         await probe_configured_root_lm(
             settings,

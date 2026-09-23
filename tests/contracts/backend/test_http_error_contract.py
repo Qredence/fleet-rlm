@@ -19,7 +19,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from fleet_rlm.api.errors import http_error, install_error_handlers
 from fleet_rlm.api.routes.files import _READ_ERRORS, _WRITE_ERRORS
-from fleet_rlm.composition.testing import create_testing_app
+from tests.support.testing_app import create_testing_app
 
 
 def test_unknown_route_uses_the_closed_error_envelope() -> None:

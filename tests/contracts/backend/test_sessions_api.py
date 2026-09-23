@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.composition.testing import create_testing_app
+from fleet_rlm.app_services import install_runtime_inventory
 from fleet_rlm.rlm.result import RLMOutcome
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -18,6 +18,7 @@ from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     RunClaim,
 )
+from tests.support.testing_app import create_testing_app
 
 
 def test_sessions_route_does_not_discover_provider_retirement() -> None:
@@ -80,9 +81,12 @@ def test_archive_returns_pending_when_provider_retirement_fails() -> None:
         inventory = app.state.runtime_inventory
         assert inventory is not None
         assert inventory.session_catalog is not None
-        app.state.runtime_inventory = replace(
-            inventory,
-            session_lifecycle=SessionLifecycle(inventory.session_catalog, _FailingRetirement()),
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                session_lifecycle=SessionLifecycle(inventory.session_catalog, _FailingRetirement()),
+            ),
         )
         created = client.post("/api/sessions", json={"title": "retire-me"})
         assert created.status_code == 201

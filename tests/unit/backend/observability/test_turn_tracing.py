@@ -582,9 +582,9 @@ def test_successful_model_execution_followed_by_commit_failure_marks_root_failed
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.run_state import FailedRunReceipt
+    from fleet_rlm.turns import TurnRuntime
 
     outcome = RLMOutcome(
         terminal_status="completed",

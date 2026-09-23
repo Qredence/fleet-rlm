@@ -12,12 +12,12 @@ from pydantic import BaseModel
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
     MLflowRuntimeDep,
-    RunLifecycleDep,
     SessionCatalogDep,
     SessionLifecycleDep,
     SessionPrewarmDep,
     SettingsDep,
     TraceFeedbackServiceDep,
+    TurnRuntimeDep,
 )
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
@@ -361,11 +361,11 @@ class CancellationResponse(BaseModel):
 async def request_run_cancellation(
     run_id: UUID,
     identity: LocalScopeDep,
-    lifecycle: RunLifecycleDep,
+    coordinator: TurnRuntimeDep,
 ) -> CancellationResponse:
     """Request cancellation for a run."""
     try:
-        status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
+        status = await coordinator.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
     except RunNotFoundError as exc:
         raise http_error(404, "run_not_found", "Run not found") from exc
     capture(

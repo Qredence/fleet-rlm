@@ -14,7 +14,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
@@ -22,6 +21,7 @@ from fleet_rlm.sessions.run_state import (
     FailedRunReceipt,
 )
 from tests.support.turn_lifecycle import claimed_run, completed_outcome
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 def _make_candidate(access: TurnAccess, turn: ClaimedRun, name: str, data: bytes) -> ArtifactCandidate:
@@ -85,7 +85,7 @@ async def test_candidate_reads_run_concurrently() -> None:
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(_CommitStore(), max_artifact_bytes=100).finish(
         turn, completed_outcome(candidates=candidates), artifact_sink=sink
     )
 
@@ -138,7 +138,7 @@ async def test_snapshot_failure_after_commit_does_not_roll_back_committed_turn()
     store, sink = _CommitStore(), Sink()
     snapshot_sink = _SnapshotSink(fail_write=True)
 
-    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).finish(
         turn,
         completed_outcome(candidates=(candidate,)),
         artifact_sink=sink,
@@ -188,7 +188,7 @@ async def test_staging_rollback_is_detached_when_cleanup_supervisor_available() 
 
     sink = Sink()
     cleanup = _CapturingCleanup()
-    lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=cleanup)
+    lifecycle = TestingRunSettlement(_CommitStore(), max_artifact_bytes=100, cleanup=cleanup)
 
     receipt = await lifecycle.finish(turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink)
 
@@ -225,7 +225,7 @@ async def test_staging_rollback_stays_inline_without_cleanup_supervisor() -> Non
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await RunLifecycleService(_CommitStore(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(_CommitStore(), max_artifact_bytes=100).finish(
         turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink
     )
 
@@ -257,7 +257,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
             self.removed.append(location)
             self.values.pop(location, None)
 
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 
     supervisor = RunCleanupSupervisor(max_jobs=1)
 
@@ -271,7 +271,7 @@ async def test_staging_rollback_falls_back_to_inline_when_supervisor_at_capacity
     assert not supervisor.available
 
     sink = Sink()
-    lifecycle = RunLifecycleService(_CommitStore(), max_artifact_bytes=100, cleanup=supervisor)
+    lifecycle = TestingRunSettlement(_CommitStore(), max_artifact_bytes=100, cleanup=supervisor)
 
     receipt = await lifecycle.finish(turn, completed_outcome(candidates=(candidate,)), artifact_sink=sink)
 
@@ -351,7 +351,7 @@ async def test_settle_emits_claim_transition_span_with_command_name(
     turn = claimed_run()
     store = _TransitionStore()
 
-    receipt = await RunLifecycleService(store, max_artifact_bytes=100).settle(
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).settle(
         turn, RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
     )
 

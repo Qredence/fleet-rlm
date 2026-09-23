@@ -28,17 +28,17 @@ import pytest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
-from fleet_rlm.rlm.recursion import (
-    RecursiveRLMOptions,
-)
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
     RLMRunner,
     RunIdentity,
     SessionView,
+)
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.recursion import (
+    RecursiveRLMOptions,
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
@@ -197,7 +197,7 @@ async def test_public_runner_first_child_reservation_reports_depth_one() -> None
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "one-donetwo-done"
+    assert stream.outcome.prediction.answer == "one-donetwo-done"
 
     # The first single-child reservation reports depth exactly 1.
     single_completed = next(
@@ -371,7 +371,7 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "child-native-ok"
+    assert stream.outcome.prediction.answer == "child-native-ok"
 
     # Both Root and child are the exact native class, each freshly composed.
     assert root_types == [dspy.RLM]
@@ -392,4 +392,4 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
     # Native Prediction evidence: the completed Root turn exposes a trajectory
     # and the child's typed SUBMIT settled through the same kernel.
     prediction = stream.outcome.prediction
-    assert prediction.outputs["answer"] == "child-native-ok"
+    assert prediction.answer == "child-native-ok"

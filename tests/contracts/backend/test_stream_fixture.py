@@ -38,7 +38,7 @@ def test_turn_stream_fixture_is_current() -> None:
 
 def test_emitted_chunks_are_fully_documented_by_openapi() -> None:
     from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
-    from fleet_rlm.composition.testing import create_testing_app
+    from tests.support.testing_app import create_testing_app
 
     variants = create_testing_app().openapi()["components"]["schemas"]["FleetUIMessageChunk"]["oneOf"]
     by_type = {variant["properties"]["type"]["const"]: variant for variant in variants}

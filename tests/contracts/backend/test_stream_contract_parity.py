@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 from fleet_rlm.sessions.committed_turn import CommittedTurn
+from tests.support.testing_app import create_testing_app
 
 _ASSISTANT_TYPES = {model.model_fields["type"].default for model in AssistantPartModelUnion}
 _TRANSPORT_SEMANTICS = set(FLEET_UI_CHUNK_TYPES)

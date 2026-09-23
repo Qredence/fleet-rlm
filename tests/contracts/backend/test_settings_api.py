@@ -10,8 +10,8 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from fleet_rlm.api.schemas import SettingsPolicyPatchRequest, SettingsPolicyUpdate
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config.settings import Settings
+from tests.support.testing_app import create_testing_app
 
 
 def test_settings_policy_openapi_exposes_closed_operation_alternatives() -> None:

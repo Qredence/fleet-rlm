@@ -20,8 +20,8 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
     observe_tool,
 )
+from fleet_rlm.rlm.execution import RunToolGuards
 from fleet_rlm.rlm.result import RunNoProgressError
-from fleet_rlm.rlm.runtime import RunToolGuards
 
 
 def test_observe_tool_admits_calls_against_the_turn_budget() -> None:

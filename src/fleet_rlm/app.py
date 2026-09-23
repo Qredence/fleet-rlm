@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from typing import TYPE_CHECKING, Protocol
 
 from fastapi import FastAPI
@@ -15,88 +14,24 @@ from .config.loader import configure_logging, load_runtime_settings, reject_reti
 from .config.settings import Settings
 
 if TYPE_CHECKING:
-    from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, RuntimeInventory
+    from fleet_rlm.app_services import RuntimeInventory
 
 
-class _CompositionInstaller(Protocol):
-    def __call__(
-        self,
-        app: FastAPI,
-        settings: Settings,
-        *,
-        database: RuntimeDatabaseLifecycle,
-    ) -> RuntimeInventory: ...
-
-
-@asynccontextmanager
-async def _local_db_lifespan(
-    app: FastAPI,
-    settings_obj: Settings,
-    install_fn: _CompositionInstaller,
-) -> AsyncIterator[None]:
-    from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle, clear_runtime_inventory
-
-    engine = None
-    session_factory = None
-    try:
-        if settings_obj.database_url:
-            from fleet_rlm.persistence.database import (
-                create_async_engine_from_url,
-                create_session_factory,
-                create_tables,
-                is_sqlite_url,
-            )
-
-            engine = create_async_engine_from_url(settings_obj.database_url)
-            session_factory = create_session_factory(engine)
-            if is_sqlite_url(settings_obj.database_url):
-                await create_tables(engine)
-        database = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
-        inventory = install_fn(app, settings_obj, database=database)
-        run_state = inventory.run_state_store
-        reconcile = getattr(run_state, "reconcile_settling", None)
-        if callable(reconcile):
-            from fleet_rlm.composition.inventory import no_provider_recovery_fence
-
-            await reconcile(no_provider_recovery_fence)
-        yield
-    finally:
-        detached = clear_runtime_inventory(app)
-        from fleet_rlm.composition.inventory import close_inventory_services
-
-        shutdown_error: BaseException | None = None
-        service_close = await close_inventory_services(detached, drain_seconds=30)
-        if service_close.first_error is not None:
-            shutdown_error = service_close.first_error
-
-        if detached is not None:
-            try:
-                await detached.database.aclose()
-            except BaseException as exc:
-                if shutdown_error is None:
-                    shutdown_error = exc
-        if engine is not None and (detached is None or detached.database.engine is not engine):
-            try:
-                await engine.dispose()
-            except BaseException as exc:
-                if shutdown_error is None:
-                    shutdown_error = exc
-        if shutdown_error is not None:
-            raise shutdown_error
+class _ServicesBuilder(Protocol):
+    def __call__(self, app: FastAPI, settings: Settings) -> AbstractAsyncContextManager[RuntimeInventory]: ...
 
 
 def create_app(
     *,
     settings: Settings | None = None,
-    _composition_installer: _CompositionInstaller | None = None,
+    _services_builder: _ServicesBuilder | None = None,
 ) -> FastAPI:
     """
     Create and configure the Fleet RLM FastAPI application.
 
     Parameters:
         settings (Settings | None): Optional runtime settings. When omitted, settings are loaded from the environment.
-        _composition_installer (Callable[..., Any] | None): Optional composition installer used for local
-            database-backed application lifecycles.
+        _services_builder: Private credential-free services builder used by tests.
 
     Returns:
         FastAPI: The configured application instance.
@@ -134,30 +69,22 @@ def create_app(
             init_posthog(settings_obj)
             await mlflow_runtime.start()
             try:
-                if _composition_installer is not None:
-                    async with _local_db_lifespan(app, settings_obj, _composition_installer):
-                        yield
-                    return
+                from fleet_rlm.app_services import clear_runtime_inventory, install_runtime_inventory
 
-                if settings_obj.run_environment == "daytona":
-                    from fleet_rlm.composition import (
-                        dispose_daytona_composition,
-                        install_daytona_composition,
-                        require_daytona_settings,
-                    )
+                if _services_builder is None:
+                    if settings_obj.run_environment != "daytona":
+                        raise RuntimeError("Fleet only supports the Daytona runtime")
+                    from fleet_rlm.app_lifecycle import daytona_services
 
-                    require_daytona_settings(settings_obj)
-                    installed = False
+                    builder = daytona_services
+                else:
+                    builder = _services_builder
+                async with builder(app, settings_obj) as services:
+                    install_runtime_inventory(app, services)
                     try:
-                        await install_daytona_composition(app, settings_obj)
-                        installed = True
                         yield
                     finally:
-                        if installed:
-                            await dispose_daytona_composition(app)
-                    return
-
-                raise RuntimeError("Fleet only supports the Daytona runtime")
+                        clear_runtime_inventory(app)
             finally:
                 await mlflow_runtime.close()
         finally:
@@ -171,6 +98,7 @@ def create_app(
     app.state.settings = resolved
     app.state.composition_ready = False
     app.state.runtime_inventory = None
+    app.state.route_services = None
     from fleet_rlm.observability.feedback import TraceFeedbackService
     from fleet_rlm.observability.mlflow import MLflowRuntime
 

@@ -11,8 +11,8 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.observability import posthog
+from tests.support.testing_app import create_testing_app
 
 
 class _BrokenClient:

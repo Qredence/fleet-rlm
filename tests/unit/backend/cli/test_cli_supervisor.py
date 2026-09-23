@@ -324,10 +324,8 @@ def test_local_mlflow_server_skips_unmanaged_policies(
 
 
 def test_daytona_startup_cleanup_recovery_leaves_readiness_margin() -> None:
-    from fleet_rlm.composition.live import (
-        _ORPHAN_CLEANUP_TIMEOUT_SECONDS,
-        _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS,
-    )
+    from fleet_rlm.app_lifecycle import _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
+    from fleet_rlm.workspace.mounted_gateway import _ORPHAN_CLEANUP_TIMEOUT_SECONDS
 
     readiness_timeout = supervisor._READY_TIMEOUT_SECONDS["daytona"]
     assert readiness_timeout - 15 >= _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS

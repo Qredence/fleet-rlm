@@ -72,7 +72,7 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
 
 
 def test_openapi_declares_typed_render_data_payloads() -> None:
-    from fleet_rlm.composition.testing import create_testing_app
+    from tests.support.testing_app import create_testing_app
 
     schema = create_testing_app().openapi()
     variants = schema["components"]["schemas"]["FleetUIMessageChunk"]["oneOf"]

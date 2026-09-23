@@ -38,20 +38,19 @@ from fleet_rlm.daytona.interpreter import (
     sandbox_backend,
 )
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
+from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeFactory,
 )
-from fleet_rlm.runtime.bindings import (
+from fleet_rlm.sessions.bindings import (
     BindingGenerationAuthority,
     SandboxBinding,
     require_non_zero_workspace_id,
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
-from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 if TYPE_CHECKING:

@@ -20,13 +20,13 @@ import dspy
 from fleet_rlm.observability.tracing import dspy_turn_callbacks
 from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
 from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
 from fleet_rlm.rlm.recursion import (
     RecursiveCallSummary,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 RoutingClass = Literal[
     "python_native",

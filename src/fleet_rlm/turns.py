@@ -10,15 +10,6 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol, Self, TypeAlias, TypeVar
 from uuid import UUID
 
-from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-from fleet_rlm.chat.preparation import (
-    PreparedTurn,
-    RunPreparation,
-    RunPreparationCancelledError,
-    RunPreparationTimeoutError,
-)
-from fleet_rlm.chat.run_lifecycle import RunLifecycle
 from fleet_rlm.observability.tracing import annotate_trace_io, record_settlement_status, turn_phase_span, turn_trace
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
@@ -33,11 +24,18 @@ from fleet_rlm.rlm.events import (
     RuntimeEvent,
     Status,
 )
-from fleet_rlm.rlm.result import RLMOutcome, RLMUsage, empty_rlm_usage
-from fleet_rlm.rlm.runtime import RLMExecutionContext
-from fleet_rlm.runtime.cleanup import RunCleanupSupervisor, RunCleanupUnavailableError
-from fleet_rlm.runtime.owned_effect import OwnedEffect
+from fleet_rlm.rlm.execution import RLMExecutionContext
+from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.rlm.result import (
+    RLMOutcome,
+    RLMUsage,
+    empty_rlm_usage,
+    project_outcome_prediction,
+)
+from fleet_rlm.sessions.committed_turn_events import CommittedTurnEventProjector
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
+    CancelResult,
     ClaimedRun,
     CommittedRunReplay,
     CommittedTurnReceipt,
@@ -49,8 +47,39 @@ from fleet_rlm.sessions.run_state import (
     RunSettlement,
     RunStateError,
 )
+from fleet_rlm.turn_preparation import (
+    PreparedTurn,
+    RunPreparation,
+    RunPreparationCancelledError,
+    RunPreparationTimeoutError,
+    TurnPreparationPlan,
+    prepare_turn,
+)
+from fleet_rlm.turn_settlement import RunLifecycle
 
 T = TypeVar("T")
+
+
+@dataclass(frozen=True, slots=True)
+class OpenTurnCommand:
+    """Validated Turn intent after local-scope and schema validation."""
+
+    access: TurnAccess
+    session_id: UUID
+    input: TurnInput
+    idempotency_key: str
+    proposed_run_id: UUID
+
+    def __post_init__(self) -> None:
+        key = self.idempotency_key
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= 128
+            or key != key.strip()
+            or not key.isprintable()
+            or any(char.isspace() for char in key)
+        ):
+            raise ValueError("idempotency_key must contain 1..128 printable non-whitespace characters")
 
 
 @dataclass(slots=True)
@@ -429,7 +458,7 @@ class TurnRuntime:
         self,
         *,
         lifecycle: RunLifecycle,
-        preparation: RunPreparation,
+        preparation: RunPreparation | TurnPreparationPlan,
         runner: RunRunner,
         projector: CommittedTurnEventProjector | None = None,
         turn_timeout_seconds: int | float = 1800,
@@ -462,6 +491,10 @@ class TurnRuntime:
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
 
+    async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
+        """Apply a cancellation request through the coordinator's settlement boundary."""
+        return await self._lifecycle.request_cancel(access, run_id)
+
     async def _prepare_with_trace(self, start: ClaimedRun, *, deadline: float) -> PreparedTurn:
         """
         Prepare a claimed run while recording preparation tracing information for execution correlation.
@@ -488,7 +521,10 @@ class TurnRuntime:
                         "skill_selection_count": len(start.input.skill_selections),
                     },
                 ):
-                    prepared = await self._preparation.prepare(start, deadline=deadline)
+                    if isinstance(self._preparation, TurnPreparationPlan):
+                        prepared = await prepare_turn(self._preparation, start, deadline=deadline)
+                    else:
+                        prepared = await self._preparation.prepare(start, deadline=deadline)
             except BaseException:
                 annotate_trace_io(
                     request=start.input.text,
@@ -799,6 +835,7 @@ class TurnRuntime:
                 terminal_status="failed",
                 public_error_message="Turn failed",
             )
+            outcome = project_outcome_prediction(outcome)
             self._annotate_outcome(trace_request, outcome)
             receipt = await self._settle_outcome(run, prepared, state, outcome, trace_request)
             if isinstance(receipt, _ClaimLost):

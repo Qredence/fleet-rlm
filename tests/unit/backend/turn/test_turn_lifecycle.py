@@ -8,11 +8,12 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 @pytest.mark.asyncio
 async def test_success_validates_and_publishes_before_atomic_commit() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -92,7 +93,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
             self.values.pop(location, None)
 
     store, sink = Store(), Sink()
-    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             terminal_status="completed",
@@ -113,7 +114,6 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
 @pytest.mark.asyncio
 async def test_authority_revocation_after_artifact_publish_rolls_back_before_commit() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -212,7 +212,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
             self.values.pop(location, None)
 
     store, sink = Store(), Sink()
-    receipt = await RunLifecycleService(store, max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -230,7 +230,6 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
 @pytest.mark.asyncio
 async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -304,7 +303,7 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
             del location
             return None
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             terminal_status="completed",
@@ -319,7 +318,6 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
 
 @pytest.mark.asyncio
 async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -382,7 +380,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
             self.values.pop(location, None)
 
     snapshot = SnapshotSink()
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -400,7 +398,6 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 @pytest.mark.asyncio
 async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failure_opaque(caplog) -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -499,7 +496,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
             self.values.pop(location, None)
 
     artifacts, snapshot = ArtifactSink(), SnapshotSink()
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -538,7 +535,6 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_success_never_writes_result_snapshot(status: str) -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -587,7 +583,7 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
         def __getattr__(self, name):
             raise AssertionError(name)
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(status, public_error_message="Turn failed"),
         result_snapshot_sink=NeverSnapshot(),
@@ -600,7 +596,6 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_success_removes_run_local_artifact_candidate_bytes(status: str) -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -669,7 +664,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
             self.values.pop(location, None)
 
     sink = Sink()
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=100).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
         turn,
         RLMOutcome(status, artifact_candidates=(candidate,)),
         artifact_sink=sink,
@@ -683,7 +678,6 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
 @pytest.mark.asyncio
 async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_soft() -> None:
 
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -691,6 +685,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
         CommittedTurnReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
@@ -728,7 +723,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
             order.append("promote")
             raise RuntimeError("promotion storage unavailable")
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -747,7 +742,6 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
 async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -755,6 +749,7 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
@@ -791,7 +786,7 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
     def promotion(candidates):
         seen.extend(candidates)
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -817,7 +812,6 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
     import contextlib
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -825,6 +819,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
         CommittedTurnReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidatePromotionResult
 
     run_id, session_id = uuid4(), uuid4()
@@ -854,7 +849,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 
         yield Handle()
 
-    monkeypatch.setattr("fleet_rlm.chat.run_lifecycle.turn_phase_span", fake_span)
+    monkeypatch.setattr("fleet_rlm.turn_settlement.turn_phase_span", fake_span)
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
@@ -869,7 +864,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
         )
 
     secret = "secret autonomous promotion learning"
-    await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -896,7 +891,6 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(terminal: str) -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -904,6 +898,7 @@ async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(
         RunFailure,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
 
     run_id, session_id = uuid4(), uuid4()
 
@@ -938,7 +933,7 @@ async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(
     def promotion(candidates):
         seen.extend(candidates)
 
-    await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RunFailure(
             terminal,  # type: ignore[arg-type]

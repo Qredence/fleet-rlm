@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 
-from fleet_rlm.composition.testing import create_testing_app
+from tests.support.testing_app import create_testing_app
 
 _CARD_FIELDS = {
     "id",

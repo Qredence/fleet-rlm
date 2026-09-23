@@ -11,9 +11,6 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.persistence.repositories import InMemoryRunStateStore
 from fleet_rlm.rlm.events import (
@@ -25,8 +22,7 @@ from fleet_rlm.rlm.events import (
     RunTimedOut,
     RuntimeEvent,
 )
-from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
@@ -34,8 +30,11 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import ClaimedRun
+from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+from tests.support.turn_settlement import TestingRunSettlement
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
 HarnessMode = FailureMode | Literal["caller_cancel", "native_success"]
@@ -110,7 +109,7 @@ class _Harness:
         self.mode = mode
         self.access = TurnAccess(uuid4(), uuid4())
         self.store = InMemoryRunStateStore()
-        self.lifecycle = RunLifecycleService(self.store, max_artifact_bytes=1024)
+        self.lifecycle = TestingRunSettlement(self.store, max_artifact_bytes=1024)
         self.session_id = uuid4()
         self.run_id = uuid4()
         self.cleanup_calls = 0

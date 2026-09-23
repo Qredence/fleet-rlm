@@ -22,7 +22,6 @@ from fleet_rlm.attachments import (
     PreparedAttachments,
     RunAttachmentSink,
 )
-from fleet_rlm.chat.run_lifecycle import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
@@ -34,10 +33,7 @@ from fleet_rlm.rlm.events import (
     SkillLoaded,
     ToolEventView,
 )
-from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions
-from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
-from fleet_rlm.rlm.result import empty_rlm_usage
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
     PreparationNotice,
@@ -49,7 +45,9 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
+from fleet_rlm.rlm.result import empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.context import build_session_context_manifest
 from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
@@ -60,6 +58,7 @@ from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
+from fleet_rlm.turn_settlement import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
 from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidateCollector
 from fleet_rlm.workspace.models import (
     WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
@@ -141,15 +140,6 @@ class PreparedTurn:
     execution: RLMExecutionContext
     artifact_sink: RunArtifactSink
     _resources: _PreparedTurnResources
-    # Direct ownership-facing projections make the preparation boundary
-    # inspectable without requiring callers to know the execution context tree.
-    claim: ClaimedRun | None = None
-    history: dspy.History | CommittedSessionHistory | None = None
-    session_context: Any | None = None
-    attachments: tuple[PreparedAttachment, ...] = ()
-    capabilities: PreparedCapabilities | None = None
-    program: RLMExecutionSpec | None = None
-    authorization: RunAuthority | None = None
     result_snapshot_sink: ResultSnapshotSink | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
     memory_intent_builder: MemoryIntentBuilder | None = None
@@ -173,11 +163,6 @@ class PreparedTurn:
     async def aclose_before_commit(self) -> None:
         """Contain native execution resources before a successful Turn commits."""
         await self._resources.aclose_pre_commit()
-
-
-# Historical spellings retained while callers migrate to the Turn terminology.
-PreparedRun = PreparedTurn
-_PreparedRunResources = _PreparedTurnResources
 
 
 def _workspace_memory_digest(capabilities: PreparedCapabilities) -> str:
@@ -319,282 +304,272 @@ class CapabilityPreparer(Protocol):
     ) -> PreparedCapabilities: ...
 
 
-class DefaultRunPreparer:
-    """Build exactly one complete immutable execution context before delivery."""
+@dataclass(frozen=True, slots=True)
+class TurnPreparationPlan:
+    """Immutable inputs for one Turn preparation function."""
 
-    def __init__(
-        self,
-        *,
-        models: RLMModelBundle,
-        options: RLMOptions,
-        attachments: RunAttachmentPreparer,
-        environments: RunEnvironmentProvider,
-        capabilities: CapabilityPreparer,
-        recursive_options: RecursiveRLMOptions | None = None,
-        wrap_up_seconds: float = 300.0,
-        budget_limits: BudgetLimits | None = None,
-    ) -> None:
-        self._models = models
-        self._options = options
-        self._attachments = attachments
-        self._environments = environments
-        self._capabilities = capabilities
-        self._recursive_options = recursive_options or RecursiveRLMOptions()
-        self._wrap_up_seconds = max(0.0, float(wrap_up_seconds))
-        self._budget_limits = budget_limits or BudgetLimits()
+    models: RLMModelBundle
+    options: RLMOptions
+    attachments: RunAttachmentPreparer
+    environments: RunEnvironmentProvider
+    capabilities: CapabilityPreparer
+    recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
+    wrap_up_seconds: float = 300.0
+    budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
 
-    async def _check_cancellation(self, run: ClaimedRun) -> None:
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "wrap_up_seconds", max(0.0, float(self.wrap_up_seconds)))
+
+
+async def _check_cancellation(run: ClaimedRun) -> None:
+    try:
+        if await run.cancellation_requested():
+            raise RunPreparationCancelledError("Turn cancelled")
+    except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+        raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
+
+
+async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
+    await _check_cancellation(run)
+
+    with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
         try:
-            if await run.cancellation_requested():
-                raise RunPreparationCancelledError("Turn cancelled")
-        except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
-            raise RunPreparationUnavailableError("Turn cancellation status is unavailable") from exc
+            environment = await plan.environments.acquire(run, deadline=deadline)
+        except RunPreparationError:
+            raise
+        except Exception as exc:
+            raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+        environment_phase.set_outputs(
+            {
+                "has_interpreter": environment.interpreter is not None,
+                "has_snapshot_sink": environment.result_snapshot_sink is not None,
+            }
+        )
 
-    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
-        await self._check_cancellation(run)
+    if environment.resident_release is not None:
+        environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
+            environment.resident_release,
+            taint_callback=environment.mark_tainted,
+        )
+        turn_environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
+            environment.release
+        )
+    elif environment.release_is_resident:
+        environment_release = RetainableEnvironmentRelease(
+            environment.release,
+            taint_callback=environment.mark_tainted,
+        )
+        turn_environment_release = None
+    else:
+        environment_release = None
+        turn_environment_release = RetainableEnvironmentRelease(environment.release)
 
-        with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
+    staged = PreparedAttachments((), ())
+    capabilities: PreparedCapabilities | None = None
+
+    async def remove_staged() -> None:
+        await _remove_staged(environment.attachment_sink, staged)
+
+    def _build_resources() -> _PreparedTurnResources:
+        cleanups: list[AsyncCleanup] = []
+        if environment_release is not None:
+            cleanups.append(environment_release.release)
+        if turn_environment_release is not None:
+            cleanups.append(turn_environment_release.release)
+        if capabilities is not None:
+            cleanups.append(capabilities.aclose)
+        cleanups.append(remove_staged)
+        return _PreparedTurnResources(tuple(cleanups))
+
+    try:
+        _check_deadline(deadline)
+        with turn_phase_span(
+            "Turn.stage_attachments",
+            inputs={"attachment_count": len(run.input.attachment_ids)},
+        ) as attachments_phase:
             try:
-                environment = await self._environments.acquire(run, deadline=deadline)
-            except RunPreparationError:
-                raise
-            except Exception as exc:
-                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
-            environment_phase.set_outputs(
+                staged = await plan.attachments.prepare_run(
+                    AttachmentAccess(run.access.user_id, run.access.workspace_id),
+                    run.input.attachment_ids,
+                    AttachmentRun(run.session_id, run.run_id),
+                    environment.attachment_sink,
+                )
+            except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                raise RunPreparationUnavailableError("Turn attachments are unavailable") from exc
+            attachments_phase.set_outputs(
                 {
-                    "has_interpreter": environment.interpreter is not None,
-                    "has_snapshot_sink": environment.result_snapshot_sink is not None,
+                    "staged_count": len(staged.refs),
+                    "staged_bytes": sum(ref.byte_size for ref in staged.refs),
                 }
             )
 
-        if environment.resident_release is not None:
-            environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
-                environment.resident_release,
-                taint_callback=environment.mark_tainted,
-            )
-            turn_environment_release: RetainableEnvironmentRelease | None = RetainableEnvironmentRelease(
-                environment.release
-            )
-        elif environment.release_is_resident:
-            environment_release = RetainableEnvironmentRelease(
-                environment.release,
-                taint_callback=environment.mark_tainted,
-            )
-            turn_environment_release = None
-        else:
-            environment_release = None
-            turn_environment_release = RetainableEnvironmentRelease(environment.release)
+        with turn_phase_span(
+            "Turn.prepare_capabilities",
+            inputs={"skill_selection_count": len(run.input.skill_selections)},
+        ) as capabilities_phase:
+            try:
+                async with asyncio.timeout_at(deadline):
+                    capabilities = await _prepare_capabilities(plan, run, environment, staged, deadline)
+            except TimeoutError:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from None
+            except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+                raise RunPreparationUnavailableError("Turn capabilities are unavailable") from exc
+            capabilities_phase.set_outputs({"notice_count": len(getattr(capabilities, "preparation_notices", ()))})
 
-        staged = PreparedAttachments((), ())
-        capabilities: PreparedCapabilities | None = None
+        await _check_cancellation(run)
+        _check_deadline(deadline)
 
-        async def remove_staged() -> None:
-            await self._remove_staged(environment.attachment_sink, staged)
-
-        def _build_resources() -> _PreparedTurnResources:
-            cleanups: list[AsyncCleanup] = []
-            if environment_release is not None:
-                cleanups.append(environment_release.release)
-            if turn_environment_release is not None:
-                cleanups.append(turn_environment_release.release)
-            if capabilities is not None:
-                cleanups.append(capabilities.aclose)
-            cleanups.append(remove_staged)
-            return _PreparedTurnResources(tuple(cleanups))
-
-        try:
-            self._check_deadline(deadline)
-            with turn_phase_span(
-                "Turn.stage_attachments",
-                inputs={"attachment_count": len(run.input.attachment_ids)},
-            ) as attachments_phase:
-                try:
-                    staged = await self._attachments.prepare_run(
-                        AttachmentAccess(run.access.user_id, run.access.workspace_id),
-                        run.input.attachment_ids,
-                        AttachmentRun(run.session_id, run.run_id),
-                        environment.attachment_sink,
-                    )
-                except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
-                    raise RunPreparationUnavailableError("Turn attachments are unavailable") from exc
-                attachments_phase.set_outputs(
-                    {
-                        "staged_count": len(staged.refs),
-                        "staged_bytes": sum(ref.byte_size for ref in staged.refs),
-                    }
-                )
-
-            with turn_phase_span(
-                "Turn.prepare_capabilities",
-                inputs={"skill_selection_count": len(run.input.skill_selections)},
-            ) as capabilities_phase:
-                try:
-                    async with asyncio.timeout_at(deadline):
-                        capabilities = await self._prepare_capabilities(run, environment, staged, deadline)
-                except TimeoutError:
-                    raise RunPreparationTimeoutError("Turn preparation timed out") from None
-                except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
-                    raise RunPreparationUnavailableError("Turn capabilities are unavailable") from exc
-                capabilities_phase.set_outputs({"notice_count": len(getattr(capabilities, "preparation_notices", ()))})
-
-            await self._check_cancellation(run)
-            self._check_deadline(deadline)
-
-            staged_by_id = {item.attachment_id: item for item in staged.staged}
-            attachment_context = None
-            if staged.refs and environment.context_mount_path is not None:
-                attachment_context = AttachmentContextCapsule(
-                    tuple(
-                        AttachmentContextEntry(
-                            attachment_id=ref.id,
-                            filename=ref.filename,
-                            content_type=ref.content_type,
-                            byte_size=ref.byte_size,
-                            checksum_sha256=ref.checksum_sha256,
-                            sandbox_path=staged_by_id[ref.id].sandbox_path,
-                        )
-                        for ref in staged.refs
-                    ),
-                    mount_root=environment.context_mount_path,
-                )
-        except BaseException:
-            await asyncio.shield(_build_resources().aclose())
-            raise
-
-        assert capabilities is not None
-        resources = _build_resources()
-        try:
-            turn_budget = TurnBudget(
-                deadline=deadline if math.isfinite(deadline) else None,
-                limits=self._budget_limits,
-            )
-            turn_models = self._models.bind_turn_deadline(
-                deadline=deadline,
-                reserve_seconds=self._wrap_up_seconds,
-                budget=turn_budget,
-            )
-        except BaseException:
-            await asyncio.shield(resources.aclose())
-            raise
-
-        execution = RLMExecutionContext(
-            identity=RunIdentity(
-                run_id=run.run_id,
-                session_id=run.session_id,
-                access=run.access,
-                authority=run.authority,
-            ),
-            session=SessionView(
-                request=run.input.text,
-                session_context=build_session_context_manifest(
-                    run.session_id,
-                    run.checkpoint_version,
-                    run.history,
-                ),
-                attachments=tuple(
-                    PreparedAttachment(
-                        ref.id,
-                        ref.filename,
-                        ref.content_type,
-                        ref.byte_size,
-                        ref.checksum_sha256,
+        staged_by_id = {item.attachment_id: item for item in staged.staged}
+        attachment_context = None
+        if staged.refs and environment.context_mount_path is not None:
+            attachment_context = AttachmentContextCapsule(
+                tuple(
+                    AttachmentContextEntry(
+                        attachment_id=ref.id,
+                        filename=ref.filename,
+                        content_type=ref.content_type,
+                        byte_size=ref.byte_size,
+                        checksum_sha256=ref.checksum_sha256,
+                        sandbox_path=staged_by_id[ref.id].sandbox_path,
                     )
                     for ref in staged.refs
                 ),
-                attachment_context=attachment_context,
-                preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
-                workspace_memory_digest=_workspace_memory_digest(capabilities),
-                history=(
-                    environment.history_transport
-                    if environment.history_transport is not None
-                    else build_dspy_history_for_claim(run)
-                ),
-            ),
-            execution=ExecutionRuntime(
-                models=turn_models,
-                options=self._options,
-                interpreter=environment.interpreter,
-                cancellation_requested=run.cancellation_requested,
-                deadline=deadline,
-                wrap_up_seconds=self._wrap_up_seconds,
-                environment_release=environment_release,
-                async_bridge=environment.async_bridge,
-            ),
-            capabilities=capabilities,
-            delegation=DelegationPolicy(
-                child_runtime_factory=environment.child_runtime_factory,
-                recursive_options=self._recursive_options,
-            ),
-            selected_skill_count=len(run.input.skill_selections),
+                mount_root=environment.context_mount_path,
+            )
+    except BaseException:
+        await asyncio.shield(_build_resources().aclose())
+        raise
+
+    assert capabilities is not None
+    resources = _build_resources()
+    try:
+        turn_budget = TurnBudget(
+            deadline=deadline if math.isfinite(deadline) else None,
+            limits=plan.budget_limits,
         )
-        return PreparedTurn(
-            execution=execution,
-            artifact_sink=environment.artifact_sink,
-            _resources=resources,
-            claim=run,
-            history=execution.session.history,
-            session_context=execution.session.session_context,
-            attachments=execution.session.attachments,
-            capabilities=capabilities,
-            program=capabilities.spec,
-            authorization=run.authority,
-            result_snapshot_sink=environment.result_snapshot_sink,
-            post_commit_memory_promotion=environment.post_commit_memory_promotion,
-            memory_intent_builder=environment.memory_intent_builder,
-            image_identity=environment.image_identity,
+        turn_models = plan.models.bind_turn_deadline(
+            deadline=deadline,
+            reserve_seconds=plan.wrap_up_seconds,
+            budget=turn_budget,
         )
+    except BaseException:
+        await asyncio.shield(resources.aclose())
+        raise
 
-    async def aclose(self) -> bool:
-        close = getattr(self._environments, "aclose", None)
-        return bool(await close()) if callable(close) else True
+    execution = RLMExecutionContext(
+        identity=RunIdentity(
+            run_id=run.run_id,
+            session_id=run.session_id,
+            access=run.access,
+            authority=run.authority,
+        ),
+        session=SessionView(
+            request=run.input.text,
+            session_context=build_session_context_manifest(
+                run.session_id,
+                run.checkpoint_version,
+                run.history,
+            ),
+            attachments=tuple(
+                PreparedAttachment(
+                    ref.id,
+                    ref.filename,
+                    ref.content_type,
+                    ref.byte_size,
+                    ref.checksum_sha256,
+                )
+                for ref in staged.refs
+            ),
+            attachment_context=attachment_context,
+            preparation_notices=tuple(getattr(capabilities, "preparation_notices", ())),
+            workspace_memory_digest=_workspace_memory_digest(capabilities),
+            history=(
+                environment.history_transport
+                if environment.history_transport is not None
+                else build_dspy_history_for_claim(run)
+            ),
+        ),
+        execution=ExecutionRuntime(
+            models=turn_models,
+            options=plan.options,
+            interpreter=environment.interpreter,
+            cancellation_requested=run.cancellation_requested,
+            deadline=deadline,
+            wrap_up_seconds=plan.wrap_up_seconds,
+            environment_release=environment_release,
+            async_bridge=environment.async_bridge,
+        ),
+        capabilities=capabilities,
+        delegation=DelegationPolicy(
+            child_runtime_factory=environment.child_runtime_factory,
+            recursive_options=plan.recursive_options,
+        ),
+        selected_skill_count=len(run.input.skill_selections),
+    )
+    return PreparedTurn(
+        execution=execution,
+        artifact_sink=environment.artifact_sink,
+        _resources=resources,
+        result_snapshot_sink=environment.result_snapshot_sink,
+        post_commit_memory_promotion=environment.post_commit_memory_promotion,
+        memory_intent_builder=environment.memory_intent_builder,
+        image_identity=environment.image_identity,
+    )
 
-    async def wait_for_session_idle(
-        self,
-        workspace_id: UUID,
-        session_id: UUID,
-        *,
-        deadline: float,
-    ) -> None:
-        wait = getattr(self._environments, "wait_for_session_idle", None)
-        if callable(wait):
-            await wait(workspace_id, session_id, deadline=deadline)
 
-    async def _prepare_capabilities(
-        self,
-        run: ClaimedRun,
-        environment: RunEnvironment,
-        staged: PreparedAttachments,
-        deadline: float,
-    ) -> PreparedCapabilities:
-        task = asyncio.create_task(self._capabilities.prepare(run, environment, staged, deadline=deadline))
-        try:
-            while not task.done():
-                if await run.cancellation_requested():
-                    task.cancel()
-                    raise RunPreparationCancelledError("Turn cancelled")
-                remaining = deadline - asyncio.get_running_loop().time()
-                if remaining <= 0:
-                    task.cancel()
-                    raise RunPreparationTimeoutError("Turn preparation timed out")
-                await asyncio.wait((task,), timeout=min(0.05, remaining))
-            return await task
-        finally:
-            if not task.done():
+async def close_turn_preparation(plan: TurnPreparationPlan) -> bool:
+    close = getattr(plan.environments, "aclose", None)
+    return bool(await close()) if callable(close) else True
+
+
+async def wait_for_session_idle(
+    plan: TurnPreparationPlan,
+    workspace_id: UUID,
+    session_id: UUID,
+    *,
+    deadline: float,
+) -> None:
+    wait = getattr(plan.environments, "wait_for_session_idle", None)
+    if callable(wait):
+        await wait(workspace_id, session_id, deadline=deadline)
+
+
+async def _prepare_capabilities(
+    plan: TurnPreparationPlan,
+    run: ClaimedRun,
+    environment: RunEnvironment,
+    staged: PreparedAttachments,
+    deadline: float,
+) -> PreparedCapabilities:
+    task = asyncio.create_task(plan.capabilities.prepare(run, environment, staged, deadline=deadline))
+    try:
+        while not task.done():
+            if await run.cancellation_requested():
                 task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+                raise RunPreparationCancelledError("Turn cancelled")
+            remaining = deadline - asyncio.get_running_loop().time()
+            if remaining <= 0:
+                task.cancel()
+                raise RunPreparationTimeoutError("Turn preparation timed out")
+            await asyncio.wait((task,), timeout=min(0.05, remaining))
+        return await task
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
-    @staticmethod
-    def _check_deadline(deadline: float) -> None:
-        if asyncio.get_running_loop().time() >= deadline:
-            raise RunPreparationTimeoutError("Turn preparation timed out")
 
-    @staticmethod
-    async def _remove_staged(sink: RunAttachmentSink, prepared: PreparedAttachments) -> None:
-        for item in reversed(prepared.staged):
-            try:
-                await sink.remove_private(item.sandbox_path)
-            except Exception:
-                continue
+def _check_deadline(deadline: float) -> None:
+    if asyncio.get_running_loop().time() >= deadline:
+        raise RunPreparationTimeoutError("Turn preparation timed out")
+
+
+async def _remove_staged(sink: RunAttachmentSink, prepared: PreparedAttachments) -> None:
+    for item in reversed(prepared.staged):
+        try:
+            await sink.remove_private(item.sandbox_path)
+        except Exception:
+            continue
 
 
 class EmptySkillHost:
@@ -776,10 +751,8 @@ async def prepare_host_capabilities(
 __all__ = [
     "AsyncCleanup",
     "CapabilityPreparer",
-    "DefaultRunPreparer",
     "EmptySkillHost",
     "PreparedHostCapabilities",
-    "PreparedRun",
     "PreparedTurn",
     "RunAttachmentPreparer",
     "RunEnvironment",
@@ -789,8 +762,12 @@ __all__ = [
     "RunPreparationError",
     "RunPreparationTimeoutError",
     "RunPreparationUnavailableError",
+    "TurnPreparationPlan",
     "build_dspy_history_for_claim",
     "claim_history_records",
+    "close_turn_preparation",
     "prepare_host_capabilities",
+    "prepare_turn",
     "skill_event",
+    "wait_for_session_idle",
 ]

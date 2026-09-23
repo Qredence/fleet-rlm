@@ -24,14 +24,14 @@ from fleet_rlm.rlm.events import (
     ToolStarted,
     observe_tool,
 )
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     ExecutionRuntime,
     RLMExecutionSpec,
     RLMRunner,
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.sessions.models import TurnAccess
 
 
@@ -360,7 +360,7 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fallback", [False, True], ids=["invalid-submit-repair", "typed-extract"])
 async def test_runner_completes_native_repair_and_extract_as_prediction_result(fallback: bool) -> None:
-    from fleet_rlm.rlm.runtime import RLMExecutionContext
+    from fleet_rlm.rlm.execution import RLMExecutionContext
     from fleet_rlm.sessions.context import SessionContextManifest
 
     class Capabilities:
@@ -412,8 +412,8 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
     assert stream.outcome is not None
     assert stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == ("extracted" if fallback else "repaired")
-    assert stream.outcome.prediction.outputs == {"answer": "extracted" if fallback else "repaired"}
+    assert stream.outcome.prediction.answer == ("extracted" if fallback else "repaired")
+    assert stream.outcome.prediction.answer == ("extracted" if fallback else "repaired")
     reasoning_events = [event for event in events if isinstance(event.detail, RLMReasoning)]
     assert reasoning_events
     assert all(event.detail.text.strip() for event in reasoning_events)

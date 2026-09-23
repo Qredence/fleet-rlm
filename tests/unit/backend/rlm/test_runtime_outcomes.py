@@ -12,14 +12,14 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -63,9 +63,13 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
 
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
     assert stream.outcome is not None
-    assert not stream.outcome.succeeded
-    assert stream.outcome.public_error_message == "Turn output is invalid"
+    assert stream.outcome.succeeded
+    projected = project_outcome_prediction(stream.outcome)
+    assert not projected.succeeded
+    assert projected.public_error_message == "Turn output is invalid"
     assert stream.outcome.usage["iterations"] == 2
     assert stream.outcome.usage["observed_lm_usage"] == {
         "root": {"prompt_tokens": 9, "completion_tokens": 3},
@@ -74,14 +78,14 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
 
 @pytest.mark.asyncio
 async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -128,22 +132,26 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
 
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
     assert stream.outcome is not None
-    assert not stream.outcome.succeeded
-    assert stream.outcome.public_error_message == "Turn output is too large"
+    assert stream.outcome.succeeded
+    projected = project_outcome_prediction(stream.outcome)
+    assert not projected.succeeded
+    assert projected.public_error_message == "Turn output is too large"
 
 
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -199,21 +207,23 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
         "skill.loaded",
     ]
     assert stream.outcome is not None
-    assert stream.outcome.terminal_status == "failed"
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
+    assert project_outcome_prediction(stream.outcome).terminal_status == "failed"
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
     from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -274,8 +284,8 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
 
 
 def test_public_failure_message_honors_instance_override() -> None:
+    from fleet_rlm.rlm.execution import _public_failure_message
     from fleet_rlm.rlm.result import RunTerminalError
-    from fleet_rlm.rlm.runtime import _public_failure_message
 
     # A parametrized terminal error sets an instance ``public_message``; the
     # runner must honor the instance attribute instead of reading
@@ -287,14 +297,14 @@ def test_public_failure_message_honors_instance_override() -> None:
 
 @pytest.mark.asyncio
 async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -338,8 +348,8 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
 def test_delegation_usage_falls_back_to_started_calls_without_executor() -> None:
     from types import SimpleNamespace
 
+    from fleet_rlm.rlm.execution import _delegation_usage
     from fleet_rlm.rlm.recursion import DelegationMetrics
-    from fleet_rlm.rlm.runtime import _delegation_usage
 
     metrics = DelegationMetrics()
     metrics.record_lm_call("root", 0)
@@ -356,8 +366,8 @@ def test_delegation_usage_falls_back_to_started_calls_without_executor() -> None
 def test_delegation_usage_prefers_executor_reserved_count() -> None:
     from types import SimpleNamespace
 
+    from fleet_rlm.rlm.execution import _delegation_usage
     from fleet_rlm.rlm.recursion import DelegationMetrics, RecursiveCallSummary
-    from fleet_rlm.rlm.runtime import _delegation_usage
 
     metrics = DelegationMetrics()
     summary = RecursiveCallSummary(

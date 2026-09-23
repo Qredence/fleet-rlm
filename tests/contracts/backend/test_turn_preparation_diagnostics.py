@@ -11,13 +11,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.dependencies import get_turn_runtime
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
-from fleet_rlm.chat.preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
-from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.sessions.run_state import RunLifecycleUnavailableError
+from fleet_rlm.turn_preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
 
 
 class _FailingCoordinator:
@@ -25,7 +25,7 @@ class _FailingCoordinator:
         self._cause = cause
 
     def open_owned(self, _command):
-        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+        from fleet_rlm.turns import OpenedTurnStream
 
         async def fail():
             if isinstance(self._cause, RunPreparationTimeoutError):
@@ -43,8 +43,7 @@ class _FailingCoordinator:
 def _client(cause: BaseException) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
-    app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_runtime=_FailingCoordinator(cause))
+    app.dependency_overrides[get_turn_runtime] = lambda: _FailingCoordinator(cause)
     install_error_handlers(app)
     app.include_router(router)
     return TestClient(app)

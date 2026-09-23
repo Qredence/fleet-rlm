@@ -1,15 +1,11 @@
-"""Daytona-backed Workspace Volume gateway assembly.
-
-Constructs the gateways live composition wires, and delegates the orphan byte
-sweep to the canonical provider-neutral implementation in
-``fleet_rlm.workspace.storage``.
-"""
+"""Mounted Workspace file and byte adapters over a runtime-owned I/O lease."""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import AsyncIterator, Collection, Mapping
+import logging
+from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import PurePosixPath
@@ -17,8 +13,6 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import CompletedRun
-from fleet_rlm.daytona.errors import map_provider_error
-from fleet_rlm.daytona.runtime import DaytonaRuntime, VolumeConfig
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceTextPage
 from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.storage import (
@@ -242,13 +236,15 @@ class DaytonaWorkspaceGateway:
     def __init__(
         self,
         *,
-        runtime: DaytonaRuntime,
-        volume_config: VolumeConfig,
+        runtime: Any,
+        paths: VolumePaths,
         max_file_bytes: int,
+        map_error: Callable[[Exception], Exception],
     ) -> None:
         self._runtime = runtime
-        self._volume_config = volume_config
+        self._paths = paths
         self._max_file_bytes = max_file_bytes
+        self._map_error = map_error
         self._workspace_locks: dict[UUID, asyncio.Lock] = {}
 
     @asynccontextmanager
@@ -259,12 +255,11 @@ class DaytonaWorkspaceGateway:
         purpose: str,
     ) -> AsyncIterator[WorkspaceFileSession]:
         async with self.open_sandbox(workspace_id, purpose=purpose) as sandbox:
-            paths = self._volume_config.paths()
             yield _DaytonaWorkspaceFileSession(
                 AgentAsyncStorageSession(
                     sandbox,
-                    volume_root=str(paths.mount_path),
-                    root=str(paths.files_root()),
+                    volume_root=str(self._paths.mount_path),
+                    root=str(self._paths.files_root()),
                     max_file_bytes=self._max_file_bytes,
                 ),
                 max_file_bytes=self._max_file_bytes,
@@ -293,7 +288,7 @@ class DaytonaWorkspaceGateway:
             ):
                 raise
             except Exception as exc:
-                raise map_provider_error(exc) from exc
+                raise self._map_error(exc) from exc
 
 
 class DaytonaWorkspaceVolumeGateway:
@@ -394,9 +389,74 @@ async def cleanup_orphan_bytes(
         )
 
 
+logger = logging.getLogger(__name__)
+_ORPHAN_CLEANUP_TIMEOUT_SECONDS = 60
+
+
+async def run_deferred_orphan_cleanup(
+    gateway: Any,
+    *,
+    workspace_id: UUID,
+    paths: Any,
+    artifact_catalog: Any,
+    grace_period: timedelta = timedelta(hours=1),
+) -> None:
+    """Best-effort orphan sweep that must never block startup readiness.
+
+    Runs as a tracked background task after the composition is installed; its
+    sandbox creation (cold provisioning) and deletions are deliberately kept off
+    the readiness-critical path. Failures and timeouts are logged and left for a
+    later startup.
+    """
+    from fleet_rlm.workspace.mounted_gateway import OrphanCleanupReport, cleanup_orphan_bytes
+
+    committed_storage_refs = await artifact_catalog.list_storage_refs(workspace_id=workspace_id)
+    completed_runs = await artifact_catalog.list_completed_runs(workspace_id=workspace_id)
+    active_runs = await artifact_catalog.list_active_runs(workspace_id=workspace_id)
+    if not committed_storage_refs and not completed_runs and not active_runs:
+        # The fresh startup sweep has no durable candidates. Do not provision
+        # an ephemeral sandbox just to discover an empty Volume; that extra
+        # mount call races the first Turn's Volume creation/readiness work.
+        cleanup_report = OrphanCleanupReport(scanned=0, removed=0, retained=0, skipped_fresh=0)
+        logger.info(
+            "Daytona orphan cleanup complete phase=orphan_cleanup scanned=0 removed=0 retained=0 "
+            "skipped_fresh=0 deferred=true"
+        )
+        return
+    try:
+        async with asyncio.timeout(_ORPHAN_CLEANUP_TIMEOUT_SECONDS):
+            cleanup_report = await cleanup_orphan_bytes(
+                gateway,
+                workspace_id=workspace_id,
+                paths=paths,
+                committed_storage_refs=committed_storage_refs,
+                completed_runs=completed_runs,
+                active_runs=active_runs,
+                grace_period=grace_period,
+            )
+    except TimeoutError:
+        logger.warning(
+            "Daytona orphan cleanup timed out phase=orphan_cleanup timeout_seconds=%.3f; left for a later startup",
+            _ORPHAN_CLEANUP_TIMEOUT_SECONDS,
+        )
+        return
+    except Exception:
+        logger.warning("Daytona orphan cleanup failed phase=orphan_cleanup", exc_info=True)
+        return
+    logger.info(
+        "Daytona orphan cleanup complete phase=orphan_cleanup scanned=%d removed=%d retained=%d "
+        "skipped_fresh=%d deferred=true",
+        cleanup_report.scanned,
+        cleanup_report.removed,
+        cleanup_report.retained,
+        cleanup_report.skipped_fresh,
+    )
+
+
 __all__ = [
     "DaytonaWorkspaceGateway",
     "DaytonaWorkspaceVolumeGateway",
     "OrphanCleanupReport",
     "cleanup_orphan_bytes",
+    "run_deferred_orphan_cleanup",
 ]

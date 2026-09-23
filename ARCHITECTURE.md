@@ -53,9 +53,9 @@ performance evidence.
 
 | Area | Owner and boundary |
 | --- | --- |
-| HTTP, schemas, OpenAPI, SSE | `src/fleet_rlm/api/` validates and projects transport; routes acquire services from composition. |
-| Process wiring | `src/fleet_rlm/composition/` constructs the runtime graph and owns startup/shutdown orchestration. |
-| Turn lifecycle | `src/fleet_rlm/chat/` claims Runs, prepares work, orders terminal events, settles results, and coordinates cleanup. |
+| HTTP, schemas, OpenAPI, SSE | `src/fleet_rlm/api/` validates and projects transport; routes acquire a typed view of lifespan services. |
+| Process wiring | `src/fleet_rlm/app.py` owns the FastAPI lifespan and publishes route services after recovery; `app_lifecycle.py` builds and closes Daytona resources. |
+| Turn lifecycle | `src/fleet_rlm/turns.py` is the stateful coordinator and owns the stream; `turn_preparation.py` and `turn_settlement.py` hold immutable plans and focused functions. |
 | Reasoning | `src/fleet_rlm/rlm/` owns DSPy signatures, program construction, budgets, tools, events, and recursive orchestration. |
 | Provider integration | `src/fleet_rlm/daytona/` is the Daytona SDK boundary with three core execution modules (`runtime.py`, `interpreter.py`, `broker.py`), `diagnostics.py` for operational doctoring, and `errors.py` for provider error taxonomy. |
 | Durable domain data | `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `persistence/` own their policies and adapters. |
@@ -75,7 +75,7 @@ performance evidence.
 - A Run retains ownership of its interpreter, sandbox, workers, and cleanup
   through settlement. Cancellation or timeout does not authorize detached work
   to mutate settled state.
-- `RunLifecycle.finish()` owns successful durable settlement, Artifact
+- Turn settlement owns successful durable settlement, Artifact
   publication, result snapshots, and Turn Commit. No failure path may publish
   a successful committed result.
 - Daytona-specific SDK imports stay under `src/fleet_rlm/daytona/`. Provider

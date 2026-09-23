@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
-from fleet_rlm.runtime.errors import WorkspaceConflictError
+from fleet_rlm.workspace.errors import WorkspaceConflictError
 
 
 @dataclass(frozen=True, slots=True)

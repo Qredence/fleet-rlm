@@ -9,9 +9,9 @@ import pytest
 
 def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() -> None:
     from fleet_rlm.artifacts.models import ArtifactRef
-    from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, ToolCompleted, ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     artifact = ArtifactRef(
         uuid4(),
@@ -53,10 +53,10 @@ def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() ->
 
 
 def test_commit_success_coalesces_incremental_output_before_durable_commit() -> None:
-    from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.events import RLMOutput
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import OutputPart
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     committed = commit_success(
         RLMOutcome(
@@ -76,8 +76,8 @@ def test_commit_success_coalesces_incremental_output_before_durable_commit() -> 
 
 
 def test_commit_omits_structured_duplicate_for_single_output_prediction() -> None:
-    from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     committed = commit_success(
         RLMOutcome(
@@ -92,9 +92,9 @@ def test_commit_omits_structured_duplicate_for_single_output_prediction() -> Non
 
 
 def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> None:
-    from fleet_rlm.chat.turn_detail_policy import TurnDetailPolicyError, commit_success
     from fleet_rlm.rlm.events import ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.turn_detail_policy import TurnDetailPolicyError, commit_success
 
     with pytest.raises(TurnDetailPolicyError):
         commit_success(RLMOutcome(terminal_status="failed"), ())
@@ -113,7 +113,6 @@ def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
     """RC-2: ToolStarted closed by the guard's ToolFailed commits as failed."""
     import dspy
 
-    from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.events import (
         ToolCompleted,
         ToolEventView,
@@ -121,9 +120,10 @@ def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
         ToolStarted,
         observe_tool,
     )
+    from fleet_rlm.rlm.execution import RunToolGuards
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, RunNoProgressError
-    from fleet_rlm.rlm.runtime import RunToolGuards
     from fleet_rlm.sessions.committed_turn import ToolCallPart
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     observed: list[object] = []
     wrapped = observe_tool(

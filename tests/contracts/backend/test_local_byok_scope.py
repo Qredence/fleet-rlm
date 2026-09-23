@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from fleet_rlm.composition.testing import create_testing_app
+from tests.support.testing_app import create_testing_app
 
 
 def test_session_and_turn_creation_need_no_identity_or_authorization_headers() -> None:

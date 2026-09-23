@@ -25,6 +25,14 @@ from fleet_rlm.rlm.events import (
     ToolFailed,
     ToolStarted,
 )
+from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
@@ -39,14 +47,6 @@ from fleet_rlm.rlm.result import (
     PredictionOutputTooLargeError,
     prediction_result,
     rlm_termination_mode,
-)
-from fleet_rlm.rlm.runtime import (
-    DelegationPolicy,
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RLMRunner,
-    RunIdentity,
-    SessionView,
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
@@ -289,7 +289,7 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert "sub-fallback-answer" in stream.outcome.prediction.display_text
+    assert "sub-fallback-answer" in stream.outcome.prediction.answer
 
     snapshot = metrics_context.metrics.snapshot()
     # Role/depth annotations: Root actions at depth 0, the child's
@@ -318,7 +318,7 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
     # Usage accounting stayed truthful: the Root prediction's trajectory
     # carries exactly the two Root actions.
     assert stream.outcome.usage["iterations"] == 2
-    assert "sub-fallback-answer" in stream.outcome.prediction.outputs["answer"]
+    assert "sub-fallback-answer" in stream.outcome.prediction.answer
 
     # One native child, settled exactly once.
     assert recorder.call_indexes == [1]
@@ -455,7 +455,7 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
             pass
         assert stream.outcome is not None and stream.outcome.succeeded
         assert stream.outcome.prediction is not None
-        return stream.outcome.prediction.display_text
+        return stream.outcome.prediction.answer
 
     answer = asyncio.run(drive())
     # Root continuity preserved; Root↔child and sibling↔sibling isolation
@@ -579,11 +579,14 @@ async def test_root_oversized_submit_fails_with_the_same_closed_category() -> No
     stream = RLMRunner().stream(context)
     _events = [event async for event in stream]
 
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
     assert stream.outcome is not None
-    assert stream.outcome.terminal_status == "failed"
-    assert stream.outcome.prediction is None
+    projected = project_outcome_prediction(stream.outcome)
+    assert projected.terminal_status == "failed"
+    assert projected.prediction is None
     # Same closed literal as the child boundary's too-large category.
-    assert stream.outcome.public_error_message == "Turn output is too large"
+    assert projected.public_error_message == "Turn output is too large"
 
 
 def test_extraction_fallback_termination_parity_between_root_and_child() -> None:
