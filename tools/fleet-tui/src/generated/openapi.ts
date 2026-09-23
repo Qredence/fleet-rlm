@@ -1174,6 +1174,10 @@ export interface components {
                 elapsed_ms: number;
                 /** Outcome */
                 outcome?: string | null;
+                /** Evidence */
+                evidence?: string[];
+                /** Gaps */
+                gaps?: string[];
                 /**
                  * Cleanup State
                  * @enum {string}

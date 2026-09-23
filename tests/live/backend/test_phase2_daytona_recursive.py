@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import dspy
 import pytest
+from daytona.common.errors import DaytonaNotFoundError
 from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
@@ -23,7 +24,7 @@ from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import runtime as recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
-from tests.live.backend._cleanup import _strict_cleanup
+from tests.live.backend._cleanup import _retry_cleanup, _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
@@ -113,6 +114,8 @@ class _ChildEvidence:
     created: int = 0
     same_volume_sibling_scope: bool = False
     volumeless_semantic_isolation: bool = False
+    provider_mounts_inspected: bool = False
+    provider_no_volume_mount: bool = False
     cleanup_succeeded: bool = False
     child_duration_ms: int = 0
     started_at: float | None = None
@@ -140,7 +143,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     copied_policy.write_text(
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1),
+        .replace('default_profile = "daytona-native"', 'default_profile = "daytona-recursive"', 1),
         encoding="utf-8",
     )
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
@@ -178,9 +181,11 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
     """Instrument child-runtime acquisition and cleanup to record evidence for the test."""
-    original = recursive_child_runtime._acquire_child_runtime
+    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
 
-    async def observed(**kwargs: object) -> recursive_child_runtime.ChildRuntimeLease:
+    async def observed(
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: object
+    ) -> recursive_child_runtime.ChildRuntimeLease:
         """
         Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
 
@@ -192,7 +197,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
                 recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
         """
         evidence.started_at = time.perf_counter()
-        lease = await original(**kwargs)  # type: ignore[arg-type]
+        lease = await original(owner, **kwargs)  # type: ignore[arg-type]
         evidence.created += 1
         expected_scope = f"recursive/{kwargs['workspace_id']}/{kwargs['run_id']}/{kwargs['call_index']}"
         evidence.same_volume_sibling_scope = (
@@ -205,6 +210,15 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
             None,
             "",
         )
+        # Lease metadata describes Fleet's request. Read the acquired Sandbox
+        # back from Daytona so the receipt can distinguish provider evidence.
+        try:
+            provider_child = await owner._platform.get(lease.sandbox_id) if owner._platform is not None else None
+        except Exception:
+            provider_child = None
+        provider_mounts = getattr(provider_child, "volumes", None)
+        evidence.provider_mounts_inspected = provider_child is not None and provider_mounts is not None
+        evidence.provider_no_volume_mount = evidence.provider_mounts_inspected and len(provider_mounts) == 0
         close = lease._close
 
         def observed_close() -> None:
@@ -222,7 +236,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         lease._close = observed_close
         return lease
 
-    monkeypatch.setattr(recursive_child_runtime, "_acquire_child_runtime", observed)
+    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
@@ -290,6 +304,30 @@ def _write_receipt(payload: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+async def _delete_sandboxes_on_canary_volume(resources: Any, volume_name: str) -> bool:
+    """Delete provider-visible sandboxes mounting this canary's unique volume."""
+    daytona = resources.runtime._client
+    try:
+        volume = await daytona.volume.get(volume_name, create=False)
+    except DaytonaNotFoundError:
+        return True
+    except Exception:
+        return False
+    try:
+        matching = [
+            sandbox
+            async for sandbox in daytona.list()
+            if any(mount.volume_id == volume.id for mount in sandbox.volumes or ())
+        ]
+    except Exception:
+        return False
+    succeeded = True
+    for sandbox in matching:
+        if not await _retry_cleanup(lambda sandbox=sandbox: daytona.delete(sandbox, wait=True)):
+            succeeded = False
+    return succeeded
+
+
 def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Run the live Daytona recursive canary through the FastAPI application.
@@ -325,8 +363,13 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
-        preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
         try:
+            assert client.portal is not None
             created = client.post("/api/sessions", json={"title": "Phase 2 Daytona recursive canary"})
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
@@ -336,10 +379,11 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "text": (
                         "Execute the narrow native DSPy Phase 2 recursive proof. Run exactly one recursive"
                         ' Daytona proof. First set root_marker = "root-only". Then make exactly one'
-                        " outcome = rlm_query(capsule={'task': ...}) call; the capsule task must tell the fresh"
+                        " outcome = rlm_query(task=..., inputs=[], context='...') call; the task must tell the fresh"
                         " child interpreter to determine whether the Python name root_marker exists, return"
                         " exactly absent when it does not, and use typed SUBMIT(answer="
-                        '"absent"); do not call rlm_query inside the child. After return, assert that'
+                        '"absent", evidence=[], gaps=[], result_files=[]); do not call rlm_query inside the child.'
+                        " After return, assert that"
                         " outcome['status'] is completed, set child_result = outcome['answer'], and assert"
                         " root_marker is still root-only and child_result is exactly absent. Call"
                         " verify_phase2 exactly once with those values and require its ok result. Finally"
@@ -368,6 +412,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert ledger.calls == 1
             assert child_evidence.created == 1
             assert child_evidence.same_volume_sibling_scope or child_evidence.volumeless_semantic_isolation
+            assert child_evidence.provider_mounts_inspected and child_evidence.provider_no_volume_mount
             assert child_evidence.cleanup_succeeded
             pending_receipt = {
                 "schema": _RECEIPT_SCHEMA,
@@ -378,6 +423,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                 "assertions": {
                     "dedicated_child_sandbox": True,
                     "child_isolation_scope": True,
+                    "provider_mounts_inspected": child_evidence.provider_mounts_inspected,
+                    "provider_no_volume_mount": child_evidence.provider_no_volume_mount,
                     "root_marker_absent_in_child": ledger.root_marker_absent_in_child,
                     "root_continuity": ledger.root_continuity,
                     "child_typed_submit": completion["termination_mode"] == "typed_submit",
@@ -391,7 +438,10 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             }
         finally:
             assert client.portal is not None
+            sandbox_cleanup_succeeded = client.portal.call(
+                _delete_sandboxes_on_canary_volume, resources, settings.volume_name
+            )
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
-    assert cleanup_failures == ()
+            assert sandbox_cleanup_succeeded and cleanup_failures == (), "Phase 2 canary cleanup did not settle"
     assert pending_receipt is not None
     _write_receipt(pending_receipt)

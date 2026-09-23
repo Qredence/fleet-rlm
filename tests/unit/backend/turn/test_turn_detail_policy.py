@@ -88,7 +88,15 @@ def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
             execution_details=(
                 ChildProgress("root:call-1", "Inspect code", "running", 10),
                 ChildProgress(
-                    "root:call-1", "Inspect code", "completed", 42, "Reviewed two files", "complete", "run-9"
+                    "root:call-1",
+                    "Inspect code",
+                    "completed",
+                    42,
+                    "Reviewed two files",
+                    "complete",
+                    "run-9",
+                    evidence=("src/api.py:42",),
+                    gaps=("Caller not checked",),
                 ),
             ),
         ),
@@ -97,7 +105,17 @@ def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
 
     children = [part for part in committed.parts if isinstance(part, ChildProgressPart)]
     assert children == [
-        ChildProgressPart("root:call-1", "Inspect code", "completed", 42, "Reviewed two files", "complete", "run-9")
+        ChildProgressPart(
+            "root:call-1",
+            "Inspect code",
+            "completed",
+            42,
+            "Reviewed two files",
+            "complete",
+            "run-9",
+            evidence=("src/api.py:42",),
+            gaps=("Caller not checked",),
+        )
     ]
 
 

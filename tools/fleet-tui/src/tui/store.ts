@@ -93,6 +93,8 @@ export type Message =
       state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
       elapsedMs: number;
       outcome?: string;
+      evidence?: string[];
+      gaps?: string[];
       cleanupState: "pending" | "complete" | "failed" | "not_required";
       collapsed?: boolean;
       ts: number;

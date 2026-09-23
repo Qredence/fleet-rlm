@@ -194,6 +194,8 @@ export class TurnEventReducer {
           state: event.state,
           elapsedMs: event.elapsedMs,
           outcome: event.outcome,
+          evidence: event.evidence,
+          gaps: event.gaps,
           cleanupState: event.cleanupState,
           collapsed: true,
           ts: this.clock(),

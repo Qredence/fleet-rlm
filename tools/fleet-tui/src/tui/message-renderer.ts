@@ -122,6 +122,9 @@ export function renderMessage(
           ` ${heading}`,
           ` ${muted(`cleanup: ${message.cleanupState.replaceAll("_", " ")}`)}`,
           ...(message.outcome ? [` ${terminalSafeText(message.outcome)}`] : []),
+          ...(message.evidence?.map((item) => ` ${muted("evidence:")} ${terminalSafeText(item)}`) ??
+            []),
+          ...(message.gaps?.map((item) => ` ${muted("gap:")} ${terminalSafeText(item)}`) ?? []),
         ],
         safeWidth,
       );

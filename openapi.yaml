@@ -2668,6 +2668,18 @@ components:
                   type: string
                 - type: 'null'
                 title: Outcome
+              evidence:
+                items:
+                  type: string
+                maxItems: 8
+                title: Evidence
+                type: array
+              gaps:
+                items:
+                  type: string
+                maxItems: 8
+                title: Gaps
+                type: array
               cleanup_state:
                 enum:
                 - pending

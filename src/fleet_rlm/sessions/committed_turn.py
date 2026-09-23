@@ -184,6 +184,8 @@ class ChildProgressPart:
     outcome: str | None = None
     cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
     parent_run_id: str | None = None
+    evidence: tuple[str, ...] = ()
+    gaps: tuple[str, ...] = ()
     type: Literal["child_progress"] = "child_progress"
 
     def __post_init__(self) -> None:
@@ -194,6 +196,12 @@ class ChildProgressPart:
         _require_nonnegative(self.elapsed_ms, "elapsed_ms")
         if self.outcome is not None and len(self.outcome) > 500:
             raise CommittedTurnValidationError("outcome must not exceed 500 characters")
+        if (
+            len(self.evidence) > 8
+            or len(self.gaps) > 8
+            or any(not isinstance(item, str) or len(item) > 200 for item in (*self.evidence, *self.gaps))
+        ):
+            raise CommittedTurnValidationError("child progress details exceed their bounds")
         if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
             raise CommittedTurnValidationError("parent_run_id must contain 1 to 128 non-blank characters")
 

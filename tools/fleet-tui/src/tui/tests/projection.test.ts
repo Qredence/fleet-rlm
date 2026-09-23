@@ -74,7 +74,13 @@ describe("terminal projection", () => {
           state,
           elapsed_ms,
           cleanup_state: state === "running" ? "pending" : "complete",
-          ...(state === "completed" ? { outcome: "Found the replay path" } : {}),
+          ...(state === "completed"
+            ? {
+                outcome: "Found the replay path",
+                evidence: ["src/stream.py:42"],
+                gaps: ["Retry not checked"],
+              }
+            : {}),
         },
       });
 
@@ -91,6 +97,8 @@ describe("terminal projection", () => {
         parentRunId: "run-1",
         elapsedMs: 90,
         outcome: "Found the replay path",
+        evidence: ["src/stream.py:42"],
+        gaps: ["Retry not checked"],
       },
     });
   });

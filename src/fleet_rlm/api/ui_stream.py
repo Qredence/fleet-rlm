@@ -48,6 +48,8 @@ class ChildProgressData(FleetUIDataModel):
     state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
     elapsed_ms: int = Field(ge=0)
     outcome: str | None = Field(default=None, max_length=500)
+    evidence: list[str] = Field(default_factory=list, max_length=8)
+    gaps: list[str] = Field(default_factory=list, max_length=8)
     cleanup_state: Literal["pending", "complete", "failed", "not_required"]
     parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -56,6 +58,13 @@ class ChildProgressData(FleetUIDataModel):
     def _nonblank_parent_run_id(cls, value: str | None) -> str | None:
         if value is not None and not value.strip():
             raise ValueError("parent_run_id must not be blank")
+        return value
+
+    @field_validator("evidence", "gaps")
+    @classmethod
+    def _bounded_details(cls, value: list[str]) -> list[str]:
+        if any(len(item) > 200 for item in value):
+            raise ValueError("child progress detail exceeds 200 characters")
         return value
 
 

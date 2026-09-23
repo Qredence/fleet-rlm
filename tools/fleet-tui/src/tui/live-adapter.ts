@@ -151,6 +151,18 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
           state: state as (typeof states)[number],
           elapsedMs: int(value.elapsed_ms) ?? 0,
           outcome: str(value.outcome),
+          evidence:
+            Array.isArray(value.evidence) &&
+            value.evidence.length <= 8 &&
+            value.evidence.every((item) => typeof item === "string" && item.length <= 200)
+              ? value.evidence
+              : undefined,
+          gaps:
+            Array.isArray(value.gaps) &&
+            value.gaps.length <= 8 &&
+            value.gaps.every((item) => typeof item === "string" && item.length <= 200)
+              ? value.gaps
+              : undefined,
           cleanupState: cleanupState as (typeof cleanups)[number],
           messageId: chunk.id ?? undefined,
         },
