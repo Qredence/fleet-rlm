@@ -40,7 +40,7 @@ import pytest
 from dspy import CodeExecutionError, CodeInterpreterError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
 from fleet_rlm.rlm.events import RunCompleted, Status
 from fleet_rlm.rlm.program import (

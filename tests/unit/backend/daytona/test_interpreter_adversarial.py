@@ -28,13 +28,11 @@ from fleet_rlm.daytona.interpreter import (
     final_output_frame,
     sandbox_backend,
 )
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-from fleet_rlm.daytona.provisioning import (
-    DaytonaEnvironmentProfile,
-    DaytonaSandboxSpec,
-)
-from fleet_rlm.daytona.recursive_child_runtime import acquire_child_runtime
 from fleet_rlm.daytona.runtime import (
+    DaytonaEnvironmentProfile,
+    DaytonaRuntime,
+    DaytonaSandboxSpec,
+    LiveDaytonaPlatform,
     create_folder,
     delete_file,
     get_file_info,
@@ -631,7 +629,7 @@ class TestSandboxIsolationInvariants:
         mock_admission.acquire = AsyncMock()
         mock_interpreter = MagicMock()
 
-        await acquire_child_runtime(
+        await DaytonaRuntime()._acquire_child_runtime(
             loop=loop,
             platform=mock_platform,
             admission=mock_admission,

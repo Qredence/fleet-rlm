@@ -74,7 +74,7 @@ class _App:
 
 
 def _inventory(manager: _RecordingManager | None) -> RuntimeInventory:
-    resources = None if manager is None else SimpleNamespace(session_manager=manager)
+    resources = None if manager is None else SimpleNamespace(runtime=manager)
     return RuntimeInventory(run_environment_resources=resources)  # type: ignore[arg-type]
 
 

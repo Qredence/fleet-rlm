@@ -252,7 +252,9 @@ class _QRE142Runner:
             assert binding is not None and binding.sandbox_id is not None
             self.sandbox_ids.add(binding.sandbox_id)
             portal_loop = self.portal.call(lambda: asyncio.get_running_loop())
-            sandbox = sync_sandbox(self.portal.call(self.resources.platform.get, binding.sandbox_id), portal_loop)
+            sandbox = sync_sandbox(
+                self.portal.call(self.resources.runtime._platform.get, binding.sandbox_id), portal_loop
+            )
             assert sandbox is not None
             self._volume_fs = DaytonaSandboxVolumeFs(sandbox)
             paths = volume_paths_from_settings(self.settings)

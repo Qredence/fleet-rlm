@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import dspy
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm

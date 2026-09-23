@@ -5,19 +5,21 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.diagnostics import (
+    build_snapshot_image,
+    environment_manifest,
+    snapshot_dependency_import_names,
+    snapshot_dependency_sha256,
+    snapshot_execution_dependencies,
+)
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
     PYTHON_VERSION,
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
-    build_snapshot_image,
-    environment_manifest,
     sandbox_spec_from_settings,
-    snapshot_dependency_import_names,
-    snapshot_dependency_sha256,
-    snapshot_execution_dependencies,
     verify_sandbox_spec,
 )
 

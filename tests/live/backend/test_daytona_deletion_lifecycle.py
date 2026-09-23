@@ -7,7 +7,7 @@ timings recorded to ``FLEET_LIVE_EVIDENCE_PATH`` (suffix ``-deletion-a`` / ``-b`
 when set.
 
 This probe talks to the provider through Fleet's own client factory and the
-production ``fleet_rlm.daytona.lifecycle.confirm_absence`` poller; no LLM is
+production ``fleet_rlm.daytona.runtime.confirm_absence`` poller; no LLM is
 involved.
 """
 
@@ -44,9 +44,11 @@ def _live_client_and_platform() -> tuple[Any, Any]:
     # unreachable, which makes the name local-but-unbound and raises
     # UnboundLocalError on the first use below.
     from fleet_rlm.config.loader import load_runtime_settings
-    from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-    from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
-    from fleet_rlm.daytona.runtime import build_daytona_client
+    from fleet_rlm.daytona.runtime import (
+        DaytonaSandboxSpec,
+        LiveDaytonaPlatform,
+        build_daytona_client,
+    )
 
     settings = load_runtime_settings()
     client = build_daytona_client(settings)
@@ -72,7 +74,7 @@ async def test_live_delete_request_acceptance_is_not_absence_then_confirms() -> 
     request is accepted, transitions through deleting, and reaches confirmed
     absence only later; records the full observed state sequence and timing.
     """
-    from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, confirm_absence
+    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
 
     client, platform = _live_client_and_platform()
     sandbox = await platform.create(
@@ -154,7 +156,7 @@ async def test_live_delete_wait_true_reference_blocks_until_destroyed() -> None:
             await sandbox.refresh_data()
         except Exception as exc:
             terminal_visibility = f"refresh_data raised {type(exc).__name__}: {str(exc)[:160]}"
-        from fleet_rlm.daytona.lifecycle import AbsenceConfirmation, confirm_absence
+        from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
 
         outcome = await confirm_absence(
             probe=platform.get,

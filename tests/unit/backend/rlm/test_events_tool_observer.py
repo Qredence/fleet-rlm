@@ -307,7 +307,7 @@ def test_projection_defect_fails_closed_without_changing_tool_result() -> None:
     assert observed[1].output == {}
 
 
-def test_observe_tool_rejects_non_tools_and_resolves_awaitable_results() -> None:
+def test_observe_tool_rejects_non_tools_and_async_results_without_bridge() -> None:
     observed: list[Any] = []
 
     def plain() -> str:
@@ -321,8 +321,9 @@ def test_observe_tool_rejects_non_tools_and_resolves_awaitable_results() -> None
         return "unsupported"
 
     wrapped = observe_tool(dspy.Tool(async_tool), observed.append, ToolEventView())
-    assert wrapped() == "unsupported"
-    assert [type(item) for item in observed] == [ToolStarted, ToolCompleted]
+    with pytest.raises(RuntimeError, match="persistent async bridge"):
+        wrapped()
+    assert [type(item) for item in observed] == [ToolStarted, ToolFailed]
 
 
 @pytest.mark.asyncio

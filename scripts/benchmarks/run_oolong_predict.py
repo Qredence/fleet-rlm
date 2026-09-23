@@ -179,7 +179,7 @@ def _run_dry(args: argparse.Namespace) -> dict[str, object]:
 
 
 async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, object]:
-    from fleet_rlm.daytona.provisioning import acquire_ephemeral_interpreter
+    from fleet_rlm.daytona.runtime import acquire_ephemeral_interpreter
     from fleet_rlm.rlm.budget import TurnBudget
 
     loaded = resolve_datapoints(

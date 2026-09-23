@@ -772,6 +772,7 @@ class DaytonaCodeInterpreter:
         self._reservation_state_lock = Lock()
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
+        self._async_bridge: Any | None = None
         self._fleet_output_contract: FleetOutputContract | None = None
         self._output_fields: list[dict[str, Any]] | None = None
         self.output_fields = output_fields
@@ -1000,6 +1001,7 @@ class DaytonaCodeInterpreter:
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         """Pass the composition-owned async bridge to a live tool broker."""
         self._ensure_binding_mutation_allowed()
+        self._async_bridge = async_bridge
         backend = self._backend
         bind_bridge = getattr(backend, "bind_async_bridge", None)
         if callable(bind_bridge):
@@ -1364,18 +1366,18 @@ class DaytonaCodeInterpreter:
         fn = self._bound_tools.get(str(tool_name))
         if fn is None:
             raise CodeInterpreterError(f"Unknown tool: {tool_name}")
-        if inspect.iscoroutinefunction(fn):
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is not None and loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(fn(*args, **dict(kwargs)), loop)
-                return future.result()
-            return asyncio.run(fn(*args, **dict(kwargs)))
-        if args:
-            return fn(*args, **dict(kwargs))
-        return fn(**dict(kwargs))
+        result = fn(*args, **dict(kwargs))
+        if not inspect.isawaitable(result):
+            return result
+        if self._async_bridge is None:
+            if inspect.iscoroutine(result):
+                result.close()
+            cancel = getattr(result, "cancel", None)
+            if callable(cancel):
+                cancel()
+            raise CodeInterpreterError("async Tool requires a persistent async bridge")
+        deadline = self._turn_budget.deadline if self._turn_budget is not None else None
+        return self._async_bridge.run(result, deadline=deadline)
 
     def _ensure_bindings(self) -> None:
         backend = self._backend

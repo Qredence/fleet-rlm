@@ -53,7 +53,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     import fleet_rlm.cli as cli_module
     import fleet_rlm.composition.live as composition_daytona
     import fleet_rlm.composition.testing as composition_common
-    import fleet_rlm.daytona.platform as daytona_platform
+    import fleet_rlm.daytona.runtime as daytona_runtime
     import fleet_rlm.persistence.database as persistence_database
     import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
     import fleet_rlm.rlm.program as program
@@ -76,7 +76,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
 
     seam_bindings = (
         (persistence_database, "create_async_engine_from_url", "database"),
-        (daytona_platform, "build_daytona_client", "daytona"),
+        (daytona_runtime, "build_daytona_client", "daytona"),
         (program, "build_model_bundle", "provider"),
     )
     for module, attribute, label in seam_bindings:
@@ -103,10 +103,10 @@ def _stub_daytona_settings_gates() -> None:
     is a module-global resolved at call time.
     """
     import fleet_rlm.composition.live as composition_daytona
-    import fleet_rlm.daytona.provisioning as daytona_provisioning
+    import fleet_rlm.daytona.runtime as daytona_runtime
 
     composition_daytona.require_daytona_settings = lambda _settings: None
-    daytona_provisioning.sandbox_spec_from_settings = lambda _settings: object()
+    daytona_runtime.sandbox_spec_from_settings = lambda _settings: object()
 
 
 def _run_create_app(*, payload: dict[str, Any]) -> None:

@@ -33,10 +33,16 @@ JSON-only tool requests to the host and returns sanitized results; it does not
 move model code into the Fleet process. The broker lifecycle is owned by the
 interpreter and closes with its Sandbox lease. Reused root leases reset the
 execution namespace and invocation credential between Turns. `DaytonaRuntime`
-is the sole application-facing owner of reusable root records and disposable
-child leases: it coordinates per-session acquisition without holding a
-runtime-wide lock across provider calls, tracks late acquisitions until
-their Sandboxes settle, and supplies the invocation-scoped interpreter
+is the sole application-facing owner of reusable root records, disposable
+child leases, and temporary Workspace I/O Sandboxes. It constructs and disposes
+the process SDK graph only after remote ownership settles. It coordinates
+per-session acquisition without holding a runtime-wide lock across provider
+calls, tracks late acquisitions until
+their Sandboxes settle, validates retained roots against durable binding
+generations, and serializes active invocations across preparation adapters.
+Shutdown cannot retire a root while its invocation is active. Persistence
+repositories remain the cross-worker generation authority; there is no
+separate Daytona session manager. The runtime supplies the invocation-scoped interpreter
 factory that native DSPy calls per RLM invocation. DSPy's native
 semantic tools use the same broker path as Fleet tools. Consult the
 [testing strategy](docs/how-to-guides/testing-strategy.md) for validation lanes
@@ -51,7 +57,7 @@ performance evidence.
 | Process wiring | `src/fleet_rlm/composition/` constructs the runtime graph and owns startup/shutdown orchestration. |
 | Turn lifecycle | `src/fleet_rlm/chat/` claims Runs, prepares work, orders terminal events, settles results, and coordinates cleanup. |
 | Reasoning | `src/fleet_rlm/rlm/` owns DSPy signatures, program construction, budgets, tools, events, and recursive orchestration. |
-| Provider integration | `src/fleet_rlm/daytona/` is the Daytona SDK boundary and normalizes provider failures before they reach public surfaces. |
+| Provider integration | `src/fleet_rlm/daytona/` is the Daytona SDK boundary with three core execution modules (`runtime.py`, `interpreter.py`, `broker.py`), `diagnostics.py` for operational doctoring, and `errors.py` for provider error taxonomy. |
 | Durable domain data | `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `persistence/` own their policies and adapters. |
 | Policy | `config/fleet.toml` and `src/fleet_rlm/config/` define selected, validated runtime policy. |
 | Diagnostics and evaluation | `observability/` and `optimization/` own sanitized telemetry and evaluation contracts; they do not become a second execution path. |

@@ -31,7 +31,6 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/api/dependencies.py",
     "fleet_rlm/daytona/broker.py",
     "fleet_rlm/daytona/runtime.py",
-    "fleet_rlm/daytona/sandbox.py",
     "fleet_rlm/paths.py",
     "fleet_rlm/config/__init__.py",
     "fleet_rlm/config/settings.py",

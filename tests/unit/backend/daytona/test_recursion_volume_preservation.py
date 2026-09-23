@@ -18,10 +18,12 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.provisioning import recursive_child_volume_subpath
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
+from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona.runtime import (
+    ChildRuntimeLeaseState,
+    DaytonaAdmission,
+    recursive_child_volume_subpath,
+)
 
 MOUNT = "/home/daytona/fleet"
 
@@ -130,7 +132,7 @@ def _factory(
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    return recursive_child_runtime.build_child_runtime_factory(
+    return recursive_child_runtime.DaytonaRuntime().build_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,

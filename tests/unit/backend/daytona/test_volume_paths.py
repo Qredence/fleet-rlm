@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,

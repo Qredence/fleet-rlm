@@ -35,8 +35,8 @@ PYPROJECT = ROOT / "pyproject.toml"
 _REQUIRED_ASSET_PATHS = (
     "fleet_rlm/py.typed",
     "fleet_rlm/daytona/snapshot-requirements.txt",
-    "fleet_rlm/daytona/provisioning.py",
-    "fleet_rlm/daytona/sync_bridge.py",
+    "fleet_rlm/daytona/runtime.py",
+    "fleet_rlm/daytona/diagnostics.py",
     "fleet_rlm/skills/bundled/README.md",
     "fleet_rlm/skills/bundled/data-analysis/SKILL.md",
     "fleet_rlm/skills/bundled/dspy-rlm/SKILL.md",
@@ -214,24 +214,25 @@ class TestPackageAssetsAndExclusions:
         code = """
 import sys
 sys.path.insert(0, sys.argv[1])
-import fleet_rlm.daytona.provisioning as provisioning
+import fleet_rlm.daytona.diagnostics as diagnostics
+import fleet_rlm.daytona.runtime as runtime
 from importlib.resources import files
-assert sys.argv[1] in provisioning.__file__
+assert sys.argv[1] in runtime.__file__
 manifests = {}
-for profile in provisioning.DaytonaEnvironmentProfile:
-    is_child = profile is provisioning.DaytonaEnvironmentProfile.SEMANTIC_CHILD
-    resources = provisioning.SEMANTIC_CHILD_RESOURCES if is_child else provisioning.SESSION_RESOURCES
-    spec = provisioning.DaytonaSandboxSpec(
+for profile in runtime.DaytonaEnvironmentProfile:
+    is_child = profile is runtime.DaytonaEnvironmentProfile.SEMANTIC_CHILD
+    resources = runtime.SEMANTIC_CHILD_RESOURCES if is_child else runtime.SESSION_RESOURCES
+    spec = runtime.DaytonaSandboxSpec(
         'package-profile-check-v1', profile=profile,
         cpu=resources[0], memory_gib=resources[1], disk_gib=resources[2],
     )
-    manifest = provisioning.environment_manifest(spec, profile)
+    manifest = diagnostics.environment_manifest(spec, profile)
     assert len(manifest.digest) == 64
     assert len(manifest.dependency_sha256) == 64
     manifests[profile] = manifest
-assert manifests[provisioning.DaytonaEnvironmentProfile.SESSION].dependencies
-assert not manifests[provisioning.DaytonaEnvironmentProfile.SEMANTIC_CHILD].dependencies
-assert manifests[provisioning.DaytonaEnvironmentProfile.WORKSPACE_CHILD].volume_allowed
+assert manifests[runtime.DaytonaEnvironmentProfile.SESSION].dependencies
+assert not manifests[runtime.DaytonaEnvironmentProfile.SEMANTIC_CHILD].dependencies
+assert manifests[runtime.DaytonaEnvironmentProfile.WORKSPACE_CHILD].volume_allowed
 """
         with tempfile.TemporaryDirectory() as directory:
             result = subprocess.run(

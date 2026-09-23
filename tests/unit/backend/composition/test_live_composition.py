@@ -82,7 +82,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
     """Partial live composition cleanup must also run for task cancellation."""
     import fleet_rlm.composition.daytona_run_preparation as run_environment
     import fleet_rlm.composition.live as composition
-    import fleet_rlm.daytona.provisioning as provisioning
+    import fleet_rlm.daytona.runtime as daytona_runtime
     import fleet_rlm.persistence.database as database
     import fleet_rlm.rlm.compat_3_3_1 as dspy_contract
 
@@ -97,7 +97,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
     monkeypatch.setattr(dspy_contract, "assert_dspy_version", lambda: None)
     monkeypatch.setattr(composition, "require_daytona_settings", lambda _settings: None)
     monkeypatch.setattr(run_environment, "resolve_settings", lambda settings: settings)
-    monkeypatch.setattr(provisioning, "sandbox_spec_from_settings", lambda _settings: object())
+    monkeypatch.setattr(daytona_runtime, "sandbox_spec_from_settings", lambda _settings: object())
     monkeypatch.setattr(database, "create_async_engine_from_url", lambda _url: engine)
 
     async def cancel_startup(*_args, **_kwargs) -> None:
@@ -549,7 +549,7 @@ async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -
     assert app.state.runtime_inventory is None
     assert app.state.composition_ready is False
     assert dispatcher.service_loop() is asyncio.get_running_loop()
-    assert composition._COMPOSITION_DISPOSAL_TASKS or composition._COMPOSITION_DISPOSAL_MONITORS
+    assert composition._COMPOSITION_DISPOSAL_TASKS or composition._COMPOSITION_DISPOSAL_OWNERS
 
     # Settle deferred ownership so later tests do not inherit fenced tasks.
     pending = list(composition._COMPOSITION_DISPOSAL_TASKS)
@@ -558,6 +558,11 @@ async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -
         with contextlib.suppress(asyncio.CancelledError, BaseException):
             _ = await task
     composition._COMPOSITION_DISPOSAL_TASKS.clear()
+    # Cancellation must retain the concrete inventory, without spawning a
+    # fallback thread or moving its SDK objects to a fresh event loop.
+    await asyncio.sleep(0)
+    assert composition._COMPOSITION_DISPOSAL_OWNERS[id(inventory)] is inventory
+    composition._COMPOSITION_DISPOSAL_OWNERS.pop(id(inventory))
     dispatcher.clear_loop(asyncio.get_running_loop())
 
 

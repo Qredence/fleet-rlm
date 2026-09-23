@@ -19,7 +19,7 @@ def _interpreter():
 
 def _child_runtime(call_index: int):
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+    from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(

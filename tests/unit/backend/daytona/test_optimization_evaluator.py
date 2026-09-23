@@ -11,7 +11,7 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
 from fleet_rlm.optimization import daytona as subject
 from fleet_rlm.optimization.daytona import (
     DisposableOptimizationSandboxFactory,

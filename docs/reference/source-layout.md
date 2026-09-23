@@ -6,14 +6,19 @@ src/fleet_rlm/
 ├── artifacts/      # candidates, validation, persistent/local stores
 ├── chat/           # Turn context, coordination, and claim policy
 ├── cli/            # supervised TUI/backend launchers and Daytona doctor
-├── daytona/        # Daytona resources, provider adapters, and transport
+├── daytona/        # runtime-owned SDK lifecycle, invocation adapter, and broker
+│   ├── runtime.py      # root/child/Workspace I/O lifecycle and process disposal
+│   ├── interpreter.py  # invocation adapter and reviewed host-tool bridge
+│   ├── broker.py       # bounded authenticated Sandbox-to-host transport
+│   ├── diagnostics.py  # doctor and deterministic image-manifest utilities
+│   └── errors.py       # typed provider/runtime error taxonomy
 ├── attachments/    # Attachment models, lifecycle, storage, and host tools
 ├── workspace/      # Workspace, Projects, Memory, URL, and storage domains
 ├── observability/  # failure diagnostics, MLflow tracing, DSPy callbacks, and posthog
 ├── optimization/   # trusted-host GEPA/evidence lane
 ├── persistence/    # SQLAlchemy models and repository adapters
 ├── rlm/            # DSPy signature, models, runner, Runtime Events
-├── runtime/        # provider-neutral Sandbox bindings + Daytona assembly
+├── runtime/        # provider-neutral Sandbox bindings and runtime contracts
 ├── sessions/       # Session/Turn domain and repository interfaces
 ├── skills/         # immutable bundled catalog, Signatures, and host tools
 ├── app.py          # FastAPI factory and lifespan

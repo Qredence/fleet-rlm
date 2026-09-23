@@ -95,13 +95,13 @@ def _wait_for_release(resources: Any, session_id: UUID, *, permits: int, portal:
     deadline = time.perf_counter() + 45
     while time.perf_counter() < deadline:
         if (
-            resources.daytona_admission._semaphore._value == permits
-            and resources.session_manager.active_leases.holder(session_id) is None
+            resources.runtime._admission._semaphore._value == permits
+            and resources.runtime.active_leases.holder(session_id) is None
         ):
             return
         time.sleep(0.25)
-    assert resources.daytona_admission._semaphore._value == permits
-    assert resources.session_manager.active_leases.holder(session_id) is None
+    assert resources.runtime._admission._semaphore._value == permits
+    assert resources.runtime.active_leases.holder(session_id) is None
 
 
 def test_daytona_deadline_cleanup_through_fastapi(
@@ -150,7 +150,7 @@ def test_daytona_deadline_cleanup_through_fastapi(
                 chunk.get("type") == "tool-output-available" and "propose_memory" in str(chunk) for chunk in chunks
             )
             _wait_for_release(resources, session_id, permits=settings.max_active_daytona_leases, portal=client.portal)
-            sandbox_ids.update(resources._sandbox_ids)
+            sandbox_ids.update(resources.runtime._tracked_sandbox_ids)
         finally:
             release.set()
             assert client.portal is not None

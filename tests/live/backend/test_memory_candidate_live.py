@@ -207,7 +207,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 binding = portal.call(resources.bindings.get, session_id)
                 assert binding is not None and binding.sandbox_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                sandbox = sync_sandbox(portal.call(resources.platform.get, binding.sandbox_id), portal_loop)
+                sandbox = sync_sandbox(portal.call(resources.runtime._platform.get, binding.sandbox_id), portal_loop)
                 paths = volume_paths_from_settings(settings)
                 from fleet_rlm.workspace.memory import WorkspaceMemory
                 from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage

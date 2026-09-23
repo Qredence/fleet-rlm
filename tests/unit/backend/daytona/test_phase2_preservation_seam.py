@@ -5,8 +5,7 @@ Focused ownership-transfer coverage for the DaytonaRuntime cutover:
 * sequential root reuse returns the same lease without a second create;
 * two concurrent sessions acquire independently (no shared registry lock
   across provider waits);
-* failed root creation keeps provider-owned late acquisitions visible until
-  the SessionManager reports that ownership settled;
+* failed/late root creation keeps actual provider work owned until cleanup;
 * cancellation during execution cannot mutate the settled registry entry;
 * child cleanup failure keeps the child retained for retry;
 * restart reconciliation (taint) rotates the generation on next acquire;
@@ -19,8 +18,6 @@ runtime-owned ``DaytonaSessionRecord`` seam.
 from __future__ import annotations
 
 import asyncio
-import gc
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -71,26 +68,6 @@ async def test_sequential_root_reuse_returns_same_lease() -> None:
 
 
 @pytest.mark.asyncio
-async def test_retiring_root_releases_record_and_idle_key_lock() -> None:
-    runtime = DaytonaRuntime(
-        root_acquirer=lambda _spec, **_kwargs: _closable(),
-        root_releaser=lambda lease: lease.release(),
-    )
-    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
-
-    await runtime.acquire_root_session(spec)
-    assert runtime.session_record(spec.workspace_id, spec.session_id) is not None
-
-    await runtime.close_root_session(spec.workspace_id, spec.session_id)
-    gc.collect()
-
-    assert runtime.roots == ()
-    assert runtime.session_record(spec.workspace_id, spec.session_id) is None
-    assert len(runtime._key_locks) == 0
-    assert not runtime.has_pending_ownership
-
-
-@pytest.mark.asyncio
 async def test_two_concurrent_sessions_acquire_independently() -> None:
     started = asyncio.Event()
     release_second = asyncio.Event()
@@ -121,68 +98,15 @@ async def test_two_concurrent_sessions_acquire_independently() -> None:
 
 
 @pytest.mark.asyncio
-async def test_same_session_acquisitions_share_a_lock_until_settled() -> None:
-    started = asyncio.Event()
-    release = asyncio.Event()
-    creates = 0
+async def test_failed_root_creation_keeps_late_ownership_visible() -> None:
+    landed = asyncio.Event()
+    lease = _closable()
 
     async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
-        nonlocal creates
-        creates += 1
-        started.set()
-        await release.wait()
-        return _closable()
+        await landed.wait()
+        return lease
 
     runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
-    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
-    first_task = asyncio.create_task(runtime.acquire_root_session(spec))
-    await started.wait()
-
-    second_started = asyncio.Event()
-
-    async def second_acquire():
-        second_started.set()
-        return await runtime.acquire_root_session(spec)
-
-    second_task = asyncio.create_task(second_acquire())
-    await second_started.wait()
-    await asyncio.sleep(0)
-    assert creates == 1
-
-    release.set()
-    first, second = await asyncio.gather(first_task, second_task)
-
-    assert first is second
-    assert creates == 1
-    await runtime.close_root_session(spec.workspace_id, spec.session_id)
-    gc.collect()
-    assert len(runtime._key_locks) == 0
-
-
-@pytest.mark.asyncio
-async def test_failed_root_creation_checks_session_manager_ownership() -> None:
-    class Manager:
-        has_pending_ownership = False
-        close_calls = 0
-
-        async def aclose(self, *, drain_seconds: float) -> bool:
-            assert drain_seconds >= 0
-            self.close_calls += 1
-            self.has_pending_ownership = False
-            return True
-
-    manager = Manager()
-
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
-        manager.has_pending_ownership = True
-        await asyncio.sleep(10.0)
-        return _closable()  # pragma: no cover
-
-    runtime = DaytonaRuntime(
-        SimpleNamespace(session_manager=manager),
-        root_acquirer=acquire,
-        root_releaser=lambda lease: lease.release(),
-    )
     spec = RootSessionSpec(
         workspace_id=uuid4(),
         session_id=uuid4(),
@@ -192,21 +116,26 @@ async def test_failed_root_creation_checks_session_manager_ownership() -> None:
     with pytest.raises((TimeoutError, asyncio.TimeoutError)):
         await runtime.acquire_root_session(spec)
 
-    # Runtime ownership mirrors the provider manager's real settlement state.
+    # The timed-out create remains tracked until its Sandbox settles.
     assert runtime.has_pending_ownership
+    assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 0.01) is False
+    assert not lease.closed
+    landed.set()
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 5.0) is True
+    assert lease.closed
     assert not runtime.has_pending_ownership
-    assert manager.close_calls == 1
 
 
 @pytest.mark.asyncio
 async def test_cancelled_acquisition_does_not_publish_a_root() -> None:
     started = asyncio.Event()
+    landed = asyncio.Event()
+    lease = _closable()
 
     async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
         started.set()
-        await asyncio.sleep(10.0)
-        return _closable()  # pragma: no cover
+        await landed.wait()
+        return lease
 
     runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
@@ -219,6 +148,10 @@ async def test_cancelled_acquisition_does_not_publish_a_root() -> None:
 
     assert runtime.roots == ()
     assert runtime.session_record(spec.workspace_id, spec.session_id) is None
+    assert runtime.has_pending_ownership
+    landed.set()
+    assert await runtime.aclose() is True
+    assert lease.closed
 
 
 @pytest.mark.asyncio

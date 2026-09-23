@@ -14,7 +14,6 @@ import logging
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from threading import Event, Thread, current_thread
 from typing import Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -26,10 +25,10 @@ from fleet_rlm.chat.preparation import DefaultRunPreparer
 from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.composition.inventory import (
     CompositionError,
+    DaytonaRuntimeSurface,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
     RuntimeProcessResources,
-    RuntimeSessionManager,
     SettlingRunStateStore,
     clear_runtime_inventory,
     install_runtime_inventory,
@@ -52,7 +51,7 @@ _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
 _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS = 60.0
 _COMPOSITION_DISPOSAL_TASKS: set[asyncio.Task[Any]] = set()
-_COMPOSITION_DISPOSAL_MONITORS: set[Thread] = set()
+_COMPOSITION_DISPOSAL_OWNERS: dict[int, RuntimeInventory] = {}
 _DATABRICKS_MLFLOW_CHAT_BASE_PATH = "/ai-gateway/mlflow/v1"
 
 
@@ -159,9 +158,9 @@ async def _finish_daytona_disposal(
     inventory: RuntimeInventory,
     dispatcher: SyncBridgeDispatcher,
     composition_loop: asyncio.AbstractEventLoop | None,
-) -> None:
+) -> bool:
     """Retry deferred composition teardown before relinquishing bridge authority."""
-    from fleet_rlm.daytona.session_manager import has_pending_lease_ownership, wait_lease_ownership
+    from fleet_rlm.daytona.runtime import has_pending_lease_ownership, wait_lease_ownership
 
     retry_deadline = asyncio.get_running_loop().time() + _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS
     while asyncio.get_running_loop().time() < retry_deadline:
@@ -198,7 +197,7 @@ async def _finish_daytona_disposal(
         if not pending:
             if composition_loop is not None:
                 dispatcher.clear_loop(composition_loop)
-            return
+            return True
 
         # Wait briefly for owned tasks that are still attached to this loop.
         # Foreign-loop ownership is deliberately reported as unresolved by the
@@ -210,122 +209,32 @@ async def _finish_daytona_disposal(
             await wait_lease_ownership(timeout=0.25)
         await asyncio.sleep(0.25)
     logger.warning("deferred Daytona composition disposal budget expired; provider ownership remains fenced")
+    return False
 
 
 def _retain_composition_disposal(
     task: asyncio.Task[Any],
     *,
     inventory: RuntimeInventory,
-    dispatcher: SyncBridgeDispatcher,
-    composition_loop: asyncio.AbstractEventLoop,
 ) -> None:
-    """Retain deferred teardown, including when its loop is destroyed.
-
-    FastAPI normally runs lifespan finalizers on a live loop.  If that loop is
-    stopped while a provider request is still owned, however, asyncio cancels
-    the deferred task and destroys the loop before a later retry can run.  A
-    tiny daemon monitor keeps the inventory/dispatcher fenced and retries on
-    the original loop when possible, then on a disposable loop after the
-    original loop has stopped.  It never closes the client while ownership is
-    unresolved; ``_finish_daytona_disposal`` performs that final check.
-    """
+    """Retain unresolved ownership without moving loop-bound SDK resources."""
+    _COMPOSITION_DISPOSAL_OWNERS[id(inventory)] = inventory
     _COMPOSITION_DISPOSAL_TASKS.add(task)
-    woke = Event()
 
     def settled(completed: asyncio.Task[Any]) -> None:
         _COMPOSITION_DISPOSAL_TASKS.discard(completed)
-        woke.set()
         if completed.cancelled():
             return
-        with contextlib.suppress(BaseException):
-            error = completed.exception()
+        error = completed.exception()
         if error is not None:
             logger.warning(
                 "deferred Daytona composition disposal failed",
                 extra={"error_type": type(error).__name__},
             )
+        elif completed.result():
+            _COMPOSITION_DISPOSAL_OWNERS.pop(id(inventory), None)
 
     task.add_done_callback(settled)
-
-    def retry() -> None:
-        """Retry cancellation/loop-stop teardown without blocking the loop."""
-        try:
-            while not task.done():
-                if composition_loop.is_closed() or not composition_loop.is_running():
-                    break
-                woke.wait(0.1)
-                woke.clear()
-
-            # A normally completed retry has already made the ownership
-            # decision.  Only cancellation or loop shutdown needs another
-            # owner; a completed-but-unsuccessful pass leaves global provider
-            # fences in place for the next composition/process owner.
-            if task.done() and not task.cancelled():
-                return
-
-            if composition_loop.is_running() and not composition_loop.is_closed():
-                woke.clear()
-                try:
-                    retry_future = asyncio.run_coroutine_threadsafe(
-                        _finish_daytona_disposal(inventory, dispatcher, composition_loop),
-                        composition_loop,
-                    )
-                except BaseException:
-                    retry_future = None
-                if retry_future is not None:
-                    while not retry_future.done():
-                        if composition_loop.is_closed() or not composition_loop.is_running():
-                            retry_future.cancel()
-                            break
-                        woke.wait(0.1)
-                        woke.clear()
-                    if retry_future.done() and not retry_future.cancelled():
-                        with contextlib.suppress(BaseException):
-                            retry_future.exception()
-                        return
-
-            # ``asyncio.run`` owns a fresh loop and therefore avoids awaiting
-            # any Task tied to the destroyed composition loop.  The disposal
-            # routine remains fail-closed if those foreign resources are still
-            # pending and simply keeps provider ownership fenced.
-            with contextlib.suppress(BaseException):
-                asyncio.run(_finish_daytona_disposal(inventory, dispatcher, composition_loop))
-        finally:
-            _COMPOSITION_DISPOSAL_MONITORS.discard(current_thread())
-
-    monitor = Thread(target=retry, name="fleet-daytona-composition-disposal-monitor", daemon=True)
-    _COMPOSITION_DISPOSAL_MONITORS.add(monitor)
-    monitor.start()
-
-
-def _start_composition_disposal_fallback(
-    inventory: RuntimeInventory,
-    dispatcher: SyncBridgeDispatcher,
-    composition_loop: asyncio.AbstractEventLoop | None,
-) -> None:
-    """Start disposal on an independent loop when no owner loop remains."""
-
-    def dispose() -> None:
-        try:
-            asyncio.run(_finish_daytona_disposal(inventory, dispatcher, composition_loop))
-        except BaseException as exc:
-            logger.warning(
-                "deferred Daytona composition fallback failed",
-                extra={"error_type": type(exc).__name__},
-            )
-        finally:
-            _COMPOSITION_DISPOSAL_MONITORS.discard(current_thread())
-
-    monitor = Thread(target=dispose, name="fleet-daytona-composition-disposal-fallback", daemon=True)
-    _COMPOSITION_DISPOSAL_MONITORS.add(monitor)
-    try:
-        monitor.start()
-    except BaseException as exc:
-        _COMPOSITION_DISPOSAL_MONITORS.discard(monitor)
-        logger.critical(
-            "unable to retain deferred Daytona composition disposal",
-            extra={"error_type": type(exc).__name__},
-        )
 
 
 async def run_deferred_memory_outbox_reconcile(
@@ -361,12 +270,12 @@ async def run_deferred_memory_outbox_reconcile(
 
 async def _reconcile_daytona_settling(
     run_state: SettlingRunStateStore,
-    session_manager: RuntimeSessionManager,
+    runtime: DaytonaRuntimeSurface,
     *,
     fence_timeout: float = _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS,
     deadline: float | None = None,
 ) -> ReconciliationSummary:
-    """Reconcile stale settling turns using bounded session fencing."""
+    """Reconcile stale settling turns using bounded runtime fencing."""
 
     async def bounded_fence(session_id: UUID) -> None:
         remaining = fence_timeout
@@ -375,7 +284,7 @@ async def _reconcile_daytona_settling(
         if remaining <= 0:
             raise TimeoutError("startup recovery budget exhausted")
         fence_deadline = asyncio.get_running_loop().time() + remaining
-        fence = session_manager.fence_session
+        fence = runtime.fence_session
         try:
             accepts_deadline = "deadline" in inspect.signature(fence).parameters
         except (TypeError, ValueError):
@@ -482,7 +391,7 @@ async def build_daytona_composition(
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
     )
-    from fleet_rlm.daytona.provisioning import sandbox_spec_from_settings
+    from fleet_rlm.daytona.runtime import sandbox_spec_from_settings
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory
     from fleet_rlm.persistence.repositories import (
         SqlAlchemyArtifactCatalog,
@@ -529,10 +438,8 @@ async def build_daytona_composition(
             dispatcher=dispatcher,
         )
         mounted_workspace_gateway = DaytonaWorkspaceGateway(
-            platform=resources.platform,
-            volume_client=resources.volume_client,
+            runtime=resources.runtime,
             volume_config=resources.volume_config,
-            sandbox_spec=resources.sandbox_spec,
             max_file_bytes=resolved.max_upload_bytes,
         )
         gateway = DaytonaWorkspaceVolumeGateway(
@@ -579,7 +486,7 @@ async def build_daytona_composition(
         )
         recovery = await _reconcile_daytona_settling(
             run_state,
-            resources.session_manager,
+            resources.runtime,
             deadline=startup_deadline,
         )
         recovery_elapsed_ms = int((asyncio.get_running_loop().time() - startup_started) * 1000)
@@ -680,7 +587,7 @@ async def build_daytona_composition(
             runner=runner,
             turn_timeout_seconds=resolved.turn_timeout_seconds,
             cleanup=cleanup,
-            claim_loss_fence=resources.session_manager.fence_session,
+            claim_loss_fence=resources.runtime.fence_session,
             mlflow_tracing_enabled=resolved.mlflow_tracing_enabled,
             mlflow_expose_trace_id=resolved.mlflow_expose_trace_id,
         )
@@ -825,7 +732,7 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
     dispatcher = getattr(inventory, "bridge_dispatcher", None)
     if ownership_pending and isinstance(dispatcher, SyncBridgeDispatcher):
         composition_loop = dispatcher.service_loop()
-        if composition_loop is not None and not composition_loop.is_closed():
+        if composition_loop is asyncio.get_running_loop():
             deferred = asyncio.create_task(
                 _finish_daytona_disposal(inventory, dispatcher, composition_loop),
                 name="fleet-daytona-composition-disposal",
@@ -833,14 +740,12 @@ async def dispose_daytona_composition(app: FastAPI) -> None:
             _retain_composition_disposal(
                 deferred,
                 inventory=inventory,
-                dispatcher=dispatcher,
-                composition_loop=composition_loop,
             )
         else:
-            # The lifespan loop may already have been torn down after a
-            # cancellation/error phase.  Keep the provider fenced and move
-            # the retry to an independent owner instead of losing it silently.
-            _start_composition_disposal_fallback(inventory, dispatcher, composition_loop)
+            # Retain the inventory for recovery; loop-bound clients and pending
+            # requests cannot safely be transferred to a new event loop.
+            _COMPOSITION_DISPOSAL_OWNERS[id(inventory)] = inventory
+            logger.warning("Daytona disposal requires its owning application loop; ownership remains retained")
     elif isinstance(dispatcher, SyncBridgeDispatcher):
         dispatcher.clear_loop(dispatcher.service_loop())
 

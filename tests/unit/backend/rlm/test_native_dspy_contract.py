@@ -1394,8 +1394,21 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
         await asyncio.sleep(0)
         return {"value": value, "note": note}
 
+    class _Bridge:
+        def run(self, awaitable: Any, **_kwargs: Any) -> Any:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(awaitable)
+            finally:
+                loop.close()
+
     sync_wrapped = observe_tool(dspy.Tool(sync_tool), sync_events.append, ToolEventView.metadata_only())
-    async_wrapped = observe_tool(dspy.Tool(async_tool), async_events.append, ToolEventView.metadata_only())
+    async_wrapped = observe_tool(
+        dspy.Tool(async_tool),
+        async_events.append,
+        ToolEventView.metadata_only(),
+        async_bridge=_Bridge(),
+    )
 
     sync_result = sync_wrapped.func(value=4, note=None)
     # DSPy Tools are synchronous at the interpreter boundary; direct callers
