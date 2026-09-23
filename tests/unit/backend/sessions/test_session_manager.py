@@ -1,24 +1,24 @@
-"""impl-08: DaytonaSessionManager lifecycle and leases (fake platform, no network)."""
+"""impl-08: DaytonaRuntime lifecycle and leases (fake platform, no network)."""
 
 from __future__ import annotations
 
 import asyncio
 import threading
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
-from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
-from fleet_rlm.daytona.session_manager import (
+from fleet_rlm.daytona.runtime import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
-    DaytonaSessionManager,
+    DaytonaAdmission,
+    DaytonaAdmissionTimeoutError,
+    DaytonaRuntime,
     LeaseRequest,
+    RootSessionSpec,
 )
 from fleet_rlm.runtime.bindings import SandboxBinding
 from tests.support.session_manager import (
@@ -159,7 +159,7 @@ def _request() -> LeaseRequest:
     return LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
 
 
-async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+async def _acquire(mgr: DaytonaRuntime, request: LeaseRequest):
     return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
 
 
@@ -661,7 +661,7 @@ async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> N
 @pytest.mark.asyncio
 async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
     mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=plat))
+    runtime = mgr
     req = _request()
     owner = await runtime.acquire_root_session(
         RootSessionSpec(
@@ -683,7 +683,7 @@ async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
+async def test_idle_stop_fails_closed_when_retained_root_probe_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     mgr, plat, _store, _volumes = _manager(idle_stop_seconds=0.01)
     req = _request()
     lease = await _acquire(mgr, req)
@@ -693,7 +693,7 @@ async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
             raise ValueError("runtime ownership probe unavailable")
 
     runtime = BrokenRuntime()
-    mgr.bind_runtime(runtime)
+    monkeypatch.setattr(mgr, "owns_open_root", runtime.owns_open_root)
     await mgr.release(lease)
     await mgr._stop_after_idle(
         session_id=req.session_id,
@@ -886,7 +886,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeoutError
+    from fleet_rlm.daytona.runtime import DaytonaLeaseAcquisitionTimeoutError
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -1102,9 +1102,71 @@ async def test_replace_keeps_volume_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forced_root_rotation_creates_exactly_one_replacement() -> None:
+    runtime, platform, _store, _volumes = _manager()
+    request = _request()
+    spec = RootSessionSpec(
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        run_id=request.run_id,
+    )
+    first = await runtime.acquire_root_session(spec)
+    second = await runtime.acquire_root_session(replace(spec, force_new=True))
+    assert first.closed
+    assert first.sandbox_id != second.sandbox_id
+    assert len(platform.created) == 2
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_shutdown_waits_for_active_invocation_release() -> None:
+    runtime, _platform, _store, _volumes = _manager()
+    request = _request()
+    release = await runtime.begin_root_invocation(
+        request.workspace_id,
+        request.session_id,
+        request.run_id,
+        deadline=asyncio.get_running_loop().time() + 1,
+    )
+    record = runtime.session_record(request.workspace_id, request.session_id)
+    assert record is not None
+    assert record.active_invocation_id == str(request.run_id)
+    assert not await runtime.aclose(drain_seconds=0.01)
+    release()
+    release()
+    assert record.active_invocation_id is None
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_retained_root_rechecks_durable_generation_before_reuse() -> None:
+    runtime, _platform, store, _volumes = _manager()
+    request = _request()
+    spec = RootSessionSpec(
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        run_id=request.run_id,
+    )
+    first = await runtime.acquire_root_session(spec)
+    binding = await store.get(request.session_id)
+    assert binding is not None
+    await store.upsert(replace(binding, generation=binding.generation + 1))
+
+    second = await runtime.acquire_root_session(spec)
+
+    assert first.closed
+    assert second is not first
+    assert second.sandbox_id == first.sandbox_id
+    assert second.lease.binding_generation == binding.generation + 1
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_replace_closes_retained_root_before_retiring_sandbox() -> None:
     mgr, platform, store, _volumes = _manager()
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    runtime = mgr
     request = _request()
     first_spec = RootSessionSpec(
         workspace_id=request.workspace_id,
@@ -1148,7 +1210,7 @@ async def test_replace_retains_root_and_binding_when_root_close_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mgr, platform, store, _volumes = _manager()
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    runtime = mgr
     request = _request()
     retained = await runtime.acquire_root_session(
         RootSessionSpec(
@@ -1294,7 +1356,7 @@ async def test_lease_construction_failure_fences_persisted_replacement_before_cl
         del args, kwargs
         raise RuntimeError("interpreter construction interrupted")
 
-    monkeypatch.setattr("fleet_rlm.daytona.session_manager._build_interpreter", fail_construction)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime._build_interpreter", fail_construction)
 
     with pytest.raises(RuntimeError, match="interpreter construction interrupted"):
         await _acquire(mgr, request)

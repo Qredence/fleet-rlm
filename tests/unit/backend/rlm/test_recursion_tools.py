@@ -17,7 +17,7 @@ import pytest
 
 import fleet_rlm.rlm.recursion as recursion_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (

@@ -324,7 +324,7 @@ def _session_volume_files(sandbox: Any, session_dir: str) -> list[bytes]:
 
 
 async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBinding:
-    return await resources.session_manager.replace(
+    return await resources.runtime.replace(
         binding,
         workspace_id=binding.workspace_id,
         user_id=LocalScope().user_id,
@@ -334,11 +334,10 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any) -> UUID:
     starts = [chunk for chunk in chunks if chunk.get("type") == "start"]
     if len(starts) != 1:
-        manager = getattr(resources, "session_manager", None)
         runtime = getattr(resources, "runtime", None)
-        pending_ownership = bool(getattr(manager, "has_pending_ownership", False))
+        pending_ownership = bool(getattr(runtime, "has_pending_ownership", False))
         runtime_roots = len(getattr(runtime, "roots", ())) if runtime is not None else 0
-        tracked_sandboxes = len(getattr(resources, "_sandbox_ids", ()))
+        tracked_sandboxes = len(getattr(runtime, "_tracked_sandbox_ids", ())) if runtime is not None else 0
         pytest.fail(
             f"{label}: expected exactly one start event, got {len(starts)}; "
             f"{_sse_finish_diagnostic(chunks)} "
@@ -442,7 +441,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert binding is not None
             assert binding.sandbox_id is not None
             sandbox_ids.add(binding.sandbox_id)
-            assert portal.call(resources.platform.get, binding.sandbox_id) is not None
+            assert portal.call(resources.runtime._platform.get, binding.sandbox_id) is not None
         finally:
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
@@ -670,7 +669,9 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                first_sandbox = sync_sandbox(portal.call(resources.platform.get, binding.sandbox_id), portal_loop)
+                first_sandbox = sync_sandbox(
+                    portal.call(resources.runtime._platform.get, binding.sandbox_id), portal_loop
+                )
                 assert first_sandbox is not None
                 first_fs = DaytonaSandboxVolumeFs(first_sandbox)
                 paths = volume_paths_from_settings(settings)
@@ -714,7 +715,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert replacement.volume_id == binding.volume_id
                 assert replacement.mount_path == binding.mount_path
                 assert replacement.volume_subpath == binding.volume_subpath
-                resources.track_sandbox(replacement.sandbox_id)
+                resources.runtime.track_sandbox(replacement.sandbox_id)
 
                 phase = "second_turn"
                 second = client.post(
@@ -777,7 +778,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert assistants[0] == first_assistant
                 assert _structured_part(assistants[0]) == first_structured
                 replacement_sandbox = sync_sandbox(
-                    portal.call(resources.platform.get, replacement.sandbox_id), portal_loop
+                    portal.call(resources.runtime._platform.get, replacement.sandbox_id), portal_loop
                 )
                 assert replacement_sandbox is not None
                 replacement_env_names = _sandbox_environment_names(replacement_sandbox)

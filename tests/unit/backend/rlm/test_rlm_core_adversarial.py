@@ -19,7 +19,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.program import (
     _MAX_CONTEXT_ATTACHMENT_COUNT,
     _MAX_PREVIEW_CHARS,

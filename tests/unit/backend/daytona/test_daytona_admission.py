@@ -6,7 +6,7 @@ import asyncio
 
 import pytest
 
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
+from fleet_rlm.daytona.runtime import DaytonaAdmission, DaytonaAdmissionTimeoutError
 
 
 def test_admission_rejects_more_than_eight_direct_leases() -> None:

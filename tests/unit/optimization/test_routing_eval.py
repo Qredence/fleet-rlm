@@ -8,7 +8,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.optimization.routing import (
     CURATED_ROUTING_SCENARIOS,
     RoutingFacts,

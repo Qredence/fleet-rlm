@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
-from fleet_rlm.daytona.session_manager import DaytonaSessionManager
+from fleet_rlm.daytona.runtime import (
+    DaytonaAdmission,
+    DaytonaRuntime,
+    DaytonaSandboxSpec,
+    VolumeConfig,
+)
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
@@ -190,11 +193,11 @@ def _manager(
     bindings: InMemoryBindingStore | None = None,
     admission: DaytonaAdmission | None = None,
     idle_stop_seconds: float | None = None,
-) -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
+) -> tuple[DaytonaRuntime, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
     plat = platform or _FakePlatform()
     store = bindings or InMemoryBindingStore()
     volumes = _FakeVolumeClient()
-    mgr = DaytonaSessionManager(
+    mgr = DaytonaRuntime(
         platform=plat,
         volume_client=volumes,
         volume_config=VolumeConfig(),

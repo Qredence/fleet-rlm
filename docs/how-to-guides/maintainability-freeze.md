@@ -17,7 +17,7 @@ provider lifecycle, or native DSPy execution contract.
 | Result validation, Artifact publication, and atomic Turn commit | `chat/run_lifecycle.py` | result snapshot and lifecycle contract suites |
 | Native RLM execution and worker observation | `rlm/runtime.py`, `rlm/events.py` | native RLM and recursive delegation suites |
 | Waits for already-started asynchronous effects | `runtime/owned_effect.py` | owned-effect and cancellation suites |
-| Recursive child acquisition, settlement, and late ownership | `daytona/recursive_child_runtime.py` | child cleanup, cancellation, and provider-boundary suites |
+| Recursive child acquisition, settlement, and late ownership | `daytona/runtime.py` | child cleanup, cancellation, and provider-boundary suites |
 | Installed and fallback Workspace agent protocol | `daytona/workspace_agent/`, `daytona/workspace_agent/runtime.py` | Workspace agent handshake and file/Memory suites |
 | Workspace Memory fail-soft classification | `workspace/memory.py` | Memory diagnostics and observability sanitation suites |
 | Configuration field metadata and editor inventory | `config/settings.py`, `config/policy.py` | configuration policy and settings API suites |

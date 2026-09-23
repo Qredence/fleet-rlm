@@ -20,7 +20,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
     FINAL_OUTPUT_MARKER,
@@ -33,13 +32,14 @@ from fleet_rlm.daytona.interpreter import (
     sync_sandbox,
     validate_json_value,
 )
-from fleet_rlm.daytona.lifecycle import (
+from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceProbeError,
     AbsenceTimeout,
+    DaytonaAdmission,
+    cleanup_child_runtime_async,
     confirm_absence,
 )
-from fleet_rlm.daytona.recursive_child_runtime import cleanup_child_runtime_async
 from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
@@ -603,7 +603,7 @@ async def test_confirm_absence_cancelled_error_propagates() -> None:
 
 @pytest.mark.asyncio
 async def test_child_runtime_cleanup_leak_free_on_failure() -> None:
-    """Verify that child runtime cleanup restores the admission permit even if deletion fails."""
+    """Verify that unconfirmed child deletion keeps its admission fence."""
     admission = DaytonaAdmission(max_active_leases=1)
     permit = await admission.acquire(deadline=time.monotonic() + 5.0)
     assert admission._semaphore._value == 0
@@ -623,9 +623,9 @@ async def test_child_runtime_cleanup_leak_free_on_failure() -> None:
             confirm_poll_interval_s=0.01,
         )
 
-    # CRITICAL: Verify admission permit was restored and not leaked
-    assert permit._released is True, "Permit was not released!"
-    assert admission._semaphore._value == 1, "Admission semaphore was leaked after cleanup failure!"
+    assert permit._released is False
+    assert admission._semaphore._value == 0
+    permit.release()
 
 
 def test_interpreter_context_and_sandbox_tombstoning_on_close() -> None:

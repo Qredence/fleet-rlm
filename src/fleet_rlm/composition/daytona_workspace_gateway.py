@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import logging
 from collections.abc import AsyncIterator, Collection, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -19,16 +18,7 @@ from uuid import UUID
 
 from fleet_rlm.artifacts.models import CompletedRun
 from fleet_rlm.daytona.errors import map_provider_error
-from fleet_rlm.daytona.platform import sandbox_state
-from fleet_rlm.daytona.provisioning import (
-    DaytonaSandboxSpec,
-    SandboxProvisioner,
-    VolumeClient,
-    VolumeConfig,
-    ensure_shared_volume_layout,
-    get_or_create_volume_id,
-)
-from fleet_rlm.daytona.session_manager import SandboxLease, SandboxLeasePolicy
+from fleet_rlm.daytona.runtime import DaytonaRuntime, VolumeConfig
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceTextPage
 from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.storage import (
@@ -43,12 +33,6 @@ from fleet_rlm.workspace.workspace import (
     WorkspaceFileList,
     WorkspaceFileSession,
 )
-
-logger = logging.getLogger(__name__)
-
-# Bound provider deletion and cancel it on timeout so no untracked task can
-# outlive the gateway operation or race process-scoped Daytona disposal.
-_SANDBOX_DELETE_GRACE_SECONDS = 15.0
 
 
 def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> WorkspaceFileEntry:
@@ -253,28 +237,19 @@ class _DaytonaWorkspaceVolumeSession:
 
 
 class DaytonaWorkspaceGateway:
-    """Create one purpose-labelled I/O Sandbox and mount one Workspace subpath."""
+    """Adapt runtime-owned Workspace I/O Sandboxes to file operations."""
 
     def __init__(
         self,
         *,
-        platform: Any,
-        volume_client: VolumeClient,
+        runtime: DaytonaRuntime,
         volume_config: VolumeConfig,
-        sandbox_spec: DaytonaSandboxSpec,
         max_file_bytes: int,
     ) -> None:
-        self._platform = platform
-        self._volume_client = volume_client
+        self._runtime = runtime
         self._volume_config = volume_config
-        self._sandbox_spec = sandbox_spec
         self._max_file_bytes = max_file_bytes
         self._workspace_locks: dict[UUID, asyncio.Lock] = {}
-        self._provisioner = SandboxProvisioner(
-            platform=platform,
-            volume_config=volume_config,
-            sandbox_spec=sandbox_spec,
-        )
 
     @asynccontextmanager
     async def open_workspace(
@@ -305,32 +280,9 @@ class DaytonaWorkspaceGateway:
         """Yield one verified mounted Sandbox for a bounded I/O operation group."""
         lock = self._workspace_locks.setdefault(workspace_id, asyncio.Lock())
         async with lock:
-            sandbox: Any | None = None
             try:
-                volume_id = await get_or_create_volume_id(
-                    self._volume_client,
-                    self._volume_config,
-                )
-                expected = self._provisioner.expected_mount(
-                    volume_id=volume_id,
-                    workspace_id=workspace_id,
-                )
-                sandbox = await self._provisioner.create(
-                    expected,
-                    labels={
-                        "fleet-package": "fleet_rlm",
-                        "purpose": purpose,
-                        "workspace_id": str(workspace_id),
-                    },
-                    ephemeral=True,
-                )
-                await sandbox.refresh_data()
-                if sandbox_state(sandbox) != "running":
-                    raise RuntimeError("Workspace I/O Sandbox did not reach running state")
-                self._provisioner.verify(sandbox, expected)
-                paths = self._volume_config.paths()
-                await ensure_shared_volume_layout(sandbox, paths)
-                yield sandbox
+                async with self._runtime.open_workspace_sandbox(workspace_id, purpose=purpose) as sandbox:
+                    yield sandbox
             except (
                 ValueError,
                 WorkspaceFileConflictError,
@@ -342,36 +294,6 @@ class DaytonaWorkspaceGateway:
                 raise
             except Exception as exc:
                 raise map_provider_error(exc) from exc
-            finally:
-                if sandbox is not None:
-                    # Lease-backed (QRE-156): the temporary Volume-I/O teardown uses the
-                    # same confirmed provider cleanup contract as every other
-                    # lifecycle; the workspace lock stays held through confirmation.
-                    # Failure stays bounded and logged, never raised into the file op.
-                    lease = SandboxLease(
-                        kind="volume_io",
-                        sandbox=sandbox,
-                        sandbox_id=getattr(sandbox, "id", None),
-                        platform=self._platform,
-                        policy=SandboxLeasePolicy(
-                            kind="volume_io",
-                            interpreter_shutdown=False,
-                            provider_request_timeout_s=_SANDBOX_DELETE_GRACE_SECONDS,
-                            confirm_timeout_s=_SANDBOX_DELETE_GRACE_SECONDS,
-                            confirm_poll_interval_s=0.5,
-                        ),
-                    )
-                    receipt = await lease.aclose()
-                    if not receipt.provider.confirmed_absent:
-                        logger.warning(
-                            "Workspace I/O Sandbox deletion not confirmed absent within grace period",
-                            extra={
-                                "workspace_id": str(workspace_id),
-                                "grace_seconds": _SANDBOX_DELETE_GRACE_SECONDS,
-                                "provider_error": receipt.provider.error,
-                                "plateau": receipt.provider.plateau,
-                            },
-                        )
 
 
 class DaytonaWorkspaceVolumeGateway:

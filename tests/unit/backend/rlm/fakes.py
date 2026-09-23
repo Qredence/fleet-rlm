@@ -6,7 +6,7 @@ from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.runtime import RLMExecutionSpec
 from fleet_rlm.workspace.memory import MemoryCandidate
 

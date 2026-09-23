@@ -10,7 +10,7 @@ import pytest
 
 import fleet_rlm.rlm.runtime as runtime_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions

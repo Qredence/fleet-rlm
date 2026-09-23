@@ -15,7 +15,7 @@ from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResource
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
-from fleet_rlm.daytona.session_manager import LeaseRequest
+from fleet_rlm.daytona.runtime import LeaseRequest
 from fleet_rlm.observability.tracing import turn_trace
 from fleet_rlm.rlm.events import ToolCompleted, observe_tool
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
@@ -123,12 +123,12 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
             cleanup = RunCleanupSupervisor(max_jobs=8)
             resources = _live_resources(settings, cleanup)
 
-        first_lease = await resources.session_manager.acquire(
+        first_lease = await resources.runtime.acquire(
             LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
             deadline=asyncio.get_running_loop().time() + 120,
         )
-        resources.track_sandbox(first_lease.sandbox_id)
-        first_sandbox = await resources.platform.get(first_lease.sandbox_id)
+        resources.runtime.track_sandbox(first_lease.sandbox_id)
+        first_sandbox = await resources.runtime._platform.get(first_lease.sandbox_id)
         assert first_sandbox is not None
 
         first_host = UrlToolHost(
@@ -144,11 +144,11 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
         assert first["cache_hit"] is False
         assert first["content"] == _BODY
 
-        await resources.session_manager.release(first_lease)
+        await resources.runtime.release(first_lease)
         first_lease = None
         binding = await resources.bindings.get(session_id)
         assert binding is not None
-        replacement = await resources.session_manager.replace(
+        replacement = await resources.runtime.replace(
             SandboxBinding(
                 session_id=session_id,
                 sandbox_id=binding.sandbox_id,
@@ -162,14 +162,14 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
             user_id=user_id,
         )
         assert replacement.sandbox_id != binding.sandbox_id
-        resources.track_sandbox(replacement.sandbox_id)
+        resources.runtime.track_sandbox(replacement.sandbox_id)
 
-        second_lease = await resources.session_manager.acquire(
+        second_lease = await resources.runtime.acquire(
             LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
             deadline=asyncio.get_running_loop().time() + 120,
         )
-        resources.track_sandbox(second_lease.sandbox_id)
-        second_sandbox = await resources.platform.get(second_lease.sandbox_id)
+        resources.runtime.track_sandbox(second_lease.sandbox_id)
+        second_sandbox = await resources.runtime._platform.get(second_lease.sandbox_id)
         assert second_sandbox is not None
 
         second_host = UrlToolHost(
@@ -200,9 +200,9 @@ async def test_url_cache_survives_daytona_sandbox_replacement_with_body_free_eve
     finally:
         if resources is not None:
             if first_lease is not None:
-                await resources.session_manager.release(first_lease)
+                await resources.runtime.release(first_lease)
             if second_lease is not None:
-                await resources.session_manager.release(second_lease)
+                await resources.runtime.release(second_lease)
             if cleanup is not None:
                 await cleanup.shutdown(drain_seconds=30)
             await resources.adispose()

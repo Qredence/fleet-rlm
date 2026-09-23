@@ -574,13 +574,6 @@ def _resolve_awaitable_result(
     if not inspect.isawaitable(result):
         return result
 
-    async def await_result() -> Any:
-        return await result
-
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(await_result())
     if async_bridge is None:
         if inspect.iscoroutine(result):
             result.close()

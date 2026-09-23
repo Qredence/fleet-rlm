@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.daytona.provisioning import (
-    DaytonaEnvironmentProfile,
+from fleet_rlm.daytona.diagnostics import (
     MissingImportOutcome,
     normalize_missing_import_observation,
 )
+from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
 
 
 def test_missing_import_observation_is_normalized_and_content_free() -> None:

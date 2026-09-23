@@ -244,8 +244,12 @@ def test_submit_abort_is_not_reported_as_an_execution_error() -> None:
     assert result.error is None
 
 
-def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> None:
+@pytest.mark.asyncio
+async def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> None:
     """Broker polling must not turn host-tool failures into opaque HTTP 500s."""
+    import asyncio
+
+    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
 
     class _Response:
         def __init__(self, body: dict[str, object]) -> None:
@@ -278,8 +282,9 @@ def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> Non
     client = _Client()
     broker._client = client  # type: ignore[assignment]
     broker.bind_tools({"async_tool": async_tool})
+    broker.bind_async_bridge(_SyncBridgeLoop(caller_loop=asyncio.get_running_loop()))
 
-    broker._poll_once()
+    await asyncio.to_thread(broker._poll_once)
 
     assert client.posts[0]["result"] == {"ok": True}
     failure = client.posts[1]["tool_error"]

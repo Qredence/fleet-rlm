@@ -8,15 +8,16 @@ from typing import Any
 
 import pytest
 
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionPermit
-from fleet_rlm.daytona.lifecycle import (
+from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceProbeError,
     AbsenceTimeout,
+    DaytonaAdmission,
+    DaytonaAdmissionPermit,
     classify_deletion_phase,
+    cleanup_child_runtime_async,
     confirm_absence,
 )
-from fleet_rlm.daytona.recursive_child_runtime import cleanup_child_runtime_async
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 
@@ -287,13 +288,14 @@ async def test_request_acceptance_alone_never_releases() -> None:
 
 @pytest.mark.asyncio
 async def test_unconfirmed_teardown_is_explicit_quarantine_failure() -> None:
-    """Slow deletion: bounded wait exhausts -> typed failure AND no leaked permit."""
+    """A bounded deletion wait retains admission until absence is proven."""
     platform = _ScriptedPlatform(states=["destroying"] * 100)
     _, permit = await _take_permit()
     with pytest.raises(ChildRuntimeCleanupError) as excinfo:
         await _cleanup_coroutine(platform, permit)
     assert "absence unconfirmed" in str(excinfo.value)
-    assert permit._released is True  # quarantine releases once, never silently
+    assert permit._released is False
+    permit.release()
 
 
 @pytest.mark.asyncio
@@ -313,7 +315,8 @@ async def test_provider_error_state_is_quarantine_failure() -> None:
     _, permit = await _take_permit()
     with pytest.raises(ChildRuntimeCleanupError):
         await _cleanup_coroutine(platform, permit)
-    assert permit._released is True
+    assert permit._released is False
+    permit.release()
 
 
 @pytest.mark.asyncio
@@ -338,10 +341,11 @@ async def test_double_release_is_idempotent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_confirmation_timeout_never_leaks_permit() -> None:
-    """Timeout path: permit always ends released exactly once (quarantine semantics)."""
+async def test_confirmation_timeout_retains_permit_for_recovery() -> None:
+    """A timed-out absence probe cannot release provider capacity."""
     platform = _ScriptedPlatform(states=["destroying"] * 1000)
     _, permit = await _take_permit()
     with pytest.raises(ChildRuntimeCleanupError):
         await _cleanup_coroutine(platform, permit, confirm_timeout_s=0.05)
-    assert permit._released is True
+    assert permit._released is False
+    permit.release()

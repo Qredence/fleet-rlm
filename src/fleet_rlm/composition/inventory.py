@@ -1,7 +1,7 @@
 """Typed runtime inventory publication for FastAPI lifespan composition.
 
 Why these seams are Protocols rather than attributes: the inventory is
-provider-neutral. `SettlingRunStateStore`, `RuntimeSessionManager`, and
+provider-neutral. `SettlingRunStateStore`, `DaytonaRuntimeSurface`, and
 `RuntimeProcessResources` let `composition/inventory.py` name exactly the
 surfaces startup recovery needs without importing `daytona/` (which owns the
 SDK boundary), and they let the private testing composition substitute
@@ -51,8 +51,8 @@ class SettlingRunStateStore(Protocol):
     ) -> ReconciliationSummary: ...
 
 
-class RuntimeSessionManager(Protocol):
-    """Provider session manager surface needed by startup recovery."""
+class DaytonaRuntimeSurface(Protocol):
+    """Daytona runtime operations needed by startup recovery and prewarming."""
 
     async def fence_session(self, session_id: UUID, *, deadline: float | None = None) -> None: ...
 
@@ -78,7 +78,7 @@ class RuntimeProcessResources(Protocol):
     """Closeable process-scoped resources owned by one runtime composition."""
 
     @property
-    def session_manager(self) -> RuntimeSessionManager: ...
+    def runtime(self) -> DaytonaRuntimeSurface: ...
 
     async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
 
@@ -227,10 +227,10 @@ class RuntimeInventory:
         return self.database.engine
 
     @property
-    def session_manager(self) -> RuntimeSessionManager | None:
+    def daytona_runtime(self) -> DaytonaRuntimeSurface | None:
         if self.run_environment_resources is None:
             return None
-        return self.run_environment_resources.session_manager
+        return self.run_environment_resources.runtime
 
 
 def get_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
@@ -340,11 +340,11 @@ async def close_inventory_services(
 __all__ = [
     "CloseServicesResult",
     "CompositionError",
+    "DaytonaRuntimeSurface",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
     "RuntimeInventoryError",
     "RuntimeProcessResources",
-    "RuntimeSessionManager",
     "SettlingRunStateStore",
     "clear_runtime_inventory",
     "close_inventory_services",

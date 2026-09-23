@@ -9,17 +9,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
+    DaytonaRuntime,
     DaytonaSandboxSpec,
     ExpectedWorkspaceMount,
+    LeaseRequest,
+    LiveDaytonaPlatform,
     VolumeConfig,
     verify_sandbox_workspace_mount,
     volume_mount_spec,
-)
-from fleet_rlm.daytona.session_manager import (
-    DaytonaSessionManager,
-    LeaseRequest,
 )
 from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 from fleet_rlm.runtime.bindings import (
@@ -144,10 +142,10 @@ class _FakePlatform:
         self.sandboxes.pop(sandbox_id, None)
 
 
-def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore]:
+def _manager() -> tuple[DaytonaRuntime, _FakePlatform, InMemoryBindingStore]:
     plat = _FakePlatform()
     store = InMemoryBindingStore()
-    mgr = DaytonaSessionManager(
+    mgr = DaytonaRuntime(
         platform=plat,
         volume_client=_FakeVolumeClient(),
         volume_config=VolumeConfig(),
@@ -157,7 +155,7 @@ def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingSto
     return mgr, plat, store
 
 
-async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+async def _acquire(mgr: DaytonaRuntime, request: LeaseRequest):
     return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
 
 

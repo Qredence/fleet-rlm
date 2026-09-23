@@ -12,7 +12,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.provisioning import EphemeralInterpreterLease
+from fleet_rlm.daytona.runtime import EphemeralInterpreterLease
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
 from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter, FleetRLMSignature
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
@@ -596,7 +596,7 @@ async def test_live_rows_receive_independent_deadlines_and_budgets(monkeypatch: 
         return None
 
     monkeypatch.setattr(runner, "resolve_datapoints", lambda **_kwargs: rows)
-    monkeypatch.setattr("fleet_rlm.daytona.provisioning.acquire_ephemeral_interpreter", fake_acquire)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime.acquire_ephemeral_interpreter", fake_acquire)
     monkeypatch.setattr(runner, "stage_attachment_context_on_lease", fake_stage)
     monkeypatch.setattr(runner, "build_predict_kwargs", lambda *_args, **_kwargs: {"request": "request"})
     monkeypatch.setattr(runner, "kwargs_context_mode", lambda _kwargs: "attachment_context_capsule")

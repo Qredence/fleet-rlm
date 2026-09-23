@@ -113,15 +113,15 @@ def get_session_lifecycle(request: Request) -> SessionLifecycle:
 
 
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
-    """Return the composed Session manager's pre-warm scheduler, if present.
+    """Return the composed Daytona runtime's pre-warm scheduler, if present.
 
-    Scheduling and task retention live in the session manager; this dependency
+    Scheduling and task retention live in the Daytona runtime; this dependency
     only retrieves the callable so routes stay transport-thin.
     """
-    manager = get_ready_runtime_inventory(request).session_manager
-    if manager is None:
+    runtime = get_ready_runtime_inventory(request).daytona_runtime
+    if runtime is None:
         return None
-    return manager.schedule_prewarm
+    return runtime.schedule_prewarm
 
 
 def get_run_lifecycle(request: Request) -> RunLifecycle:

@@ -22,7 +22,7 @@ from fleet_rlm.daytona.errors import (
     map_provider_error,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.platform import LiveDaytonaVolumeClient
+from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
 
 
 @pytest.mark.parametrize(

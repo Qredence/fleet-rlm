@@ -133,7 +133,7 @@ def _in_process_child_runtime(call_index: int):
         ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+    from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(

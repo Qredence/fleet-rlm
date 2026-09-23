@@ -23,8 +23,12 @@ from fleet_rlm.daytona.errors import (
     sanitize_failure_text,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform, LiveDaytonaVolumeClient, normalize_state
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.daytona.runtime import (
+    DaytonaSandboxSpec,
+    LiveDaytonaPlatform,
+    LiveDaytonaVolumeClient,
+    normalize_state,
+)
 from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
 from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
 from fleet_rlm.persistence.repositories.sessions import SqlAlchemySandboxBindingStore
@@ -271,7 +275,7 @@ async def test_live_volume_client_waits_for_created_volume_to_be_ready(monkeypat
     async def _no_sleep(_delay: float) -> None:
         return None
 
-    monkeypatch.setattr("fleet_rlm.daytona.platform.asyncio.sleep", _no_sleep)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime.asyncio.sleep", _no_sleep)
     volume = await LiveDaytonaVolumeClient(client).get("vol-1", create=True)
     assert volume.state == "ready"
     assert client.volume.get.call_args_list == [

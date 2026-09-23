@@ -262,22 +262,22 @@ def _owns_ephemeral_proof_volume(volume_name: str) -> bool:
 
 async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: str) -> tuple[str, ...]:
     failures: list[str] = []
-    tracked_ids = sandbox_ids | set(resources._sandbox_ids)
+    tracked_ids = sandbox_ids | set(resources.runtime._tracked_sandbox_ids)
     for sandbox_id in sorted(tracked_ids):
 
         async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
-            sandbox = await resources.platform.get(sandbox_id)
+            sandbox = await resources.runtime._platform.get(sandbox_id)
             if sandbox is None:
                 return
             state = str(getattr(getattr(sandbox, "state", None), "value", getattr(sandbox, "state", None)) or "")
             if state.strip().lower() in {"destroyed", "deleted", "archived"}:
                 return
-            await resources.platform.delete(sandbox)
+            await resources.runtime._platform.delete(sandbox)
 
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")
     try:
-        resources._sandbox_ids.clear()
+        resources.runtime._tracked_sandbox_ids.clear()
     except Exception:
         failures.append("tracking")
 
@@ -285,9 +285,9 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
         return tuple(failures)
 
     async def delete_volume() -> None:
-        volume = await resources.client.volume.get(volume_name, create=False)
+        volume = await resources.runtime._client.volume.get(volume_name, create=False)
         if volume is not None:
-            await resources.client.volume.delete(volume)
+            await resources.runtime._client.volume.delete(volume)
 
     if not await _retry_cleanup(delete_volume):
         failures.append("volume")

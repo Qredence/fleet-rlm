@@ -454,8 +454,8 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
                     "turn_resources_cleanup": True,
                 },
                 "resources": {
-                    "sandbox_count": len(resources._sandbox_ids),
-                    "broker_session_count": len(resources._sandbox_ids),
+                    "sandbox_count": len(resources.runtime._tracked_sandbox_ids),
+                    "broker_session_count": len(resources.runtime._tracked_sandbox_ids),
                     "owned_volume_only": True,
                 },
                 "failure": None,
