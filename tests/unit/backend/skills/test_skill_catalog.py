@@ -17,7 +17,7 @@ def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
     assert [(card.name, card.version) for card in catalog.cards()] == [
         ("data-analysis", "1.0.0"),
         ("dspy-rlm", "1.0.0"),
-        ("long-context", "2.0.1"),
+        ("long-context", "2.1.0"),
         ("report-builder", "1.1.0"),
         ("workspace-files", "1.2.0"),
     ]
@@ -54,7 +54,7 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
 def test_long_context_skill_does_not_rewrite_request_specified_prompts() -> None:
     catalog = build_bundled_skill_catalog()
     skill = catalog.require(stable_skill_id("long-context"))
-    assert skill.card.version == "2.0.1"
+    assert skill.card.version == "2.1.0"
     assert "pass those strings unchanged" in skill.instructions
     assert "do not add offsets, paraphrase, or substitute different wording" in skill.instructions
 
@@ -121,7 +121,7 @@ def test_bundled_cards_advertise_bounded_capability_affordances() -> None:
 
     catalog = build_bundled_skill_catalog()
     by_name = {card.name: card for card in catalog.cards()}
-    assert by_name["long-context"].affordances == ("fetch_url", "llm_query_batched", "workspace.files")
+    assert by_name["long-context"].affordances == ("sandbox.search", "llm_query_batched", "workspace.files")
     assert by_name["workspace-files"].affordances == ("workspace.files", "artifacts.publish")
     assert by_name["data-analysis"].affordances == ("artifacts.publish", "llm_query_batched")
     assert by_name["report-builder"].affordances == ("workspace.files", "artifacts.publish")
@@ -170,10 +170,10 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "015a133e-7b90-50c7-bb61-4b2772f57c1c",
             "long-context",
-            "2.0.1",
-            "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
+            "2.1.0",
+            "Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.",
             True,
-            ("fetch_url", "llm_query_batched", "workspace.files"),
+            ("sandbox.search", "llm_query_batched", "workspace.files"),
             ("scripts/semantic_chunk.py", "scripts/rank_chunks.py", "references/chunking-strategies.md"),
             False,
         ),

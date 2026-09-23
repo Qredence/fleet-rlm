@@ -532,9 +532,16 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
    prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
-   relevant public HTTPS URL, call ``fetch_url`` once. For inline sources, assign ``content`` to a Python
-   variable; for large sources, use the returned ``workspace_path`` with bounded Workspace reads. Never print
-   the complete value. Validate the result is a mapping and handle either ``content`` or a workspace reference.
+   relevant public HTTPS URL, retrieve it with Python in the Sandbox and save large content under
+   ``/workspace/sources``; inspect bounded excerpts instead of printing or returning the body. Record URL,
+   retrieval time, path, and SHA-256 in a small sidecar file. When available, use
+   ``read_active_task`` / ``update_active_task`` to record the file path and checksum in source revisions.
+   For search discovery, load the long-context Skill when relevant and use an installed Python search package
+   in the Sandbox; keep only selected titles and URLs in the REPL output.
+   For Git, tests, and package installation, run bounded ``subprocess.run`` calls with a timeout and bounded
+   captured output. Install with ``sys.executable -m pip`` so the active interpreter receives the package;
+   verify the import and save a ``pip freeze`` manifest under ``/workspace``; after Sandbox replacement,
+   reinstall from that manifest into the new active interpreter before claiming the dependency is recovered.
    Assume the declared minimal environment;
    do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
    sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
@@ -542,15 +549,16 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    call ``create_artifact(kind="markdown", content=full_report, title=...)`` once, require ``ok == True``, then
    ``SUBMIT`` a concise executive summary. The Artifact is the complete durable answer; do not paste it inline.
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
-   its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
-   a URL whose cached result is already available.
+   its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or redownload
+   a URL whose recorded file is already available. For repository work, fix the checkout to a commit and cite
+   commit, paths, and line numbers from selected files in the final report.
 3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine. If the request
    already specifies the prompt string, pass that string unchanged.
 4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
    self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
    Prefer the cheapest sufficient mechanism."""
 
-# Fleet-provided recursion, URL-fetch, and Workspace tools require executable
+# Fleet-provided recursion and Workspace tools require executable
 # host bindings. A remote Sandbox currently receives source and serializable
 # values only, so those Fleet tools must not be advertised when bindings are
 # unavailable. This does not suppress DSPy's native semantic tools: dspy.RLM
@@ -565,8 +573,8 @@ TOOL_RLM_INSTRUCTIONS_NO_DISPATCH = """1. Use the Python standard library for de
    and never recompute a cached prefix.
 2. Load Session History, Skills, or Attachments only when the request or its discovery metadata establishes that
    capability as relevant.
-3. This runtime dispatches no Fleet recursion, URL-fetch, or Workspace host tool. Do not probe for
-   ``rlm_query``, ``rlm_query_batched``, ``fetch_url``, or Workspace tools. Answer from the request text,
+3. This runtime dispatches no Fleet recursion or Workspace host tool. Do not probe for
+   ``rlm_query``, ``rlm_query_batched``, or Workspace tools. Answer from the request text,
    the Sandbox filesystem, and deterministic Python; if the request demands one of those Fleet capabilities,
    say so plainly in the ``answer`` instead of searching for the tool."""
 
@@ -584,7 +592,7 @@ WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
 
 WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspace writes or artifact publishes, call the matching host tools
 (``write_workspace_text``, ``append_workspace_text``, ``publish_workspace_artifact``) and require a successful ``ok``
-result before ``SUBMIT``. Sandbox-local ``open()`` is not Session Workspace. A successful verification helper does not
+result before ``SUBMIT``. Files outside the mounted ``/workspace`` are not Session Workspace. A successful verification helper does not
 complete the request if a named write or publish remains."""
 
 RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative

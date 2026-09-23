@@ -803,48 +803,6 @@
       ],
       "additionalProperties": true
     },
-    "url_fetch": {
-      "type": "object",
-      "properties": {
-        "ok": {
-          "type": "boolean"
-        },
-        "error": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        },
-        "source_id": {
-          "type": "string"
-        },
-        "canonical_url": {
-          "type": "string"
-        },
-        "workspace_path": {
-          "type": "string"
-        },
-        "content": {
-          "type": "string"
-        },
-        "byte_size": {
-          "type": "integer"
-        },
-        "checksum_sha256": {
-          "type": "string"
-        },
-        "cache_hit": {
-          "type": "boolean"
-        },
-        "content_type": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "ok"
-      ],
-      "additionalProperties": true
-    },
     "attachment_read": {
       "type": "object",
       "properties": {
@@ -1486,51 +1444,6 @@
           "expected_sha256"
         ],
         "source": "src/fleet_rlm/workspace/workspace.py:WorkspaceToolHost.event_views"
-      }
-    },
-    {
-      "name": "fetch_url",
-      "category": "url",
-      "source": "src/fleet_rlm/workspace/url.py:UrlToolHost",
-      "description": "Fetch one relevant anonymous public HTTPS text URL. The result is a Python value; do not print the complete content. Repeated calls reuse the Session cache.",
-      "argument_schema": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "additionalProperties": false
-      },
-      "result_schema": {
-        "$ref": "#/$defs/url_fetch"
-      },
-      "availability_policy": "Composed in live and deterministic test environments. Live uses public HTTPS retrieval plus a Session cache; deterministic tests use a cache-only fetcher that reports unavailable on a miss.",
-      "authorization_policy": "Host binds one Session ID and source store; the generic observed-tool Run-authority fence fails closed after revocation.",
-      "event_projection_policy": {
-        "mode": "bounded_allowlist",
-        "input": [
-          "source_id"
-        ],
-        "output": [
-          "ok",
-          "error",
-          "source_id",
-          "cache_hit",
-          "content_type",
-          "byte_size",
-          "checksum_sha256"
-        ],
-        "omits": [
-          "url",
-          "canonical_url",
-          "workspace_path",
-          "content"
-        ],
-        "source": "src/fleet_rlm/workspace/url.py:UrlToolHost.event_views"
       }
     },
     {

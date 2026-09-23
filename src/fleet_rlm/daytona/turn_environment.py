@@ -562,7 +562,7 @@ class _LiveCapabilityPreparer:
         deadline: float,
     ) -> LivePreparedCapabilities:
         """
-        Prepare the file, workspace, URL, and memory capabilities for a Run.
+        Prepare the file, workspace, and memory capabilities for a Run.
 
         Parameters:
             deadline (float): Deadline for capability preparation.
@@ -575,7 +575,6 @@ class _LiveCapabilityPreparer:
         from fleet_rlm.sessions.task_tools import SessionTaskToolHost
         from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost, build_workspace_memory_store
         from fleet_rlm.workspace.projects import ProjectToolHost
-        from fleet_rlm.workspace.url import UrlToolHost, WorkspaceUrlSourceStore
         from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
         sink = environment.attachment_sink
@@ -626,19 +625,6 @@ class _LiveCapabilityPreparer:
         project_host = ProjectToolHost(
             projects_fs,
             max_file_bytes=self.settings.max_upload_bytes,
-        )
-        url_host = UrlToolHost(
-            session_id=run.session_id,
-            store=WorkspaceUrlSourceStore(
-                _workspace_storage(
-                    sandbox,
-                    volume_root="/workspace" if host_io is not None else str(paths.mount_path),
-                    root="/workspace" if host_io is not None else str(paths.session_workspace_dir(run.session_id)),
-                    max_file_bytes=self.settings.max_url_bytes,
-                    allow_volume_root=host_io is not None,
-                )
-            ),
-            max_bytes=self.settings.max_url_bytes,
         )
         memory_store = getattr(environment, "workspace_memory_store", None)
         if memory_store is None:
@@ -699,7 +685,6 @@ class _LiveCapabilityPreparer:
         project_tools = project_host.as_tools()
         memory_tools = memory_host.as_tools()
         task_tools = task_host.as_tools() if task_host is not None else ()
-        url_tools = url_host.as_tools()
         base_views = {
             **attachment_host.event_views(),
             **artifact_host.event_views(),
@@ -708,7 +693,6 @@ class _LiveCapabilityPreparer:
             **memory_host.event_views(),
             **(task_host.event_views() if task_host is not None else {}),
             **candidate_views,
-            **url_host.event_views(),
         }
         spec, skill_host, notices = await prepare_host_capabilities(
             turn=run,
@@ -721,7 +705,6 @@ class _LiveCapabilityPreparer:
                 *memory_tools,
                 *task_tools,
                 *candidate_tools,
-                *url_tools,
             ),
             base_event_views=base_views,
             workspace=DAYTONA_WORKSPACE_CAPABILITY,

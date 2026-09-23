@@ -60,6 +60,13 @@ is reserved for that I/O while execution leases are active. An older
 Workspace-wide binding is fenced and retired before a Session-scoped binding
 can replace it; unconfirmed retirement keeps the old binding unavailable.
 
+Public search, page downloads, Git inspection, and package installation run as
+ordinary Python or subprocess work in the Session Sandbox. The bundled
+long-context Skill gives the RLM a small `ddgs` search recipe; there is no
+host research service. The host URL fetcher was retired under the operator's
+explicit network-policy parity waiver; sandbox egress follows the deployed
+Daytona policy.
+
 ## Ownership map
 
 | Area | Owner and boundary |

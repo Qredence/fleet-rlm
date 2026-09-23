@@ -88,6 +88,24 @@ that the identity is gone. This is separate from the Fleet doctor: the doctor
 also checks configured Volume/database/LLM readiness and can stop at an earlier
 prerequisite.
 
+## Phase 5 sandbox capability proof
+
+Run the disposable provider proof after changing public retrieval, dependency
+recovery, or repository work:
+
+```bash
+FLEET_LIVE=1 uv run python scripts/live_phase5_verify.py \
+  --output .scratch/live-provider/phase5-sandbox-<run-id>.json
+```
+
+The receipt records sandbox package-based search, public downloads with provenance, a commit-pinned Git
+checkout, an import verified in the installing Python process, a dependency
+manifest, reading files after Sandbox replacement, legacy `sources/urls` file
+readability, network probes, credential absence, and Sandbox deletion. The
+operator waived the public-only network-policy parity gate for retiring the
+host URL subsystem; the receipt records observed egress behavior without
+claiming network isolation.
+
 ## P2.7 reduced-image certification and promotion
 
 P2.7 requires one sealed receipt covering both immutable candidates before either

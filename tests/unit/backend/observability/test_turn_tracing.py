@@ -334,45 +334,45 @@ def test_turn_trace_unrecognized_phase_is_ignored(monkeypatch: pytest.MonkeyPatc
     assert calls.update_kwargs[-1] == {"state": "OK"}
 
 
-def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
+def test_observed_tool_is_nested_under_turn_root_with_bounded_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     observed: list[Any] = []
 
-    def fetch_url(url: str) -> dict[str, object]:
-        """Return a simulated URL fetch result with private source content and cache status.
+    def lookup_sources(query: str) -> dict[str, object]:
+        """Return simulated metadata while keeping the query out of events.
 
         Parameters:
-                url (str): URL whose content would be fetched.
+                query (str): Search terms.
 
         Returns:
-                dict[str, object]: A result containing the source content and cache-hit status.
+                dict[str, object]: A result containing one discovered URL.
         """
-        del url
-        return {"content": "private source body", "cache_hit": False}
+        del query
+        return {"ok": True, "results": [{"url": "https://example.com/private"}]}
 
     source = dspy.Tool(
-        fetch_url,
-        name="fetch_url",
+        lookup_sources,
+        name="lookup_sources",
     )
     wrapped = observe_tool(
         source,
         observed.append,
         ToolEventView(
-            input_projection=lambda _arguments: {"source_id": "source-1"},
-            output_projection=lambda result: {"cache_hit": result["cache_hit"]},
+            input_projection=lambda arguments: {"query_chars": len(str(arguments["query"]))},
+            output_projection=lambda result: {"result_count": len(result["results"])},
         ),
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert wrapped.func(url="https://example.com/report")["content"] == "private source body"
+        assert wrapped.func(query="private research")["ok"] is True
 
-    assert calls.start_span_names == ["fleet_turn", "tool.fetch_url"]
-    assert calls.span_inputs[-1]["input"] == {"source_id": "source-1"}
-    assert calls.span_outputs[-1]["output"] == {"cache_hit": False}
-    assert "private source body" not in str(calls.span_inputs + calls.span_outputs)
-    assert "private source body" not in str(observed)
+    assert calls.start_span_names == ["fleet_turn", "tool.lookup_sources"]
+    assert calls.span_inputs[-1]["input"] == {"query_chars": 16}
+    assert calls.span_outputs[-1]["output"] == {"result_count": 1}
+    assert "example.com/private" not in str(calls.span_inputs + calls.span_outputs)
+    assert "example.com/private" not in str(observed)
 
 
 def test_daytona_broker_preserves_batched_tool_span_under_turn_root(

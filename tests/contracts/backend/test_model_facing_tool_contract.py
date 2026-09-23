@@ -57,7 +57,6 @@ _EXPECTED_CATEGORIES = {
         "forget",
     },
     "skill": {"load_skill", "read_skill_resource"},
-    "url": {"fetch_url"},
     "attachment_artifact": {"read_attachment", "create_artifact", "publish_workspace_artifact"},
     "conditional_capability": {"propose_memory", "read_curated_input"},
 }
@@ -112,8 +111,6 @@ def _source_tools() -> dict[str, dspy.Tool]:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
     from fleet_rlm.attachments import AttachmentToolHost
 
-    url_source_store = _import_moved_symbol("UrlSourceStore", "fleet_rlm.workspace.url")
-    url_tool_host = _import_moved_symbol("UrlToolHost", "fleet_rlm.workspace.url")
     volume_blob_fs = _import_moved_symbol("VolumeBlobFs", "fleet_rlm.workspace.storage")
     session_workspace_fs = _import_moved_symbol("SessionWorkspaceFS", "fleet_rlm.workspace.models")
     workspace_tool_host = _import_moved_symbol("WorkspaceToolHost", "fleet_rlm.workspace.workspace")
@@ -165,7 +162,6 @@ def _source_tools() -> dict[str, dspy.Tool]:
             session_id=identifier,
             run_id=identifier,
         ).as_tools(),
-        *url_tool_host(session_id=identifier, store=cast(url_source_store, object()), max_bytes=1).as_tools(),
         *SkillToolHost(cast(SkillCatalog, object())).as_tools(),
         recursive.tool,
         recursive.batched_tool,

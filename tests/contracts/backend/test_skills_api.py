@@ -56,7 +56,7 @@ def test_bundled_skill_cards_are_bounded_metadata_only() -> None:
 
     serialized = json.dumps(cards).lower()
     assert next(card for card in cards if card["name"] == "long-context")["affordances"] == [
-        "fetch_url",
+        "sandbox.search",
         "llm_query_batched",
         "workspace.files",
     ]

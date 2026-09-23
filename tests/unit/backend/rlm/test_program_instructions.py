@@ -107,12 +107,12 @@ def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> No
     assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in present
     assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in publish_only
     assert "named write or publish remains" in present
-    assert "Sandbox-local ``open()`` is not Session Workspace" in present
+    assert "Files outside the mounted ``/workspace`` are not Session Workspace" in present
 
 
-def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> None:
-    assert "workspace_path" in TOOL_RLM_INSTRUCTIONS
-    assert "workspace reference" in TOOL_RLM_INSTRUCTIONS
+def test_tool_instructions_require_sandbox_research_and_bounded_precision() -> None:
+    assert "SHA-256" in TOOL_RLM_INSTRUCTIONS
+    assert "sys.executable -m pip" in TOOL_RLM_INSTRUCTIONS
     assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
     assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
     assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS
@@ -192,7 +192,7 @@ def test_runtime_without_host_tool_dispatch_stops_advertising_those_tools() -> N
     # This overlay removes Fleet-provided tools only. DSPy adds its native
     # semantic tools outside this Signature instruction composition.
     for guidance in (
-        "call ``fetch_url`` once",
+        "load the long-context Skill when relevant",
         "Use ``rlm_query(capsule=capsule)``",
     ):
         assert guidance not in composed
@@ -225,8 +225,8 @@ def test_native_builder_threads_host_tool_dispatch_into_the_signature() -> None:
     without = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
     with_dispatch = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
 
-    assert "Fleet recursion, URL-fetch, or Workspace host tool" in without.signature.instructions
-    assert "Fleet recursion, URL-fetch, or Workspace host tool" not in with_dispatch.signature.instructions
+    assert "Fleet recursion or Workspace host tool" in without.signature.instructions
+    assert "Fleet recursion or Workspace host tool" not in with_dispatch.signature.instructions
 
 
 def test_nondefault_observation_budget_preserves_the_original_signature() -> None:

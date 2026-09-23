@@ -59,10 +59,10 @@ leases, liveness, and the credentialed-command live switch; Root/Sub model ids,
 Chat Completion base endpoints, token limits, temperatures, cache, retries, and
 secret-variable references; RLM limits and host verbosity;
 storage limits and database variable reference; Daytona API-key/Volume/Snapshot
-policy; MLflow tracking policy; and Fleet/DSPy logger level. The storage limits
-are independent: `storage.max_upload_bytes` bounds uploads and workspace files,
-`storage.max_url_bytes` bounds fetched public URL sources, and
-`storage.max_artifact_bytes` bounds artifact bodies.
+policy; MLflow tracking policy; and Fleet/DSPy logger level. Public search and
+retrieval run in the Daytona Sandbox using Python packages when needed. The storage
+limits are independent: `storage.max_upload_bytes` bounds uploads and workspace
+files, and `storage.max_artifact_bytes` bounds artifact bodies.
 
 `runtime.live_enabled` defaults to `true` for explicitly invoked provider and
 Daytona commands. Set it to `false` in the selected TOML policy to fail closed

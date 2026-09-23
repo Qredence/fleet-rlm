@@ -1,11 +1,11 @@
 ---
 name: long-context
-description: Use bounded retrieval to analyze large documents, transcripts, code, or datasets.
+description: Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "2.0.1"
+  version: "2.1.0"
   affordances:
-    - fetch_url
+    - sandbox.search
     - llm_query_batched
     - workspace.files
 allowed-tools: read_skill_resource
@@ -26,7 +26,20 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
 
 ## Analyze
 
-1. Inspect variable names, types, lengths, and small previews. Do not print a whole large value. For a relevant URL, call `fetch_url` once; use its inline `content` when present or read its `workspace_path` in bounded pages.
+1. Inspect variable names, types, lengths, and small previews. Do not print a whole large value. If URLs must be discovered, install `ddgs==9.16.0` with the active interpreter and search in the REPL:
+
+   ```python
+   import importlib, site, subprocess, sys
+
+   subprocess.run([sys.executable, "-m", "pip", "install", "ddgs==9.16.0"], check=True, timeout=120, capture_output=True)
+   site.addsitedir(site.getusersitepackages())
+   importlib.invalidate_caches()
+   from ddgs import DDGS
+
+   results = DDGS(timeout=10).text(query, max_results=5)
+   ```
+
+   Keep only selected titles and URLs in the REPL output. Download selected URLs with Python in the Sandbox to `/workspace/sources`; read each file in bounded pages. Record its URL, retrieval time, path, and SHA-256 in a small sidecar file and, when available, record the path and checksum in the active task.
 2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices.
 3. When the relevant regions are unknown, scan every bounded chunk for structured candidates before reducing them. Query ranking may prioritize reading order, but it must not exclude unseen evidence.
 4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets or source identifiers, unless the request already specifies the exact prompt strings: then pass those strings unchanged and in the given order; do not add offsets, paraphrase, or substitute different wording. Use `rlm_query` only for the rare selected subproblem that needs a fresh iterative Python investigation; it is not the normal route for extraction, counting, parsing, aggregation, or independent excerpts.

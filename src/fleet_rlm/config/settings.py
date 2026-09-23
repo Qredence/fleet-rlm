@@ -323,20 +323,6 @@ class Settings(BaseModel):
         default=10 * 1024 * 1024,
         description="Maximum upload size in bytes",
     )
-    max_url_bytes: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="storage.max_url_bytes",
-            group="Storage",
-            label="Maximum URL source bytes",
-            editor="number",
-            rank=41,
-            required_in_policy=True,
-        ),
-    ] = Field(
-        default=10 * 1024 * 1024,
-        description="Maximum public URL source size in bytes",
-    )
     max_artifact_bytes: Annotated[
         int,
         FleetFieldPolicy(

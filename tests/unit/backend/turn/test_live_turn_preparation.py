@@ -212,7 +212,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "edit_memory",
         "edit_project_text",
         "edit_workspace_text",
-        "fetch_url",
         "forget",
         "list_memories",
         "publish_workspace_artifact",
