@@ -796,8 +796,8 @@ def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPat
     assert settings.mlflow_tracing_sql_warehouse_id is None
 
 
-@pytest.mark.parametrize("value", [0, -1, 9])
-def test_daytona_admission_must_be_between_one_and_eight(value: int) -> None:
+@pytest.mark.parametrize("value", [0, 1, -1, 9])
+def test_daytona_admission_must_be_between_two_and_eight(value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(max_active_daytona_leases=value)
 

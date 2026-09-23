@@ -118,6 +118,21 @@ def workspace_volume_subpath(workspace_id: UUID) -> str:
     return f"workspaces/{require_non_zero_workspace_id(workspace_id)}"
 
 
+def session_workspace_volume_subpath(workspace_id: UUID, session_id: UUID) -> str:
+    """Return the private durable workspace subpath for one Session."""
+    workspace = require_non_zero_workspace_id(workspace_id)
+    if not isinstance(session_id, UUID) or session_id == _ZERO_UUID:
+        raise ValueError("session_id must be a non-zero UUID")
+    return f"{workspace_volume_subpath(workspace)}/sessions/{session_id}/workspace"
+
+
+def require_session_workspace_subpath(subpath: str, *, workspace_id: UUID, session_id: UUID) -> str:
+    expected = session_workspace_volume_subpath(workspace_id, session_id)
+    if not isinstance(subpath, str) or subpath.strip().strip("/") != expected:
+        raise ValueError("volume subpath does not match Session workspace authority")
+    return expected
+
+
 def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = None) -> str:
     """Validate and normalize a workspace-scoped provider volume subpath."""
 
@@ -137,10 +152,17 @@ def require_scoped_volume_subpath(subpath: str, *, workspace_id: UUID | None = N
 
 
 def validate_sandbox_binding(binding: SandboxBinding) -> SandboxBinding:
-    """Validate binding identity and workspace-scoped volume ownership."""
+    """Validate exact legacy or Session-scoped volume ownership."""
 
     require_non_zero_workspace_id(binding.workspace_id)
-    require_scoped_volume_subpath(binding.volume_subpath, workspace_id=binding.workspace_id)
+    if binding.volume_subpath == workspace_volume_subpath(binding.workspace_id):
+        require_scoped_volume_subpath(binding.volume_subpath, workspace_id=binding.workspace_id)
+    else:
+        require_session_workspace_subpath(
+            binding.volume_subpath,
+            workspace_id=binding.workspace_id,
+            session_id=binding.session_id,
+        )
     if type(binding.generation) is not int or binding.generation < 1:
         raise ValueError("sandbox binding generation must be a positive integer")
     return binding
@@ -209,6 +231,8 @@ __all__ = [
     "SandboxBindingStore",
     "require_non_zero_workspace_id",
     "require_scoped_volume_subpath",
+    "require_session_workspace_subpath",
+    "session_workspace_volume_subpath",
     "validate_sandbox_binding",
     "workspace_volume_subpath",
 ]

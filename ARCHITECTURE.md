@@ -49,6 +49,17 @@ semantic tools use the same broker path as Fleet tools. Consult the
 and the [performance budget](docs/reference/performance-budget.md) for dated
 performance evidence.
 
+Root and recursive execution Sandboxes mount only the authorized Session
+workspace at `/workspace`. Ordinary Python and Session workspace tools address
+those same files. Each Run uses local `/tmp/fleet/<run_id>` scratch; recursive
+children use a child directory there. Scratch is removed by its owned
+interpreter or child cleanup. Workspace memory, task checkpoints, original
+attachments, Artifact staging, and result snapshots stay outside the execution
+mount and are accessed through short-lived host I/O leases. One Daytona slot
+is reserved for that I/O while execution leases are active. An older
+Workspace-wide binding is fenced and retired before a Session-scoped binding
+can replace it; unconfirmed retirement keeps the old binding unavailable.
+
 ## Ownership map
 
 | Area | Owner and boundary |
@@ -58,6 +69,8 @@ performance evidence.
 | Turn lifecycle | `src/fleet_rlm/turns.py` is the stateful coordinator and owns the stream; `turn_preparation.py` and `turn_settlement.py` hold immutable plans and focused functions. |
 | Reasoning | `src/fleet_rlm/rlm/` owns DSPy signatures, program construction, budgets, tools, events, and recursive orchestration. |
 | Provider integration | `src/fleet_rlm/daytona/` is the Daytona SDK boundary with three core execution modules (`runtime.py`, `interpreter.py`, `broker.py`), `diagnostics.py` for operational doctoring, and `errors.py` for provider error taxonomy. |
+| Host file access | `workspace/mounted_gateway.py` owns authorized volume operations; `workspace/host_io.py` adapts them to short-lived Daytona I/O leases for Run tools. |
+| Active task | `sessions/task.py` owns one versioned, bounded, revision-checked Session checkpoint outside `/workspace`; `sessions/task_tools.py` is its DSPy Tool adapter. |
 | Durable domain data | `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `persistence/` own their policies and adapters. |
 | Policy | `config/fleet.toml` and `src/fleet_rlm/config/` define selected, validated runtime policy. |
 | Diagnostics and evaluation | `observability/` and `optimization/` own sanitized telemetry and evaluation contracts; they do not become a second execution path. |
@@ -70,6 +83,9 @@ performance evidence.
 - DSPy owns `REPLHistory` and native trajectory behavior. Fleet supplies
   committed history and invocation-local bindings without reconstructing or
   mutating DSPy's internal history.
+- Only committed Turns enter the native `dspy.History` conversation boundary.
+  Active-task progress is a separate, explicit checkpoint; arbitrary Python
+  variables remain invocation-local.
 - Process-scoped LMs are immutable templates. Deadlines, callbacks, retries,
   adapters, tools, and budgets are scoped to a Turn or child invocation.
 - A Run retains ownership of its interpreter, sandbox, workers, and cleanup

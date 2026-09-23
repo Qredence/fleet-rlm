@@ -1,27 +1,15 @@
-"""P43.7 + P44.5 production wiring: Daytona composition uses ``CommittedSessionHistory``.
-
-The Dayona broker cannot inject a raw ``dspy.History`` Pydantic value into
-a Sandbox. The Dayona composition therefore projects the claimed Session
-checkpoint to the same canonical ``{"request", "answer"}`` records used
-by the in-process composition and wraps them in the P43.7
-``CommittedSessionHistory`` transport so the interpreter can reconstruct
-the conversation inside the Sandbox.
-
-The test pins two contracts:
-
-* ``composition/daytona_run_preparation.py`` exposes a helper that returns a
-  ``CommittedSessionHistory`` (not ``dspy.History``) for one
-  ``ClaimedRun``.
-* The records passed to the transport equal the canonical records
-  returned by ``to_canonical_history_records`` for the same checkpoint.
-"""
+"""Daytona's narrow committed-history transport and Run-local attachment copies."""
 
 from __future__ import annotations
 
+from pathlib import PurePosixPath
+from types import SimpleNamespace
 from uuid import uuid4
 
 import dspy
+import pytest
 
+from fleet_rlm.paths import VolumePaths
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
@@ -135,3 +123,44 @@ def test_daytona_helper_returns_empty_history_for_fresh_session() -> None:
 
     assert type(transport) is CommittedSessionHistory
     assert list(transport.messages) == []
+
+
+@pytest.mark.asyncio
+async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() -> None:
+    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
+
+    class Fs:
+        def __init__(self) -> None:
+            self.directories = {"/tmp/fleet"}
+            self.files: dict[str, bytes] = {}
+
+        async def create_folder(self, path: str, _mode: str) -> None:
+            assert str(PurePosixPath(path).parent) in self.directories
+            self.directories.add(path)
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            self.files[path] = bytes(data)
+
+        async def download_file(self, path: str) -> bytes:
+            return self.files[path]
+
+        async def delete_file(self, path: str) -> None:
+            self.files.pop(path)
+
+    run_id = uuid4()
+    attachment_id = uuid4()
+    fs = Fs()
+    fs.directories.add(f"/tmp/fleet/{run_id}")
+    sink = _DaytonaRunSink(
+        SimpleNamespace(fs=fs),
+        paths=VolumePaths.from_mount("/volume"),
+        host_io=SimpleNamespace(),
+        run_id=run_id,
+    )
+    path = f"/tmp/fleet/{run_id}/attachments/{attachment_id}/notes.txt"
+
+    await sink.write_private(path, b"body")
+    assert await sink.read(path, max_bytes=4) == b"body"
+    assert f"/tmp/fleet/{run_id}/attachments/{attachment_id}" in fs.directories
+    await sink.remove_private(path)
+    assert path not in fs.files

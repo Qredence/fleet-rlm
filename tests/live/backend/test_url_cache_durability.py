@@ -21,7 +21,7 @@ from fleet_rlm.rlm.events import ToolCompleted, observe_tool
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.paths import volume_paths_from_settings
-from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+from fleet_rlm.workspace.storage import WorkspaceStorage
 from fleet_rlm.workspace.url import UrlFetchResult, UrlToolHost, WorkspaceUrlSourceStore
 
 pytestmark = [pytest.mark.live_daytona]
@@ -70,7 +70,7 @@ def _workspace(
     settings: Settings,
     session_id: UUID,
     loop: asyncio.AbstractEventLoop,
-) -> DaytonaSessionWorkspaceFS:
+) -> WorkspaceStorage:
     """
     Build a Daytona session workspace filesystem for the specified session.
 
@@ -81,10 +81,10 @@ def _workspace(
         loop (asyncio.AbstractEventLoop): Event loop used to synchronize the sandbox.
 
     Returns:
-        DaytonaSessionWorkspaceFS: The configured session workspace filesystem.
+        WorkspaceStorage: The configured session workspace filesystem.
     """
     paths = volume_paths_from_settings(settings)
-    return DaytonaSessionWorkspaceFS(
+    return WorkspaceStorage(
         sync_sandbox(sandbox, loop),
         volume_root=str(paths.mount_path),
         root=str(paths.session_workspace_dir(session_id)),

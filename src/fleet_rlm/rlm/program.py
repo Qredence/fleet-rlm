@@ -450,6 +450,7 @@ class SessionContextInput(FleetInputModel):
     recent: tuple[TurnPreviewInput, ...] = Field(max_length=6)
     workspace: WorkspaceCapabilityInput
     workspace_memory: WorkspaceMemoryInput | None = None
+    active_task: str | None = Field(default=None, max_length=2048)
 
 
 class SkillCardInput(FleetInputModel):
@@ -882,6 +883,7 @@ def build_session_context_payload(
     session_context: SessionContextManifest,
     workspace: WorkspaceCapabilityMetadata,
     workspace_memory_digest: str = "",
+    active_task_summary: str = "",
 ) -> dict[str, Any]:
     try:
         workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
@@ -903,12 +905,15 @@ def build_session_context_payload(
                 instructions=workspace.instructions,
             ),
             workspace_memory=workspace_memory,
+            active_task=active_task_summary or None,
         )
     except ValidationError as exc:
         raise RLMConfigError("Turn input metadata is invalid") from exc
     payload = context.model_dump(mode="json")
     if workspace_memory is None:
         payload.pop("workspace_memory", None)
+    if not active_task_summary:
+        payload.pop("active_task", None)
     return payload
 
 
@@ -921,6 +926,7 @@ def build_rlm_input_kwargs(
     attachment_context: AttachmentContextCapsule | None = None,
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
     workspace_memory_digest: str = "",
+    active_task_summary: str = "",
     history: dspy.History | CommittedSessionHistory | None = None,
     signature: type[dspy.Signature] | None = None,
 ) -> dict[str, Any]:
@@ -931,6 +937,8 @@ def build_rlm_input_kwargs(
         or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
     ):
         raise RLMConfigError("Turn input metadata is invalid")
+    if not isinstance(active_task_summary, str) or len(active_task_summary) > 2048:
+        raise RLMConfigError("Turn input metadata is invalid")
     if history is not None and type(history) is not dspy.History:
         from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
@@ -940,6 +948,7 @@ def build_rlm_input_kwargs(
         session_context=session_context,
         workspace=workspace,
         workspace_memory_digest=workspace_memory_digest,
+        active_task_summary=active_task_summary,
     )
     try:
         cards = tuple(

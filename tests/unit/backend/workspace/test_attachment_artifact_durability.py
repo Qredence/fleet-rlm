@@ -15,6 +15,8 @@ from fleet_rlm.attachments import (
     AttachmentLifecycleService,
     AttachmentRun,
     AttachmentUpload,
+    AttachmentValidationError,
+    DaytonaRunAttachmentPathPolicy,
     LocalAttachmentBlobGateway,
     LocalAttachmentCatalog,
     LocalAttachmentPathPolicy,
@@ -68,6 +70,21 @@ def test_volume_paths_durable_attachment_and_artifact_layout() -> None:
     staged = paths.run_attachment_file(sid, rid, aid, "note.txt")
     assert as_posix(staged).startswith("/home/daytona/fleet/sessions/")
     assert str(aid) in as_posix(staged)
+
+
+def test_daytona_run_attachment_paths_keep_blobs_durable_and_stage_in_scratch() -> None:
+    paths = VolumePaths.from_mount()
+    policy = DaytonaRunAttachmentPathPolicy(paths)
+    session_id, run_id, attachment_id = uuid4(), uuid4(), uuid4()
+
+    assert policy.attachment_blob(attachment_id) == as_posix(paths.attachment_blob_path(attachment_id))
+    staged = policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "report final.txt")
+    assert staged == f"/tmp/fleet/{run_id}/attachments/{attachment_id}/report final.txt"
+
+    with pytest.raises(AttachmentValidationError):
+        policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "../outside.txt")
+    with pytest.raises(AttachmentValidationError):
+        policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "nested\\outside.txt")
 
 
 def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path) -> None:

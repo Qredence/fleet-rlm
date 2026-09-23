@@ -45,6 +45,9 @@ class _Fs:
             *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
         ]
 
+    async def create_folder(self, path: str, _mode: str) -> None:
+        self.directories.add(path)
+
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
         Remove a tracked file or directory and record its path.
@@ -217,8 +220,10 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
+    session_id = uuid4()
     root_fs = _Fs({"/home/daytona/fleet/workspaces-root.txt"})
-    child_fs = _Fs({"/home/daytona/fleet/intermediate.txt"})
+    scratch_file = f"/tmp/fleet/{run_id}/1/intermediate.txt"
+    child_fs = _Fs({"/workspace/persistent.txt", scratch_file})
     root = _Sandbox("root-sandbox", root_fs)
     child = _Sandbox("child-sandbox", child_fs)
     platform = _Platform(child)
@@ -227,6 +232,9 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
@@ -246,6 +254,7 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=workspace_id,
+        session_id=session_id,
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -257,12 +266,12 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     assert lease.sandbox_id != root.id
     assert lease.sandbox_id == child.id
     assert lease.volume_id == "shared-volume"
-    assert lease.volume_subpath == recursive_child_volume_subpath(workspace_id, run_id, 1)
+    assert lease.volume_subpath == f"workspaces/{workspace_id}/sessions/{session_id}/workspace"
     assert platform.create_calls == [
         {
             "profile": DaytonaEnvironmentProfile.WORKSPACE_CHILD,
             "volume_id": "shared-volume",
-            "mount_path": "/home/daytona/fleet",
+            "mount_path": "/workspace",
             "volume_subpath": lease.volume_subpath,
             "labels": {"fleet.runtime": "recursive-child"},
             "with_volume": True,
@@ -273,8 +282,8 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     await asyncio.to_thread(lease.close)
 
     assert shutdown_calls == [True]
-    assert child_fs.files == set()
-    assert child_fs.deleted == ["/home/daytona/fleet/intermediate.txt"]
+    assert child_fs.files == {"/workspace/persistent.txt"}
+    assert child_fs.deleted == [scratch_file, f"/tmp/fleet/{run_id}/1"]
     assert root_fs.files == {"/home/daytona/fleet/workspaces-root.txt"}
     assert root_fs.deleted == []
     assert platform.deleted == ["child-sandbox"]
@@ -292,6 +301,9 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
@@ -304,6 +316,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -345,6 +358,7 @@ async def test_semantic_child_requires_a_configured_snapshot_before_provider_acq
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -370,6 +384,7 @@ async def test_semantic_child_can_fall_back_to_volume_backed_workspace_child() -
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -402,6 +417,9 @@ async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
@@ -416,6 +434,7 @@ async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -448,6 +467,9 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             release_shutdown.wait(2)
@@ -463,6 +485,7 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -507,6 +530,9 @@ async def test_ordered_cleanup_never_starts_a_quarantine_thread(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             release_shutdown.wait(2)
@@ -523,6 +549,7 @@ async def test_ordered_cleanup_never_starts_a_quarantine_thread(
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -545,12 +572,16 @@ async def test_ordered_cleanup_never_starts_a_quarantine_thread(
 async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interpreter_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
+    run_id = uuid4()
+    child = _Sandbox("child-sandbox", _Fs({"/workspace/persistent.txt", f"/tmp/fleet/{run_id}/1/intermediate.txt"}))
     platform = _Platform(child)
 
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
@@ -574,7 +605,8 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
-        run_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
         execution_output_cap=1000,
@@ -584,7 +616,7 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
     with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         await asyncio.to_thread(lease.close)
 
-    assert child.fs.files == set()
+    assert child.fs.files == {"/workspace/persistent.txt"}
     assert platform.deleted == ["child-sandbox"]
 
 
@@ -601,6 +633,7 @@ async def test_child_factory_times_out_when_real_admission_is_saturated() -> Non
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,
@@ -628,6 +661,7 @@ async def test_revocation_before_admission_performs_no_allocation() -> None:
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -654,6 +688,7 @@ async def test_invalid_workspace_child_binding_does_not_consume_admission_permit
         volume_id=None,
         mount_path=None,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -691,6 +726,7 @@ async def test_revocation_after_admission_releases_permit_without_sandbox_creati
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -728,6 +764,7 @@ async def test_revocation_after_sandbox_creation_deletes_sandbox_and_releases_pe
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -789,6 +826,7 @@ async def test_failed_child_creation_with_failed_cleanup_is_marked_fatal(
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -826,6 +864,9 @@ async def test_child_factory_adopts_provider_acquisition_that_finishes_after_dea
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             shutdown_calls.append(strict_broker_cleanup)
 
@@ -839,6 +880,7 @@ async def test_child_factory_adopts_provider_acquisition_that_finishes_after_dea
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,
@@ -873,6 +915,9 @@ async def test_child_cleanup_retains_ownership_when_owner_loop_closed() -> None:
     shutdown_calls: list[bool] = []
 
     class Interpreter:
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             shutdown_calls.append(strict_broker_cleanup)
 
@@ -921,6 +966,9 @@ async def test_factory_wait_owned_bounds_never_completing_provider_acquisition(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
@@ -937,6 +985,7 @@ async def test_factory_wait_owned_bounds_never_completing_provider_acquisition(
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,

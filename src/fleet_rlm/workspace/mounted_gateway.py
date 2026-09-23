@@ -202,9 +202,8 @@ class _DaytonaWorkspaceVolumeSession:
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes:
-        return await self._files.read_bytes(self._path(logical_path), max_bytes=max_bytes, use_cache=use_cache)
+        return await self._files.read_bytes(self._path(logical_path), max_bytes=max_bytes)
 
     async def exists(self, logical_path: str) -> bool:
         return await self._files.exists(self._path(logical_path))

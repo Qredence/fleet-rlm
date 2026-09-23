@@ -378,9 +378,9 @@ class Settings(BaseModel):
         ),
     ] = Field(
         default=8,
-        gt=0,
+        ge=2,
         le=8,
-        description="Daytona Admission bound for process-wide acquiring or active Interpreter Leases",
+        description="Daytona lease limit with one slot reserved for short-lived host I/O",
     )
     rlm_max_iters: Annotated[
         int,

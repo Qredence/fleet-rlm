@@ -86,8 +86,26 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
 
     class RootProvider:
-        released = False
         sandbox_id = f"sandbox-{tmp_path}"
+
+        def __init__(self) -> None:
+            self.released = False
+            self.interpreters = []
+
+        class RunScratchInterpreter:
+            def __init__(self) -> None:
+                self.bound_runs = []
+                self.cleaned_runs = []
+                self.current_run = None
+
+            def bind_run_scratch(self, run_id) -> None:
+                self.current_run = run_id
+                self.bound_runs.append(run_id)
+
+            def cleanup_run_scratch(self) -> None:
+                if self.current_run is not None:
+                    self.cleaned_runs.append(self.current_run)
+                    self.current_run = None
 
         async def acquire(self, _request, *, deadline, force_new=False):
             """
@@ -102,9 +120,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             """
             del force_new
             assert deadline > asyncio.get_running_loop().time()
+            interpreter = self.RunScratchInterpreter()
+            self.interpreters.append(interpreter)
             return SimpleNamespace(
                 sandbox_id=self.sandbox_id,
-                interpreter=object(),
+                interpreter=interpreter,
                 volume_id="test-volume",
             )
 
@@ -176,6 +196,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
+    first_interpreter = resources.root_provider.interpreters[-1]
+    assert first_interpreter.bound_runs == [turn.run_id]
     budget = prepared.execution.execution.models.budget
     assert budget is not None
     assert budget.limits.provider_attempts == settings.rlm_max_provider_attempts
@@ -264,12 +286,18 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         memory_id=memory_id,
         key_learning="Prefer very concise release notes.",
     )
-    assert edited["ok"] is True and edited["memory_id"] == memory_id
+    assert edited["ok"] is True and edited["memory_id"] != memory_id
     listed = await asyncio.to_thread(tools["list_memories"], category="Preference")
-    assert [entry["learning"] for entry in listed["entries"]] == ["Prefer very concise release notes."]
+    assert [entry["learning"] for entry in listed["entries"]] == [
+        learning,
+        "Prefer very concise release notes.",
+    ]
+    assert [entry["active"] for entry in listed["entries"]] == [False, True]
     forgotten = await asyncio.to_thread(tools["forget"], memory_id=memory_id)
     assert forgotten == {"ok": True, "namespace": "workspace_memory", "memory_id": memory_id, "removed": True}
     assert (await asyncio.to_thread(tools["list_memories"]))["entries"] == []
+    assert "Prefer concise release notes." not in volume[canonical_memory].decode("utf-8")
+    assert "Prefer very concise release notes." not in volume[canonical_memory].decode("utf-8")
     await asyncio.to_thread(tools["remember"], key_learning=learning, category="Preference")
 
     # Project deliverables land under the browsable projects/<slug>/ root through
@@ -342,6 +370,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert {attachment_path, project_path, memory_path, result_path} <= set(volume)
 
     await prepared.aclose()
+    assert first_interpreter.cleaned_runs == [turn.run_id]
     # Staged attachments are released; remote workspace and project data remain durable.
     assert attachment_path not in volume
     assert {project_path, memory_path, result_path} <= set(volume)
@@ -375,6 +404,8 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         turn2,
         deadline=float("inf"),
     )
+    second_interpreter = resources.root_provider.interpreters[-1]
+    assert second_interpreter.bound_runs == [turn2.run_id]
     digest = prepared2.execution.session.workspace_memory_digest
     assert f" -->: {learning}\n" in digest
     assert len(digest.encode("utf-8")) <= 4_096
@@ -387,6 +418,32 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     assert kwargs["session_context"]["workspace_memory"]["tail"] == digest
     await prepared2.aclose()
+    assert second_interpreter.cleaned_runs == [turn2.run_id]
+
+    turn3 = ClaimedRun(
+        uuid4(),
+        turn.session_id,
+        turn.access,
+        TurnInput("another follow up", ()),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    prepared3 = await prepare_turn(
+        build_run_preparation(
+            resources,
+            attachment_lifecycle=NoAttachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn3,
+        deadline=float("inf"),
+    )
+    assert len(resources.root_provider.interpreters) == 2
+    assert second_interpreter.bound_runs == [turn2.run_id, turn3.run_id]
+    await prepared3.aclose()
+    assert second_interpreter.cleaned_runs == [turn2.run_id, turn3.run_id]
     assert resources.root_provider.released is True
 
 

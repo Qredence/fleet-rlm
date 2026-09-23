@@ -137,9 +137,9 @@ recursion_child_max_output_chars = 2000
 recursion_max_parallel_children = 4
 
 [profiles.phase4-campaign.runtime]
-# The Turn's root lease consumes one permit; leave room for all four
-# concurrent recursive child leases used by the campaign arms.
-max_active_daytona_leases = 5
+# The Turn's root and four concurrent children need five execution permits;
+# reserve one more for short-lived host Volume I/O.
+max_active_daytona_leases = 6
 turn_timeout_seconds = 90
 
 # Arm A: direct-answer baseline without Fleet recursion. Tight Root budgets
@@ -164,7 +164,7 @@ wrap_up_seconds = 30
 recursion_enabled = false
 
 [profiles.phase4-campaign-a.runtime]
-max_active_daytona_leases = 1
+max_active_daytona_leases = 2
 turn_timeout_seconds = 90
 
 # Arm B: native RLM with llm_query only and no Fleet recursion. The Root
@@ -190,7 +190,7 @@ wrap_up_seconds = 30
 recursion_enabled = false
 
 [profiles.phase4-campaign-b.runtime]
-max_active_daytona_leases = 1
+max_active_daytona_leases = 2
 turn_timeout_seconds = 90
 
 # Explicit managed-production profile. Keep the local/disposable profile above

@@ -252,9 +252,7 @@ class _TestingVolumeFsAdapter:
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes:
-        del use_cache
         value = self._sink.values[logical_path]
         if max_bytes is not None and len(value) > max_bytes:
             raise ValueError("volume value exceeds its byte bound")
