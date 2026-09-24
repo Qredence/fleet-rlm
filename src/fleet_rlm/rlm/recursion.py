@@ -62,6 +62,10 @@ class ChildRuntimeAuthorizationError(RuntimeError):
     """A child runtime operation was attempted after Run authority was revoked."""
 
 
+class ChildInputFailureError(RuntimeError):
+    """A selected child input was unavailable without losing Run authority."""
+
+
 class ChildRuntimeNotStartedError(RuntimeError):
     """The runtime refused child admission before allocating a child resource."""
 
@@ -927,14 +931,27 @@ class RecursiveRLMExecutor:
 
     def _execute_child(self, request: ChildRequest, *, classify_failures: bool) -> ChildOutcome:
         rendered = _validate_recursive_prompt(request.render(), max_chars=self._options.max_prompt_chars)
-        staged_files = self._materialize_inputs(request)
-        source_manifest, source_manifest_sha256 = _child_source_manifest(staged_files)
+        self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
+        try:
+            reservation = self._begin_call(rendered)
+            staged_files = self._materialize_inputs(request)
+            source_manifest, source_manifest_sha256 = _child_source_manifest(staged_files)
+        except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
+            raise
+        except Exception as exc:
+            self._ensure_authorized()
+            if not classify_failures:
+                raise
+            return ChildOutcome(
+                status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+                error_category=_recursive_failure_category(exc),
+            )
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         local_metrics = DelegationMetrics(parent=self._metrics)
         token = _child_metrics.set(local_metrics)
         try:
-            reservation = self._begin_call(rendered)
             future = self._scheduler.submit_blocking(
                 lambda: self._run_reserved_call(
                     reservation,
@@ -984,7 +1001,12 @@ class RecursiveRLMExecutor:
                     raise ValueError("child input materializer returned invalid files")
                 normalized = {}
                 for path, content in files.items():
-                    _validate_child_path(path)
+                    try:
+                        _validate_child_path(path)
+                    except ValueError as exc:
+                        raise ChildRuntimeAuthorizationError(
+                            "child input materializer returned an unsafe path"
+                        ) from exc
                     if not isinstance(content, bytes):
                         raise ValueError("child input materializer must return bytes")
                     if not any(path == scope or path.startswith(f"{scope.rstrip('/')}/") for scope in request.inputs):
@@ -1020,8 +1042,28 @@ class RecursiveRLMExecutor:
         rendered = tuple(
             _validate_recursive_prompt(req.render(), max_chars=self._options.max_prompt_chars) for req in normalized
         )
-        staged = tuple(self._materialize_inputs(req) for req in normalized)
-        manifests = tuple(_child_source_manifest(files) for files in staged)
+        prepared: list[tuple[Mapping[str, bytes], list[dict[str, str]], str] | ChildOutcome] = []
+        for request in normalized:
+            try:
+                files = self._materialize_inputs(request)
+                manifest, manifest_sha256 = _child_source_manifest(files)
+            except (
+                asyncio.CancelledError,
+                FutureCancelledError,
+                ChildRuntimeAuthorizationError,
+                ChildRuntimeCleanupError,
+            ):
+                raise
+            except Exception as exc:
+                self._ensure_authorized()
+                prepared.append(
+                    ChildOutcome(
+                        status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+                        error_category=_recursive_failure_category(exc),
+                    )
+                )
+            else:
+                prepared.append((files, manifest, manifest_sha256))
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
@@ -1034,6 +1076,10 @@ class RecursiveRLMExecutor:
             batch_cancelled: Event,
         ) -> ChildOutcome:
             index = reservation.call_index - reservations[0].call_index
+            item = prepared[index]
+            if isinstance(item, ChildOutcome):
+                return item
+            staged_files, source_manifest, source_manifest_sha256 = item
             local_metrics = DelegationMetrics(parent=self._metrics)
             token = _child_metrics.set(local_metrics)
             try:
@@ -1041,9 +1087,9 @@ class RecursiveRLMExecutor:
                     reservation,
                     batch_cancelled,
                     request=normalized[index],
-                    staged_files=staged[index],
-                    source_manifest=manifests[index][0],
-                    source_manifest_sha256=manifests[index][1],
+                    staged_files=staged_files,
+                    source_manifest=source_manifest,
+                    source_manifest_sha256=source_manifest_sha256,
                 )
             except (asyncio.CancelledError, FutureCancelledError):
                 raise
@@ -1053,14 +1099,14 @@ class RecursiveRLMExecutor:
                 category = _recursive_failure_category(exc)
                 return ChildOutcome(
                     status="timed_out",
-                    source_manifest_sha256=manifests[index][1],
+                    source_manifest_sha256=source_manifest_sha256,
                     error_category=category,
                     usage=_child_usage(local_metrics),
                 )
             except Exception as exc:
                 return ChildOutcome(
                     status="failed",
-                    source_manifest_sha256=manifests[index][1],
+                    source_manifest_sha256=source_manifest_sha256,
                     error_category=_recursive_failure_category(exc),
                     usage=_child_usage(local_metrics),
                 )
@@ -1846,6 +1892,7 @@ class RecursiveRLMExecutor:
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
     "ChildAsyncScheduler",
+    "ChildInputFailureError",
     "ChildOutcome",
     "ChildRequest",
     "ChildRuntimeAuthorizationError",

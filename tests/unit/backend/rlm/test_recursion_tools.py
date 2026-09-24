@@ -20,9 +20,12 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInter
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
 from fleet_rlm.rlm.events import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.execution import materialize_child_inputs
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import (
+    ChildInputFailureError,
     ChildRequest,
+    ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeNotStartedError,
     RecursiveRLMOptions,
@@ -32,6 +35,7 @@ from fleet_rlm.rlm.recursion import RecursiveRLMExecutor as ProductionRecursiveR
 from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.tools import SkillToolHost
+from fleet_rlm.workspace.errors import FilesystemToolError
 from tests.live.backend.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
@@ -414,6 +418,57 @@ def test_child_result_files_are_persisted_before_cleanup_and_never_fabricated(
         assert outcome["status"] == "completed"
         assert outcome["result_files"] == ["run/children/1/summary.json"]
         assert persisted == {"summary.json": b'{"count":12}'}
+
+
+def test_partial_child_file_persistence_never_becomes_a_trusted_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            return dspy.Prediction(
+                answer="uncommitted",
+                evidence=["partial evidence"],
+                gaps=[],
+                result_files=["first.txt", "second.txt"],
+                trajectory=[],
+            )
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    persisted: list[str] = []
+
+    def persist(_call_index: int, path: str, _content: bytes) -> str:
+        if path == "second.txt":
+            raise OSError("second result write failed")
+        persisted.append(path)
+        return f"run/children/1/{path}"
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    lease = ChildRuntimeLease(
+        interpreter,
+        "partial-child",
+        "",
+        "",
+        interpreter.shutdown,
+        _stage_files=lambda _files: None,
+        _read_result_files=lambda paths: {path: path.encode() for path in paths},
+    )
+    executor = _executor(
+        [],
+        child_runtime_factory=lambda _index, *, profile: lease,  # noqa: ARG005
+        result_writer=persist,
+    )
+
+    outcome = executor.tool(task="write two files", inputs=[])
+    assert outcome["status"] == "failed"
+    assert outcome["answer"] == ""
+    assert outcome["evidence"] == outcome["result_files"] == []
+    assert persisted == ["first.txt"]
+    assert interpreter._shutdown
+    executor.wait_owned()
 
 
 @pytest.mark.asyncio
@@ -878,6 +933,134 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     executor.wait_owned()
     assert all(lease.interpreter._shutdown for lease in created)
     assert executor.summary().recursive_children_completed == 2
+
+
+def test_missing_child_input_returns_failed_slot_without_losing_successful_sibling() -> None:
+    created: list[DaytonaCodeInterpreter] = []
+
+    def materialize(request: ChildRequest) -> dict[str, bytes]:
+        if request.task == "missing":
+            raise ChildInputFailureError("selected input was not found")
+        return {}
+
+    executor = _executor(
+        {"ok": {"reasoning": "submit", "code": "SUBMIT(answer='kept', evidence=[], gaps=[], result_files=[])"}},
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        factory_calls=created,
+        input_materializer=materialize,
+    )
+
+    outcomes = executor.batched_tool(tasks=[{"task": "missing"}, {"task": "ok"}])
+    assert [item["status"] for item in outcomes] == ["failed", "completed"]
+    assert outcomes[0]["answer"] == ""
+    assert outcomes[0]["evidence"] == outcomes[0]["result_files"] == []
+    assert outcomes[1]["answer"] == "kept"
+    assert len(created) == 1
+    assert executor.summary().call_count == 2
+    executor.wait_owned()
+
+
+def test_single_missing_child_input_is_an_ordinary_failed_outcome() -> None:
+    deadline = time.monotonic() + 30
+    budget = TurnBudget(deadline=deadline, limits=BudgetLimits(tool_calls=1))
+    lm = dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter())
+    materialized: list[ChildRequest] = []
+    created: list[int] = []
+
+    def missing(request: ChildRequest) -> dict[str, bytes]:
+        materialized.append(request)
+        raise ChildInputFailureError("selected input was not found")
+
+    def create_child(call_index: int, *, profile: str) -> ChildRuntimeLease:
+        del profile
+        created.append(call_index)
+        raise AssertionError("unavailable input must fail before child admission")
+
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(lm, lm, budget=budget),
+        options=RecursiveRLMOptions(max_calls=1),
+        child_runtime_factory=create_child,
+        deadline=deadline,
+        input_materializer=missing,
+    )
+    outcome = executor.tool(task="missing", inputs=["missing.txt"])
+    assert outcome["status"] == "failed"
+    assert outcome["answer"] == ""
+    assert outcome["result_files"] == []
+    assert executor.summary().call_count == 1
+    assert budget.snapshot()[BudgetDimension.TOOL_CALLS.value] == 1
+    assert len(materialized) == 1
+    assert created == []
+    executor.wait_owned()
+
+
+def test_child_input_authorization_failure_stops_batch_before_admission() -> None:
+    created: list[DaytonaCodeInterpreter] = []
+    resolved: list[str] = []
+
+    def materialize(request: ChildRequest) -> dict[str, bytes]:
+        resolved.append(request.task)
+        raise ChildRuntimeAuthorizationError("selected source is unauthorized")
+
+    executor = _executor(
+        [],
+        options=RecursiveRLMOptions(max_calls=2),
+        factory_calls=created,
+        input_materializer=materialize,
+    )
+    with pytest.raises(ChildRuntimeAuthorizationError):
+        executor.batched_tool(tasks=[{"task": "unauthorized"}, {"task": "never resolved"}])
+    assert resolved == ["unauthorized"]
+    assert created == []
+    executor.wait_owned()
+
+
+@pytest.mark.parametrize("code", ["not_found", "too_large", "invalid_path"])
+def test_selected_source_error_keeps_missing_distinct_from_authorization(code: str) -> None:
+    def stat(path: str) -> dict[str, object]:
+        del path
+        raise FilesystemToolError(code, "selected source rejected")
+
+    request = ChildRequest(task="inspect", inputs=("missing.txt",))
+    error_type = ChildInputFailureError if code in {"not_found", "too_large"} else ChildRuntimeAuthorizationError
+    with pytest.raises(error_type):
+        materialize_child_inputs(
+            request,
+            tools={"stat_workspace_file": dspy.Tool(stat, name="stat_workspace_file")},
+            check_authority=lambda: None,
+            turn_deadline=time.monotonic() + 5,
+        )
+
+
+@pytest.mark.parametrize(
+    ("reader_error", "expected"),
+    [
+        (FilesystemToolError("not_found", "missing"), ChildInputFailureError),
+        (FilesystemToolError("permission_denied", "denied"), ChildRuntimeAuthorizationError),
+        (PermissionError("denied"), ChildRuntimeAuthorizationError),
+    ],
+)
+def test_selected_source_reader_keeps_permission_failures_terminal(
+    reader_error: Exception,
+    expected: type[Exception],
+) -> None:
+    def stat(path: str) -> dict[str, object]:
+        return {
+            "ok": True,
+            "entry": {"path": path, "kind": "file", "byte_size": 1, "modified_at": None},
+        }
+
+    def read(_path: str, _max_bytes: int) -> bytes:
+        raise reader_error
+
+    with pytest.raises(expected):
+        materialize_child_inputs(
+            ChildRequest(task="inspect", inputs=("selected.txt",)),
+            tools={"stat_workspace_file": dspy.Tool(stat, name="stat_workspace_file")},
+            check_authority=lambda: None,
+            turn_deadline=time.monotonic() + 5,
+            source_reader=read,
+        )
 
 
 def test_recursive_batch_ordinary_failure_waits_for_successful_sibling_cleanup(
