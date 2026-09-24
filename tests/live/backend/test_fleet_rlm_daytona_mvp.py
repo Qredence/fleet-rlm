@@ -567,10 +567,10 @@ def test_complete_daytona_mvp_through_fastapi(
             preparation = inventory.run_preparation
             assert resources is not None
             assert preparation is not None
-            preparation._capabilities = _ProofCapabilityPreparer(
-                preparation._capabilities,
-                proof_tools,
-                proof_views,
+            object.__setattr__(
+                preparation,
+                "capabilities",
+                _ProofCapabilityPreparer(preparation.capabilities, proof_tools, proof_views),
             )
             portal = client.portal
             assert portal is not None
