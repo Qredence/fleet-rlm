@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import tempfile
 import time
-from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
@@ -90,11 +89,16 @@ class _ProofLedger:
     unselected_material_hidden: bool = False
     source_revision_verified: bool = False
     result_file_verified: bool = False
+    result_file_content_verified: bool = False
+    child_copy_write_verified: bool = False
+    persisted_result_reader: Callable[[str], bytes] | None = field(default=None, repr=False)
     result_file_count: int = 0
     expected_source_bytes: int = 0
-    expected_source_sha256: str = ""
-    expected_source_manifest_sha256: str = ""
+    expected_source_lines: int = 0
+    expected_source_content: bytes | None = field(default=None, repr=False)
+    source_manifest_id: str | None = None
     expected_last_record: str = ""
+    expected_child_marker: str = ""
     source_path: str = "selected/evidence.txt"
     private_path: str = "unselected/private.txt"
 
@@ -130,18 +134,29 @@ class _ProofLedger:
         self.child_source_verified = (
             isinstance(summary, dict)
             and summary.get("byte_count") == self.expected_source_bytes
-            and summary.get("sha256") == self.expected_source_sha256
+            and summary.get("line_count") == self.expected_source_lines
             and summary.get("last_record") == self.expected_last_record
         )
         self.unselected_material_hidden = isinstance(summary, dict) and summary.get("private_visible") is False
         self.root_marker_absent_in_child = isinstance(summary, dict) and summary.get("root_marker_visible") is False
-        self.source_revision_verified = source_manifest_sha256 == self.expected_source_manifest_sha256
+        self.source_manifest_id = source_manifest_sha256
+        self.source_revision_verified = isinstance(source_manifest_sha256, str) and bool(source_manifest_sha256)
         self.result_file_count = len(result_files)
         self.result_file_verified = (
             len(result_files) == 1
             and result_files[0].startswith("run/children/1/")
             and result_files[0].endswith("/results/source-summary.json")
         )
+        self.child_copy_write_verified = (
+            isinstance(summary, dict) and summary.get("child_copy_after_write") == self.expected_child_marker
+        )
+        persisted_result: dict[str, Any] = {}
+        if self.result_file_verified and self.persisted_result_reader is not None:
+            try:
+                persisted_result = json.loads(self.persisted_result_reader(result_files[0]))
+            except (OSError, TypeError, ValueError):
+                persisted_result = {}
+        self.result_file_content_verified = isinstance(persisted_result, dict) and persisted_result == summary
         self.root_continuity = root_marker == "root-only"
         if not all(
             (
@@ -150,6 +165,8 @@ class _ProofLedger:
                 self.root_marker_absent_in_child,
                 self.source_revision_verified,
                 self.result_file_verified,
+                self.result_file_content_verified,
+                self.child_copy_write_verified,
                 self.root_continuity,
             )
         ):
@@ -161,6 +178,8 @@ class _ProofLedger:
             "root_marker_absent": self.root_marker_absent_in_child,
             "revision_verified": self.source_revision_verified,
             "result_file_saved": self.result_file_verified,
+            "result_file_content_verified": self.result_file_content_verified,
+            "child_copy_write_verified": self.child_copy_write_verified,
         }
 
 
@@ -287,18 +306,10 @@ def _install_child_evidence(
         if stage_files is not None:
 
             def observed_stage(files: Mapping[str, bytes]) -> None:
-                manifest = [
-                    {"path": path, "sha256": hashlib.sha256(content).hexdigest()}
-                    for path, content in sorted(files.items())
-                ]
-                encoded = json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
-                ledger.expected_source_manifest_sha256 = hashlib.sha256(encoded).hexdigest()
                 evidence.source_file_count = len(files)
                 evidence.source_bytes = sum(map(len, files.values()))
                 selected = files.get(ledger.source_path)
-                evidence.selected_input_staged = (
-                    selected is not None and hashlib.sha256(selected).hexdigest() == ledger.expected_source_sha256
-                )
+                evidence.selected_input_staged = selected is not None and selected == ledger.expected_source_content
                 evidence.unselected_source_staged = ledger.private_path in files
                 stage_started = time.perf_counter()
                 stage_files(files)
@@ -426,6 +437,31 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     ledger = _ProofLedger()
     child_evidence = _ChildEvidence()
     _install_child_evidence(monkeypatch, child_evidence, ledger)
+    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
+
+    persisted_child_writes: list[tuple[Any, str, bytes]] = []
+    original_write_private = _DaytonaRunSink.write_private
+
+    async def observed_write_private(sink: Any, logical_path: str, data: bytes) -> None:
+        await original_write_private(sink, logical_path, data)
+        if "/children/" in logical_path:
+            persisted_child_writes.append((sink, logical_path, bytes(data)))
+
+    monkeypatch.setattr(_DaytonaRunSink, "write_private", observed_write_private)
+
+    def read_persisted_result(_public_reference: str) -> bytes:
+        if not child_evidence.cleanup_succeeded or len(persisted_child_writes) != 1:
+            raise ValueError("child result is unavailable after cleanup")
+        sink, logical_path, expected_bytes = persisted_child_writes[0]
+        if not logical_path.endswith("/children/1/results/source-summary.json"):
+            raise ValueError("child result path is invalid")
+        volume_fs = getattr(sink, "volume_fs", None)
+        read_bytes = getattr(volume_fs, "read_bytes", None)
+        if not callable(read_bytes):
+            raise ValueError("parent result filesystem is unavailable")
+        return read_bytes(logical_path, max_bytes=len(expected_bytes))
+
+    ledger.persisted_result_reader = read_persisted_result
     proof_tool = dspy.Tool(
         ledger.verify_phase2,
         name="verify_phase2",
@@ -446,6 +482,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "root_marker_absent": bool(result.get("root_marker_absent")),
                     "revision_verified": bool(result.get("revision_verified")),
                     "result_file_saved": bool(result.get("result_file_saved")),
+                    "result_file_content_verified": bool(result.get("result_file_content_verified")),
+                    "child_copy_write_verified": bool(result.get("child_copy_write_verified")),
                 },
             )
         }
@@ -469,14 +507,17 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert client.portal is not None
             source_path = "selected/evidence.txt"
             private_path = "unselected/private.txt"
-            records = [f"record-{index:05d};value-{index % 17:02d}" for index in range(4_000)]
+            records = [f"record-{index:06d};value-{index % 17:02d}" for index in range(100_000)]
             last_record = f"P6-END-{uuid4()}"
             source_text = "\n".join((*records, last_record))
             source_bytes = source_text.encode("utf-8")
-            assert len(source_bytes) > 50_000
+            assert len(source_bytes) > 2_000_000
             private_marker = f"PARENT-ONLY-{uuid4()}"
+            child_marker = f"CHILD-ONLY-{uuid4()}"
+            ledger.expected_child_marker = child_marker
             ledger.expected_source_bytes = len(source_bytes)
-            ledger.expected_source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+            ledger.expected_source_lines = len(records) + 1
+            ledger.expected_source_content = source_bytes
             ledger.expected_last_record = last_record
             source_write = client.put(
                 "/api/files/content",
@@ -498,18 +539,25 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                         "Execute the native DSPy recursive child source-isolation proof. Run exactly one child."
                         ' First set root_marker = "root-only". Then call rlm_query exactly once with'
                         " task asking the child to read only selected/evidence.txt under"
-                        " os.path.join(FLEET_RUN_SCRATCH, path), compute its byte count, SHA-256, and last"
-                        " line, check that unselected/private.txt does not exist under that same scratch, and"
-                        " check that the Python name root_marker is absent from the child's globals."
-                        " The selected input is a large exhaustive record list; inspect the whole file, not a"
-                        " preview. Have the child write the computed JSON to"
-                        " results/source-summary.json under FLEET_RUN_SCRATCH and typed-submit that JSON as"
-                        " answer, cite the selected file hash, use no gaps, and declare that result file."
+                        " os.path.join(FLEET_RUN_SCRATCH, path), compute its byte count, line count, and last"
+                        " line, check that unselected/private.txt does not exist under that same scratch or"
+                        " under /workspace, and check that the Python name root_marker is absent from the"
+                        " child's globals. The selected input is a multi-megabyte exhaustive record list;"
+                        " inspect the whole file, not a preview. After calculating its byte count, line count, and"
+                        " last line, overwrite only the child's selected/evidence.txt copy with this exact"
+                        " marker: "
+                        + child_marker
+                        + ". Read it back and include the exact string as child_copy_after_write. Have the child"
+                        " write the computed JSON to results/source-summary.json under"
+                        " FLEET_RUN_SCRATCH and typed-submit the exact same JSON as"
+                        " answer, cite selected/evidence.txt and its final record, use no gaps, and declare the"
+                        " result file."
                         " Pass only inputs=['selected/evidence.txt']. Do not inspect or copy the unselected"
                         " file, do not call llm_query or rlm_query inside the child, and do not use extraction"
                         " fallback. After return, assert the child status is completed and call verify_phase2"
                         " exactly once with the child answer, the unchanged root_marker, the runtime-provided"
-                        " source_manifest_sha256, and result_files. Require its ok result, then issue exactly"
+                        " source_manifest_sha256, and result_files. The verifier reads the persisted result only"
+                        " after the child has been torn down. Require its ok result, then issue exactly"
                         ' one typed SUBMIT(answer="phase 6 child source isolation complete", evidence='
                         '"selected staged source and persisted child result").'
                     ),
@@ -518,6 +566,15 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             )
             assert response.status_code == 200
             chunks, done = _sse_chunks(response)
+            start_metadata = next(
+                (
+                    chunk.get("messageMetadata", {})
+                    for chunk in chunks
+                    if chunk.get("type") == "start" and isinstance(chunk.get("messageMetadata"), dict)
+                ),
+                {},
+            )
+            trace_id = start_metadata.get("traceId")
             assert done == 1
             assert chunks[-1].get("type") == "finish"
             assert chunks[-1].get("finishReason") == "stop"
@@ -532,7 +589,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert isinstance(result_files, list) and len(result_files) == 1
             assert result_files[0].startswith("run/children/1/")
             assert result_files[0].endswith("/results/source-summary.json")
-            assert completion.get("source_manifest_sha256") == ledger.expected_source_manifest_sha256
+            assert isinstance(completion.get("source_manifest_sha256"), str)
+            ledger.source_manifest_id = str(completion["source_manifest_sha256"])
             ledger.result_file_count = len(result_files)
             ledger.result_file_verified = True
             structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
@@ -543,6 +601,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert ledger.unselected_material_hidden
             assert ledger.source_revision_verified
             assert ledger.result_file_verified
+            assert ledger.result_file_content_verified
+            assert ledger.child_copy_write_verified
             assert child_evidence.selected_input_staged
             assert not child_evidence.unselected_source_staged
             assert child_evidence.source_file_count >= 1
@@ -568,21 +628,22 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             else:
                 raise AssertionError("parent source verification exceeded its page bound")
             parent_source_after = "".join(parent_pages)
-            parent_file_unchanged = (
-                parent_source_after == source_text
-                and hashlib.sha256(parent_source_after.encode("utf-8")).hexdigest() == ledger.expected_source_sha256
-            )
+            parent_file_unchanged = parent_source_after == source_text
             assert parent_file_unchanged
             pending_receipt = {
                 "schema": _RECEIPT_SCHEMA,
+                "observability": {
+                    "session_id": str(session_id),
+                    "run_id": str(start_metadata.get("runId", "")),
+                    "trace_id": trace_id if isinstance(trace_id, str) else None,
+                },
                 "timing": {
                     "turn_duration_ms": int((time.perf_counter() - started) * 1000),
                     "child_duration_ms": child_evidence.child_duration_ms,
                 },
                 "source_isolation": {
                     "selected_input_bytes": ledger.expected_source_bytes,
-                    "selected_input_sha256": ledger.expected_source_sha256,
-                    "source_manifest_sha256": ledger.expected_source_manifest_sha256,
+                    "source_manifest_id": ledger.source_manifest_id,
                     "staged_source_file_count": child_evidence.source_file_count,
                     "staged_source_bytes": child_evidence.source_bytes,
                     "staging_duration_ms": child_evidence.staging_duration_ms,
@@ -594,6 +655,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "parent_file_unchanged": parent_file_unchanged,
                     "result_file_count": ledger.result_file_count,
                     "result_file_verified": ledger.result_file_verified,
+                    "result_file_content_verified_after_child_cleanup": ledger.result_file_content_verified,
+                    "child_copy_write_verified": ledger.child_copy_write_verified,
                 },
                 "assertions": {
                     "dedicated_child_sandbox": True,
@@ -613,6 +676,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                     "source_materialized_before_provider_admission": child_evidence.selected_input_staged,
                     "parent_source_unchanged": parent_file_unchanged,
                     "result_harvested_before_cleanup": ledger.result_file_verified and child_evidence.cleanup_succeeded,
+                    "result_readable_after_child_cleanup": ledger.result_file_content_verified,
                 },
                 "failure": None,
                 "passed": True,

@@ -532,6 +532,24 @@ class WorkspaceStorage:
     ) -> WorkspaceTextPage:
         return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
 
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Read one authorized file exactly, refusing rather than truncating at the bound."""
+        if type(max_bytes) is not int or max_bytes < 0:
+            raise ValueError("file read bound must be a non-negative integer")
+        target = self._resolve(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            raise IsADirectoryError(path)
+        limit = min(max_bytes, self._max_file_bytes)
+        if target.stat().st_size > limit:
+            raise ValueError("file read bound exceeded")
+        with target.open("rb") as handle:
+            data = handle.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("file read bound exceeded")
+        return data
+
     def _write_bytes_with_fsync(self, path: Path, data: bytes) -> None:
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
@@ -934,9 +952,9 @@ class DaytonaSandboxWorkspaceStorage:
             raise WorkspaceStorageError("unable to prepare Session Workspace directory")
 
     @staticmethod
-    def _modified_at(info: Any) -> str:
+    def _modified_at(info: Any) -> str | None:
         value = getattr(info, "mod_time", info.get("mod_time") if isinstance(info, Mapping) else None)
-        return str(value) if value is not None else datetime.now(UTC).isoformat()
+        return str(value) if value is not None else None
 
     def _entry(self, full_path: str, path: str, *, checksum: bool = False) -> WorkspaceEntry:
         self._assert_no_symlink(full_path)
@@ -1062,6 +1080,34 @@ class DaytonaSandboxWorkspaceStorage:
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
         return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
+
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Read one authorized file exactly, refusing rather than truncating at the bound."""
+        if type(max_bytes) is not int or max_bytes < 0:
+            raise ValueError("file read bound must be a non-negative integer")
+        full_path, normalized = self._path(path)
+        self._assert_no_symlink(full_path)
+        try:
+            info = self._fs.get_file_info(full_path)
+        except Exception as exc:
+            if self._is_not_found(exc):
+                raise FileNotFoundError(normalized) from exc
+            raise
+        is_dir = getattr(info, "is_dir", info.get("is_dir", False) if isinstance(info, Mapping) else False)
+        if is_dir:
+            raise IsADirectoryError(normalized)
+        size = getattr(info, "size", info.get("size") if isinstance(info, Mapping) else None)
+        if type(size) is not int or size < 0:
+            raise WorkspaceStorageError("Daytona filesystem cannot verify bounded file size")
+        limit = min(max_bytes, self._max_file_bytes)
+        if size > limit:
+            raise ValueError("file read bound exceeded")
+        data = self._read_optional(full_path)
+        if data is None:
+            raise FileNotFoundError(normalized)
+        if len(data) > limit:
+            raise ValueError("file read bound exceeded")
+        return data
 
     def write_text(
         self, path: str, content: str, *, overwrite: bool = True, expected_sha256: str | None = None

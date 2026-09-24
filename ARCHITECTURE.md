@@ -119,16 +119,21 @@ requests to host tools and returns bounded, sanitized results; model code does
 not run in the Fleet process.
 
 The current recursive executor selects the `semantic-child` profile. Fleet
-requests a child Sandbox without a Volume mount, resolves selected inputs under
-the existing Session authority, stages bounded file copies in child-local
-scratch, and records a manifest of the staged content. Declared result files
-are validated and harvested before child cleanup. The child cannot directly
-update the parent's task checkpoint, memory, publication state, or credentials;
-the Root verifies findings and performs durable updates through existing
-owners. This describes Fleet's request and data flow, not independent proof of
-provider mount or network enforcement. A successful recursive canary covers
-one ordinary path; it does not prove mount isolation, network blocking,
-timeout or claim-loss containment, or comparative quality.
+requests a child Sandbox without a Volume mount, resolves only the selected
+files or subtree under existing Session/Project authority, and copies those
+files into private child-local scratch. File sizes and available modification
+metadata are checked around bounded materialization; bounded
+resolve/stage spans record file counts, bytes, and elapsed time. Declared child
+result paths are checked for traversal and symlinks, harvested, size-bounded,
+and persisted in the parent Run before child cleanup. Children receive no
+parent Workspace tools, memory, task checkpoints, attachment storage,
+publication capability, credential-bearing files, or Root mutable state. The
+Root verifies findings and performs durable updates through existing owners.
+This describes Fleet's request and data flow, not independent proof of provider
+mount or network enforcement. The canary confirms the provider reports no
+Volume mount for its child; the requested network block remains unverified. It
+does not prove network blocking, timeout or claim-loss containment, or
+comparative quality.
 
 `DaytonaRuntime` owns reusable Session resources, ephemeral child resources,
 host I/O Sandboxes, and cleanup. The Turn coordinator owns claim, preparation,

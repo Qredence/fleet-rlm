@@ -997,7 +997,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     with turn_trace(uuid4(), uuid4(), enabled=True):
         assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
 
-    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    assert calls.start_span_names[:3] == ["fleet_turn", "RLM.child.resolve_inputs", "RLM.recursive_call"]
     recursive_inputs = [
         payload
         for payload in calls.span_inputs
@@ -1194,7 +1194,7 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
     with turn_trace(uuid4(), uuid4(), enabled=True):
         assert "semantic-answer" in executor.tool(task="outer slice", inputs=[])["answer"]
 
-    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    assert calls.start_span_names[:3] == ["fleet_turn", "RLM.child.resolve_inputs", "RLM.recursive_call"]
     outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
     assert any(payload["termination_mode"] == "typed_submit" for payload in outputs)
 

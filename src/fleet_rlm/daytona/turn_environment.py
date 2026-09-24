@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from hashlib import sha256
 from pathlib import PurePosixPath
@@ -736,6 +736,24 @@ class _LiveCapabilityPreparer:
             artifact_reader=self.artifact_reader,
             deadline=deadline,
         )
+
+        def read_child_source(path: str, max_bytes: int) -> bytes:
+            if path.startswith("projects/"):
+                storage, relative_path = projects_fs, path.removeprefix("projects/")
+            else:
+                storage, relative_path = session_workspace, path
+            read_file = getattr(storage, "read_file_bytes", None)
+            if not callable(read_file):
+                raise ValueError("selected child source does not support bounded file reads")
+            content = read_file(relative_path, max_bytes=max_bytes)
+            if not isinstance(content, bytes):
+                raise ValueError("selected child source reader returned invalid content")
+            return content
+
+        if callable(getattr(session_workspace, "read_file_bytes", None)) and callable(
+            getattr(projects_fs, "read_file_bytes", None)
+        ):
+            spec = replace(spec, child_source_reader=read_child_source)
         return LivePreparedCapabilities(
             spec,
             files=attachment_host,

@@ -52,6 +52,8 @@ class _Fs:
         ]
 
     async def get_file_info(self, path: str) -> SimpleNamespace:
+        if path in {"/", "/tmp"}:
+            return SimpleNamespace(path=path, is_dir=True, size=0, mode="040755")
         if path in self.symlinks:
             return SimpleNamespace(path=path, is_dir=False, size=0, mode="120777")
         if path in self.directories:
@@ -423,11 +425,14 @@ async def test_child_lease_stages_and_harvests_files_in_its_private_directory() 
     )
 
     lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
-    await asyncio.to_thread(lease.stage_files, {"src/main.py": b"answer = 42\n"})
+    parent_source = {"src/main.py": b"answer = 42\n"}
+    await asyncio.to_thread(lease.stage_files, parent_source)
     private_root = lease.data_path
     assert private_root == f"/tmp/fleet/child-data/{run_id}/1"
     assert lease.interpreter._backend._run_scratch_path == private_root
-    assert child_fs.contents[f"{private_root}/src/main.py"] == b"answer = 42\n"
+    assert child_fs.contents[f"{private_root}/src/main.py"] == parent_source["src/main.py"]
+    child_fs.contents[f"{private_root}/src/main.py"] = b"child rewrite"
+    assert parent_source["src/main.py"] == b"answer = 42\n"
     child_fs.contents[f"{private_root}/result.txt"] = b"finding"
     child_fs.files.add(f"{private_root}/result.txt")
 
@@ -446,6 +451,31 @@ async def test_child_lease_stages_and_harvests_files_in_its_private_directory() 
 
     with pytest.raises(ValueError, match="safely relative"):
         await asyncio.to_thread(lease.read_result_files, ["../outside"])
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
+async def test_child_lease_rejects_symlinked_private_stage_root_before_writing() -> None:
+    child_fs = _Fs(set(), symlinks={"/tmp/fleet": "/outside"})
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    factory = recursive_child_runtime.DaytonaRuntime().build_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id=None,
+        mount_path=None,
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+    )
+    lease = await asyncio.to_thread(factory, 1)
+
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.stage_files, {"src/main.py": b"answer = 42\n"})
+    assert child_fs.files == set()
     await asyncio.to_thread(lease.close)
 
 
