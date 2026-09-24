@@ -66,11 +66,23 @@ class LiveDaytonaMVPResult(dspy.Signature):
     findings: list[dict[str, str]] = dspy.OutputField()
 
 
+class NativeSemanticProofResult(dspy.Signature):
+    """Return a small typed result for the native semantic-call canary."""
+
+    request: str = dspy.InputField()
+    session_context: dict = dspy.InputField()
+    skill_cards: list[dict] = dspy.InputField()
+    attachments: list[dict] = dspy.InputField()
+    answer: str = dspy.OutputField()
+    evidence: str = dspy.OutputField()
+
+
 @dataclass(slots=True)
 class _ProofCapabilityPreparer:
     delegate: Any
     tools: tuple[dspy.Tool, ...]
     event_views: MappingProxyType[str, ToolEventView]
+    signature: Any = LiveDaytonaMVPResult
 
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
@@ -78,7 +90,7 @@ class _ProofCapabilityPreparer:
         # bodies at worker start; live steering rides the Turn request text.
         prepared.spec = replace(
             prepared.spec,
-            signature=LiveDaytonaMVPResult,
+            signature=self.signature,
             output_schema_id=_CONTRACT_ID,
             output_schema_version="1",
             tools=(*prepared.spec.tools, *self.tools),
@@ -965,7 +977,12 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
             object.__setattr__(
                 preparation,
                 "capabilities",
-                _ProofCapabilityPreparer(preparation.capabilities, (token_tool, semantic_tool), proof_views),
+                _ProofCapabilityPreparer(
+                    preparation.capabilities,
+                    (token_tool, semantic_tool),
+                    proof_views,
+                    NativeSemanticProofResult,
+                ),
             )
             portal = client.portal
             assert portal is not None
@@ -988,9 +1005,8 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                             " verification = verify_semantic_work(iteration_token=iteration_token,"
                             " single_result=single_result, batch_results=batch_results, accumulator=accumulator);"
                             " require verification['ok'] and print SEMANTIC_VERIFICATION_READY. Do not recreate"
-                            " the accumulator. 3) Set a non-empty string summary and a findings list with string"
-                            " claim and evidence fields, then"
-                            " call exactly SUBMIT(answer=summary, findings=findings) with keywords. Do not call"
+                            " the accumulator. 3) Set a non-empty string summary and evidence, then call exactly"
+                            " SUBMIT(answer=summary, evidence=evidence) with keywords. Do not call"
                             " rlm_query or rlm_query_batched."
                         ),
                     },
@@ -1036,7 +1052,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
 
                 submit_shapes = _call_shapes(chunks, "SUBMIT")
                 assert len(submit_shapes) == 1
-                assert submit_shapes[0]["keyword_names"] == ["answer", "findings"]
+                assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
                 structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
                 assert len(structured) == 1
                 assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
@@ -1075,7 +1091,6 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                         "single_semantic_call_succeeded": True,
                         "ordered_batch_results_verified": True,
                         "one_budgeted_sub_lm_call_per_prompt": metrics["sub_lm_calls_depth_0"] == 4,
-                        "native_error_results_rejected": True,
                         "typed_submit": True,
                         "no_full_child_sandbox": usage["recursive_call_count"] == 0,
                         "cleanup_passed": False,
@@ -1085,7 +1100,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 }
                 scenario_passed = True
             finally:
-                cleanup_failures = portal.call(_strict_cleanup, resources, settings.volume_name)
+                cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
                 if scenario_passed and not cleanup_failures:
                     assert success_receipt is not None
                     assertions = success_receipt["assertions"]
