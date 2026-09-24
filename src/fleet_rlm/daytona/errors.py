@@ -96,8 +96,13 @@ class ProviderRequestError(DaytonaAdapterError):
 def provider_status_code(exc: object) -> int | None:
     """Extract provider HTTP status metadata without inspecting exception text."""
     direct = getattr(exc, "status_code", None)
-    if isinstance(direct, int):
+    if isinstance(direct, int) and not isinstance(direct, bool):
         return direct
+    # Daytona's generated OpenAPI clients expose ``status`` rather than
+    # ``status_code`` on their ApiException subclasses.
+    generated = getattr(exc, "status", None)
+    if type(exc).__module__.startswith("daytona_") and isinstance(generated, int) and not isinstance(generated, bool):
+        return generated
     response = getattr(exc, "response", None)
     nested = getattr(response, "status_code", None)
     return nested if isinstance(nested, int) else None
@@ -212,3 +217,10 @@ def map_provider_error(exc: BaseException) -> DaytonaAdapterError:
     if is_sandbox_not_found(exc):
         return DaytonaAdapterError(message=message, cause_type=cause, status_code=status, source=source)
     return ProviderRequestError(message=message, cause_type=cause, status_code=status, source=source)
+
+
+def map_daytona_sdk_error(exc: Exception) -> Exception:
+    """Map only Daytona SDK errors; preserve unrelated application failures."""
+    if type(exc).__module__.startswith(("daytona.", "daytona_")):
+        return map_provider_error(exc)
+    return exc

@@ -7,6 +7,7 @@ import sys
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -598,7 +599,11 @@ def test_turn_trace_preserves_managed_body_exception(monkeypatch: pytest.MonkeyP
         raise expected
 
     assert raised.value is expected
-    assert calls.span_outputs[-1] == {"failure_category": "unknown"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "unknown",
+        "failure_cause_class": "ValueError",
+        "provider_status_category": "none",
+    }
     assert calls.span_statuses[-1] == "ERROR"
     assert calls.update_kwargs[-1] == {"state": "ERROR"}
     assert current_turn_trace_id() is None
@@ -668,7 +673,11 @@ def test_turn_trace_omits_raw_exception_from_mlflow_context(monkeypatch: pytest.
     except TimeoutError as exc:
         assert "secret timeout" in str(exc)
 
-    assert calls.span_outputs[-1] == {"failure_category": "timeout"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "timeout",
+        "failure_cause_class": "TimeoutError",
+        "provider_status_category": "none",
+    }
     assert calls.span_statuses[-1] == "ERROR"
     assert exit_args == [(None, None, None)]
     assert "secret timeout" not in str(calls.span_outputs + calls.span_statuses)
@@ -906,8 +915,33 @@ def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: 
 
     assert calls.span_outputs[-1] == {
         "failure_category": "unknown",
+        "failure_cause_class": "RuntimeError",
+        "provider_status_category": "none",
         "phase_status": "failed",
     }
+
+
+def test_turn_phase_span_exports_safe_provider_failure_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.errors import ProviderRequestError
+    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
+
+    calls = _install_fake_mlflow(monkeypatch)
+    cause = ProviderRequestError("api_key=private", cause_type="BadRequestException", status_code=400)
+
+    with pytest.raises(RunPreparationUnavailableError):
+        try:
+            raise cause
+        except ProviderRequestError as exc:
+            with turn_phase_span("Turn.acquire_environment", inputs={}):
+                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+
+    assert calls.span_outputs[-1] == {
+        "failure_category": "request_validation",
+        "failure_cause_class": "BadRequestException",
+        "provider_status_category": "4xx",
+        "phase_status": "failed",
+    }
+    assert "private" not in str(calls.span_outputs)
 
 
 def test_turn_phase_span_merges_handle_outputs_with_phase_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -936,6 +970,8 @@ def test_turn_phase_span_handle_outputs_survive_body_failure(monkeypatch: pytest
     assert calls.span_outputs[-1] == {
         "stdout_chars": 3,
         "failure_category": "unknown",
+        "failure_cause_class": "RuntimeError",
+        "provider_status_category": "none",
         "phase_status": "failed",
     }
 
@@ -1467,3 +1503,75 @@ def test_exhausted_finalization_is_not_classified_as_a_deadline() -> None:
 
     assert trace_failure_category(exhaustion) == "wrap_up_rejected"
     assert trace_failure_category(TimeoutError("Turn deadline exceeded")) == "timeout"
+
+
+def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import mlflow
+    from mlflow.dspy.callback import MlflowCallback
+    from mlflow.tracking import fluent
+
+    from fleet_rlm.observability import tracing
+    from fleet_rlm.rlm.compat_3_3_1 import _RLMReasoningCallback, _RLMTraceCallback
+
+    prior_uri = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+    # Earlier MLflow tests may leave an active experiment ID from a different
+    # tracking store. Create this test's experiment in its own SQLite store.
+    monkeypatch.setattr(fluent, "_active_experiment_id", None)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "0")
+    mlflow.set_experiment("fleet-span-parentage")
+    monkeypatch.setattr("mlflow.dspy.callback.get_autologging_config", lambda *_args: True)
+    tracing.set_tracing_active_for_tests(True)
+    active_token = tracing._fleet_trace_active.set(True)
+    try:
+        autolog = MlflowCallback()
+        predictor = dspy.Predict("question -> answer")
+        root_lm = SimpleNamespace(model="openai/test", model_type="chat", kwargs={}, cache=False, history=[])
+        lm_callback = _RLMTraceCallback(root_lm=root_lm, sub_lm=object())
+        action_callback = _RLMReasoningCallback(lambda _event: None)
+
+        with mlflow.start_span("fleet_turn") as root:
+            trace_id = root.request_id
+            with (
+                tracing.turn_phase_span("RLM.execute", inputs={}) as phase,
+                tracing.rlm_callback_parent(phase),
+            ):
+                for iteration in range(3):
+                    module_id = f"module-{iteration}"
+                    lm_id = f"lm-{iteration}"
+                    autolog.on_module_start(module_id, predictor, {"question": "q"})
+                    action_callback.on_module_start(module_id, predictor, {"question": "q"})
+                    autolog.on_lm_start(lm_id, root_lm, {"prompt": "q"})
+                    lm_callback.on_lm_start(lm_id, root_lm, {"prompt": "q"})
+                    autolog.on_lm_end(lm_id, {"answer": "a"})
+                    lm_callback.on_lm_end(lm_id, {"answer": "a"})
+                    prediction = dspy.Prediction(reasoning="reason", code="pass", answer="a")
+                    autolog.on_module_end(module_id, prediction)
+                    action_callback.on_module_end(module_id, prediction)
+                    with tracing.turn_phase_span("sandbox.execute", inputs={"iteration": iteration}):
+                        pass
+
+        mlflow.flush_trace_async_logging()
+        spans = mlflow.get_trace(trace_id).data.spans
+    finally:
+        tracing._fleet_trace_active.reset(active_token)
+        tracing.set_tracing_active_for_tests(False)
+        mlflow.set_tracking_uri(prior_uri)
+
+    by_id = {span.span_id: span for span in spans}
+    predictions = sorted(
+        (span for span in spans if span.name == "Predict.forward"), key=lambda span: span.start_time_ns
+    )
+    assert len(predictions) == 3
+    assert len({span.parent_id for span in predictions}) == 1
+    assert sum(span.name == "RLM.root_action" for span in spans) == 3
+    assert sum(span.name == "RLM.root_lm" for span in spans) == 3
+    assert sum(span.name == "sandbox.execute" for span in spans) == 3
+    for span in spans:
+        if span.name in {"Predict.forward", "RLM.root_action", "RLM.root_lm", "sandbox.execute"}:
+            parent = by_id[span.parent_id]
+            assert parent.start_time_ns <= span.start_time_ns <= span.end_time_ns <= parent.end_time_ns
+            if span.name in {"RLM.root_action", "RLM.root_lm"}:
+                assert parent.name == "RLM.execute"

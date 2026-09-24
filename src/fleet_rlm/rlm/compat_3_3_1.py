@@ -117,6 +117,7 @@ class _RLMReasoningCallback(BaseCallback):
             self._action_spans[call_id] = start_turn_span(
                 "RLM.root_action",
                 inputs={"iteration": self._iteration + 1},
+                callback_span=True,
             )
         except Exception:
             return
@@ -210,6 +211,7 @@ class _RLMTraceCallback(BaseCallback):
                 # Fleet keeps a diagnostic timing span without advertising a
                 # second countable LM request.
                 span_type="CHAIN",
+                callback_span=True,
                 inputs={
                     "role": role,
                     "model": str(model),

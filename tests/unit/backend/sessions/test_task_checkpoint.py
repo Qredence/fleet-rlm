@@ -8,7 +8,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.paths import VolumePaths
+from fleet_rlm.sessions.models import TurnInput
 from fleet_rlm.sessions.task import (
     SessionTaskService,
     TaskCheckpointConflictError,
@@ -108,6 +110,47 @@ async def test_long_initial_request_seeds_readable_checkpoint(
     assert seeded.goal == request
     assert seeded.pending_work == (f"{request.strip()[:497]}...",)
     assert await service.read(session_id, user_id=user_id, workspace_id=workspace_id) == seeded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("length", (4_000, 4_001, 4_502, 100_000))
+async def test_seed_bounds_only_checkpoint_goal(
+    services: tuple[SessionTaskService, _Catalog, _Volume, UUID, UUID, UUID], length: int
+) -> None:
+    service, _, _, session_id, workspace_id, user_id = services
+    request = "A" * length
+    body = CreateTurnRequest(text=request)
+    turn_input = TurnInput(body.text)
+
+    checkpoint = await service.seed(
+        session_id, user_id=user_id, workspace_id=workspace_id, first_request=turn_input.text
+    )
+
+    expected_goal = request if length <= 4_000 else f"{request[:3_997]}..."
+    assert checkpoint.goal == expected_goal
+    assert len(checkpoint.goal) <= 4_000
+    assert checkpoint.pending_work == (f"{request[:497]}...",)
+    assert turn_input.text == request
+    assert len(turn_input.text) == length
+    assert (
+        await service.seed(session_id, user_id=user_id, workspace_id=workspace_id, first_request="B" * length)
+        == checkpoint
+    )
+
+
+@pytest.mark.asyncio
+async def test_seed_fits_multibyte_request_within_checkpoint_byte_limit(
+    services: tuple[SessionTaskService, _Catalog, _Volume, UUID, UUID, UUID],
+) -> None:
+    service, _, _, session_id, workspace_id, user_id = services
+    request = "😀" * 4_000
+
+    checkpoint = await service.seed(session_id, user_id=user_id, workspace_id=workspace_id, first_request=request)
+
+    assert len(checkpoint.goal) <= 4_000
+    assert checkpoint.goal.endswith("...")
+    assert len(checkpoint.pending_work[0]) <= 500
+    assert await service.read(session_id, user_id=user_id, workspace_id=workspace_id) == checkpoint
 
 
 @pytest.mark.asyncio

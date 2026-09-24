@@ -22,7 +22,7 @@ import dspy
 
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import dspy_turn_callbacks, turn_phase_span
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, turn_phase_span
 from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
@@ -1418,6 +1418,7 @@ class ExecutionTraceAssembler:
                     "max_output_chars": context.execution.options.max_output_chars,
                 },
             ) as phase,
+            rlm_callback_parent(phase),
             dspy.context(
                 lm=context.execution.models.root_lm,
                 # DSPy 3.3.x combines context callbacks with instance callbacks

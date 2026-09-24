@@ -11,6 +11,7 @@ import contextlib
 import inspect
 import logging
 import math
+import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
 from concurrent.futures import Future, wait
@@ -27,6 +28,7 @@ from fleet_rlm.daytona.errors import (
     ProviderRequestError,
     is_safe_pre_creation_retry,
     is_sandbox_not_found,
+    map_daytona_sdk_error,
     map_provider_error,
     sanitize_failure_text,
 )
@@ -3656,7 +3658,13 @@ class DaytonaRuntime:
                     if self._roots.get(key) is stale:
                         self._roots.pop(key, None)
 
-            raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
+            try:
+                raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
+            except Exception as exc:
+                mapped = map_daytona_sdk_error(exc)
+                if mapped is exc:
+                    raise
+                raise mapped from exc
             owner = self._coerce_root(spec, raw)
             async with self._lock:
                 if self._state is DaytonaRuntimeState.OPEN:
@@ -5698,7 +5706,13 @@ class DaytonaRuntime:
 
     async def _release_interpreter(self, lease: InterpreterLease) -> None:
         release_task = self._start_release_task(lease)
-        await asyncio.shield(release_task)
+        try:
+            await asyncio.shield(release_task)
+        except Exception as exc:
+            mapped = map_daytona_sdk_error(exc)
+            if mapped is exc:
+                raise
+            raise mapped from exc
         self._settled_release_task(lease, release_task)
 
     async def release(self, lease: InterpreterLease) -> None:
@@ -5841,9 +5855,12 @@ class DaytonaRuntime:
         try:
             task.result()
         except BaseException as exc:
+            sandbox_id = re.sub(r"[^A-Za-z0-9_-]", "", str(lease.sandbox_id))[:64] or "unknown"
             logger.warning(
-                "Daytona interpreter release failed",
-                extra={"sandbox_id": lease.sandbox_id, "error_type": type(exc).__name__},
+                "Daytona interpreter release failed sandbox_id=%s error_type=%s",
+                sandbox_id,
+                type(exc).__name__,
+                extra={"sandbox_id": sandbox_id, "error_type": type(exc).__name__},
             )
             return
         for owned_task, owned_lease in tuple(self._release_leases.items()):

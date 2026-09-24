@@ -77,8 +77,7 @@ changing it.
   infrastructure changes need an explicit request. Provider, Daytona,
   database, and benchmark runs use their documented entry points and require
   explicit operator authorization.
-- Use `uv run` for Python. Keep secrets in configured environment references;
-  do not expose credentials, private paths, or raw infrastructure failures.
+- Use `uv run` for Python.
 - Review the final diff and run `git diff --check`. State what the checks prove:
   local tests do not certify provider behavior, release readiness, or promotion.
 

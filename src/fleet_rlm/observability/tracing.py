@@ -965,6 +965,7 @@ _current_trace_failed: ContextVar[bool] = ContextVar("fleet_mlflow_trace_failed"
 # True only while a fleet_turn root span is open. Phase spans gate on this so
 # tracing-disabled turns never import or touch MLflow at all.
 _fleet_trace_active: ContextVar[bool] = ContextVar("fleet_turn_trace_active", default=False)
+_rlm_callback_parent: ContextVar[Any | None] = ContextVar("fleet_rlm_callback_parent", default=None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1138,6 +1139,7 @@ class TraceSpanHandle:
 
     _span_context: Any | None = None
     _span: Any | None = None
+    _detached: bool = False
     outputs: dict[str, object] = field(default_factory=dict)
     _closed: bool = False
 
@@ -1160,7 +1162,7 @@ class TraceSpanHandle:
         self._closed = True
         if outputs is not None:
             self.set_outputs(outputs)
-        if self._span is None or self._span_context is None:
+        if self._span is None:
             return
         try:
             self._span.set_outputs({**_trace_mapping(self.outputs), "phase_status": phase_status})
@@ -1181,9 +1183,22 @@ class TraceSpanHandle:
         try:
             # Do not pass provider exceptions to MLflow: their messages can
             # contain prompts, generated code, or gateway response bodies.
-            self._span_context.__exit__(None, None, None)
+            if self._detached:
+                self._span.end()
+            elif self._span_context is not None:
+                self._span_context.__exit__(None, None, None)
         except BaseException:
             logger.debug("trace span close failed; continuing")
+
+
+@contextmanager
+def rlm_callback_parent(parent: TraceSpanHandle) -> Iterator[None]:
+    """Keep callback spans under their enclosing invocation across DSPy callbacks."""
+    token = _rlm_callback_parent.set(getattr(parent, "_span", None))
+    try:
+        yield
+    finally:
+        _rlm_callback_parent.reset(token)
 
 
 def dspy_turn_callbacks(*callbacks: Any) -> list[Any]:
@@ -1226,6 +1241,7 @@ def start_turn_span(
     *,
     inputs: Mapping[str, object],
     span_type: str = "CHAIN",
+    callback_span: bool = False,
 ) -> TraceSpanHandle:
     """Start a bounded nested span when a ``fleet_turn`` trace is active.
 
@@ -1240,14 +1256,27 @@ def start_turn_span(
         import mlflow
         from mlflow.entities import SpanType
 
-        active_span = mlflow.get_current_active_span()
-        if active_span is None:
-            return handle
-        span_context = mlflow.start_span(
-            name=name,
-            span_type=getattr(SpanType, span_type, SpanType.CHAIN),
-        )
-        span = span_context.__enter__()
+        if callback_span:
+            parent = _rlm_callback_parent.get()
+            if parent is None:
+                return handle
+            from mlflow.tracing.fluent import start_span_no_context
+
+            span = start_span_no_context(
+                name=name,
+                span_type=getattr(SpanType, span_type, SpanType.CHAIN),
+                parent_span=parent,
+            )
+            span_context = None
+            handle._detached = True
+        else:
+            if mlflow.get_current_active_span() is None:
+                return handle
+            span_context = mlflow.start_span(
+                name=name,
+                span_type=getattr(SpanType, span_type, SpanType.CHAIN),
+            )
+            span = span_context.__enter__()
     except Exception:
         logger.debug("MLflow lifecycle span setup failed; continuing")
         return handle
@@ -1287,11 +1316,11 @@ def turn_phase_span(name: str, *, inputs: Mapping[str, object]) -> Iterator[Trac
         # Categorize failures without passing the exception object or message
         # into MLflow. Provider and interpreter exceptions frequently carry
         # prompts, generated code, URLs, or gateway response bodies.
-        from fleet_rlm.observability.diagnostics import trace_failure_category
+        from fleet_rlm.observability.diagnostics import trace_failure_details
 
         handle.finish(
             phase_status="failed",
-            outputs={"failure_category": trace_failure_category(exc)},
+            outputs=trace_failure_details(exc),
         )
         raise
     else:
@@ -1479,7 +1508,7 @@ def turn_trace(
         try:
             yield TraceHandle(trace_id=trace_id if expose_trace_id else None, _span_id=span_id)
         except BaseException as exc:
-            from fleet_rlm.observability.diagnostics import trace_failure_category
+            from fleet_rlm.observability.diagnostics import trace_failure_details
 
             _current_trace_failed.set(True)
             _set_current_trace_state("ERROR")
@@ -1489,7 +1518,7 @@ def turn_trace(
                 # so at the ownership boundary avoids depending on an SDK
                 # implementation detail and leaves a useful, safe diagnosis.
                 try:
-                    span.set_outputs({"failure_category": _trace_value(trace_failure_category(exc))})
+                    span.set_outputs(_trace_mapping(trace_failure_details(exc)))
                 except BaseException:
                     logger.warning("MLflow turn span failure output annotation failed; continuing")
                 try:
