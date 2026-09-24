@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import queue
@@ -89,6 +90,26 @@ class _ProofLedger:
         self.ordered = normalized == [_TOKEN_A, _TOKEN_B]
         if not self.ordered:
             raise ValueError("batch results must preserve [prompt_a, prompt_b] order")
+        return {"ok": True}
+
+
+@dataclass(slots=True)
+class _PartialProofLedger:
+    calls: int = 0
+    verified: bool = False
+    batch_calls: int = 0
+    outcomes: list[dict[str, object]] | None = None
+
+    def verify_partial(self, statuses: list[str], surviving_answer: str, failed_trusted_fields: int) -> dict[str, bool]:
+        self.calls += 1
+        self.verified = (
+            self.calls == 1
+            and statuses == ["failed", "completed"]
+            and surviving_answer == _TOKEN_B
+            and failed_trusted_fields == 0
+        )
+        if not self.verified:
+            raise ValueError("ordered partial outcomes were not verified")
         return {"ok": True}
 
 
@@ -208,7 +229,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     policy_source = (
         (_REPO_ROOT / "config" / "fleet.toml")
         .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona"', 'default_profile = "daytona-recursive"', 1)
+        .replace('default_profile = "daytona-native"', 'default_profile = "daytona-recursive"', 1)
     )
     if target_profile != "daytona-recursive":
         policy_source = policy_source.replace(
@@ -476,6 +497,152 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             },
             "cleanup": {"confirmed_absent": True, "admission_restored": True},
             "trace": trace_evidence,
+            "passed": True,
+        }
+    )
+
+
+def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One real sibling survives an injected ordinary failure after the first lease is acquired."""
+    if os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive") != "daytona-recursive":
+        pytest.fail("P6D.4 partial canary requires the daytona-recursive profile")
+    settings = _load_live_settings(tmp_path, monkeypatch)
+    ledger = _PartialProofLedger()
+    child_evidence = _ChildEvidence()
+    _install_child_evidence(monkeypatch, child_evidence)
+    original_invoke = RecursiveRLMExecutor._run_native_child
+    original_batch = RecursiveRLMExecutor._call_children_batched
+
+    def inject_first_failure(self: RecursiveRLMExecutor, *args: Any, **kwargs: Any) -> Any:
+        call = args[1]
+        if call.call_index == 1:
+            raise ValueError("P6D.4 injected ordinary child invocation failure")
+        return original_invoke(self, *args, **kwargs)
+
+    def capture_batch(self: RecursiveRLMExecutor, tasks: list[dict[str, object]]) -> list[dict[str, object]]:
+        ledger.batch_calls += 1
+        outcomes = original_batch(self, tasks)
+        ledger.outcomes = outcomes
+        return outcomes
+
+    monkeypatch.setattr(RecursiveRLMExecutor, "_run_native_child", inject_first_failure)
+    monkeypatch.setattr(RecursiveRLMExecutor, "_call_children_batched", capture_batch)
+    proof_tool = dspy.Tool(
+        ledger.verify_partial,
+        name="verify_partial",
+        desc="Verify one failed child and one preserved successful child exactly once.",
+    )
+    proof_views = MappingProxyType(
+        {
+            "verify_partial": ToolEventView(
+                input_projection=lambda values: {"status_count": len(values.get("statuses") or ())},
+                output_projection=lambda result: {"ok": bool(result.get("ok"))},
+            )
+        }
+    )
+    app = create_app(settings=settings)
+    cleanup_failures: tuple[str, ...] = ()
+    trace_id: str | None = None
+    with TestClient(app) as client:
+        resources = app.state.runtime_inventory.run_environment_resources
+        preparation = app.state.runtime_inventory.run_preparation
+        assert resources is not None
+        assert preparation is not None
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
+        try:
+            created = client.post("/api/sessions", json={"title": "Daytona recursive partial canary"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            failed_prompt = "Investigate the first isolated child task. This test injects a failure at invocation."
+            successful_prompt = (
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_B}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
+            )
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Run exactly one rlm_query_batched call with two independent input-free tasks. "
+                        "Set outcomes = rlm_query_batched(tasks=[{'task': failed_prompt, 'inputs': []}, "
+                        "{'task': successful_prompt, 'inputs': []}]) once. "
+                        f"failed_prompt = {failed_prompt!r}. successful_prompt = {successful_prompt!r}. "
+                        "After it returns, require statuses = [item['status'] for item in outcomes] "
+                        "to equal ['failed', 'completed']. Require the failed answer, evidence, and result_files "
+                        "to be empty. Call verify_partial(statuses=statuses, "
+                        "surviving_answer=outcomes[1]['answer'], failed_trusted_fields="
+                        "int(bool(outcomes[0]['answer'])) + len(outcomes[0]['evidence']) + "
+                        "len(outcomes[0]['result_files'])) exactly once and require ok. "
+                        "Then issue one typed SUBMIT with a brief answer identifying the surviving child and "
+                        "evidence='ordered partial child outcomes'. Do not retry or run any other recursive call."
+                    )
+                },
+                headers={"Idempotency-Key": f"daytona-recursive-partial-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("finishReason") == "stop"
+            assert ledger.batch_calls == ledger.calls == 1
+            assert ledger.verified
+            assert ledger.outcomes is not None
+            assert [item["status"] for item in ledger.outcomes] == ["failed", "completed"]
+            assert ledger.outcomes[0]["answer"] == ""
+            assert ledger.outcomes[0]["evidence"] == ledger.outcomes[0]["result_files"] == []
+            assert ledger.outcomes[1]["answer"] == _TOKEN_B
+            assert sorted(child_evidence.call_indexes) == [1, 2]
+            assert len(set(child_evidence.sandbox_ids)) == 2
+            assert child_evidence.cleanups == 2
+            assert child_evidence._active == 0
+            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            assert len(structured) == 1
+            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+            code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+            submit_calls = [
+                node
+                for chunk in code_chunks
+                for node in ast.walk(ast.parse(str(chunk.get("data", {}).get("code", ""))))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SUBMIT"
+            ]
+            assert len(submit_calls) == 1
+            trace_ids = {
+                metadata["traceId"]
+                for chunk in chunks
+                for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                if isinstance(metadata, dict) and isinstance(metadata.get("traceId"), str)
+            }
+            assert len(trace_ids) <= 1
+            trace_id = next(iter(trace_ids), None)
+        finally:
+            assert client.portal is not None
+            cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
+            assert cleanup_failures == (), "recursive partial canary cleanup did not settle"
+    write_receipt(
+        {
+            "schema": "fleet.p6d4-partial/v1",
+            "candidate": candidate_identity(),
+            "profile": "daytona-recursive",
+            "root_model": settings.root_model,
+            "sub_model": settings.sub_model,
+            "trace_id": trace_id,
+            "trace_status": "available" if trace_id else "unavailable",
+            "assertions": {
+                "one_turn_post": True,
+                "ordered_failed_completed": True,
+                "surviving_answer_verified": True,
+                "failed_trusted_fields_empty": True,
+                "batch_calls": ledger.batch_calls,
+                "child_leases": len(child_evidence.sandbox_ids),
+                "typed_root_submission": True,
+            },
+            "cleanup": {"confirmed_absent": not cleanup_failures, "child_closes": child_evidence.cleanups},
             "passed": True,
         }
     )

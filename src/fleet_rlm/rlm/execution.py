@@ -74,6 +74,7 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.recursion import (
     _CHILD_STAGE_MAX_BYTES,
+    ChildInputFailureError,
     ChildRequest,
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
@@ -103,6 +104,7 @@ from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.models import SkillCard, SkillDefinition
+from fleet_rlm.workspace.errors import FilesystemToolError
 from fleet_rlm.workspace.memory import MemoryCandidate
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 
@@ -843,7 +845,16 @@ def _child_source_tool(
     tool = tools.get(name)
     if tool is None:
         raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized")
-    result = tool(**arguments)
+    try:
+        result = tool(**arguments)
+    except FilesystemToolError as exc:
+        if exc.code in {"not_found", "too_large", "is_directory"} or (
+            exc.code in {"invalid_path", "invalid_cursor"} and name in {"read_workspace_text", "read_project_text"}
+        ):
+            raise ChildInputFailureError("selected child input is unavailable") from exc
+        raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized") from exc
+    except PermissionError as exc:
+        raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized") from exc
     check_authority()
     if time.monotonic() >= deadline:
         raise TimeoutError("child input staging deadline exceeded")
@@ -895,7 +906,7 @@ def _child_source_paths(
             raise ValueError("selected source metadata is invalid")
         expected_entry_path = reference.removeprefix("projects/") if project else reference
         if entry.get("path") != expected_entry_path:
-            raise ValueError("selected source metadata escaped its requested path")
+            raise ChildRuntimeAuthorizationError("selected source metadata escaped its requested path")
         kind = entry.get("kind")
         byte_size = entry.get("byte_size")
         modified_at = entry.get("modified_at")
@@ -933,10 +944,13 @@ def _child_source_paths(
                 if not isinstance(item, Mapping) or not isinstance(item.get("path"), str):
                     raise ValueError("selected source listing is invalid")
                 child = f"projects/{item['path']}" if project else str(item["path"])
-                ChildRequest(task=request.task, inputs=(child,))
-                _validate_child_source_path(child)
+                try:
+                    ChildRequest(task=request.task, inputs=(child,))
+                    _validate_child_source_path(child)
+                except ValueError as exc:
+                    raise ChildRuntimeAuthorizationError("selected source listing contained an unsafe path") from exc
                 if not child.startswith(reference.rstrip("/") + "/"):
-                    raise ValueError("selected source escaped its selected directory")
+                    raise ChildRuntimeAuthorizationError("selected source escaped its selected directory")
                 pending.append(child)
             next_cursor = listing.get("next_cursor")
             if not listing.get("truncated"):
@@ -1034,7 +1048,14 @@ def materialize_child_inputs(
                 expected_byte_size=byte_size,
             )
         else:
-            content = source_reader(path, remaining)
+            try:
+                content = source_reader(path, remaining)
+            except FilesystemToolError as exc:
+                if exc.code in {"not_found", "too_large", "is_directory"}:
+                    raise ChildInputFailureError("selected child input is unavailable") from exc
+                raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized") from exc
+            except PermissionError as exc:
+                raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized") from exc
             check_authority()
             if time.monotonic() >= deadline:
                 raise TimeoutError("child input staging deadline exceeded")

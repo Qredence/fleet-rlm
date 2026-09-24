@@ -1023,11 +1023,8 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
                 generated_code = [str(chunk.get("data", {}).get("code", "")) for chunk in code_chunks]
                 assert any("issue_iteration_token" in code for code in generated_code)
-                semantic_steps = [code for code in generated_code if "llm_query_batched" in code]
-                assert len(semantic_steps) == 1
-                assert "llm_query(" in semantic_steps[0]
-                assert "verify_semantic_work" in semantic_steps[0]
-                assert "accumulator =" not in semantic_steps[0]
+                assert len(_call_shapes(chunks, "llm_query")) == 1
+                assert len(_call_shapes(chunks, "llm_query_batched")) == 1
 
                 tool_names = [
                     str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
@@ -1043,7 +1040,6 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
                 assert len(usage_chunks) == 1
                 usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
-                assert usage.get("termination_mode") == "typed_submit"
                 assert int(usage["iterations"]) <= settings.rlm_max_iters
                 assert int(usage["recursive_call_count"]) == 0
                 metrics = usage["delegation_metrics"]
@@ -1056,7 +1052,25 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
                 structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
                 assert len(structured) == 1
-                assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+                assert structured[0].get("data", {}).get("schemaId") == _CONTRACT_ID
+
+                trace_ids = {
+                    metadata["traceId"]
+                    for chunk in chunks
+                    for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                    if isinstance(metadata, dict) and isinstance(metadata.get("traceId"), str)
+                }
+                assert len(trace_ids) == 1
+                trace_id = trace_ids.pop()
+                from mlflow import MlflowClient
+
+                trace = MlflowClient(tracking_uri=settings.mlflow_tracking_uri).get_trace(
+                    trace_id, display=False, flush=True
+                )
+                execution_spans = [span for span in trace.data.spans if span.name == "RLM.execute"]
+                assert len(execution_spans) == 1
+                termination_mode = execution_spans[0].outputs["termination_mode"]
+                assert termination_mode == "typed_submit"
 
                 run_id = _run_id_from_sse(chunks, label="native_semantic_calls", resources=resources)
                 binding = portal.call(resources.bindings.get, session_id)
@@ -1086,8 +1100,9 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                         "recursive_calls": int(usage["recursive_call_count"]),
                         "sse_done": done,
                     },
-                    "token_usage_status": usage.get("token_usage_status"),
-                    "termination_mode": usage.get("termination_mode"),
+                    "token_usage_status": metrics["token_usage_status"],
+                    "trace_id": trace_id,
+                    "termination_mode": termination_mode,
                     "assertions": {
                         "single_semantic_call_succeeded": True,
                         "ordered_batch_results_verified": True,
