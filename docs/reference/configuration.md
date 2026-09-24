@@ -2,8 +2,9 @@
 
 Fleet starts from the required, committed [`config/fleet.toml`](../../config/fleet.toml)
 policy file. The active profile is selected by the `[config] default_profile` key
-inside that file. Set `default_profile` to `daytona-recursive` for local or
-disposable certification, or to `daytona-managed` for a production Lakebase
+inside that file. The committed default is `daytona-native`. Select
+`daytona-recursive` explicitly for local or disposable child-recursion
+certification, or `daytona-managed` when configuring a production Lakebase
 deployment, before starting any backend or running `fleet doctor`. Policy is
 strict, resolved once at process
 startup, and takes effect only after restart. The [generated profile matrix](profile-matrix.md)
@@ -29,16 +30,18 @@ requires `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, and
 `FLEET_DAYTONA_ORG_ID`. The workspace Databricks gateway enforces a per-minute
 output-token quota that terminates multi-step Turns after roughly five root-LM
 calls; MaaS carries no such quota, which is why it is the committed default.
-The committed policy keeps `daytona-recursive` as the safe local/disposable
-default (it inherits the complete policy from `[defaults]`) and declares an
-explicit `daytona-managed` production profile. The managed profile pins Root and
-Sub back to the Databricks Unity AI Gateway transport (`DATABRICKS_TOKEN`,
+The committed policy uses `daytona-native` as the local/disposable default.
+It inherits `[defaults]` with Fleet-child recursion disabled;
+`daytona-recursive` is an explicit opt-in that enables bounded Fleet children.
+`daytona-managed` is the explicit Lakebase production policy; it pins Root and
+Sub to the Databricks Unity AI Gateway transport (`DATABRICKS_TOKEN`,
 `FLEET_LLM_BASE_URL`) and requires `FLEET_DATABASE_URL` to be a TLS PostgreSQL
 URL authenticated as `fleet_app`.
 
 | Profile | Provider values | Persistence and tracing |
 | --- | --- | --- |
-| `daytona-recursive` (default) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled. |
+| `daytona-native` (default) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled; child recursion is disabled. |
+| `daytona-recursive` (opt-in) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled; bounded child recursion is enabled. |
 | `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DATABASE_URL` | TLS Lakebase PostgreSQL as `fleet_app`, at Alembic head; local MLflow tracing remains enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
@@ -158,8 +161,8 @@ not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
 override them. Profiles without an explicit recursion override inherit the
-operator-selected value from `[defaults.rlm]`; `daytona-recursive` remains the
-selected default profile name. The `phase4-campaign-a` and
+operator-selected value from `[defaults.rlm]`; `daytona-native` is the selected
+default profile. The `phase4-campaign-a` and
 `phase4-campaign-b` profiles explicitly disable recursion for comparison, while
 `phase4-campaign` inherits the enabled value. The
 managed profile's database URL policy is enforced while loading that profile;

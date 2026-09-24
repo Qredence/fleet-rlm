@@ -215,8 +215,8 @@ uv run python scripts/live_daytona_verify.py \
   --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
 ```
 
-Select the intended provider profile through `[config] default_profile` before
-this gate; the shipped default is `daytona-recursive`. The [profile matrix](../reference/profile-matrix.md)
+This verifier explicitly targets the opt-in `daytona-recursive` profile; the
+shipped default remains `daytona-native`. The [profile matrix](../reference/profile-matrix.md)
 identifies the required provider values. The verifier requires the committed
 configured Root and Sub policy roles, records a passing receipt at
 the exact candidate SHA, verifies provider cleanup and secret isolation, and

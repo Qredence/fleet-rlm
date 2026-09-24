@@ -7,7 +7,8 @@ Sandbox, or execution runtime.
 ## Start a supervised session
 
 For Daytona, select an interactive runtime policy profile (the shipped default
-is `daytona-recursive`), configure the provider/Daytona values from the [profile
+is `daytona-native`; `daytona-recursive` is an opt-in for child-RLM execution),
+configure the provider/Daytona values from the [profile
 matrix](../reference/profile-matrix.md), and use an upgraded database. The
 supervisor verifies Alembic head and never migrates automatically:
 
@@ -17,8 +18,9 @@ uv run fleet cli --port 8000
 ```
 
 Set the intended interactive profile in `[config] default_profile` in
-`config/fleet.toml` first (the shipped default is `daytona-recursive`), or use
-`/profiles` and restart Fleet.
+`config/fleet.toml` first (the shipped default is `daytona-native`), or use
+`/profiles` to select `daytona-recursive` for bounded child-RLM execution, then
+restart Fleet.
 
 See [configuration](../reference/configuration.md) for all settings. Supervised
 backend output is stored under `.fleet_rlm/logs/`; `latest.log` identifies the

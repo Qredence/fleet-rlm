@@ -47,7 +47,7 @@ You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`). `uv
 
 ### 2. Configure credentials
 
-Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
+Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-native`), then export the provider and Daytona variables for that profile. `daytona-recursive` is an opt-in for bounded Fleet child execution. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
 
 Fleet connects through an OpenAI-compatible Chat Completions base URL. The
 shipped `daytona-recursive` profile uses Alibaba DashScope (MaaS); the

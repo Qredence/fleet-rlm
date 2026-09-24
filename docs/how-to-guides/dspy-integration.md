@@ -327,27 +327,33 @@ See the root [architecture](../../ARCHITECTURE.md) for ownership and Turn commit
 
 ## Run the Phase 1 Daytona stream canary
 
-Phase 1 closure uses a deliberately narrow, one-Turn live canary. It selects
-the default `daytona-recursive` policy and proves one small
-text Attachment is materialized through the Volume capsule, native
+The Phase 1 one-Turn live canary is maintained as a pytest test. It checks that
+a small text Attachment is materialized through the Volume capsule, native
 `llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
 reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
-finishes the Turn, and the Turn-owned broker/Sandbox/Volume resources clean
-up.
+finishes the Turn, and Turn-owned broker, Sandbox, and Volume resources clean
+up. This canary explicitly requires the opt-in `daytona-recursive` profile;
+the shipped default remains `daytona-native`.
+
+For the canary, set `[config] default_profile` to `"daytona-recursive"` in
+`config/fleet.toml` and set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
+immutable Daytona snapshot name, then run:
 
 ```bash
-uv run python scripts/live_phase1_stream_verify.py \
-  --output .scratch/fleet-rlm-recursive-runtime/evidence/daytona-dspy-stream-<run-id>.json
+FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
+FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
+uv run pytest -q -n 0 --timeout=900 \
+  tests/live/backend/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
 ```
 
-The command is explicitly invoked and policy-gated by
-`runtime.live_enabled`. It loads `.env` with `override=False`, so operator
-exports retain precedence. It requires a clean tracked non-`main` candidate,
-the default `daytona-recursive` policy, and its configured Root and Sub model
-roles. Its bounded receipt excludes Attachment content, prompts,
-generated code, provider responses, trace IDs, broker addresses, and
-credentials. A passing canary closes Phase 1 only; it does not promote or
-release the candidate.
+The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
+Daytona and model credentials. The evidence-path variable must be exported in
+the process environment before pytest starts. The immutable snapshot variable
+is required to admit the recursive profile for this test. The test loads
+`.env` with `override=False`; operator exports retain precedence. A passing
+canary is evidence for this test only and does not promote or release the
+candidate. Replace the snapshot example with the candidate's immutable Daytona
+snapshot name, which must end in `-v` followed by a positive integer.
 
 ## Run the Phase 2 Daytona recursive-child canary
 
@@ -388,8 +394,9 @@ uv run python scripts/live_daytona_verify.py \
 ```
 
 Select the intended provider profile in `[config] default_profile` and restart
-Fleet first. The shipped default is `daytona-recursive`; use the [profile
-matrix](../reference/profile-matrix.md) to provide its environment names.
+Fleet first. The shipped default is `daytona-native`; select `daytona-recursive`
+explicitly for child-RLM behavior. Use the [profile
+matrix](../reference/profile-matrix.md) to provide the selected profile's environment names.
 Provision the immutable Snapshot named by that profile with the [Daytona
 Snapshot guide](daytona-snapshot.md).
 
