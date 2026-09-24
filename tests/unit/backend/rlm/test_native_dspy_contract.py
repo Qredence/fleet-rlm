@@ -20,6 +20,19 @@ from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import prediction_result
 
 
+def _use_context_span_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep payload-only callback tests on their existing fake span API."""
+    from fleet_rlm.observability import tracing
+
+    start = tracing.start_turn_span
+
+    def mocked_start(name: str, **kwargs: Any):
+        kwargs.pop("callback_span", None)
+        return start(name, **kwargs)
+
+    monkeypatch.setattr(tracing, "start_turn_span", mocked_start)
+
+
 def test_prediction_result_encodes_every_declared_output_by_annotation() -> None:
     from fleet_rlm.rlm.result import prediction_result
 
@@ -516,6 +529,7 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 
 
 def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
@@ -602,6 +616,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
     must record a bounded, sanitized error kind and status class so the model
     that failed is debuggable without a live gateway.
     """
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.daytona.errors import ProviderRequestError
@@ -701,6 +716,7 @@ def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
 
 
 def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
@@ -795,6 +811,7 @@ def test_lm_trace_previews_keep_system_prompt_text_and_redact_urls() -> None:
 
 
 def test_lm_trace_callback_keeps_diagnostics_without_duplicate_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
@@ -896,6 +913,7 @@ def test_lm_trace_callback_keeps_diagnostics_without_duplicate_token_usage(monke
 
 
 def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
@@ -1142,6 +1160,7 @@ def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
 
 def test_lm_trace_callback_avoids_duplicate_mlflow_usage(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fleet metrics retain observed usage while DSPy autolog owns the LLM span."""
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing

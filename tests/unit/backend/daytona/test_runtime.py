@@ -7,16 +7,19 @@ construction against the pinned SDK.
 from __future__ import annotations
 
 import asyncio
+import logging
 import warnings
 from importlib.metadata import version
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from daytona_toolbox_api_client.exceptions import BadRequestException
 from pydantic import SecretStr
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona import runtime as runtime_module
+from fleet_rlm.daytona.errors import ProviderRequestError, classify_provider_error
 from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceTimeout,
@@ -24,6 +27,7 @@ from fleet_rlm.daytona.runtime import (
     ChildRuntimeLease,
     DaytonaAdmission,
     DaytonaRuntime,
+    InterpreterLease,
     RootSessionSpec,
     build_daytona_client,
 )
@@ -31,6 +35,67 @@ from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 
 # --- Runtime lifecycle -------------------------------------------------
+@pytest.mark.asyncio
+async def test_root_acquisition_maps_sdk_bad_request_without_publishing_a_root() -> None:
+    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+        raise BadRequestException(status=400, reason="api_key=private")
+
+    runtime = DaytonaRuntime(root_acquirer=acquire)
+    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+
+    with pytest.raises(ProviderRequestError) as raised:
+        await runtime.acquire_root_session(spec)
+
+    assert raised.value.cause_type == "BadRequestException"
+    assert raised.value.status_code == 400
+    assert classify_provider_error(raised.value) == "request_validation"
+    assert "private" not in str(raised.value)
+    assert runtime.roots == ()
+
+
+@pytest.mark.asyncio
+async def test_root_acquisition_preserves_application_value_error() -> None:
+    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+        raise ValueError("invalid local invariant")
+
+    runtime = DaytonaRuntime(root_acquirer=acquire)
+    with pytest.raises(ValueError, match="invalid local invariant"):
+        await runtime.acquire_root_session(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailingInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            del strict_broker_cleanup
+            raise BadRequestException(status=400, reason="api_key=private")
+
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=FailingInterpreter(),
+        session_id=str(uuid4()),
+        workspace_id=str(uuid4()),
+        user_id=str(uuid4()),
+        run_id=str(uuid4()),
+    )
+    runtime = DaytonaRuntime()
+
+    with pytest.raises(ProviderRequestError) as raised, caplog.at_level(logging.WARNING):
+        await runtime.release(lease)
+
+    assert raised.value.cause_type == "BadRequestException"
+    assert raised.value.status_code == 400
+    assert lease.failed
+    assert id(lease) in runtime._late_owners
+    assert "sandbox_id=sandbox-1 error_type=BadRequestException" in caplog.text
+    assert "private" not in caplog.text
+
+
 @pytest.mark.asyncio
 async def test_runtime_close_retains_a_failed_root_for_retry() -> None:
     calls = 0

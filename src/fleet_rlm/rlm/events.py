@@ -22,11 +22,12 @@ import dspy
 
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import dspy_turn_callbacks, turn_phase_span
-from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, turn_phase_span
+from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
+    RLMConfigError,
     RLMUsage,
     RunCancelledError,
     RunNoProgressError,
@@ -879,17 +880,14 @@ def _public_trajectory_output(output: str) -> str:
     return "FINAL submitted" if output.startswith("FINAL:") else output
 
 
-def _bounded_trajectory(
-    trajectory: Sequence[TrajectoryStep], *, max_steps: int | None, max_chars: int
-) -> tuple[TrajectoryStep, ...]:
+def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int | None) -> tuple[TrajectoryStep, ...]:
     """Assign trajectory details to the bounded executed-iteration sequence.
 
     Native DSPy may retain setup or terminal backfill records with an index past
     the executed REPL budget. Public events use their retained sequence
     position, never those provider-internal indexes. Overflow records fold
     into the final executed step so no public code event can claim an
-    impossible iteration. Reserve room for the final record when bounding
-    folded content so earlier diagnostics cannot hide terminal submission.
+    impossible iteration while all diagnostic content remains available.
     """
     if max_steps is None:
         return tuple(trajectory)
@@ -905,15 +903,7 @@ def _bounded_trajectory(
         for value in values:
             if value and value not in unique:
                 unique.append(value)
-        combined = "\n\n".join(unique)
-        if len(unique) < 2 or len(combined) <= max_chars:
-            return combined
-        terminal = truncate_public_text(unique[-1], max_len=max_chars)
-        prefix_budget = max_chars - len(terminal) - 2
-        if prefix_budget <= 0:
-            return terminal
-        prefix = truncate_public_text("\n\n".join(unique[:-1]), max_len=prefix_budget)
-        return f"{prefix}\n\n{terminal}"
+        return "\n\n".join(unique)
 
     return tuple(
         TrajectoryStep(
@@ -1154,7 +1144,7 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
-    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps, max_chars=max_chars):
+    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps):
         step = trajectory_step.index
         step_details = trajectory_details(
             (trajectory_step,),
@@ -1242,9 +1232,13 @@ async def invoke_native_rlm(
     context: RLMExecutionContext,
     kwargs: Mapping[str, Any],
 ) -> Any:
-    """Invoke the RLM so native DSPy can create its per-call interpreter."""
-    del context
-    return await rlm.acall(**dict(kwargs))
+    """Invoke the RLM operation using the caller-owned interpreter when required."""
+    native_call_args: tuple[Any, ...] = ()
+    if is_native_rlm(rlm):
+        if context.execution.interpreter is None:
+            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
+        native_call_args = (context.execution.interpreter,)
+    return await rlm.acall(*native_call_args, **dict(kwargs))
 
 
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
@@ -1424,6 +1418,7 @@ class ExecutionTraceAssembler:
                     "max_output_chars": context.execution.options.max_output_chars,
                 },
             ) as phase,
+            rlm_callback_parent(phase),
             dspy.context(
                 lm=context.execution.models.root_lm,
                 # DSPy 3.3.x combines context callbacks with instance callbacks

@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import dspy_turn_callbacks, start_turn_span
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
 from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, _RLMTraceCallback, is_native_rlm
 from fleet_rlm.rlm.events import ChildProgress, Status, ToolEventView, ToolObserver, observe_tool
@@ -1455,7 +1455,8 @@ class RecursiveRLMExecutor:
             )
             invocation_started_at = time.monotonic()
             try:
-                prediction = child(prompt=child_prompt)
+                with rlm_callback_parent(invocation_span):
+                    prediction = child(prompt=child_prompt)
             except BaseException as exc:
                 invocation_span.finish(
                     phase_status="failed",

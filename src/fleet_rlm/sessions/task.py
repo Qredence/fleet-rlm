@@ -91,10 +91,9 @@ class SessionTaskService:
         first_request: str,
     ) -> TaskCheckpoint:
         """Create the initial pending goal once; preserve an existing checkpoint."""
-        request = _bounded_text(first_request, "first_request", _MAX_GOAL_CHARS, nonempty=True)
-        pending = request.strip()
-        if len(pending) > _MAX_ITEM_CHARS:
-            pending = f"{pending[: _MAX_ITEM_CHARS - 3]}..."
+        if not isinstance(first_request, str) or not first_request.strip():
+            raise ValueError("first_request must be a nonempty string")
+        goal, pending = _fit_initial_checkpoint_text(first_request)
         await self._authorize(session_id, user_id=user_id, workspace_id=workspace_id)
         path = self._logical_path(session_id)
         async with self._write_lock:
@@ -103,7 +102,7 @@ class SessionTaskService:
             except FileNotFoundError:
                 checkpoint = TaskCheckpoint(
                     revision=1,
-                    goal=request,
+                    goal=goal,
                     decisions=(),
                     relevant_paths=(),
                     source_revisions={},
@@ -238,6 +237,57 @@ def _encode(checkpoint: TaskCheckpoint) -> bytes:
         "pending_work": list(checkpoint.pending_work),
     }
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def _fit_initial_checkpoint_text(first_request: str) -> tuple[str, str]:
+    """Bound seed text by both character limits and the encoded checkpoint size."""
+    goal = first_request if len(first_request) <= _MAX_GOAL_CHARS else f"{first_request[: _MAX_GOAL_CHARS - 3]}..."
+
+    def pending_for(value: str) -> str:
+        pending = value.strip()
+        if len(pending) > _MAX_ITEM_CHARS:
+            pending = f"{pending[: _MAX_ITEM_CHARS - 3]}..."
+        return pending
+
+    pending = pending_for(goal)
+
+    def encoded_size(candidate_goal: str, candidate_pending: str) -> int:
+        return len(
+            _encode(
+                TaskCheckpoint(
+                    revision=1,
+                    goal=candidate_goal,
+                    decisions=(),
+                    relevant_paths=(),
+                    source_revisions={},
+                    completed_work=(),
+                    pending_work=(candidate_pending,),
+                )
+            )
+        )
+
+    if encoded_size(goal, pending) <= TASK_CHECKPOINT_MAX_BYTES:
+        return goal, pending
+
+    # Multibyte characters and JSON escaping can make a character-bounded goal
+    # exceed the checkpoint's byte limit. Find the longest fitting prefix while
+    # accounting for the duplicated pending-work preview as well.
+    low = 0
+    high = min(len(first_request) - 1, _MAX_GOAL_CHARS - 3)
+    best: tuple[str, str] | None = None
+    while low <= high:
+        prefix_chars = (low + high) // 2
+        candidate_goal = f"{first_request[:prefix_chars]}..."
+        candidate_pending = pending_for(candidate_goal)
+        if encoded_size(candidate_goal, candidate_pending) <= TASK_CHECKPOINT_MAX_BYTES:
+            best = candidate_goal, candidate_pending
+            low = prefix_chars + 1
+        else:
+            high = prefix_chars - 1
+
+    if best is None:
+        raise ValueError("task checkpoint exceeds its byte limit")
+    return best
 
 
 def _decode(raw: bytes) -> TaskCheckpoint:
