@@ -1087,6 +1087,34 @@ def annotate_turn_attributes(attributes: Mapping[str, object]) -> None:
         logger.debug("annotate_turn_attributes failed; continuing")
 
 
+def annotate_turn_metadata(metadata: Mapping[str, str]) -> None:
+    """Update the active Turn trace with allowlisted, bounded attempt metadata.
+
+    Metadata is kept separate from span attributes because it describes the
+    execution attempt as a whole. Dynamic Skill loads use this to record the
+    versions actually made available during execution. Export is fail-soft.
+    """
+    if not _fleet_trace_active.get():
+        return
+    try:
+        from fleet_rlm.rlm.result import sanitize_trace_text
+
+        updates = {
+            key: sanitize_trace_text(value, max_len=256)
+            for key, value in metadata.items()
+            if key == "fleet.skill_loaded_versions" and isinstance(value, str) and value and len(value) <= 256
+        }
+        if not updates:
+            return
+        import mlflow
+
+        update_trace = getattr(mlflow, "update_current_trace", None)
+        if callable(update_trace):
+            update_trace(metadata=updates)
+    except Exception:
+        logger.debug("annotate_turn_metadata failed; continuing")
+
+
 def record_settlement_status(status: str, *, durable: bool) -> None:
     """Record Fleet's durable settlement separately from MLflow span state."""
     if status not in {"completed", "failed", "cancelled", "timeout"}:

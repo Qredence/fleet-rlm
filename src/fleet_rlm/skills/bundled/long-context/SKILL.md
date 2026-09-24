@@ -3,7 +3,7 @@ name: long-context
 description: Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "2.2.0"
+  version: "2.3.0"
   affordances:
     - sandbox.search
     - llm_query_batched
@@ -48,6 +48,14 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
 7. Call `SUBMIT(...)` once with exactly the requested output fields. If the evidence is absent, ambiguous, or insufficient, state that instead of forcing the requested count. Do not `SUBMIT` an entire large `llm_query` or `llm_query_batched` blob; keep declared answers within the Turn output character budget.
 
 Treat sub-model output as a candidate, never as source evidence. Respect the Turn's call and output budgets; reduce excerpts before making another call. Paging, indexes, and chunk files are useful when input size or reuse justifies them; keep source identifiers, revisions, and offsets with derived records. If an exhaustive scan stops early, report incomplete coverage instead of claiming a complete result.
+
+## Strategy examples
+
+- **Sparse:** search the likely sections, inspect the matching source slices, then expand to nearby or conflicting sections only when needed.
+- **Exhaustive:** enumerate the required partitions, classify bounded source slices with `llm_query_batched`, validate each returned item in Python, and record `processed / required` coverage before aggregation.
+- **Dependent:** resolve and verify the prerequisite first; only then inspect dependent records. If the prerequisite is unresolved, report that gap instead of parallelizing work that assumes an answer.
+
+Use a full child RLM only when one selected subproblem needs its own repeated Python inspection. Pass authorized relative inputs and a small question; keep large sources and intermediate results in variables or files, and have the root verify child evidence before using it.
 
 ## Exact retrieval
 

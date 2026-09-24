@@ -186,6 +186,7 @@ class ChildProgressPart:
     parent_run_id: str | None = None
     evidence: tuple[str, ...] = ()
     gaps: tuple[str, ...] = ()
+    result_file_count: int = 0
     type: Literal["child_progress"] = "child_progress"
 
     def __post_init__(self) -> None:
@@ -194,6 +195,12 @@ class ChildProgressPart:
         if not self.task_label.strip() or len(self.task_label) > 240:
             raise CommittedTurnValidationError("task_label must contain 1 to 240 non-blank characters")
         _require_nonnegative(self.elapsed_ms, "elapsed_ms")
+        if (
+            not isinstance(self.result_file_count, int)
+            or isinstance(self.result_file_count, bool)
+            or not 0 <= self.result_file_count <= 16
+        ):
+            raise CommittedTurnValidationError("result_file_count must be between 0 and 16")
         if self.outcome is not None and len(self.outcome) > 500:
             raise CommittedTurnValidationError("outcome must not exceed 500 characters")
         if (

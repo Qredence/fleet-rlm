@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from types import ModuleType, SimpleNamespace
@@ -20,6 +20,7 @@ from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import (
     annotate_trace_io,
     annotate_turn_attributes,
+    annotate_turn_metadata,
     current_turn_trace_id,
     start_turn_span,
     turn_phase_span,
@@ -1289,6 +1290,71 @@ def test_annotate_turn_attributes_swallows_sink_failures(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(mlflow, "get_current_active_span", lambda: _FailingSpan())
     annotate_turn_attributes({"fleet.memory_degradation.category": "normalization"})
+
+
+def test_annotate_turn_metadata_updates_only_bounded_loaded_skill_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution"):
+        annotate_turn_metadata(
+            {
+                "fleet.skill_loaded_versions": "skill-a@1.2.0,skill-b@2.0.0",
+                "fleet.root_model": "unapproved metadata",
+            }
+        )
+        annotate_turn_metadata({"fleet.skill_loaded_versions": "x" * 257})
+
+    dynamic_updates = [
+        kwargs["metadata"]
+        for kwargs in calls.update_kwargs
+        if "fleet.skill_loaded_versions" in kwargs.get("metadata", {})
+    ]
+    assert dynamic_updates == [{"fleet.skill_loaded_versions": "skill-a@1.2.0,skill-b@2.0.0"}]
+
+
+def test_annotate_turn_metadata_is_noop_without_active_turn_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    token = turn_tracing._fleet_trace_active.set(False)
+    try:
+        annotate_turn_metadata({"fleet.skill_loaded_versions": "skill-a@1.0.0"})
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+    assert calls.update_kwargs == []
+
+
+@pytest.mark.asyncio
+async def test_turn_execution_records_skill_versions_as_they_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm import turns as turn_module
+    from fleet_rlm.rlm.events import EventRecorder, SkillLoaded
+    from fleet_rlm.turns import TurnRuntime
+
+    run_id = uuid4()
+    session_id = uuid4()
+    recorder = EventRecorder(run_id, session_id)
+    metadata_updates: list[dict[str, str]] = []
+    monkeypatch.setattr(turn_module, "annotate_turn_metadata", lambda value: metadata_updates.append(dict(value)))
+    runtime = TurnRuntime(lifecycle=object(), preparation=object(), runner=object())  # type: ignore[arg-type]
+
+    async def execute_claimed(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+        yield recorder.record(SkillLoaded("skill-a", "long-context", "2.3.0"))
+        yield recorder.record(SkillLoaded("skill-b", "workspace-files", "1.4.0"))
+
+    monkeypatch.setattr(runtime, "_execute_claimed", execute_claimed)
+    run = SimpleNamespace(
+        run_id=run_id,
+        session_id=session_id,
+        checkpoint_version=1,
+        input=SimpleNamespace(skill_selections=()),
+    )
+    prepared = SimpleNamespace(execution=SimpleNamespace(execution=SimpleNamespace(models=None)))
+
+    events = [event async for event in runtime._execute(run, prepared, None)]
+
+    assert len(events) == 2
+    assert metadata_updates == [
+        {"fleet.skill_loaded_versions": "skill-a@2.3.0"},
+        {"fleet.skill_loaded_versions": "skill-a@2.3.0,skill-b@1.4.0"},
+    ]
 
 
 def test_dspy_turn_callbacks_carries_mlflow_autolog_callback() -> None:

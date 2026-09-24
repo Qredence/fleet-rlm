@@ -97,6 +97,7 @@ def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
                     "run-9",
                     evidence=("src/api.py:42",),
                     gaps=("Caller not checked",),
+                    result_file_count=2,
                 ),
             ),
         ),
@@ -115,6 +116,7 @@ def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
             "run-9",
             evidence=("src/api.py:42",),
             gaps=("Caller not checked",),
+            result_file_count=2,
         )
     ]
 

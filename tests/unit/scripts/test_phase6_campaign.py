@@ -30,6 +30,7 @@ def test_frozen_cases_cover_six_families_with_valid_input_and_rubric_hashes() ->
     assert plan["conditions"] == ["cold", "warm"]
     assert [(arm["id"], arm["child_concurrency"]) for arm in PHASE6_ARMS] == [("A", 0), ("B", 1), ("C", 2)]
     assert plan["resource_envelope"]["shared_maximum_root_turn_admissions"] == 126
+    assert {"cost_usd", "spend_status"}.issubset(plan["required_outcomes"])
     assert "not_implemented" in plan["execution_support"]
 
 
@@ -85,6 +86,8 @@ def _synthetic_phase6_outcomes(*, trials: int = 3) -> list[dict[str, object]]:
             "wall_time_ms": 100.0 if cell["arm"] == "A" else 80.0,
             "input_tokens": None,
             "output_tokens": None,
+            "cost_usd": None,
+            "spend_status": "unknown",
             "usage_status": "unknown",
             "staging_ms": 0.0,
             "cleanup_status": "unknown",
@@ -107,6 +110,8 @@ def test_quality_first_analysis_reports_fixture_quality_before_performance() -> 
     assert result["performance"]["paired_deltas_ms"]["B"] == -20.0
     assert result["observability"]["usage_unknown_outcomes"] == 108
     assert result["observability"]["cleanup_unknown_outcomes"] == 108
+    assert result["cost"]["by_arm"]["A"]["status"] == "unknown"
+    assert result["cost"]["by_arm"]["A"]["mean_usd"] is None
     assert "no live execution claim" in result["provenance"]
 
 
@@ -264,8 +269,22 @@ def _reviewable_phase6_outcomes() -> list[dict[str, object]]:
             source_authorized=True,
             containment_confirmed=True,
             commit_safe=True,
+            cost_usd=0.02 if row["arm"] == "A" else 0.03,
+            spend_status="provider_reported",
         )
     return outcomes
+
+
+def test_phase6_provider_cost_is_reported_separately_from_latency() -> None:
+    from scripts.benchmarks.run_rlm_latency import analyze_phase6_outcomes
+
+    result = analyze_phase6_outcomes(_reviewable_phase6_outcomes())
+
+    assert result["cost"]["source"] == "provider_reported_only"
+    assert result["cost"]["by_arm"]["A"]["mean_usd"] == 0.02
+    assert result["cost"]["by_arm"]["B"]["mean_usd"] == pytest.approx(0.03)
+    assert result["performance"]["by_arm"]["A"]["mean_ms"] == 100.0
+    assert result["performance"]["by_arm"]["B"]["mean_ms"] == 80.0
 
 
 def test_phase6_retain_gate_requires_repeatable_family_gain() -> None:
@@ -279,6 +298,7 @@ def test_phase6_retain_gate_requires_repeatable_family_gain() -> None:
     gate = result["policy_gate"]
 
     assert gate["status"] == "conditional_analysis_only"
+    assert gate["thresholds"]["quality_gain_required_for_retention"] is True
     assert gate["by_family"]["B"]["sparse_retrieval"]["quality_gain_fields"] == ["grounded_evidence"]
     assert gate["by_family"]["B"]["sparse_retrieval"]["retain_candidate"] is True
     assert gate["promotion_authorized"] is False
@@ -296,6 +316,8 @@ def test_phase6_latency_only_gate_needs_observed_tokens_within_tolerance() -> No
     assert gate["by_family"]["B"]["sparse_retrieval"]["latency_gain"] is False
     assert gate["by_family"]["B"]["sparse_retrieval"]["retain_candidate"] is False
     assert gate["by_family"]["C"]["sparse_retrieval"]["latency_gain"] is True
+    assert gate["by_family"]["C"]["sparse_retrieval"]["quality_gain_fields"] == []
+    assert gate["by_family"]["C"]["sparse_retrieval"]["retain_candidate"] is False
 
     outcomes[0]["input_tokens"] = None
     gate = analyze_phase6_outcomes(outcomes)["policy_gate"]

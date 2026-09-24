@@ -2680,6 +2680,11 @@ components:
                 maxItems: 8
                 title: Gaps
                 type: array
+              result_file_count:
+                maximum: 16
+                minimum: 0
+                title: Result File Count
+                type: integer
               cleanup_state:
                 enum:
                 - pending

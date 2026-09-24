@@ -50,6 +50,7 @@ class ChildProgressData(FleetUIDataModel):
     outcome: str | None = Field(default=None, max_length=500)
     evidence: list[str] = Field(default_factory=list, max_length=8)
     gaps: list[str] = Field(default_factory=list, max_length=8)
+    result_file_count: int = Field(default=0, ge=0, le=16)
     cleanup_state: Literal["pending", "complete", "failed", "not_required"]
     parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
 

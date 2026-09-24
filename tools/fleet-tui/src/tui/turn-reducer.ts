@@ -196,6 +196,7 @@ export class TurnEventReducer {
           outcome: event.outcome,
           evidence: event.evidence,
           gaps: event.gaps,
+          resultFileCount: event.resultFileCount,
           cleanupState: event.cleanupState,
           collapsed: true,
           ts: this.clock(),

@@ -92,6 +92,7 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
                 "outcome": part.outcome,
                 "evidence": list(part.evidence),
                 "gaps": list(part.gaps),
+                "result_file_count": part.result_file_count,
                 "cleanup_state": part.cleanup_state,
                 "parent_run_id": part.parent_run_id,
             },

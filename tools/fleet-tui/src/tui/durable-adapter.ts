@@ -177,6 +177,7 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
             });
             break;
           }
+          const resultFileCount = int(value.result_file_count);
           events.push({
             type: "child_progress",
             childId,
@@ -202,6 +203,10 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
               value.gaps.length <= 8 &&
               value.gaps.every((item) => typeof item === "string" && item.length <= 200)
                 ? value.gaps
+                : undefined,
+            resultFileCount:
+              resultFileCount !== undefined && resultFileCount >= 0 && resultFileCount <= 16
+                ? resultFileCount
                 : undefined,
             cleanupState: cleanupState as "pending" | "complete" | "failed" | "not_required",
             messageId,

@@ -3,7 +3,7 @@ name: data-analysis
 description: Compute and verify descriptive statistics, trends, and qualified anomalies.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   affordances:
     - artifacts.publish
     - llm_query_batched
@@ -55,6 +55,20 @@ For a partitioned dataset, record processed and missing partitions. Use
 `llm_query_batched` only for independent semantic classifications, validate
 each returned item, then aggregate in Python. Report incomplete coverage and
 unresolved child gaps explicitly.
+
+Choose the work shape before calling a model:
+
+- **Sparse:** filter deterministically to candidate rows, inspect their source
+  values, and widen the search only if evidence conflicts or is incomplete.
+- **Exhaustive:** enumerate all required partitions, retain one validated
+  classification per source row, and report processed and missing counts.
+- **Dependent:** resolve a required label or prerequisite first; compute the
+  downstream metric only from verified results. Leave it unresolved when the
+  prerequisite is missing.
+
+Treat child files and findings as intermediate candidates. Check their source
+revision, coverage, and values against the authorized input before including
+them in a result.
 
 ## Submit
 

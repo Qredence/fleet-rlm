@@ -79,6 +79,7 @@ describe("terminal projection", () => {
                 outcome: "Found the replay path",
                 evidence: ["src/stream.py:42"],
                 gaps: ["Retry not checked"],
+                result_file_count: 2,
               }
             : {}),
         },
@@ -99,6 +100,7 @@ describe("terminal projection", () => {
         outcome: "Found the replay path",
         evidence: ["src/stream.py:42"],
         gaps: ["Retry not checked"],
+        resultFileCount: 2,
       },
     });
   });
@@ -140,6 +142,7 @@ describe("terminal projection", () => {
                 state: "not_started",
                 elapsed_ms: 0,
                 outcome: "Input allocation exceeded the child budget",
+                result_file_count: 1,
                 cleanup_state: "not_required",
               },
             },
@@ -162,6 +165,7 @@ describe("terminal projection", () => {
           state: "not_started",
           elapsedMs: 0,
           outcome: "Input allocation exceeded the child budget",
+          resultFileCount: 1,
           cleanupState: "not_required",
           collapsed: true,
           ts: 100,

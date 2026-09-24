@@ -140,6 +140,7 @@ export interface ChildProgressEvent {
   outcome?: string | undefined;
   evidence?: string[] | undefined;
   gaps?: string[] | undefined;
+  resultFileCount?: number | undefined;
   cleanupState: "pending" | "complete" | "failed" | "not_required";
   messageId?: string | undefined;
 }

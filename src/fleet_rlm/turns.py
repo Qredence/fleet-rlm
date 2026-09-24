@@ -10,7 +10,13 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol, Self, TypeAlias, TypeVar
 from uuid import UUID
 
-from fleet_rlm.observability.tracing import annotate_trace_io, record_settlement_status, turn_phase_span, turn_trace
+from fleet_rlm.observability.tracing import (
+    annotate_trace_io,
+    annotate_turn_metadata,
+    record_settlement_status,
+    turn_phase_span,
+    turn_trace,
+)
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
@@ -22,6 +28,7 @@ from fleet_rlm.rlm.events import (
     RunStarted,
     RunTimedOut,
     RuntimeEvent,
+    SkillLoaded,
     Status,
 )
 from fleet_rlm.rlm.execution import RLMExecutionContext
@@ -813,7 +820,11 @@ class TurnRuntime:
             image_identity=getattr(prepared, "image_identity", None),
             attempt_metadata=attempt_metadata,
         ) as handle:
+            loaded_skill_versions: set[str] = set()
             async for event in self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id):
+                if isinstance(event.detail, SkillLoaded):
+                    loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
+                    annotate_turn_metadata({"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))})
                 yield event
 
     async def _execute_claimed(

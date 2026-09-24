@@ -61,6 +61,7 @@ def test_child_progress_projects_structurally_and_preserves_legacy_status() -> N
             parent_run_id,
             evidence=("src/api.py:42",),
             gaps=("Caller not checked",),
+            result_file_count=2,
         )
     )
     legacy_status = recorder.record(
@@ -86,6 +87,7 @@ def test_child_progress_projects_structurally_and_preserves_legacy_status() -> N
                 "outcome": "Found a schema mismatch",
                 "evidence": ["src/api.py:42"],
                 "gaps": ["Caller not checked"],
+                "result_file_count": 2,
                 "cleanup_state": "complete",
                 "parent_run_id": parent_run_id,
             },

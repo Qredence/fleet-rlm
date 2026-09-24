@@ -151,17 +151,19 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
     import fleet_rlm.rlm.recursion as recursive_calls
 
     recorder = ChildLeaseRecorder()
+    entered = threading.Event()
     release = threading.Event()
 
     class HangingChild:
         def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
+            entered.set()
             release.wait(5)
             return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: HangingChild())
     monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
-    deadline = time.monotonic() + 0.2
+    deadline = time.monotonic() + 1.0
     executor = _executor(recorder, deadline=deadline)
 
     began = time.monotonic()
@@ -171,6 +173,7 @@ async def test_fenced_child_wait_preserves_batch_deadline_semantics(
         executor.batched_tool(tasks=[{"task": task} for task in ["hanging"]])
     if isinstance(raised.value, RecursiveBatchError):
         assert isinstance(raised.value.__cause__, TimeoutError)
+    assert entered.is_set()
     assert time.monotonic() - began < 2.0
     with pytest.raises(ChildRuntimeCleanupError, match="pending"):
         executor.raise_if_cleanup_failed()

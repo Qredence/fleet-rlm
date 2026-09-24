@@ -125,6 +125,9 @@ export function renderMessage(
           ...(message.evidence?.map((item) => ` ${muted("evidence:")} ${terminalSafeText(item)}`) ??
             []),
           ...(message.gaps?.map((item) => ` ${muted("gap:")} ${terminalSafeText(item)}`) ?? []),
+          ...(message.resultFileCount
+            ? [` ${muted(`saved result files: ${message.resultFileCount}`)}`]
+            : []),
         ],
         safeWidth,
       );

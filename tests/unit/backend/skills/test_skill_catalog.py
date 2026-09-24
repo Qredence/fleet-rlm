@@ -15,11 +15,11 @@ from fleet_rlm.skills.signatures import DataAnalysisSignature
 def test_bundled_catalog_is_fixed_sorted_and_version_stable() -> None:
     catalog = build_bundled_skill_catalog()
     assert [(card.name, card.version) for card in catalog.cards()] == [
-        ("data-analysis", "1.1.0"),
+        ("data-analysis", "1.2.0"),
         ("dspy-rlm", "1.1.0"),
-        ("long-context", "2.2.0"),
-        ("report-builder", "1.2.0"),
-        ("workspace-files", "1.3.0"),
+        ("long-context", "2.3.0"),
+        ("report-builder", "1.3.0"),
+        ("workspace-files", "1.4.0"),
     ]
     assert all(card.id == stable_skill_id(card.name) for card in catalog.cards())
     assert str(catalog.require(stable_skill_id("data-analysis")).card.id) == ("f4d260fa-a663-5ef9-835f-eac46c10c1bf")
@@ -54,9 +54,13 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
 def test_long_context_skill_does_not_rewrite_request_specified_prompts() -> None:
     catalog = build_bundled_skill_catalog()
     skill = catalog.require(stable_skill_id("long-context"))
-    assert skill.card.version == "2.2.0"
+    assert skill.card.version == "2.3.0"
     assert "pass those strings unchanged" in skill.instructions
     assert "do not add offsets, paraphrase, or substitute different wording" in skill.instructions
+    assert "**Sparse:**" in skill.instructions
+    assert "**Exhaustive:**" in skill.instructions
+    assert "**Dependent:**" in skill.instructions
+    assert "verify child evidence" in skill.instructions
 
 
 def test_workspace_skills_distinguish_exact_readback_from_large_file_metadata_confirmation() -> None:
@@ -149,7 +153,7 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "f4d260fa-a663-5ef9-835f-eac46c10c1bf",
             "data-analysis",
-            "1.1.0",
+            "1.2.0",
             "Compute and verify descriptive statistics, trends, and qualified anomalies.",
             False,
             ("artifacts.publish", "llm_query_batched"),
@@ -170,7 +174,7 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "015a133e-7b90-50c7-bb61-4b2772f57c1c",
             "long-context",
-            "2.2.0",
+            "2.3.0",
             "Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.",
             True,
             ("sandbox.search", "llm_query_batched", "workspace.files"),
@@ -180,7 +184,7 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "90bd89fb-66c8-558d-acdb-55c59ba7106c",
             "report-builder",
-            "1.2.0",
+            "1.3.0",
             "Create, save, read back, and verify reports from trusted source data.",
             False,
             ("workspace.files", "artifacts.publish"),
@@ -190,7 +194,7 @@ def test_manifest_derived_catalog_snapshot_preserves_public_skill_contract() -> 
         (
             "94eedfa7-4b0c-5316-96af-5e3924e128e7",
             "workspace-files",
-            "1.3.0",
+            "1.4.0",
             "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
             True,
             ("workspace.files", "artifacts.publish"),

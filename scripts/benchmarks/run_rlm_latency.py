@@ -351,6 +351,8 @@ def phase6_plan_receipt(path: Path = PHASE6_CASES_PATH, *, trials: int = PHASE6_
             "wall_time",
             "input_tokens",
             "output_tokens",
+            "cost_usd",
+            "spend_status",
             "usage_status",
             "staging_overhead",
             "cleanup_status",
@@ -493,10 +495,7 @@ def _phase6_policy_gate(
                 "quality_gain_fields": quality_gain_fields,
                 "latency_gain": latency_gain,
                 "retain_candidate": (
-                    safety_verified
-                    and not fixture_only
-                    and no_regression
-                    and (bool(quality_gain_fields) or latency_gain)
+                    safety_verified and not fixture_only and no_regression and bool(quality_gain_fields)
                 ),
             }
     if not quality_complete:
@@ -515,6 +514,7 @@ def _phase6_policy_gate(
         "safety_failed": safety_failed,
         "thresholds": {
             "quality_wins_per_condition": required_wins,
+            "quality_gain_required_for_retention": True,
             "minimum_latency_speedup": 0.10,
             "maximum_token_increase": 0.10,
         },
@@ -665,6 +665,52 @@ def analyze_phase6_outcomes(
     failures = sum(row.get("operational_failure") is True for row in observed.values())
     failure_unknown = sum(not isinstance(row.get("operational_failure"), bool) for row in observed.values())
     origins = sorted({str(row.get("quality_source", "unknown")) for row in observed.values()})
+
+    def cost_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+        costs = [
+            float(row["cost_usd"])
+            for row in rows
+            if row.get("spend_status") == "provider_reported"
+            and isinstance(row.get("cost_usd"), (int, float))
+            and not isinstance(row.get("cost_usd"), bool)
+            and math.isfinite(float(row["cost_usd"]))
+            and float(row["cost_usd"]) >= 0
+        ]
+        unknown = len(rows) - len(costs)
+        if not costs:
+            status = "unknown"
+        elif unknown:
+            status = "partially_observed"
+        else:
+            status = "provider_reported"
+        return {
+            "status": status,
+            "observed_outcomes": len(costs),
+            "unknown_outcomes": unknown,
+            "mean_usd": statistics.fmean(costs) if costs else None,
+            "median_usd": statistics.median(costs) if costs else None,
+        }
+
+    cost = {
+        "source": "provider_reported_only",
+        "by_arm": {
+            arm: cost_summary([row for (_pair_id, row_arm), row in observed.items() if row_arm == arm])
+            for arm in (entry["id"] for entry in PHASE6_ARMS)
+        },
+        "by_condition": {
+            condition: {
+                arm: cost_summary(
+                    [
+                        row
+                        for (_pair_id, row_arm), row in observed.items()
+                        if row_arm == arm and row.get("condition") == condition
+                    ]
+                )
+                for arm in (entry["id"] for entry in PHASE6_ARMS)
+            }
+            for condition in PHASE6_CONDITIONS
+        },
+    }
     policy_gate = _phase6_policy_gate(
         observed,
         quality_complete=quality_complete,
@@ -699,6 +745,7 @@ def analyze_phase6_outcomes(
             "performance_comparison_allowed": quality_passed,
         },
         "performance": performance,
+        "cost": cost,
         "observability": {
             "usage_unknown_outcomes": usage_unknown,
             "staging_unknown_outcomes": staging_unknown,
@@ -735,6 +782,8 @@ def phase6_dry_run_receipt(path: Path = PHASE6_CASES_PATH, *, trials: int = PHAS
                 "wall_time_ms": None,
                 "input_tokens": None,
                 "output_tokens": None,
+                "cost_usd": None,
+                "spend_status": "unknown",
                 "usage_status": "unknown",
                 "staging_ms": None,
                 "cleanup_status": "unknown",
