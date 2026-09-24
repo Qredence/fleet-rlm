@@ -148,6 +148,11 @@ a bare `pytest.raises(Exception, match="positive")`. **The owner test is the
 weaker of the two.** No deletion was performed; removing the weaker assertion is
 a test-strength decision, not a redundancy one, and is left to the maintainer.
 
+Resolution (2026-09-24): the maintainer removed the weaker owner test. The
+stronger parametrized adversarial test remains, and the output-cap module
+retains its distinct output-limit, shared-budget, timeout-preservation, and
+settings coverage.
+
 Conclusion: the "Challenger" files are not redundant. Their problem was
 labelling, not coverage, and it was resolved by renaming (below).
 

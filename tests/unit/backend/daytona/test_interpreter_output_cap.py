@@ -108,14 +108,6 @@ def test_sandbox_backend_retains_timeout_for_broker_execution() -> None:
     assert unbounded.timeout_s is None
 
 
-def test_sandbox_backend_rejects_non_positive_timeout() -> None:
-    class _FakeSandbox:
-        code_interpreter = object()
-
-    with pytest.raises(Exception, match="positive"):
-        sandbox_backend(_FakeSandbox(), timeout_s=0)
-
-
 def test_settings_expose_execution_bounds_and_toml_defaults() -> None:
     settings = Settings()
     assert settings.rlm_max_execution_output_chars == 4_000
