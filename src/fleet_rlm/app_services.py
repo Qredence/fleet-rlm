@@ -25,7 +25,7 @@ from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.task import SessionTaskService
-from fleet_rlm.turn_preparation import RunPreparation, TurnPreparationPlan, close_turn_preparation
+from fleet_rlm.turn_preparation import RunPreparation
 from fleet_rlm.turn_settlement import RunLifecycle
 from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
@@ -124,7 +124,7 @@ class RuntimeInventory:
     artifact_reader: ArtifactReader | None = None
     session_catalog: SessionCatalog | None = None
     run_lifecycle: RunLifecycle | None = None
-    run_preparation: RunPreparation | TurnPreparationPlan | None = None
+    run_preparation: RunPreparation | None = None
     run_cleanup_supervisor: RunCleanupSupervisor | None = None
     run_state_store: SettlingRunStateStore | None = None
     config_policy: ConfigPolicyService | None = None
@@ -261,9 +261,7 @@ class CloseServicesResult:
         return self.cancellation or (self.errors[0] if self.errors else None)
 
 
-async def close_preparation_services(preparation: RunPreparation | TurnPreparationPlan | None) -> bool:
-    if isinstance(preparation, TurnPreparationPlan):
-        return await close_turn_preparation(preparation)
+async def close_preparation_services(preparation: RunPreparation | None) -> bool:
     close = getattr(preparation, "aclose", None)
     return bool(await close()) if callable(close) else True
 

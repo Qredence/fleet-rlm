@@ -22,20 +22,6 @@ _RESOURCE_FIELDS = frozenset({"path", "media_type"})
 
 
 @dataclass(frozen=True, slots=True)
-class SkillManifestResource:
-    """One explicitly declared UTF-8 resource in a Skill manifest."""
-
-    path: str
-    media_type: str
-    content: str = field(repr=False)
-
-    def __post_init__(self) -> None:
-        # Reuse the proven path/body contract rather than defining a second
-        # resource vocabulary for the manifest layer.
-        SkillResource(self.path, self.media_type, self.content)
-
-
-@dataclass(frozen=True, slots=True)
 class SkillManifest:
     """Validated Skill-owned discovery, workflow, and resource metadata."""
 
@@ -45,7 +31,7 @@ class SkillManifest:
     compatibility: str
     affordances: tuple[str, ...]
     allowed_tools: tuple[str, ...]
-    resources: tuple[SkillManifestResource, ...]
+    resources: tuple[SkillResource, ...]
     instructions: str = field(repr=False)
 
     def __post_init__(self) -> None:
@@ -157,7 +143,7 @@ def parse_skill_manifest(document: str, *, source: str = "SKILL.md") -> SkillMan
     resources_value = root.get("resources", [])
     if not isinstance(resources_value, Sequence) or isinstance(resources_value, (str, bytes, bytearray)):
         raise ValueError("Skill manifest resources must be a list")
-    resources: list[SkillManifestResource] = []
+    resources: list[SkillResource] = []
     for index, raw_resource in enumerate(resources_value):
         resource = _required_mapping(raw_resource, f"resources[{index}]")
         if set(resource) != _RESOURCE_FIELDS:
@@ -166,7 +152,7 @@ def parse_skill_manifest(document: str, *, source: str = "SKILL.md") -> SkillMan
         media_type = _required_string(resource["media_type"], f"resources[{index}].media_type")
         # A bodyless resource declaration is a valid shape in frontmatter but
         # not a complete manifest; bundle parsing supplies the UTF-8 body.
-        resources.append(SkillManifestResource(path, media_type, ""))
+        resources.append(SkillResource(path, media_type, ""))
     return SkillManifest(
         name=_required_string(root["name"], "name"),
         description=_required_string(root["description"], "description"),
@@ -212,7 +198,7 @@ def parse_bundled_skill_manifest(directory: Path) -> SkillManifest:
         affordances=manifest.affordances,
         allowed_tools=manifest.allowed_tools,
         resources=tuple(
-            SkillManifestResource(resource.path, resource.media_type, body_by_path[resource.path])
+            SkillResource(resource.path, resource.media_type, body_by_path[resource.path])
             for resource in manifest.resources
         ),
         instructions=manifest.instructions,

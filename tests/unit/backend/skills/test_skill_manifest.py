@@ -12,7 +12,8 @@ from fleet_rlm.skills.catalog import (
     load_bundled_skill_manifests,
     stable_skill_id,
 )
-from fleet_rlm.skills.manifest import SkillManifestResource, parse_bundled_skill_manifest, parse_skill_manifest
+from fleet_rlm.skills.manifest import parse_bundled_skill_manifest, parse_skill_manifest
+from fleet_rlm.skills.models import SkillResource
 
 
 def _document(
@@ -83,7 +84,7 @@ def test_manifest_parser_uses_existing_name_version_path_and_body_constraints(tm
 
     manifest = parse_bundled_skill_manifest(bundle)
 
-    assert manifest.resources == (SkillManifestResource("references/guide.md", "text/markdown", "Guide body"),)
+    assert manifest.resources == (SkillResource("references/guide.md", "text/markdown", "Guide body"),)
     assert manifest.allowed_tools == ("read_attachment",)
     assert manifest.resources[0].media_type == "text/markdown"
 

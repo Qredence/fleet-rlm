@@ -13,23 +13,19 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import CompletedRun
-from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceTextPage
+from fleet_rlm.workspace.errors import WorkspaceConflictError
+from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.storage import (
     AgentAsyncStorageSession,
     AgentAsyncVolumeStorage,
+    AsyncStorageSession,
     VolumeFile,
     WorkspaceVolumeSession,
 )
-from fleet_rlm.workspace.workspace import (
-    WorkspaceFileConflictError,
-    WorkspaceFileEntry,
-    WorkspaceFileList,
-    WorkspaceFileSession,
-)
 
 
-def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> WorkspaceFileEntry:
+def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> WorkspaceEntry:
     """
     Convert an internal workspace entry into a public file-entry model.
 
@@ -38,9 +34,9 @@ def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> Workspa
         checksum (str | None): Optional SHA-256 checksum for the entry.
 
     Returns:
-        WorkspaceFileEntry: Public representation of the workspace entry.
+        WorkspaceEntry: Public representation of the workspace entry.
     """
-    return WorkspaceFileEntry(
+    return WorkspaceEntry(
         path=entry.path,
         kind=entry.kind,
         byte_size=entry.byte_size,
@@ -79,15 +75,15 @@ class _DaytonaWorkspaceFileSession:
         *,
         limit: int = 100,
         after: str | None = None,
-    ) -> WorkspaceFileList:
+    ) -> WorkspaceListResult:
         listing = await self._workspace.list_entries(path, limit=limit, after=after)
-        return WorkspaceFileList(
+        return WorkspaceListResult(
             tuple(_public_entry(entry) for entry in listing.entries),
             listing.truncated,
             listing.next_cursor,
         )
 
-    async def stat(self, path: str, *, include_checksum: bool | None = False) -> WorkspaceFileEntry | None:
+    async def stat(self, path: str, *, include_checksum: bool | None = False) -> WorkspaceEntry | None:
         entry = await self._workspace.stat(path, include_checksum=include_checksum)
         if entry is None:
             return None
@@ -116,7 +112,7 @@ class _DaytonaWorkspaceFileSession:
         *,
         overwrite: bool = True,
         expected_sha256: str | None = None,
-    ) -> WorkspaceFileEntry:
+    ) -> WorkspaceEntry:
         # The provider-side agent compares and mutates in one mounted
         # operation; a host read would reopen the TOCTOU window across I/O
         # Sandboxes.
@@ -137,7 +133,7 @@ class _DaytonaWorkspaceFileSession:
         content: str,
         *,
         expected_sha256: str | None = None,
-    ) -> WorkspaceFileEntry:
+    ) -> WorkspaceEntry:
         entry = await self._workspace.append_text(
             path,
             content,
@@ -166,7 +162,7 @@ class _DaytonaWorkspaceFileSession:
         new: str,
         *,
         expected_sha256: str | None = None,
-    ) -> WorkspaceFileEntry:
+    ) -> WorkspaceEntry:
         # Same single-operation contract as delete; the patched-file entry
         # carries the agent-computed checksum of the exact bytes published.
         entry = await self._workspace.patch_text(path, old, new, expected_sha256=expected_sha256)
@@ -252,7 +248,7 @@ class DaytonaWorkspaceGateway:
         workspace_id: UUID,
         *,
         purpose: str,
-    ) -> AsyncIterator[WorkspaceFileSession]:
+    ) -> AsyncIterator[AsyncStorageSession]:
         async with self.open_sandbox(workspace_id, purpose=purpose) as sandbox:
             yield _DaytonaWorkspaceFileSession(
                 AgentAsyncStorageSession(
@@ -279,7 +275,7 @@ class DaytonaWorkspaceGateway:
                     yield sandbox
             except (
                 ValueError,
-                WorkspaceFileConflictError,
+                WorkspaceConflictError,
                 FileNotFoundError,
                 FileExistsError,
                 IsADirectoryError,

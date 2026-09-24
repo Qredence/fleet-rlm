@@ -40,7 +40,6 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/observability/tracing.py",
     "fleet_rlm/observability/diagnostics.py",
     "fleet_rlm/observability/mlflow.py",
-    "fleet_rlm/observability/dspy_callbacks.py",
     "fleet_rlm/observability/posthog.py",
     "fleet_rlm/app_lifecycle.py",
     "fleet_rlm/turn_preparation.py",
