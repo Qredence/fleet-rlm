@@ -187,6 +187,8 @@ class ChildProgressPart:
     evidence: tuple[str, ...] = ()
     gaps: tuple[str, ...] = ()
     result_file_count: int = 0
+    code_excerpt: str | None = None
+    output_excerpt: str | None = None
     type: Literal["child_progress"] = "child_progress"
 
     def __post_init__(self) -> None:
@@ -203,6 +205,8 @@ class ChildProgressPart:
             raise CommittedTurnValidationError("result_file_count must be between 0 and 16")
         if self.outcome is not None and len(self.outcome) > 500:
             raise CommittedTurnValidationError("outcome must not exceed 500 characters")
+        if any(value is not None and len(value) > 800 for value in (self.code_excerpt, self.output_excerpt)):
+            raise CommittedTurnValidationError("child code and output excerpts must not exceed 800 characters")
         if (
             len(self.evidence) > 8
             or len(self.gaps) > 8

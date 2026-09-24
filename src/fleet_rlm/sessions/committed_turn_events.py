@@ -129,6 +129,8 @@ def _details(part: CommittedPart):
                 evidence=part.evidence,
                 gaps=part.gaps,
                 result_file_count=part.result_file_count,
+                code_excerpt=part.code_excerpt,
+                output_excerpt=part.output_excerpt,
                 cleanup_state=part.cleanup_state,
                 parent_run_id=part.parent_run_id,
             ),

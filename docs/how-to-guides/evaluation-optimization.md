@@ -153,6 +153,20 @@ per-case recursion classifications, and matched quality/cost evidence remain
 distinct work with its own evaluation receipts and validation gates. See the
 [testing strategy](testing-strategy.md) for the current evidence boundaries.
 
+Phase 6 keeps `daytona-native` as the default and defers the full A/B/C campaign
+until a child-promotion decision. For the smaller native baseline, the existing
+`benchmark` command now accepts `--native-only` to check the active profile
+before admission and reject observed child work. Pair it with `--fixed-input`
+so every trial submits the same frozen prompt while HTTP idempotency keys remain
+unique. Run fresh-Session samples for
+cold observations; use `--reuse-session` for a separate warm series, whose
+later Turns include prior Session history. Receipts retain bounded per-sample
+condition, quality, usage, lifecycle timing, and cleanup observations without
+answers or code. `--skill-selection UUID@VERSION` supports a matched run with
+one exact Skill version; omit it for the no-Skill arm. Each provider run still
+needs explicit authorization and the existing campaign spend, admission, time,
+and cleanup limits. Unknown usage or spend remains unknown.
+
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
   --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \

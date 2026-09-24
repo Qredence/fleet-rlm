@@ -68,6 +68,11 @@ and trajectory Runtime Events, not `dspy.RLM(verbose=...)` or a provider token
 stream. Recursive status is bounded backend metadata: Root depth is 0, a native
 child is depth 1, and deeper delegation is a Sub-LM fallback without another
 Sandbox. The TUI does not infer depth from iteration counts or model text.
+Child cards show a short finding separately from the Root answer and cleanup
+state. Ctrl+O expands bounded, sanitized child code and output excerpts,
+evidence, gaps, and the count of saved intermediate files. Private child file
+paths and full scratch contents are not projected. Committed child cards reload
+under their original Run without starting another child.
 
 The transcript is a follow-end `ScrollView` inside `TuiAltScreen`. PgUp/PgDn
 scroll a page, Home/End jump top/bottom, the mouse wheel scrolls, drag selects

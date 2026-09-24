@@ -40,7 +40,13 @@ from fleet_rlm.rlm.program import (
     RLMOptions,
     build_native_rlm,
 )
-from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode, sanitize_public_text
+from fleet_rlm.rlm.result import (
+    RLMConfigError,
+    normalize_prediction_trajectory,
+    prediction_result,
+    rlm_termination_mode,
+    sanitize_public_text,
+)
 from fleet_rlm.skills.models import SkillDefinition
 
 # ---------------------------------------------------------------------------
@@ -1159,6 +1165,8 @@ class RecursiveRLMExecutor:
         child_evidence: tuple[str, ...] = (),
         child_gaps: tuple[str, ...] = (),
         child_result_file_count: int = 0,
+        child_code_excerpt: str | None = None,
+        child_output_excerpt: str | None = None,
     ) -> None:
         if self._observer is None:
             return
@@ -1211,6 +1219,8 @@ class RecursiveRLMExecutor:
             cleanup_state=cleanup_state,
             parent_run_id=self._parent_run_id,
             result_file_count=child_result_file_count,
+            code_excerpt=child_code_excerpt,
+            output_excerpt=child_output_excerpt,
         )
         for detail in (Status("recursive", status, message), child):
             try:
@@ -1296,7 +1306,7 @@ class RecursiveRLMExecutor:
         source_manifest: list[dict[str, str]],
         source_manifest_sha256: str,
         batch_cancelled: Event | None = None,
-    ) -> tuple[ChildOutcome, dict[str, object]]:
+    ) -> tuple[ChildOutcome, dict[str, object], str | None, str | None]:
         self._ensure_call_authorized(batch_cancelled)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
@@ -1397,8 +1407,16 @@ class RecursiveRLMExecutor:
             max_output_chars=self._options.child_max_output_chars,
         )
         self._ensure_call_authorized(batch_cancelled)
-        trajectory = getattr(prediction, "trajectory", ())
-        child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
+        trajectory = normalize_prediction_trajectory(prediction)
+        child_iterations = len(trajectory)
+        latest_step = trajectory[-1] if trajectory else None
+        code_excerpt = sanitize_public_text(latest_step.code, max_len=800) if latest_step and latest_step.code else None
+        output_excerpt = None
+        if latest_step and latest_step.output:
+            if latest_step.output.startswith("FINAL:"):
+                output_excerpt = "FINAL submitted"
+            else:
+                output_excerpt = sanitize_public_text(latest_step.output, max_len=800)
         mode = rlm_termination_mode(prediction)
         completion_outputs = self._record_completion(call, mode=mode, child_iterations=child_iterations)
         answer = result.outputs.get("answer")
@@ -1485,18 +1503,23 @@ class RecursiveRLMExecutor:
                     },
                 )
                 raise
-        return ChildOutcome(
-            status="completed",
-            child_id=getattr(lease, "sandbox_id", None),
-            termination=mode,
-            answer=answer,
-            evidence=evidence_items,
-            gaps=gap_items,
-            result_files=tuple(references),
-            source_manifest_sha256=source_manifest_sha256,
-            usage=_child_usage(_child_metrics.get() or self._metrics),
-            result_bytes=total_result_bytes,
-        ), completion_outputs
+        return (
+            ChildOutcome(
+                status="completed",
+                child_id=getattr(lease, "sandbox_id", None),
+                termination=mode,
+                answer=answer,
+                evidence=evidence_items,
+                gaps=gap_items,
+                result_files=tuple(references),
+                source_manifest_sha256=source_manifest_sha256,
+                usage=_child_usage(_child_metrics.get() or self._metrics),
+                result_bytes=total_result_bytes,
+            ),
+            completion_outputs,
+            code_excerpt,
+            output_excerpt,
+        )
 
     def _record_completion(
         self,
@@ -1549,6 +1572,8 @@ class RecursiveRLMExecutor:
         child_evidence: tuple[str, ...],
         child_gaps: tuple[str, ...],
         child_result_file_count: int,
+        child_code_excerpt: str | None,
+        child_output_excerpt: str | None,
     ) -> None:
         cleanup_error: BaseException | None = None
         if lease is not None:
@@ -1605,6 +1630,8 @@ class RecursiveRLMExecutor:
             child_evidence=child_evidence if not failed and cleanup_error is None else (),
             child_gaps=child_gaps if not failed and cleanup_error is None else (),
             child_result_file_count=(child_result_file_count if not failed and cleanup_error is None else 0),
+            child_code_excerpt=(child_code_excerpt if not failed and cleanup_error is None else None),
+            child_output_excerpt=(child_output_excerpt if not failed and cleanup_error is None else None),
         )
         if cleanup_error is not None and not primary_failed:
             raise cleanup_error
@@ -1631,6 +1658,8 @@ class RecursiveRLMExecutor:
         child_evidence: tuple[str, ...] = ()
         child_gaps: tuple[str, ...] = ()
         child_result_file_count = 0
+        child_code_excerpt: str | None = None
+        child_output_excerpt: str | None = None
         primary_failed = False
         child_started = False
         child_budget_reserved = False
@@ -1732,7 +1761,7 @@ class RecursiveRLMExecutor:
                 )
             self._metrics.record_delegated_input_bytes(sum(len(data) for data in child_files.values()))
             self._ensure_call_authorized(batch_cancelled)
-            outcome, completion_outputs = self._run_native_child(
+            outcome, completion_outputs, child_code_excerpt, child_output_excerpt = self._run_native_child(
                 request,
                 call,
                 lease,
@@ -1778,6 +1807,8 @@ class RecursiveRLMExecutor:
                     child_evidence=child_evidence,
                     child_gaps=child_gaps,
                     child_result_file_count=child_result_file_count,
+                    child_code_excerpt=child_code_excerpt,
+                    child_output_excerpt=child_output_excerpt,
                 )
             finally:
                 if child_started:

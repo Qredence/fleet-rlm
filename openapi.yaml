@@ -2685,6 +2685,18 @@ components:
                 minimum: 0
                 title: Result File Count
                 type: integer
+              code_excerpt:
+                anyOf:
+                - maxLength: 800
+                  type: string
+                - type: 'null'
+                title: Code Excerpt
+              output_excerpt:
+                anyOf:
+                - maxLength: 800
+                  type: string
+                - type: 'null'
+                title: Output Excerpt
               cleanup_state:
                 enum:
                 - pending

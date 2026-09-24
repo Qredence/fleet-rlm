@@ -14,6 +14,7 @@ from fleet_rlm.sessions.assistant_parts import (
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
+    ChildProgressPart,
     CodePart,
     CommittedTurn,
     CommittedTurnCodec,
@@ -32,7 +33,7 @@ from fleet_rlm.sessions.committed_turn import (
 _ADAPTER = TypeAdapter(AssistantPart)
 
 
-def _canonical_turn() -> CommittedTurn:
+def _canonical_turn(parent_run_id: str | None = None) -> CommittedTurn:
     artifact_id = uuid4()
     attachment_id = uuid4()
     return CommittedTurn(
@@ -52,6 +53,17 @@ def _canonical_turn() -> CommittedTurn:
             SkillPart(skill_id="dspy-rlm", name="DSPy RLM", phase="activated", trust="bundled"),
             AttachmentPart(attachment_id=attachment_id, phase="read", filename="notes.md", byte_size=5),
             WarningPart(message="some evidence omitted", code="detail_overflow"),
+            ChildProgressPart(
+                child_id="child-1",
+                task_label="Verify the selected evidence",
+                state="completed",
+                elapsed_ms=24,
+                outcome="Evidence cross-check complete",
+                code_excerpt="print('checked')",
+                output_excerpt="checked",
+                cleanup_state="complete",
+                parent_run_id=parent_run_id,
+            ),
             StatusPart(phase="execution", status="degraded", message="cache unavailable"),
             StepPart(state="finished", step=1, duration_ms=8),
             ArtifactPart(
@@ -82,7 +94,8 @@ def test_assistant_part_is_a_closed_discriminated_union() -> None:
 
 
 def test_assistant_part_models_round_trip_runtime_parts_without_loss() -> None:
-    committed = _canonical_turn()
+    run_id = uuid4()
+    committed = _canonical_turn(str(run_id))
     assert tuple(assistant_part_from_payload(payload) for payload in CommittedTurnCodec.encode(committed)["parts"])
     assert (
         tuple(
@@ -98,12 +111,13 @@ def test_reload_projection_consumes_canonical_part_vocabulary() -> None:
     from fleet_rlm.api.ui_message import assistant_turn_to_ui_message
     from fleet_rlm.sessions.models import AssistantTurnRecord
 
-    committed = _canonical_turn()
+    run_id = uuid4()
+    committed = _canonical_turn(str(run_id))
     parsed_parts = tuple(
         assistant_part_from_payload(payload) for payload in CommittedTurnCodec.encode(committed)["parts"]
     )
     reparsed = CommittedTurn(schema_version=1, parts=parsed_parts, trace_id=None)
-    record = AssistantTurnRecord(uuid4(), uuid4(), 2, reparsed, uuid4())
+    record = AssistantTurnRecord(uuid4(), uuid4(), 2, reparsed, run_id)
 
     assert (
         assistant_turn_to_ui_message(record)["parts"]
@@ -111,6 +125,12 @@ def test_reload_projection_consumes_canonical_part_vocabulary() -> None:
             AssistantTurnRecord(record.id, record.session_id, record.sequence, committed, record.run_id)
         )["parts"]
     )
+    message = assistant_turn_to_ui_message(record)
+    child = next(part for part in message["parts"] if part["type"] == "data-child-progress")
+    assert message["metadata"]["runId"] == str(run_id)
+    assert child["data"]["parent_run_id"] == str(run_id)
+    assert child["data"]["code_excerpt"] == "print('checked')"
+    assert child["data"]["output_excerpt"] == "checked"
 
 
 def test_tool_call_state_error_semantics_are_canonical() -> None:

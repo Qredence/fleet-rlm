@@ -168,6 +168,14 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
             resultFileCount !== undefined && resultFileCount >= 0 && resultFileCount <= 16
               ? resultFileCount
               : undefined,
+          codeExcerpt:
+            typeof value.code_excerpt === "string" && value.code_excerpt.length <= 800
+              ? value.code_excerpt
+              : undefined,
+          outputExcerpt:
+            typeof value.output_excerpt === "string" && value.output_excerpt.length <= 800
+              ? value.output_excerpt
+              : undefined,
           cleanupState: cleanupState as (typeof cleanups)[number],
           messageId: chunk.id ?? undefined,
         },

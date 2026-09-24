@@ -183,9 +183,10 @@ export class TurnEventReducer {
             this.clock,
           ),
         );
-      case "child_progress":
+      case "child_progress": {
+        const id = `child-${this.runId}-${event.childId}`;
         return this.save({
-          id: `child-${this.runId}-${event.childId}`,
+          id,
           kind: "child_progress",
           runId: this.runId,
           childId: event.childId,
@@ -197,10 +198,13 @@ export class TurnEventReducer {
           evidence: event.evidence,
           gaps: event.gaps,
           resultFileCount: event.resultFileCount,
+          codeExcerpt: event.codeExcerpt,
+          outputExcerpt: event.outputExcerpt,
           cleanupState: event.cleanupState,
           collapsed: true,
           ts: this.clock(),
         });
+      }
       case "attachment":
         return this.save(
           attachment(

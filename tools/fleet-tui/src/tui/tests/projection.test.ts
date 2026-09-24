@@ -80,6 +80,8 @@ describe("terminal projection", () => {
                 evidence: ["src/stream.py:42"],
                 gaps: ["Retry not checked"],
                 result_file_count: 2,
+                code_excerpt: "print('selected row')",
+                output_excerpt: "selected row",
               }
             : {}),
         },
@@ -101,6 +103,8 @@ describe("terminal projection", () => {
         evidence: ["src/stream.py:42"],
         gaps: ["Retry not checked"],
         resultFileCount: 2,
+        codeExcerpt: "print('selected row')",
+        outputExcerpt: "selected row",
       },
     });
   });
@@ -143,6 +147,8 @@ describe("terminal projection", () => {
                 elapsed_ms: 0,
                 outcome: "Input allocation exceeded the child budget",
                 result_file_count: 1,
+                code_excerpt: "print('saved')",
+                output_excerpt: "saved",
                 cleanup_state: "not_required",
               },
             },
@@ -166,6 +172,8 @@ describe("terminal projection", () => {
           elapsedMs: 0,
           outcome: "Input allocation exceeded the child budget",
           resultFileCount: 1,
+          codeExcerpt: "print('saved')",
+          outputExcerpt: "saved",
           cleanupState: "not_required",
           collapsed: true,
           ts: 100,
