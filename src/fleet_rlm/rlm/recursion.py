@@ -390,6 +390,7 @@ def _future_failures(futures: set[Future[Any]]) -> list[BaseException]:
 # ---------------------------------------------------------------------------
 
 RLM_NATIVE_CHILD_DEPTH = 1
+_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 _MAX_CHILD_RESULT_BYTES = 50_000
 _MAX_CHILD_TASK_CHARS = 2_000
 _MAX_CHILD_CONTEXT_CHARS = 2_000
@@ -966,22 +967,46 @@ class RecursiveRLMExecutor:
         return outcome.model_copy(update={"usage": _child_usage(local_metrics)})
 
     def _materialize_inputs(self, request: ChildRequest) -> Mapping[str, bytes]:
-        self._ensure_authorized()
-        if self._input_materializer is None:
-            if request.inputs:
-                raise ChildRuntimeAuthorizationError("selected child inputs are unavailable")
-            return {}
-        files = self._input_materializer(request)
-        if not isinstance(files, Mapping):
-            raise ValueError("child input materializer returned invalid files")
-        normalized: dict[str, bytes] = {}
-        for path, content in files.items():
-            _validate_child_path(path)
-            if not isinstance(content, bytes):
-                raise ValueError("child input materializer must return bytes")
-            if not any(path == scope or path.startswith(f"{scope.rstrip('/')}/") for scope in request.inputs):
-                raise ChildRuntimeAuthorizationError("child input materializer exceeded the requested scope")
-            normalized[path] = content
+        span = start_turn_span(
+            "RLM.child.resolve_inputs",
+            inputs={"input_count": len(request.inputs)},
+        )
+        started_at = time.monotonic()
+        try:
+            self._ensure_authorized()
+            if self._input_materializer is None:
+                if request.inputs:
+                    raise ChildRuntimeAuthorizationError("selected child inputs are unavailable")
+                normalized: dict[str, bytes] = {}
+            else:
+                files = self._input_materializer(request)
+                if not isinstance(files, Mapping):
+                    raise ValueError("child input materializer returned invalid files")
+                normalized = {}
+                for path, content in files.items():
+                    _validate_child_path(path)
+                    if not isinstance(content, bytes):
+                        raise ValueError("child input materializer must return bytes")
+                    if not any(path == scope or path.startswith(f"{scope.rstrip('/')}/") for scope in request.inputs):
+                        raise ChildRuntimeAuthorizationError("child input materializer exceeded the requested scope")
+                    normalized[path] = content
+        except BaseException as exc:
+            span.finish(
+                phase_status="failed",
+                outputs={
+                    "duration_ms": _elapsed_ms(started_at),
+                    "failure_category": _recursive_failure_category(exc),
+                },
+            )
+            raise
+        span.finish(
+            phase_status="completed",
+            outputs={
+                "duration_ms": _elapsed_ms(started_at),
+                "file_count": len(normalized),
+                "source_bytes": sum(map(len, normalized.values())),
+            },
+        )
         return normalized
 
     @staticmethod
@@ -1676,7 +1701,7 @@ class RecursiveRLMExecutor:
                     if path in child_files:
                         raise ChildRuntimeAuthorizationError("child Skill resource conflicts with selected input")
                     child_files[path] = resource.content.encode("utf-8")
-            if sum(len(content) for content in child_files.values()) > 64 * 1024 * 1024:
+            if sum(len(content) for content in child_files.values()) > _CHILD_STAGE_MAX_BYTES:
                 raise RLMConfigError("selected child inputs exceed the staging limit")
             source_manifest, source_manifest_sha256 = _child_source_manifest(child_files)
             call_span_outputs = getattr(call.span, "set_outputs", None)
@@ -1739,6 +1764,7 @@ class RecursiveRLMExecutor:
                 },
             )
             stage_started_at = time.monotonic()
+            staged_bytes = sum(map(len, child_files.values()))
             try:
                 if child_files:
                     lease.stage_files(child_files)
@@ -1747,6 +1773,7 @@ class RecursiveRLMExecutor:
                     phase_status="failed",
                     outputs={
                         "duration_ms": _elapsed_ms(stage_started_at),
+                        "staged_bytes": staged_bytes,
                         "failure_category": _recursive_failure_category(exc),
                     },
                 )
@@ -1756,6 +1783,7 @@ class RecursiveRLMExecutor:
                     phase_status="completed",
                     outputs={
                         "duration_ms": _elapsed_ms(stage_started_at),
+                        "staged_bytes": staged_bytes,
                         "status": "staged" if child_files else "empty",
                     },
                 )

@@ -552,6 +552,20 @@ def test_missing_workspace_root_behaves_as_an_empty_virtual_directory(tmp_path: 
     assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
 
 
+def test_workspace_bounded_binary_read_is_exact_and_enforces_storage_limit(tmp_path: Path) -> None:
+    workspace, _, root, _ = _workspace(tmp_path, max_file_bytes=8)
+    target = root / "large.bin"
+    target.write_bytes(b"12345678")
+
+    assert workspace.read_file_bytes("large.bin", max_bytes=8) == b"12345678"
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        workspace.read_file_bytes("large.bin", max_bytes=7)
+
+    target.write_bytes(b"123456789")
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        workspace.read_file_bytes("large.bin", max_bytes=16)
+
+
 def test_real_guard_allows_a_missing_virtual_workspace_root(tmp_path: Path) -> None:
     from fleet_rlm.workspace.storage import WorkspaceStorage
 

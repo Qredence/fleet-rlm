@@ -202,6 +202,9 @@ class _HostWorkspaceStorage:
     ) -> Any:
         return self._call("read_text_page", path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
 
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        return self._call("read_file_bytes", path, max_bytes=max_bytes)
+
     def write_text(
         self,
         path: str,

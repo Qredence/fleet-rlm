@@ -40,6 +40,7 @@ from fleet_rlm.daytona.interpreter import (
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
 from fleet_rlm.rlm.recursion import (
+    _CHILD_STAGE_MAX_BYTES,
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeFactory,
@@ -73,7 +74,6 @@ CHILD_DELETE_CONFIRM_POLL_S = 1.0
 _CHILD_ADMISSION_WAIT_SECONDS = 5.0
 _CHILD_CLEANUP_RESULT_TIMEOUT_S = CHILD_CLEANUP_RESULT_TIMEOUT_S
 _CHILD_STAGE_MAX_FILES = 256
-_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 _CHILD_RESULT_MAX_BYTES = 16 * 1024 * 1024
 _CHILD_RESULT_MAX_ENTRIES = 1024
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
@@ -2738,21 +2738,39 @@ def _file_info_is_symlink(info: Any) -> bool:
     return isinstance(normalized_mode, int) and normalized_mode & 0o170000 == 0o120000
 
 
-async def _assert_no_child_symlink(fs: Any, root: str, relative: str = "") -> None:
-    """Fail closed unless every existing result-path component is a regular path."""
+async def _assert_no_child_symlink(
+    fs: Any,
+    root: str,
+    relative: str = "",
+    *,
+    allow_missing: bool = False,
+) -> None:
+    """Check every existing absolute and relative component before child-file I/O."""
     get_info = getattr(fs, "get_file_info", None)
     if not callable(get_info):
-        raise ValueError("child result filesystem cannot verify symlink safety")
-    current = PurePosixPath(root)
-    paths = [str(current)]
+        raise ValueError("child filesystem cannot verify symlink safety")
+    current = PurePosixPath("/")
+    paths: list[str] = []
+    for part in PurePosixPath(root).parts[1:]:
+        current /= part
+        paths.append(str(current))
     if relative:
         for part in PurePosixPath(relative).parts:
             current /= part
             paths.append(str(current))
     for path in paths:
-        info = await _maybe_await(get_info(path))
+        try:
+            info = await _maybe_await(get_info(path))
+        except Exception as exc:
+            if allow_missing and _is_not_found(exc):
+                continue
+            raise
+        if info is None:
+            if allow_missing:
+                continue
+            raise ValueError("child filesystem could not verify path metadata")
         if _file_info_is_symlink(info):
-            raise ValueError("child result path contains an unsafe symlink")
+            raise ValueError("child path contains an unsafe symlink")
 
 
 def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
@@ -4487,6 +4505,7 @@ class DaytonaRuntime:
 
                 async def stage() -> None:
                     fs = _sandbox_filesystem(sandbox)
+                    await _assert_no_child_symlink(fs, child_files_path, allow_missing=True)
                     await _ensure_directories(
                         fs,
                         (
@@ -4497,6 +4516,12 @@ class DaytonaRuntime:
                         ),
                     )
                     for relative, content in validated.items():
+                        await _assert_no_child_symlink(
+                            fs,
+                            child_files_path,
+                            relative,
+                            allow_missing=True,
+                        )
                         destination = f"{child_files_path}/{relative}"
                         parent = str(PurePosixPath(destination).parent)
                         await _ensure_directories(fs, (parent,))

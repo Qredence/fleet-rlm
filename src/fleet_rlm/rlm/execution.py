@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from hashlib import sha256
 from json import dumps
+from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeVar, cast
 from uuid import UUID
@@ -72,6 +73,7 @@ from fleet_rlm.rlm.program import (
     sanitize_base_url,
 )
 from fleet_rlm.rlm.recursion import (
+    _CHILD_STAGE_MAX_BYTES,
     ChildRequest,
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
@@ -79,6 +81,7 @@ from fleet_rlm.rlm.recursion import (
     DelegationMetrics,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
+    _validate_child_path,
 )
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
@@ -230,6 +233,7 @@ class RLMExecutionSpec:
     tool_event_views: Mapping[str, ToolEventView] = field(default_factory=dict)
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY
     read_artifact: Callable[[UUID, int], Coroutine[Any, Any, bytes]] | None = None
+    child_source_reader: Callable[[str, int], bytes] | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "tool_event_views", MappingProxyType(dict(self.tool_event_views)))
@@ -799,9 +803,30 @@ class _RunRuntimeLease:
             await self._release()
 
 
-_MAX_CHILD_STAGE_BYTES = 2_000_000
 _MAX_CHILD_STAGE_FILES = 64
 _CHILD_STAGE_SECONDS = 30.0
+_CHILD_SECRET_FILE_NAMES = frozenset(
+    {
+        ".aws",
+        ".docker",
+        ".fleet",
+        ".git",
+        ".git-credentials",
+        ".npmrc",
+        ".netrc",
+        ".pypirc",
+        ".ssh",
+        "credentials",
+        "credentials.json",
+        "id_dsa",
+        "id_ecdsa",
+        "id_ed25519",
+        "id_rsa",
+        "secrets.json",
+        "service-account.json",
+    }
+)
+_CHILD_PRIVATE_KEY_SUFFIXES = frozenset({".key", ".pem", ".p12", ".pfx", ".p7b", ".p7c"})
 
 
 def _child_source_tool(
@@ -827,6 +852,16 @@ def _child_source_tool(
     return result
 
 
+def _validate_child_source_path(path: str) -> None:
+    _validate_child_path(path)
+    for part in PurePosixPath(path).parts:
+        lowered = part.lower()
+        if lowered in _CHILD_SECRET_FILE_NAMES or lowered == ".env" or lowered.startswith(".env."):
+            raise ChildRuntimeAuthorizationError("credential-bearing or host metadata cannot be staged")
+        if PurePosixPath(lowered).suffix in _CHILD_PRIVATE_KEY_SUFFIXES:
+            raise ChildRuntimeAuthorizationError("credential-bearing or host metadata cannot be staged")
+
+
 def _child_source_paths(
     request: ChildRequest,
     *,
@@ -842,27 +877,41 @@ def _child_source_paths(
         reference = pending.pop()
         if reference in seen:
             continue
+        _validate_child_source_path(reference)
         seen.add(reference)
         if len(seen) > _MAX_CHILD_STAGE_FILES * 2:
             raise ValueError("selected child source scope contains too many entries")
         project = reference.startswith("projects/")
         stat_name = "stat_project_file" if project else "stat_workspace_file"
-        stat = _child_source_tool(tools, stat_name, path=reference, check_authority=check_authority, deadline=deadline)
+        stat = _child_source_tool(
+            tools,
+            stat_name,
+            path=reference,
+            check_authority=check_authority,
+            deadline=deadline,
+        )
         entry = stat.get("entry")
         if not isinstance(entry, Mapping):
             raise ValueError("selected source metadata is invalid")
+        expected_entry_path = reference.removeprefix("projects/") if project else reference
+        if entry.get("path") != expected_entry_path:
+            raise ValueError("selected source metadata escaped its requested path")
         kind = entry.get("kind")
-        manifest[reference] = (
-            kind,
-            entry.get("byte_size"),
-            entry.get("checksum_sha256"),
-        )
+        byte_size = entry.get("byte_size")
+        modified_at = entry.get("modified_at")
+        if modified_at is not None and not isinstance(modified_at, str):
+            raise ValueError("selected source metadata is invalid")
         if kind == "file":
+            if type(byte_size) is not int or byte_size < 0:
+                raise ValueError("selected source size metadata is unavailable")
+            manifest[reference] = (kind, byte_size, modified_at)
             files.append(reference)
             if len(files) > _MAX_CHILD_STAGE_FILES:
                 raise ValueError("selected child source scope contains too many files")
             continue
-        if kind != "directory":
+        if kind == "directory":
+            manifest[reference] = (kind, None, modified_at)
+        else:
             raise ValueError("selected source type is unsupported")
         list_name = "list_project_files" if project else "list_workspace_files"
         cursor: str | None = None
@@ -885,6 +934,7 @@ def _child_source_paths(
                     raise ValueError("selected source listing is invalid")
                 child = f"projects/{item['path']}" if project else str(item["path"])
                 ChildRequest(task=request.task, inputs=(child,))
+                _validate_child_source_path(child)
                 if not child.startswith(reference.rstrip("/") + "/"):
                     raise ValueError("selected source escaped its selected directory")
                 pending.append(child)
@@ -905,6 +955,7 @@ def _read_child_source_file(
     check_authority: Callable[[], None],
     deadline: float,
     byte_limit: int,
+    expected_byte_size: int,
 ) -> bytes:
     project = path.startswith("projects/")
     read_name = "read_project_text" if project else "read_workspace_text"
@@ -923,8 +974,11 @@ def _read_child_source_file(
             deadline=deadline,
         )
         content = page.get("content")
+        page_size = page.get("byte_size")
         if not isinstance(content, str):
             raise ValueError("selected source must be UTF-8 text")
+        if type(page_size) is not int or page_size != expected_byte_size:
+            raise ValueError("selected source changed during child staging")
         total += len(content.encode("utf-8"))
         if total > byte_limit:
             raise ValueError("selected child source exceeds its byte bound")
@@ -936,7 +990,10 @@ def _read_child_source_file(
             raise ValueError("selected source page cursor is invalid")
         seen_cursors.add(next_cursor)
         cursor = next_cursor
-    return "".join(chunks).encode("utf-8")
+    content_bytes = "".join(chunks).encode("utf-8")
+    if len(content_bytes) != expected_byte_size:
+        raise ValueError("selected source changed during child staging")
+    return content_bytes
 
 
 def materialize_child_inputs(
@@ -945,6 +1002,7 @@ def materialize_child_inputs(
     tools: Mapping[str, dspy.Tool],
     check_authority: Callable[[], None],
     turn_deadline: float,
+    source_reader: Callable[[str, int], bytes] | None = None,
 ) -> dict[str, bytes]:
     """Resolve selected text under the prepared Session authority before admission."""
     deadline = min(turn_deadline, time.monotonic() + _CHILD_STAGE_SECONDS)
@@ -954,39 +1012,42 @@ def materialize_child_inputs(
         check_authority=check_authority,
         deadline=deadline,
     )
-    first_pass: dict[str, bytes] = {}
+    staged: dict[str, bytes] = {}
     total = 0
     for path in files:
-        remaining = _MAX_CHILD_STAGE_BYTES - total
-        if remaining <= 0:
+        byte_size = initial_manifest[path][1]
+        if type(byte_size) is not int:
+            raise ValueError("selected source size metadata is unavailable")
+        remaining = _CHILD_STAGE_MAX_BYTES - total
+        if byte_size > remaining:
             raise ValueError("selected child sources exceed the staging byte bound")
-        content = _read_child_source_file(
-            path,
-            tools=tools,
-            check_authority=check_authority,
-            deadline=deadline,
-            byte_limit=remaining,
-        )
-        first_pass[path] = content
-        total += len(content)
-
-    staged: dict[str, bytes] = {}
-    second_pass_total = 0
-    for path in files:
-        remaining = _MAX_CHILD_STAGE_BYTES - second_pass_total
-        if remaining <= 0:
-            raise ValueError("selected child sources exceed the staging byte bound")
-        content = _read_child_source_file(
-            path,
-            tools=tools,
-            check_authority=check_authority,
-            deadline=deadline,
-            byte_limit=remaining,
-        )
-        if sha256(first_pass[path]).digest() != sha256(content).digest():
-            raise ValueError("selected source changed during child staging")
+        check_authority()
+        if time.monotonic() >= deadline:
+            raise TimeoutError("child input staging deadline exceeded")
+        if source_reader is None:
+            content = _read_child_source_file(
+                path,
+                tools=tools,
+                check_authority=check_authority,
+                deadline=deadline,
+                byte_limit=remaining,
+                expected_byte_size=byte_size,
+            )
+        else:
+            content = source_reader(path, remaining)
+            check_authority()
+            if time.monotonic() >= deadline:
+                raise TimeoutError("child input staging deadline exceeded")
+            if not isinstance(content, bytes):
+                raise ValueError("selected source reader must return bytes")
+            if len(content) > remaining or len(content) != byte_size:
+                raise ValueError("selected source changed during child staging")
+            try:
+                content.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError("selected source must be UTF-8 text") from exc
         staged[path] = content
-        second_pass_total += len(content)
+        total += len(content)
 
     final_files, final_manifest = _child_source_paths(
         request,
@@ -1324,6 +1385,7 @@ class RLMRunner:
                     tools={str(tool.name): tool for tool in spec.tools},
                     check_authority=check_selected_authority,
                     turn_deadline=context.execution.deadline,
+                    source_reader=spec.child_source_reader,
                 )
 
             def write_child_result(call_index: int, relative_path: str, content: bytes) -> str:

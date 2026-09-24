@@ -545,20 +545,22 @@ def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -
     assert 1 <= batch_completed.output["peak_child_concurrency"] <= 2
 
 
-def test_recursive_batch_starts_each_trace_span_in_its_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recursive_batch_resolves_inputs_before_workers_and_starts_child_spans_in_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import threading
 
     import fleet_rlm.rlm.recursion as recursive_calls
 
     parent_thread = threading.get_ident()
-    span_threads: list[int] = []
+    span_threads: list[tuple[str, int]] = []
 
     class Span:
         def finish(self, **_kwargs: object) -> None:
             return None
 
-    def start_span(_name: str, **_kwargs: object) -> Span:
-        span_threads.append(threading.get_ident())
+    def start_span(name: str, **_kwargs: object) -> Span:
+        span_threads.append((name, threading.get_ident()))
         return Span()
 
     monkeypatch.setattr(recursive_calls, "start_turn_span", start_span)
@@ -573,7 +575,8 @@ def test_recursive_batch_starts_each_trace_span_in_its_worker(monkeypatch: pytes
     outcomes = executor.batched_tool(tasks=[{"task": task} for task in ["first", "second"]])
     assert [item["answer"] for item in outcomes] == ["first", "second"]
     assert len(span_threads) >= 2
-    assert all(thread_id != parent_thread for thread_id in span_threads)
+    assert any(name == "RLM.child.resolve_inputs" and thread_id == parent_thread for name, thread_id in span_threads)
+    assert all(thread_id != parent_thread for name, thread_id in span_threads if name != "RLM.child.resolve_inputs")
 
 
 def test_recursive_batch_join_stops_at_turn_deadline_and_worker_retains_lease(

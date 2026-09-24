@@ -59,6 +59,24 @@ def test_daytona_storage_rejects_symlink_file_for_read_and_stat() -> None:
         storage.stat_path("secret.txt")
 
 
+def test_daytona_storage_bounded_binary_read_is_exact_and_rejects_symlink() -> None:
+    fs = _Fs()
+    path = f"{ROOT}/data.bin"
+    fs.files[path] = b"12345678"
+    storage = _storage(fs)
+
+    assert storage.read_file_bytes("data.bin", max_bytes=8) == b"12345678"
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        storage.read_file_bytes("data.bin", max_bytes=7)
+
+    fs.symlinks[f"{ROOT}/link.bin"] = path
+    fs.symlinks[f"{ROOT}/link-dir"] = "/outside"
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_file_bytes("link.bin", max_bytes=16)
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_file_bytes("link-dir/data.bin", max_bytes=16)
+
+
 def test_daytona_storage_recognizes_provider_octal_string_symlink_mode() -> None:
     path = f"{ROOT}/secret.txt"
 

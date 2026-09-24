@@ -229,11 +229,10 @@ the model never to repeat an identical interpreter action.
 
 ## Recursive harness limits
 
-`[defaults.rlm] recursion_enabled = true` in the current operator-selected
-policy, so the shipped `daytona-recursive` profile exposes Fleet child-RLM
-tools by default. Native `llm_query` / `llm_query_batched` remain the semantic
-delegation path. Set `rlm.recursion_enabled = false` on a comparison profile
-(for example `phase4-campaign-a` or `phase4-campaign-b`) to disable the bounded
+The shipped default profile is `daytona-native`, with recursion disabled.
+The opt-in `daytona-recursive` profile enables Fleet child-RLM tools; native
+`llm_query` / `llm_query_batched` remain the semantic delegation path. Set
+`rlm.recursion_enabled = false` on a comparison profile to disable the bounded
 recursive Tool and instruction. When enabled, one native child level is allowed,
 with four reserved child calls per Turn, a 50,000-character delegated prompt
 bound, eight child iterations, twelve child LM calls, 4,000 child output
@@ -265,13 +264,20 @@ inheritance is acceptable for prompt-only judgments because the Root's own
 generated code already executes in the same Sandbox.
 
 The isolation lane is the dedicated child Sandbox exposed as `rlm_query` and
-Root-only `rlm_query_batched` under the committed recursive policy. Each
-native depth-1 delegation provisions its own ephemeral Sandbox running a full
-native RLM, with private staged inputs and no Session Volume mount, ordinary
-Fleet capabilities, credentials, mutable Root state, or Root broker state.
-Strict child cleanup gates Root success. Child Root/Sub
-DSPy runtimes are copied per sibling to isolate mutable model histories and
-callback bookkeeping.
+Root-only `rlm_query_batched` under the opt-in recursive policy. Each native
+depth-1 delegation provisions an ephemeral, Volume-less SemanticChild Sandbox
+running a full native RLM. It receives only the selected, host-authorized source
+copy and already-loaded Skill resources; it does not receive the Session Volume,
+parent tools, memory, task checkpoints, attachment storage, publication
+capabilities, credentials, mutable Root state, or Root broker state. Source
+size and available modification metadata are rechecked around bounded staging;
+scratch is private, and declared result files are path/symlink/size validated,
+harvested, and persisted in the parent
+Run before child teardown. Strict child cleanup gates Root success. Child
+Root/Sub DSPy runtimes are copied per sibling to isolate mutable model histories
+and callback bookkeeping. The provider network-block request is not evidence of
+enforcement; the Phase 5 waiver remains, and no child network restriction is
+claimed as verified.
 Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3
 provides, so their cost is sandbox provisioning, broker/interpreter startup,
 and the child's own iteration budget — see `scripts/benchmark_daytona_lifecycle.py`
@@ -345,12 +351,12 @@ release the candidate.
 
 ## Run the Phase 2 Daytona recursive-child canary
 
-After Phase 1 has a committed passing receipt and retrospective, the narrow
-Phase 2 canary selects `[profiles.daytona-recursive]`. It proves one native
-DSPy child RLM receives a dedicated Daytona Sandbox with ordinary network
-policy, a sibling private Volume scope, no Root Python marker, and strict
+The focused recursive-child canary selects `[profiles.daytona-recursive]`.
+It proves one native DSPy child RLM receives a dedicated Volume-less Daytona
+Sandbox, only its selected source copy, no Root Python marker, and strict
 cleanup before the Root typed `SUBMIT` completes. It does not use a custom
-agent loop or a grandchild Sandbox.
+agent loop or a grandchild Sandbox. The canary does not certify provider network
+isolation; the Phase 5 network-policy waiver remains in force.
 
 ```bash
 uv run python scripts/live_phase2_recursive_verify.py \
