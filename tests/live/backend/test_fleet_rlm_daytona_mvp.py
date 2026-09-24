@@ -911,6 +911,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
             "rlm_wrap_up_seconds": 60,
+            "mlflow_tracing_enabled": True,
         }
     )
     started_at = datetime.now(UTC)
