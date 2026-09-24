@@ -889,3 +889,231 @@ def test_complete_daytona_mvp_through_fastapi(
                 )
             )
         raise
+
+
+def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
+    """Verify single and ordered batch semantic calls through the live Daytona broker."""
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            "rlm_max_iters": 6,
+            "rlm_max_llm_calls": 12,
+            "turn_timeout_seconds": 840,
+            "rlm_wrap_up_seconds": 60,
+        }
+    )
+    started_at = datetime.now(UTC)
+    started_at_text = started_at.isoformat()
+    candidate = _candidate_metadata(settings)
+    models = candidate.pop("models")
+    ledger = _ProofLedger()
+    app = create_app(settings=settings)
+    sandbox_ids: set[str] = set()
+    resources: Any | None = None
+    receipt_written = False
+    scenario_passed = False
+    cleanup_failures: tuple[str, ...] = ()
+    success_receipt: dict[str, object] | None = None
+
+    token_tool = dspy.Tool(
+        ledger.issue_iteration_token,
+        name="issue_iteration_token",
+        desc="Issue the opaque token used to prove state across RLM iterations.",
+    )
+    semantic_tool = dspy.Tool(
+        ledger.verify_semantic_work,
+        name="verify_semantic_work",
+        desc="Verify one native semantic query, its ordered batch, and the persistent accumulator exactly once.",
+        arg_desc={
+            "iteration_token": "Opaque string returned by issue_iteration_token; pass it unchanged.",
+            "single_result": "String returned by the single llm_query call.",
+            "batch_results": "Ordered list returned by llm_query_batched for ALPHA, BETA, GAMMA.",
+            "accumulator": "Existing accumulator with the token, single result, and all batch results.",
+        },
+    )
+    proof_views = MappingProxyType(
+        {
+            "issue_iteration_token": ToolEventView(
+                output_projection=lambda _result: {"issued": True},
+            ),
+            "verify_semantic_work": ToolEventView(
+                input_projection=lambda values: {
+                    "iteration_token_type": type(values.get("iteration_token")).__name__,
+                    "single_result_type": type(values.get("single_result")).__name__,
+                    "batch_count": len(values.get("batch_results", ()))
+                    if isinstance(values.get("batch_results"), (tuple, list))
+                    else 0,
+                    "accumulator_count": len(values.get("accumulator", ()))
+                    if isinstance(values.get("accumulator"), (tuple, list))
+                    else 0,
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "batch_count": int(result.get("batch_count", 0)),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+        }
+    )
+
+    try:
+        with TestClient(app) as client:
+            inventory = app.state.runtime_inventory
+            resources = inventory.run_environment_resources
+            preparation = inventory.run_preparation
+            assert resources is not None
+            assert preparation is not None
+            object.__setattr__(
+                preparation,
+                "capabilities",
+                _ProofCapabilityPreparer(preparation.capabilities, (token_tool, semantic_tool), proof_views),
+            )
+            portal = client.portal
+            assert portal is not None
+            try:
+                created = client.post("/api/sessions", json={"title": "Native Daytona semantic proof"})
+                assert created.status_code == 201
+                session_id = UUID(created.json()["id"])
+
+                response = client.post(
+                    f"/api/sessions/{session_id}/turns",
+                    json={
+                        "text": (
+                            "Execute the native Daytona semantic-call proof in exactly three iterations. Do not"
+                            " explore, improvise, retry, or write files. 1) The first code cell must call"
+                            " iteration_token = issue_iteration_token(), set accumulator = [iteration_token], and"
+                            " print FIRST_ITERATION_READY. 2) The second code cell must, in this order, call"
+                            ' single_result = llm_query("Return exactly ROOT");'
+                            ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA",'
+                            ' "Return exactly GAMMA"]); accumulator.extend([single_result, *batch_results]);'
+                            " verification = verify_semantic_work(iteration_token=iteration_token,"
+                            " single_result=single_result, batch_results=batch_results, accumulator=accumulator);"
+                            " require verification['ok'] and print SEMANTIC_VERIFICATION_READY. Do not recreate"
+                            " the accumulator. 3) Set a non-empty string summary and a findings list with string"
+                            " claim and evidence fields, then"
+                            " call exactly SUBMIT(answer=summary, findings=findings) with keywords. Do not call"
+                            " rlm_query or rlm_query_batched."
+                        ),
+                    },
+                    headers={"Idempotency-Key": f"native-semantic-{uuid4()}"},
+                )
+                assert response.status_code == 200
+                chunks, done = _sse_chunks(response)
+                assert done == 1
+                _assert_sse_stop(chunks, label="native_semantic_calls")
+                assert sum(chunk.get("type") == "start" for chunk in chunks) == 1
+                assert sum(chunk.get("type") == "finish" for chunk in chunks) == 1
+
+                code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+                generated_code = [str(chunk.get("data", {}).get("code", "")) for chunk in code_chunks]
+                assert any("issue_iteration_token" in code for code in generated_code)
+                semantic_steps = [code for code in generated_code if "llm_query_batched" in code]
+                assert len(semantic_steps) == 1
+                assert "llm_query(" in semantic_steps[0]
+                assert "verify_semantic_work" in semantic_steps[0]
+                assert "accumulator =" not in semantic_steps[0]
+
+                tool_names = [
+                    str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
+                ]
+                assert tool_names.count("issue_iteration_token") == 1
+                assert tool_names.count("verify_semantic_work") == 1
+                assert "rlm_query" not in tool_names
+                assert "rlm_query_batched" not in tool_names
+                assert not any(chunk.get("type") in {"error", "tool-output-error"} for chunk in chunks)
+                assert ledger.token_calls == 1
+                assert len(ledger.semantic_calls) == 1
+
+                usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
+                assert len(usage_chunks) == 1
+                usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
+                assert usage.get("termination_mode") == "typed_submit"
+                assert int(usage["iterations"]) <= settings.rlm_max_iters
+                assert int(usage["recursive_call_count"]) == 0
+                metrics = usage["delegation_metrics"]
+                assert int(metrics["sub_lm_calls_depth_0"]) == 4
+                assert int(metrics["recursive_children_started"]) == 0
+                assert int(metrics["recursive_batch_calls"]) == 0
+
+                submit_shapes = _call_shapes(chunks, "SUBMIT")
+                assert len(submit_shapes) == 1
+                assert submit_shapes[0]["keyword_names"] == ["answer", "findings"]
+                structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+                assert len(structured) == 1
+                assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+
+                run_id = _run_id_from_sse(chunks, label="native_semantic_calls", resources=resources)
+                binding = portal.call(resources.bindings.get, session_id)
+                assert binding is not None and binding.sandbox_id is not None
+                sandbox_ids.add(binding.sandbox_id)
+                finished_at = datetime.now(UTC)
+                success_receipt = {
+                    "schema": _RECEIPT_SCHEMA,
+                    "candidate": candidate,
+                    "models": models,
+                    "timing": {
+                        "started_at": started_at_text,
+                        "finished_at": finished_at.isoformat(),
+                        "duration_ms": int((finished_at - started_at).total_seconds() * 1000),
+                    },
+                    "resources": {
+                        "session_id": str(session_id),
+                        "run_id": str(run_id),
+                        "sandbox_ids": [binding.sandbox_id],
+                    },
+                    "counts": {
+                        "iterations": int(usage["iterations"]),
+                        "root_lm_calls_depth_0": int(metrics["root_lm_calls_depth_0"]),
+                        "native_sub_lm_calls_depth_0": int(metrics["sub_lm_calls_depth_0"]),
+                        "single_lm_calls": 1,
+                        "batched_lm_prompts": 3,
+                        "recursive_calls": int(usage["recursive_call_count"]),
+                        "sse_done": done,
+                    },
+                    "token_usage_status": usage.get("token_usage_status"),
+                    "termination_mode": usage.get("termination_mode"),
+                    "assertions": {
+                        "single_semantic_call_succeeded": True,
+                        "ordered_batch_results_verified": True,
+                        "one_budgeted_sub_lm_call_per_prompt": metrics["sub_lm_calls_depth_0"] == 4,
+                        "native_error_results_rejected": True,
+                        "typed_submit": True,
+                        "no_full_child_sandbox": usage["recursive_call_count"] == 0,
+                        "cleanup_passed": False,
+                    },
+                    "failure": None,
+                    "passed": False,
+                }
+                scenario_passed = True
+            finally:
+                cleanup_failures = portal.call(_strict_cleanup, resources, settings.volume_name)
+                if scenario_passed and not cleanup_failures:
+                    assert success_receipt is not None
+                    assertions = success_receipt["assertions"]
+                    assert isinstance(assertions, dict)
+                    assertions["cleanup_passed"] = True
+                    success_receipt["passed"] = True
+                    _write_receipt_if_requested(success_receipt)
+                    receipt_written = True
+                else:
+                    _write_receipt_if_requested(
+                        _failure_receipt(
+                            candidate=candidate,
+                            started_at=started_at_text,
+                            category="cleanup_failed" if cleanup_failures else "proof_failed",
+                            phase="cleanup" if cleanup_failures else "native_semantic_calls",
+                        )
+                    )
+                    receipt_written = True
+                if cleanup_failures:
+                    raise AssertionError("live Daytona semantic cleanup did not settle")
+    except BaseException:
+        if not receipt_written:
+            _write_receipt_if_requested(
+                _failure_receipt(
+                    candidate=candidate,
+                    started_at=started_at_text,
+                    category="proof_failed",
+                    phase="composition",
+                )
+            )
+        raise
