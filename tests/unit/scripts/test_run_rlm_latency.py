@@ -22,6 +22,7 @@ from scripts.benchmarks.run_rlm_latency import (
     _aggregate,
     _attach_trace_identity,
     _baseline_evidence_quality,
+    _bounded_sample_record,
     _campaign_preflight,
     _enforce_campaign_observations,
     _eval_otpm_backoff_seconds,
@@ -29,6 +30,7 @@ from scripts.benchmarks.run_rlm_latency import (
     _execution_trace_id,
     _judge_ab_receipt,
     _observed_spend,
+    _parse_skill_selections,
     _termination_mode_from_chunk,
     _upload_corpus,
     _usage_totals,
@@ -166,6 +168,77 @@ def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() ->
     assert row["termination_mode"] == "typed_submit"
     assert row["recursive_calls"] == 0
     assert row["concurrency_observed"] is True
+
+
+def test_run_turn_reuses_existing_session_without_creating_another() -> None:
+    class _ReuseClient(_TurnClient):
+        def post(self, path: str, **_kwargs: object) -> _Response:
+            pytest.fail(f"unexpected Session creation: {path}")
+
+        def stream(self, method: str, path: str, **kwargs: object) -> _Stream:
+            assert method == "POST"
+            assert path == "/api/sessions/session-existing/turns"
+            return super().stream(method, path, **kwargs)
+
+    row = run_turn(_ReuseClient(), "inspect the attachment", nonce="reuse", session_id="session-existing")
+
+    assert row["session_id"] == "session-existing"
+
+
+def test_run_turn_keeps_frozen_prompt_identical_across_trials() -> None:
+    first = _TurnClient()
+    second = _TurnClient()
+
+    run_turn(first, "fixed evidence question", nonce="first", fixed_input=True)
+    run_turn(second, "fixed evidence question", nonce="second", fixed_input=True)
+
+    assert first.turn_request is not None and second.turn_request is not None
+    assert first.turn_request["text"] == second.turn_request["text"] == "fixed evidence question"
+
+
+def test_parser_exposes_explicit_native_and_warm_session_modes() -> None:
+    args = build_parser().parse_args(
+        ["benchmark", "--native-only", "--reuse-session", "--fixed-input", "--output", "receipt.json"]
+    )
+
+    assert args.native_only is True
+    assert args.reuse_session is True
+    assert args.fixed_input is True
+
+
+def test_benchmark_accepts_exact_skill_selection_for_matched_runs() -> None:
+    skill_id = "11111111-1111-1111-1111-111111111111"
+    selection = _parse_skill_selections([f"{skill_id}@2.0.0"])
+    client = _TurnClient()
+
+    run_turn(client, "inspect", nonce="skill", skill_selections=selection)
+
+    assert client.turn_request is not None
+    assert client.turn_request["skill_selections"] == [{"id": skill_id, "expected_version": "2.0.0"}]
+    with pytest.raises(BenchmarkError, match="must not repeat"):
+        _parse_skill_selections([f"{skill_id}@2.0.0", f"{skill_id}@2.0.0"])
+
+
+def test_sample_record_keeps_condition_and_unknown_usage_without_answer() -> None:
+    row = {
+        "sample_kind": "measured",
+        "session_condition": "warm_reuse",
+        "answer": "private task answer",
+        "trajectory": {"codes": ["private code"]},
+        "usage": {},
+        "trace_diagnostics": {
+            "phase_durations_ms": {"environment_acquisition": 4.0},
+            "turn_cleanup_status": "confirmed",
+        },
+    }
+
+    record = _bounded_sample_record(row)
+
+    assert record["session_condition"] == "warm_reuse"
+    assert record["token_usage"] is None
+    assert record["token_usage_status"] == "unknown"
+    assert record["cleanup_status"] == "confirmed"
+    assert "answer" not in record and "trajectory" not in record
 
 
 def test_baseline_quality_uses_frozen_rubric_without_persisting_answer() -> None:

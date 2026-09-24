@@ -184,6 +184,8 @@ class ChildProgressAssistantPart(AssistantPartModel):
     evidence: tuple[str, ...] = Field(default=(), max_length=8)
     gaps: tuple[str, ...] = Field(default=(), max_length=8)
     result_file_count: int = Field(default=0, ge=0, le=16)
+    code_excerpt: str | None = Field(default=None, max_length=800)
+    output_excerpt: str | None = Field(default=None, max_length=800)
     cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
     parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
 
@@ -363,6 +365,8 @@ def assistant_part_to_model(part: CommittedPart) -> AssistantPart:
             evidence=part.evidence,
             gaps=part.gaps,
             result_file_count=part.result_file_count,
+            code_excerpt=part.code_excerpt,
+            output_excerpt=part.output_excerpt,
             cleanup_state=part.cleanup_state,
             parent_run_id=part.parent_run_id,
         )
@@ -440,6 +444,8 @@ def assistant_part_from_model(part: AssistantPart) -> CommittedPart:
             evidence=part.evidence,
             gaps=part.gaps,
             result_file_count=part.result_file_count,
+            code_excerpt=part.code_excerpt,
+            output_excerpt=part.output_excerpt,
             cleanup_state=part.cleanup_state,
             parent_run_id=part.parent_run_id,
         )

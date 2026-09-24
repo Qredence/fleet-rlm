@@ -50,6 +50,8 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
     evidence: isStringArray,
     gaps: isStringArray,
     result_file_count: isInteger,
+    code_excerpt: isNullableString,
+    output_excerpt: isNullableString,
     cleanup_state: (value) => value === "pending" || value === "complete" || value === "failed" || value === "not_required",
     parent_run_id: isNullableString,
   },

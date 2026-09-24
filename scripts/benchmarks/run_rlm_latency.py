@@ -23,7 +23,7 @@ from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from dotenv import load_dotenv
@@ -1099,7 +1099,10 @@ def run_turn(
     query: str,
     *,
     nonce: str,
+    session_id: str | None = None,
     attachment_ids: Sequence[str] = (),
+    skill_selections: Sequence[Mapping[str, str]] = (),
+    fixed_input: bool = False,
     timeout_seconds: float | None = None,
     deadline: float | None = None,
 ) -> dict[str, Any]:
@@ -1120,7 +1123,9 @@ def run_turn(
         BenchmarkError: If the Turn reports an error, is aborted, or finishes for a reason other than `stop`.
             The exception preserves partial trace_id and run_id values when available.
     """
-    prompt = f"{query}\n\nBenchmark nonce: {nonce}. It has no semantic meaning."
+    prompt = query if fixed_input else f"{query}\n\nBenchmark nonce: {nonce}. It has no semantic meaning."
+    if session_id is not None and not session_id.strip():
+        raise BenchmarkError("reused Session ID must not be blank")
     answer_parts: list[str] = []
     answer: str | None = None
     usage: dict[str, Any] = {}
@@ -1141,17 +1146,22 @@ def run_turn(
     try:
         if deadline is not None:
             _remaining_campaign_seconds(deadline)
-        session_kwargs: dict[str, Any] = {"json": {"title": f"latency-{nonce}"}}
-        session_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
-        if session_timeout is not None:
-            session_kwargs["timeout"] = session_timeout
-        session = client.post("/api/sessions", **session_kwargs)
-        session.raise_for_status()
-        if deadline is not None:
-            _remaining_campaign_seconds(deadline)
-        session_id = str(session.json()["id"])
+        if session_id is None:
+            session_kwargs: dict[str, Any] = {"json": {"title": f"latency-{nonce}"}}
+            session_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
+            if session_timeout is not None:
+                session_kwargs["timeout"] = session_timeout
+            session = client.post("/api/sessions", **session_kwargs)
+            session.raise_for_status()
+            if deadline is not None:
+                _remaining_campaign_seconds(deadline)
+            session_id = str(session.json()["id"])
         stream_kwargs: dict[str, Any] = {
-            "json": {"text": prompt, "attachment_ids": list(attachment_ids), "skill_selections": []},
+            "json": {
+                "text": prompt,
+                "attachment_ids": list(attachment_ids),
+                "skill_selections": [dict(selection) for selection in skill_selections],
+            },
             "headers": {"Idempotency-Key": f"rlm-latency-{uuid4()}"},
         }
         stream_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
@@ -1211,6 +1221,7 @@ def run_turn(
         # after provider execution began.
         exc.trace_id = trace_id  # type: ignore[attr-defined]
         exc.run_id = run_id  # type: ignore[attr-defined]
+        exc.session_id = session_id  # type: ignore[attr-defined]
         exc.usage = usage  # type: ignore[attr-defined]
         exc.peak_child_concurrency = peak_child_concurrency  # type: ignore[attr-defined]
         exc.concurrency_observed = concurrency_observed  # type: ignore[attr-defined]
@@ -1220,6 +1231,7 @@ def run_turn(
         # a positive observation that this Turn admitted no child Sandboxes.
         concurrency_observed = True
     return {
+        "session_id": session_id,
         "answer": answer if answer is not None else "".join(answer_parts),
         "trace_id": trace_id,
         "run_id": run_id,
@@ -1931,6 +1943,79 @@ def _metrics_query(
     return results
 
 
+def _parse_skill_selections(values: Sequence[str]) -> list[dict[str, str]]:
+    if len(values) > 4:
+        raise BenchmarkError("at most four exact Skill selections are supported")
+    selections: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for value in values:
+        skill_id, separator, version = value.partition("@")
+        try:
+            canonical_id = str(UUID(skill_id))
+        except ValueError:
+            raise BenchmarkError("Skill selection requires UUID@version") from None
+        if not separator or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}", version):
+            raise BenchmarkError("Skill selection requires UUID@version")
+        if canonical_id in seen:
+            raise BenchmarkError("Skill selections must not repeat an ID")
+        seen.add(canonical_id)
+        selections.append({"id": canonical_id, "expected_version": version})
+    return selections
+
+
+def _bounded_sample_record(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Retain evidence needed to compare conditions without exporting answers or trajectories."""
+
+    def has_token_counter(value: object) -> bool:
+        if isinstance(value, Mapping):
+            return any(
+                (
+                    key in {"prompt_tokens", "input_tokens", "completion_tokens", "output_tokens"}
+                    and isinstance(child, int)
+                    and not isinstance(child, bool)
+                )
+                or has_token_counter(child)
+                for key, child in value.items()
+            )
+        if isinstance(value, (list, tuple)):
+            return any(has_token_counter(child) for child in value)
+        return False
+
+    diagnostics = row.get("trace_diagnostics")
+    phases = diagnostics.get("phase_durations_ms") if isinstance(diagnostics, Mapping) else None
+    usage = row.get("usage")
+    tokens_observed = has_token_counter(usage)
+    spend, spend_observed = _observed_spend(usage)
+    return {
+        key: row.get(key)
+        for key in (
+            "sample_kind",
+            "session_condition",
+            "session_id",
+            "run_id",
+            "trace_id",
+            "duration_ms",
+            "first_event_ms",
+            "iterations",
+            "batch_calls",
+            "recursive_calls",
+            "recursive_batch_calls",
+            "peak_child_concurrency",
+            "termination_mode",
+            "error_category",
+            "spend_status",
+        )
+    } | {
+        "token_usage": _usage_totals(usage) if tokens_observed else None,
+        "token_usage_status": "observed" if tokens_observed else "unknown",
+        "provider_reported_spend_usd": round(spend, 8) if spend_observed else None,
+        "baseline_quality": row.get("baseline_quality"),
+        "corpus_quality_passed": row.get("corpus_quality_passed"),
+        "phase_durations_ms": phases if isinstance(phases, Mapping) else None,
+        "cleanup_status": diagnostics.get("turn_cleanup_status") if isinstance(diagnostics, Mapping) else None,
+    }
+
+
 def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
     """
     Run live latency benchmark samples and return an aggregate performance receipt.
@@ -1973,6 +2058,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         raise BenchmarkError("benchmark sample timeout must be finite and positive")
     _remaining_campaign_seconds(campaign_deadline)
     workload_id = str(args.workload)
+    skill_selections = _parse_skill_selections(getattr(args, "skill_selection", []))
     corpus_case: CorpusCase | None = make_corpus_case(args.corpus_seed) if workload_id == CORPUS_WORKLOAD_ID else None
     workload = corpus_workload(corpus_case) if corpus_case is not None else LATENCY_WORKLOAD
     rows: list[dict[str, Any]] = []
@@ -1983,6 +2069,11 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             timeout_seconds=min(args.timeout, _remaining_campaign_seconds(campaign_deadline)),
             deadline=campaign_deadline,
         )
+        native_only = bool(getattr(args, "native_only", False))
+        if native_only and (policy.get("profile") != "daytona-native" or policy.get("recursion_enabled") is not False):
+            raise BenchmarkError("native-only baseline requires the daytona-native profile with recursion disabled")
+        reuse_session = bool(getattr(args, "reuse_session", False))
+        reused_session_id: str | None = None
         with tempfile.TemporaryDirectory(prefix="fleet-corpus-") as temp_dir:
             attachment_ids: tuple[str, ...] = ()
             if corpus_case is not None:
@@ -2015,14 +2106,25 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 sample_started = time.perf_counter()
                 row: dict[str, Any] = {}
                 try:
-                    row = run_turn(
-                        client,
-                        workload,
-                        nonce=nonce,
-                        attachment_ids=attachment_ids,
-                        timeout_seconds=min(args.timeout, _remaining_campaign_seconds(trial_deadline)),
-                        deadline=trial_deadline,
-                    )
+                    turn_kwargs: dict[str, Any] = {
+                        "nonce": nonce,
+                        "attachment_ids": attachment_ids,
+                        "skill_selections": skill_selections,
+                        "fixed_input": bool(getattr(args, "fixed_input", False)),
+                        "timeout_seconds": min(args.timeout, _remaining_campaign_seconds(trial_deadline)),
+                        "deadline": trial_deadline,
+                    }
+                    if reuse_session and reused_session_id is not None:
+                        turn_kwargs["session_id"] = reused_session_id
+                    row = run_turn(client, workload, **turn_kwargs)
+                    if reuse_session:
+                        reused_session_id = str(row["session_id"])
+                    if native_only and (
+                        row.get("recursive_calls") != 0
+                        or row.get("recursive_batch_calls") != 0
+                        or row.get("peak_child_concurrency") != 0
+                    ):
+                        raise BenchmarkError("native-only baseline observed recursive child work")
                     _remaining_campaign_seconds(trial_deadline)
                     execution_trace_id = (
                         _execution_trace_id(
@@ -2074,6 +2176,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                     # Extract partial trace_id and run_id from stream failures
                     partial_trace_id = getattr(exc, "trace_id", None) or row.get("trace_id")
                     partial_run_id = getattr(exc, "run_id", None) or row.get("run_id")
+                    partial_session_id = getattr(exc, "session_id", None) or row.get("session_id")
                     partial_usage = getattr(exc, "usage", None)
                     partial_peak = getattr(exc, "peak_child_concurrency", None)
                     partial_concurrency_observed = getattr(exc, "concurrency_observed", None)
@@ -2092,6 +2195,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                         "error_category": type(exc).__name__,
                         "trace_id": partial_trace_id,
                         "run_id": partial_run_id,
+                        "session_id": partial_session_id,
                         "usage": partial_usage if partial_usage is not None else row.get("usage"),
                         "peak_child_concurrency": (
                             partial_peak if partial_peak is not None else row.get("peak_child_concurrency")
@@ -2107,6 +2211,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
                 if corpus_case is not None:
                     row["corpus_seed"] = corpus_case.seed
                 row["sample_kind"] = sample
+                row["session_condition"] = "warm_reuse" if reuse_session and index > 0 else "cold_new_session"
                 rows.append(row)
                 sample_cost, sample_cost_observed = _observed_spend(row.get("usage"))
                 trace_diagnostics = row.get("trace_diagnostics")
@@ -2151,12 +2256,18 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         "variant": args.variant,
         "workload_id": workload_id,
         "input_sha256": hashlib.sha256(workload.encode("utf-8")).hexdigest(),
+        "fixed_input": bool(getattr(args, "fixed_input", False)),
         "corpus_seed": corpus_case.seed if corpus_case is not None else None,
         "active_policy": policy,
+        "skill_selections": skill_selections,
         "warmups": args.warmups,
         "session_conditions": {
-            "new_session_per_sample": True,
-            "warm_session_reuse_measured": False,
+            "new_session_per_sample": not reuse_session,
+            "warm_session_reuse_measured": any(
+                row.get("session_condition") == "warm_reuse" and row.get("run_id") and row.get("error_category") is None
+                for row in rows
+            ),
+            "warm_session_history_includes_prior_trials": reuse_session and len(rows) > 1,
             "provider_cache_condition": "uncontrolled",
         },
         "campaign_preflight": campaign.as_dict(),
@@ -2176,6 +2287,7 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             "budget_ledger": campaign_budget.receipt(),
         },
         "aggregate": aggregate,
+        "sample_records": [_bounded_sample_record(row) for row in rows],
         "mlflow_span_metrics": metrics,
     }
 
@@ -2510,6 +2622,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--corpus-seed", choices=CORPUS_SEEDS, type=int, default=CORPUS_SEEDS[0])
     parser.add_argument("--warmups", type=int, default=3)
     parser.add_argument("--runs", type=int, default=20)
+    parser.add_argument(
+        "--fixed-input",
+        action="store_true",
+        help="Submit the exact frozen workload text without a per-trial prompt nonce",
+    )
+    parser.add_argument(
+        "--skill-selection",
+        action="append",
+        default=[],
+        metavar="UUID@VERSION",
+        help="Select an exact manifested Skill version for matched benchmark runs",
+    )
+    parser.add_argument(
+        "--reuse-session",
+        action="store_true",
+        help="Reuse the first sample's Session for later Turns; records warm reuse with prior Turn history",
+    )
+    parser.add_argument(
+        "--native-only",
+        action="store_true",
+        help="Require the native profile before admission and reject observed full-child tool use",
+    )
     parser.add_argument("--timeout", type=float, default=2_000.0)
     parser.add_argument(
         "--judge-model",

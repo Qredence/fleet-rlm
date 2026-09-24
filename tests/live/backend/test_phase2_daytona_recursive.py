@@ -114,6 +114,8 @@ class _ChildEvidence:
     created: int = 0
     same_volume_sibling_scope: bool = False
     volumeless_semantic_isolation: bool = False
+    provider_mounts_inspected: bool = False
+    provider_no_volume_mount: bool = False
     cleanup_succeeded: bool = False
     child_duration_ms: int = 0
     started_at: float | None = None
@@ -208,6 +210,15 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
             None,
             "",
         )
+        # Lease metadata describes Fleet's request. Read the acquired Sandbox
+        # back from Daytona so the receipt can distinguish provider evidence.
+        try:
+            provider_child = await owner._platform.get(lease.sandbox_id) if owner._platform is not None else None
+        except Exception:
+            provider_child = None
+        provider_mounts = getattr(provider_child, "volumes", None)
+        evidence.provider_mounts_inspected = provider_child is not None and provider_mounts is not None
+        evidence.provider_no_volume_mount = evidence.provider_mounts_inspected and len(provider_mounts) == 0
         close = lease._close
 
         def observed_close() -> None:
@@ -401,6 +412,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             assert ledger.calls == 1
             assert child_evidence.created == 1
             assert child_evidence.same_volume_sibling_scope or child_evidence.volumeless_semantic_isolation
+            assert child_evidence.provider_mounts_inspected and child_evidence.provider_no_volume_mount
             assert child_evidence.cleanup_succeeded
             pending_receipt = {
                 "schema": _RECEIPT_SCHEMA,
@@ -411,6 +423,8 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
                 "assertions": {
                     "dedicated_child_sandbox": True,
                     "child_isolation_scope": True,
+                    "provider_mounts_inspected": child_evidence.provider_mounts_inspected,
+                    "provider_no_volume_mount": child_evidence.provider_no_volume_mount,
                     "root_marker_absent_in_child": ledger.root_marker_absent_in_child,
                     "root_continuity": ledger.root_continuity,
                     "child_typed_submit": completion["termination_mode"] == "typed_submit",

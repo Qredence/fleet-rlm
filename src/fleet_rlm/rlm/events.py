@@ -113,6 +113,8 @@ class ChildProgress:
     evidence: tuple[str, ...] = ()
     gaps: tuple[str, ...] = ()
     result_file_count: int = 0
+    code_excerpt: str | None = None
+    output_excerpt: str | None = None
 
     def __post_init__(self) -> None:
         if not self.child_id.strip() or len(self.child_id) > 128:
@@ -139,6 +141,8 @@ class ChildProgress:
             raise ValueError("result_file_count must be between 0 and 16")
         if self.outcome is not None and len(self.outcome) > 500:
             raise ValueError("outcome must not exceed 500 characters")
+        if any(value is not None and len(value) > 800 for value in (self.code_excerpt, self.output_excerpt)):
+            raise ValueError("child code and output excerpts must not exceed 800 characters")
         if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
             raise ValueError("parent_run_id must contain 1 to 128 non-blank characters")
 

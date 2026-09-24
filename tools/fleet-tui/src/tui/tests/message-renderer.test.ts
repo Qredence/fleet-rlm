@@ -22,6 +22,8 @@ describe("renderMessage", () => {
       evidence: ["src/api.py:42"],
       gaps: ["Caller not checked"],
       resultFileCount: 2,
+      codeExcerpt: "print('selected row')",
+      outputExcerpt: "selected row",
       cleanupState: "complete",
       collapsed: true,
       ts: 1,
@@ -31,7 +33,10 @@ describe("renderMessage", () => {
     expect(expanded).toContain("src/api.py:42");
     expect(expanded).toContain("Caller not checked");
     expect(expanded).toContain("saved result files: 2");
+    expect(expanded).toContain("print('selected row')");
+    expect(expanded).toContain("output:");
     expect(renderMessage(child, 70).join("\n")).not.toContain("saved result files: 2");
+    expect(renderMessage(child, 70).join("\n")).not.toContain("print('selected row')");
   });
 
   it("uses the pi user surface and leaves assistant prose unboxed", () => {

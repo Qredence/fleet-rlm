@@ -59,6 +59,8 @@ def _canonical_turn(parent_run_id: str | None = None) -> CommittedTurn:
                 state="completed",
                 elapsed_ms=24,
                 outcome="Evidence cross-check complete",
+                code_excerpt="print('checked')",
+                output_excerpt="checked",
                 cleanup_state="complete",
                 parent_run_id=parent_run_id,
             ),
@@ -127,6 +129,8 @@ def test_reload_projection_consumes_canonical_part_vocabulary() -> None:
     child = next(part for part in message["parts"] if part["type"] == "data-child-progress")
     assert message["metadata"]["runId"] == str(run_id)
     assert child["data"]["parent_run_id"] == str(run_id)
+    assert child["data"]["code_excerpt"] == "print('checked')"
+    assert child["data"]["output_excerpt"] == "checked"
 
 
 def test_tool_call_state_error_semantics_are_canonical() -> None:

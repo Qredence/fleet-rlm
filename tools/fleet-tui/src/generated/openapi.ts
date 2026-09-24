@@ -1180,6 +1180,10 @@ export interface components {
                 gaps?: string[];
                 /** Result File Count */
                 result_file_count?: number;
+                /** Code Excerpt */
+                code_excerpt?: string | null;
+                /** Output Excerpt */
+                output_excerpt?: string | null;
                 /**
                  * Cleanup State
                  * @enum {string}

@@ -96,6 +96,8 @@ export type Message =
       evidence?: string[];
       gaps?: string[];
       resultFileCount?: number;
+      codeExcerpt?: string;
+      outputExcerpt?: string;
       cleanupState: "pending" | "complete" | "failed" | "not_required";
       collapsed?: boolean;
       ts: number;
@@ -472,7 +474,11 @@ function reduce(state: State, event: Event): State {
       }
       if (existing >= 0) {
         const messages = state.messages.slice();
-        messages[existing] = incoming;
+        const previous = messages[existing];
+        messages[existing] =
+          incoming.kind === "child_progress" && previous?.kind === "child_progress"
+            ? { ...incoming, collapsed: previous.collapsed }
+            : incoming;
         return { ...state, messages, run };
       }
       if (incoming.kind === "reasoning") {

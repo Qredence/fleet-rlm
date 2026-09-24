@@ -183,6 +183,8 @@ def _append_child_progress(detail: ChildProgress, state: _NormalizeState) -> Non
         evidence=detail.evidence,
         gaps=detail.gaps,
         result_file_count=detail.result_file_count,
+        code_excerpt=detail.code_excerpt,
+        output_excerpt=detail.output_excerpt,
         cleanup_state=detail.cleanup_state,
         parent_run_id=detail.parent_run_id,
     )

@@ -272,6 +272,8 @@ def test_recursive_tool_runs_fresh_native_child_and_redacts_observation() -> Non
     assert child_progress[-1].child_id == "child-1"
     assert child_progress[-1].parent_run_id == parent_run_id
     assert child_progress[-1].outcome == "child-ok"
+    assert child_progress[-1].code_excerpt == "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"
+    assert child_progress[-1].output_excerpt == "FINAL submitted"
     assert statuses[0].message == "call_index=1 recursive_depth=1"
     assert statuses[1].message is not None
     assert "duration_ms=" in statuses[1].message
