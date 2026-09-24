@@ -111,6 +111,7 @@ class ChildProgress:
     parent_run_id: str | None = None
     evidence: tuple[str, ...] = ()
     gaps: tuple[str, ...] = ()
+    result_file_count: int = 0
 
     def __post_init__(self) -> None:
         if not self.child_id.strip() or len(self.child_id) > 128:
@@ -129,6 +130,12 @@ class ChildProgress:
             raise ValueError("unsupported child cleanup state")
         if not isinstance(self.elapsed_ms, int) or isinstance(self.elapsed_ms, bool) or self.elapsed_ms < 0:
             raise ValueError("elapsed_ms must be a non-negative integer")
+        if (
+            not isinstance(self.result_file_count, int)
+            or isinstance(self.result_file_count, bool)
+            or not 0 <= self.result_file_count <= 16
+        ):
+            raise ValueError("result_file_count must be between 0 and 16")
         if self.outcome is not None and len(self.outcome) > 500:
             raise ValueError("outcome must not exceed 500 characters")
         if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):

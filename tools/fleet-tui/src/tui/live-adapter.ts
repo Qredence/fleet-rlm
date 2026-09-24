@@ -142,6 +142,7 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
             detail: "Child progress details are unavailable.",
           },
         ];
+      const resultFileCount = int(value.result_file_count);
       return [
         {
           type: "child_progress",
@@ -162,6 +163,10 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
             value.gaps.length <= 8 &&
             value.gaps.every((item) => typeof item === "string" && item.length <= 200)
               ? value.gaps
+              : undefined,
+          resultFileCount:
+            resultFileCount !== undefined && resultFileCount >= 0 && resultFileCount <= 16
+              ? resultFileCount
               : undefined,
           cleanupState: cleanupState as (typeof cleanups)[number],
           messageId: chunk.id ?? undefined,

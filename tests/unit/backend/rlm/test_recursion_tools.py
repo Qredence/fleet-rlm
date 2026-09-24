@@ -389,17 +389,21 @@ def test_child_result_files_are_persisted_before_cleanup_and_never_fabricated(
         persisted[path] = content
         return f"run/children/{call_index}/{path}"
 
+    observed: list[object] = []
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
     monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
         child_runtime_factory=lambda _index, *, profile: lease,  # noqa: ARG005
         result_writer=persist,
+        observer=observed.append,
     )
 
     outcome = executor.tool(task="write a structured summary", inputs=[])
 
     assert child_closed
+    progress = [item for item in observed if isinstance(item, ChildProgress)]
+    assert progress[-1].result_file_count == (0 if writer_fails else 1)
     if writer_fails:
         assert outcome["status"] == "failed"
         assert outcome["result_files"] == []

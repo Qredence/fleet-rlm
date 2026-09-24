@@ -15,7 +15,14 @@ def test_projector_replays_terminal_child_progress_with_the_same_payload() -> No
         schema_version=1,
         parts=(
             ChildProgressPart(
-                "root:call-3", "Check references", "failed", 930, "No reliable source", "complete", "run-17"
+                "root:call-3",
+                "Check references",
+                "failed",
+                930,
+                "No reliable source",
+                "complete",
+                "run-17",
+                result_file_count=1,
             ),
             ChildProgressPart(
                 "root:call-4",
@@ -44,6 +51,7 @@ def test_projector_replays_terminal_child_progress_with_the_same_payload() -> No
                 "outcome": "No reliable source",
                 "evidence": [],
                 "gaps": [],
+                "result_file_count": 1,
                 "cleanup_state": "complete",
                 "parent_run_id": "run-17",
             },
@@ -62,6 +70,7 @@ def test_projector_replays_terminal_child_progress_with_the_same_payload() -> No
                 "outcome": "Child admission budget exhausted",
                 "evidence": [],
                 "gaps": [],
+                "result_file_count": 0,
                 "cleanup_state": "not_required",
                 "parent_run_id": "run-17",
             },

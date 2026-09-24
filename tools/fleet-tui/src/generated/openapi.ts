@@ -1178,6 +1178,8 @@ export interface components {
                 evidence?: string[];
                 /** Gaps */
                 gaps?: string[];
+                /** Result File Count */
+                result_file_count?: number;
                 /**
                  * Cleanup State
                  * @enum {string}

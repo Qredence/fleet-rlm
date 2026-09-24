@@ -21,6 +21,7 @@ describe("renderMessage", () => {
       outcome: "Found one path",
       evidence: ["src/api.py:42"],
       gaps: ["Caller not checked"],
+      resultFileCount: 2,
       cleanupState: "complete",
       collapsed: true,
       ts: 1,
@@ -29,6 +30,8 @@ describe("renderMessage", () => {
     const expanded = renderMessage({ ...child, collapsed: false }, 70).join("\n");
     expect(expanded).toContain("src/api.py:42");
     expect(expanded).toContain("Caller not checked");
+    expect(expanded).toContain("saved result files: 2");
+    expect(renderMessage(child, 70).join("\n")).not.toContain("saved result files: 2");
   });
 
   it("uses the pi user surface and leaves assistant prose unboxed", () => {

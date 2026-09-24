@@ -95,6 +95,7 @@ export type Message =
       outcome?: string;
       evidence?: string[];
       gaps?: string[];
+      resultFileCount?: number;
       cleanupState: "pending" | "complete" | "failed" | "not_required";
       collapsed?: boolean;
       ts: number;
