@@ -329,6 +329,12 @@ class TurnPreparationPlan:
     def __post_init__(self) -> None:
         object.__setattr__(self, "wrap_up_seconds", max(0.0, float(self.wrap_up_seconds)))
 
+    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
+        return await prepare_turn(self, run, deadline=deadline)
+
+    async def aclose(self) -> bool:
+        return await close_turn_preparation(self)
+
 
 async def _check_cancellation(run: ClaimedRun) -> None:
     try:

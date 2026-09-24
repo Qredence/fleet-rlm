@@ -59,8 +59,6 @@ from fleet_rlm.turn_preparation import (
     RunPreparation,
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
-    TurnPreparationPlan,
-    prepare_turn,
 )
 from fleet_rlm.turn_settlement import RunLifecycle
 
@@ -465,7 +463,7 @@ class TurnRuntime:
         self,
         *,
         lifecycle: RunLifecycle,
-        preparation: RunPreparation | TurnPreparationPlan,
+        preparation: RunPreparation,
         runner: RunRunner,
         projector: CommittedTurnEventProjector | None = None,
         turn_timeout_seconds: int | float = 1800,
@@ -528,10 +526,7 @@ class TurnRuntime:
                         "skill_selection_count": len(start.input.skill_selections),
                     },
                 ):
-                    if isinstance(self._preparation, TurnPreparationPlan):
-                        prepared = await prepare_turn(self._preparation, start, deadline=deadline)
-                    else:
-                        prepared = await self._preparation.prepare(start, deadline=deadline)
+                    prepared = await self._preparation.prepare(start, deadline=deadline)
             except BaseException:
                 annotate_trace_io(
                     request=start.input.text,

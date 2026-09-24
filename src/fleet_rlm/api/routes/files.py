@@ -41,11 +41,11 @@ from fleet_rlm.attachments import (
     AttachmentUpload,
 )
 from fleet_rlm.observability.posthog import capture
+from fleet_rlm.workspace.errors import WorkspaceConflictError
+from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.workspace import (
     MAX_PUBLIC_LIST_LIMIT,
     MAX_PUBLIC_READ_CHARS,
-    WorkspaceFileConflictError,
-    WorkspaceFileEntry,
 )
 
 # ---------------------------------------------------------------------------
@@ -55,12 +55,12 @@ from fleet_rlm.workspace.workspace import (
 workspace_files_router = APIRouter(prefix="/api/files", tags=["workspace-files"])
 
 
-def _entry(value: WorkspaceFileEntry) -> WorkspaceFileEntryResponse:
+def _entry(value: WorkspaceEntry) -> WorkspaceFileEntryResponse:
     return WorkspaceFileEntryResponse.model_validate(value, from_attributes=True)
 
 
 def _raise_public_error(exc: BaseException) -> NoReturn:
-    if isinstance(exc, (WorkspaceFileConflictError, FileExistsError)):
+    if isinstance(exc, (WorkspaceConflictError, FileExistsError)):
         raise http_error(
             409,
             "workspace_file_conflict",

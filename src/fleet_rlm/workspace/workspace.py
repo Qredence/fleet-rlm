@@ -43,13 +43,6 @@ SESSION_WORKSPACE_NAMESPACE = "session_workspace"
 MAX_WORKSPACE_TEXT_BATCH_ITEMS = 32
 MAX_WORKSPACE_TEXT_BATCH_CHARS = 32_000
 
-# The old public DTO names are aliases, not second value models.  They make
-# staged route migrations possible while keeping Workspace models canonical.
-WorkspaceFileConflictError = WorkspaceConflictError
-WorkspaceFileEntry = WorkspaceEntry
-WorkspaceFileList = WorkspaceListResult
-WorkspaceFileSession = AsyncStorageSession
-
 
 class WorkspaceAccessGateway(Protocol):
     """Async opener for the Workspace-level public ``files/`` root."""
@@ -775,11 +768,7 @@ __all__ = [
     "WorkspaceCapabilityMetadata",
     "WorkspaceConflictError",
     "WorkspaceEntry",
-    "WorkspaceFileConflictError",
-    "WorkspaceFileEntry",
-    "WorkspaceFileList",
     "WorkspaceFileService",
-    "WorkspaceFileSession",
     "WorkspaceListResult",
     "WorkspaceTextPage",
     "WorkspaceToolError",

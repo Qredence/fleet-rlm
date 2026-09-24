@@ -13,13 +13,13 @@ from dspy.utils.callback import BaseCallback
 
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.observability.dspy_callbacks import (
-    CallbackShadowRecorder,
-    compare_callback_records,
-)
 from fleet_rlm.rlm.events import (
     ToolEventView,
     observe_tool,
+)
+from tests.support.dspy_callbacks import (
+    CallbackShadowRecorder,
+    compare_callback_records,
 )
 
 
