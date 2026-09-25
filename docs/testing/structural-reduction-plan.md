@@ -37,11 +37,16 @@ worktree. Lines include comments and blanks.
 `daytona/turn_environment.py` (328 lines) was deleted. Its acquisition logic
 and Run storage moved into existing composition and host-I/O owners (286 net
 lines added there); simplifications elsewhere offset that move, leaving 69
-fewer production lines overall. The runtime also dropped separate workspace-I/O,
-child-close, late-cleanup, and release-task registries; pending operations now
-use the owning record/lease and the runtime provider-task set. The required
-sync `volume_fs` view remains as a narrow bridge to the interpreter storage
-contract; there is no stateful environment-provider wrapper.
+fewer production lines overall. This removes one stateful owner,
+`_DaytonaEnvironmentProvider`, and five detached task/resource registries:
+`_workspace_io_leases`, `_workspace_io_tasks`, `_child_close_tasks`,
+`_late_cleanup_tasks`, and `_release_leases`. Pending operations now stay with
+their root or child record/lease and the runtime provider-task set. The
+remaining `InterpreterLease`, `ChildRuntimeLease`, and `SandboxLease` are
+per-resource lifecycle primitives for interpreter release, child interpreter
+cleanup, and provider-confirmed cleanup; they do not create a second registry
+or environment-provider layer. The required sync `volume_fs` view remains a
+narrow bridge to the interpreter storage contract.
 
 ## Tasks
 
@@ -80,6 +85,9 @@ contract; there is no stateful environment-provider wrapper.
   Stock `dspy.JSONAdapter` produced 16 correct scripted outputs in 64 attempts;
   `FleetJSONAdapter` produced 56 in 116 attempts. This is protocol-fixture
   evidence only; it does not establish semantic quality or Daytona behavior.
+- Re-ran `run_adapter_comparison(repetitions=2)` on this worktree, based on
+  `38a5028c6`; all four gates passed. The receipt reported `source_dirty=true`
+  because it covered the implementation under review.
 - `git diff --check` passed after the implementation and pilot evidence updates.
 
 ## Authorized live pilot — partial (2026-09-25)
@@ -94,9 +102,8 @@ contract; there is no stateful environment-provider wrapper.
   trace took 31.7 s and the execution trace 36.8 s.
 - **Cost and stop:** no provider-reported cost appeared in Turn usage, MLflow
   trace metadata, or model-call spans. Actual spend is unknown; no estimate is
-  substituted. The first $1 reservation remains booked in campaign accounting;
-  actual provider spend is unknown. The stock adapter arm was not admitted
-  under the stop rule.
+  substituted. The first $1 reservation remains booked in campaign accounting.
+  The stock adapter arm was not admitted under the stop rule.
 - **Cleanup:** the durable settlement and Turn cleanup spans were `OK`. CLI
   shutdown completed, and a read-only provider lookup for this Session's
   Sandbox returned absent. The persisted binding still said `running` at lookup
