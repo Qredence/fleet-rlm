@@ -208,6 +208,20 @@ class TestPackageAssetsAndExclusions:
             names = set(zf.namelist())
             for asset in _REQUIRED_ASSET_PATHS:
                 assert asset in names, f"Wheel missing required asset: {asset}"
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(ROOT / "scripts/validate_release.py"),
+                "wheel",
+                "--dist-dir",
+                str(wheel.parent),
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr
 
     def test_profiles_load_from_wheel_without_checkout_assets(self, built_artifacts: tuple[Path, Path]) -> None:
         wheel, _ = built_artifacts

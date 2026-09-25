@@ -57,7 +57,7 @@ make check
 
 The default pytest targets mask local live `FLEET_*` credentials so `.env`
 cannot silently select provider composition. They install deterministic private
-composition where required, run with at most four xdist workers by default, and
+composition where required, run with at most two xdist workers by default, and
 use xdist `loadfile` scheduling to keep module-scoped fixtures together. The
 packaging/release matrix is intentionally excluded because it creates isolated
 virtual environments and artifacts; run it explicitly with `make test-packaging`.
@@ -66,11 +66,12 @@ Package-wide coverage remains available locally over the same canonical
 non-live corpus:
 
 ```bash
-make test-daytona-cov
+make test-coverage
 ```
 
-This target measures `src/fleet_rlm`, fails below 75%, prints missing lines,
-and writes `.scratch/coverage/daytona.xml`. CircleCI instead measures coverage
+`make test-daytona-cov` remains an alias. The canonical target measures
+`src/fleet_rlm`, fails below 75%, prints missing lines, and writes
+`.scratch/coverage/daytona.xml`. CircleCI instead measures coverage
 inside the four `test-unit` shards, persists each shard's `.coverage.*` data,
 and combines it in the downstream `coverage-gate` job, which enforces the same
 75% floor. Coverage is not a substitute for the opt-in live Daytona durability
@@ -102,6 +103,12 @@ Daytona coverage or the canonical E2E atoms. Packaging/install certification
 runs in the release package gate rather than every unit shard. The opt-in
 `deploy-pypi` bridge is attached to this workflow and runs only on `main`
 after every listed quality, test, compatibility, coverage, and TUI gate.
+
+The manually dispatched GitHub release workflow independently runs `make check`,
+security and release checks before building. Its preflight installs the pinned
+TUI Node and pnpm toolchain so the full gate includes generated API/stream
+contracts and TUI checks; the package gate runs `make test-packaging` against
+the downloaded distribution.
 
 `git diff --check` is required separately. The packaging lane is intentionally
 separate from the fast gate and runs serially to avoid build-metadata races:
