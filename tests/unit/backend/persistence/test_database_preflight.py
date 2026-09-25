@@ -1,7 +1,20 @@
+"""Database preflight and compatibility-gate contracts.
+
+* ``test_ensure_database_compatible.py``: Unit tests for the shared fail-closed compatibility gate.
+"""
+
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
+from fleet_rlm.persistence import database
+from fleet_rlm.persistence.database import (
+    DatabaseCompatibilityError,
+    DatabaseConnectionError,
+    ensure_database_compatible,
+)
 from fleet_rlm.persistence.preflight import (
     _REQUIRED_DML_PRIVILEGES,
     _REQUIRED_SELECT_TABLES,
@@ -12,6 +25,7 @@ from fleet_rlm.persistence.preflight import (
 )
 
 
+# --- from test_database_preflight.py ----------------------------------
 def test_storage_separation_compares_hosts_without_credentials() -> None:
     url = "postgresql://fleet_app:secret@lakebase.example/fleet?sslmode=require"
     assert storage_is_separate(url, "http://127.0.0.1:5001") is True
@@ -109,3 +123,43 @@ def test_preflight_receipt_defaults_missing_dml_privileges_to_false() -> None:
     assert fleet_select["fleet_sessions"] is True
     assert fleet_select["fleet_runs"] is False
     assert fleet_select["fleet_memory_promotion_intents"] is False
+
+
+# --- from test_ensure_database_compatible.py --------------------------
+@pytest.mark.asyncio
+async def test_revision_mismatch_is_wrapped_with_remediation(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def reject(*_args: object, **_kwargs: object) -> None:
+        raise DatabaseCompatibilityError("database revision does not match Alembic head")
+
+    monkeypatch.setattr(database, "check_database_compatibility", reject)
+
+    with pytest.raises(DatabaseCompatibilityError) as error:
+        await ensure_database_compatible("postgresql+asyncpg://u:p@h/db", repo_root=Path("/repo"))
+
+    assert str(error.value) == "Fleet database is not at Alembic head; run `uv run python scripts/db_init.py`"
+
+
+@pytest.mark.asyncio
+async def test_connection_error_passes_through(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def reject(*_args: object, **_kwargs: object) -> None:
+        raise DatabaseConnectionError("fleet database compatibility could not be verified")
+
+    monkeypatch.setattr(database, "check_database_compatibility", reject)
+
+    with pytest.raises(DatabaseConnectionError, match="could not be verified"):
+        await ensure_database_compatible("postgresql+asyncpg://u:p@h/db", repo_root=Path("/repo"))
+
+
+@pytest.mark.asyncio
+async def test_unexpected_exception_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def reject(*_args: object, **_kwargs: object) -> None:
+        raise OSError("could not read /secret/path/alembic.ini")
+
+    monkeypatch.setattr(database, "check_database_compatibility", reject)
+
+    with pytest.raises(DatabaseConnectionError) as error:
+        await ensure_database_compatible("postgresql+asyncpg://u:p@h/db", repo_root=Path("/repo"))
+
+    assert str(error.value) == "Fleet database compatibility could not be verified"
+    assert "/secret/path" not in str(error.value)
+    assert isinstance(error.value.__cause__, OSError)

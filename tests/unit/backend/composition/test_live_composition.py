@@ -760,7 +760,7 @@ def test_unready_composition_never_builds_route_dependencies() -> None:
 
 
 def test_app_py_top_level_avoids_dspy_daytona() -> None:
-    app_path = Path(__file__).resolve().parents[3] / "src" / "fleet_rlm" / "app.py"
+    app_path = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "app.py"
     tree = ast.parse(app_path.read_text(encoding="utf-8"))
     imported: set[str] = set()
     for node in ast.walk(tree):

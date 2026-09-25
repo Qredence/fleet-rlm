@@ -1,4 +1,8 @@
-"""Focused coverage for coordinator-owned execution and settlement."""
+"""Coordinator-owned execution, settlement, and Turn-open command contracts.
+
+* ``test_turn_coordinator_execution.py``: Focused coverage for coordinator-owned execution and settlement.
+* ``test_open_turn_command.py``: Validated application command for Session-first Turn creation.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +13,7 @@ from uuid import uuid4
 import pytest
 
 
+# --- from test_turn_coordinator_execution.py --------------------------
 def _turn():
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -390,3 +395,39 @@ def test_trace_request_reads_the_session_view() -> None:
     assert TurnRuntime._trace_request(prepared) == "show me"
     legacy = SimpleNamespace(execution=SimpleNamespace())
     assert TurnRuntime._trace_request(legacy) == ""
+
+
+# --- from test_open_turn_command.py -----------------------------------
+def test_open_turn_command_contains_only_claimed_canonical_values() -> None:
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    command = OpenTurnCommand(
+        access=TurnAccess(user_id=uuid4(), workspace_id=uuid4()),
+        session_id=uuid4(),
+        input=TurnInput(text="inspect"),
+        idempotency_key="request-1",
+        proposed_run_id=uuid4(),
+    )
+
+    assert command.idempotency_key == "request-1"
+    assert command.input.text == "inspect"
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["", "   ", "line\nbreak", "x" * 129],
+    ids=["empty", "whitespace", "newline", "too_long"],
+)
+def test_open_turn_command_rejects_invalid_idempotency_keys(key: str) -> None:
+    from fleet_rlm.chat.commands import OpenTurnCommand
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+
+    with pytest.raises(ValueError):
+        OpenTurnCommand(
+            access=TurnAccess(user_id=uuid4(), workspace_id=uuid4()),
+            session_id=uuid4(),
+            input=TurnInput(text="inspect"),
+            idempotency_key=key,
+            proposed_run_id=uuid4(),
+        )
