@@ -85,11 +85,8 @@ outputs/
 !.codex/environments/
 !.codex/environments/environment.toml
 !.codex/cloud-preflight.zsh
-!.codex/maintenance.zsh
 !.codex/workspace-bootstrap.zsh
 !.codex/config.toml
-!.codex/hooks/
-!.codex/hooks/*.zsh
 !.codex/agents/
 !.codex/agents/*.toml
 .letta/

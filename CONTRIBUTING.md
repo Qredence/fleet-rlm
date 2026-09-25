@@ -13,8 +13,11 @@ uv sync --all-extras --dev
 uv run fleet-rlm --help
 ```
 
-Codex Cloud workspaces use `zsh .codex/workspace-bootstrap.zsh`; do not run that
-branch-guarded bootstrap as a generic local setup step.
+Codex Cloud workspaces use `.codex/environments/environment.toml` to run
+`zsh .codex/workspace-bootstrap.zsh` automatically. The bootstrap requires a
+feature branch based on `origin/main`; do not use it for ordinary local setup.
+The environment exposes common run and check actions. Use the Makefile for
+formatting, contract sync, security checks, and release commands.
 
 Node 22.19+ and pnpm are required for `tools/fleet-tui/`:
 

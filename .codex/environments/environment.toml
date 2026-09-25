@@ -5,29 +5,9 @@ name = "fleet-rlm"
 script = ".codex/workspace-bootstrap.zsh"
 
 [[actions]]
-name = "Setup: Bootstrap Workspace"
-icon = "run"
-command = "zsh .codex/workspace-bootstrap.zsh"
-
-[[actions]]
-name = "Codex Cloud: Branch Preflight"
-icon = "check"
-command = "zsh .codex/cloud-preflight.zsh"
-
-[[actions]]
 name = "App: Run API"
 icon = "run"
 command = "uv run fleet web"
-
-[[actions]]
-name = "App: Serve API on 8000"
-icon = "run"
-command = "uv run fleet-rlm serve-api --port 8000"
-
-[[actions]]
-name = "Terminal Client: Install"
-icon = "run"
-command = "cd tools/fleet-tui && pnpm install --frozen-lockfile"
 
 [[actions]]
 name = "Terminal Client: Run"
@@ -35,19 +15,9 @@ icon = "run"
 command = "cd tools/fleet-tui && pnpm start"
 
 [[actions]]
-name = "Terminal Client: Test"
+name = "Backend: Unit Tests"
 icon = "test"
-command = "cd tools/fleet-tui && pnpm test"
-
-[[actions]]
-name = "Terminal Client: Typecheck"
-icon = "check"
-command = "cd tools/fleet-tui && pnpm typecheck"
-
-[[actions]]
-name = "Backend: Format"
-icon = "check"
-command = "make format"
+command = "make test-unit"
 
 [[actions]]
 name = "Backend: Check"
@@ -55,51 +25,11 @@ icon = "check"
 command = "make check"
 
 [[actions]]
-name = "Backend: Unit Tests"
-icon = "test"
-command = "make test-unit"
-
-[[actions]]
 name = "Repo: Docs Check"
 icon = "docs"
 command = "make check-docs"
 
 [[actions]]
-name = "Repo: Release Check"
-icon = "check"
-command = "make check-release"
-
-[[actions]]
-name = "Repo: Security Check"
-icon = "shield"
-command = "make check-security"
-
-[[actions]]
-name = "Repo: Dependency Check"
-icon = "check"
-command = "make check-deps"
-
-[[actions]]
 name = "OpenAPI: Check"
 icon = "check"
 command = "make api-check"
-
-[[actions]]
-name = "OpenAPI: Sync"
-icon = "sync"
-command = "make api-sync"
-
-[[actions]]
-name = "Release: Build Artifacts"
-icon = "build"
-command = "make build-release"
-
-[[actions]]
-name = "Cloud: FastAPI Preflight"
-icon = "check"
-command = "make cloud-preflight"
-
-[[actions]]
-name = "CLI: Help"
-icon = "docs"
-command = "make cli-help"
