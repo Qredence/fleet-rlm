@@ -1,3 +1,8 @@
+"""Recursive tool contracts and live canary capture boundaries.
+
+* ``test_live_capsule_capture.py``: Credential-free checks for the live canary's host-side evidence boundary.
+"""
+
 from __future__ import annotations
 
 import json
@@ -26,10 +31,13 @@ from fleet_rlm.rlm.recursion import (
     SelectedInputAccess,
     SubproblemCapsule,
 )
+from fleet_rlm.rlm.recursion import RecursiveRLMExecutor as ProductionRecursiveRLMExecutor
 from fleet_rlm.runtime.authority import RunAuthority
+from tests.live.backend.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
+# --- from test_recursion_tools.py -------------------------------------
 def _executor(
     root_actions: list[dict[str, str]],
     *,
@@ -1317,3 +1325,27 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     assert executor.summary().call_count == 3
     assert executor.summary().recursive_children_started == 1
     assert executor.summary().recursive_children_completed == 1
+
+
+# --- from test_live_capsule_capture.py --------------------------------
+@pytest.mark.parametrize("status", ["failed", "timed_out", "cancelled"])
+def test_live_batch_capture_rejects_unsuccessful_child_status(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
+    outcomes = [{"status": "completed", "answer": "first"}, {"status": status, "answer": "second"}]
+    monkeypatch.setattr(ProductionRecursiveRLMExecutor, "_call_capsules_batched", lambda *_args: outcomes)
+    evidence = _ChildEvidence()
+    _install_batch_answer_capture(monkeypatch, evidence)
+    executor = object.__new__(ProductionRecursiveRLMExecutor)
+    with pytest.raises(AssertionError):
+        executor._call_capsules_batched([{"task": "first"}, {"task": "second"}])
+    assert evidence.batch_answers is None
+
+
+def test_live_batch_capture_retains_order_and_typed_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    outcomes = [{"status": "completed", "answer": "first"}, {"status": "completed", "answer": "second"}]
+    monkeypatch.setattr(ProductionRecursiveRLMExecutor, "_call_capsules_batched", lambda *_args: outcomes)
+    evidence = _ChildEvidence()
+    _install_batch_answer_capture(monkeypatch, evidence)
+    executor = object.__new__(ProductionRecursiveRLMExecutor)
+    result = executor._call_capsules_batched([{"task": "first"}, {"task": "second"}])
+    assert result is outcomes
+    assert evidence.batch_answers == ["first", "second"]

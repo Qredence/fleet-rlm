@@ -3,13 +3,13 @@
 Depth and exposure are asserted through public composition behavior, never
 through private symbol names:
 
-- VAL-REC-001: public Root composition fixes depth 0; the first child
+- Public Root composition fixes depth 0; the first child
   reservation produced by either recursive Tool reports depth 1; no public
   options or settings surface accepts a recursion depth.
-- VAL-REC-005: the Root native RLM receives exactly the approved recursive
+- The Root native RLM receives exactly the approved recursive
   pair; a child receives no Fleet recursive tools and a batch attempt from a child
   fails without reserving calls or allocating a Sandbox.
-- VAL-REC-023: Root and native child are both exact native ``dspy.RLM``
+- Root and native child are both exact native ``dspy.RLM``
   instances invoked with the positional caller-owned interpreter, each
   starting a fresh REPL history and producing a native Prediction.
 """
@@ -134,8 +134,8 @@ def _context(
     return context, RLMRunner(factory=runner_factory) if runner_factory is not None else RLMRunner()
 
 
-def test_val_rec_001_public_composition_fixes_root_depth_zero() -> None:
-    """VAL-REC-001: composing the production Root through the public
+def test_public_composition_fixes_root_depth_zero() -> None:
+    """Composing the production Root through the public
     delegation policy fixes depth 0; the first reservation produced by the
     single recursive Tool reports depth 1 in its completion evidence; the
     recursive options surface accepts no depth setting."""
@@ -165,8 +165,8 @@ def test_val_rec_001_public_composition_fixes_root_depth_zero() -> None:
 
 
 @pytest.mark.asyncio
-async def test_val_rec_001_public_runner_first_child_reservation_reports_depth_one() -> None:
-    """VAL-REC-001: through the public Runner composition, both recursive
+async def test_public_runner_first_child_reservation_reports_depth_one() -> None:
+    """Through the public Runner composition, both recursive
     surfaces expose their first child reservation at depth 1 while the Root
     itself stays at depth 0; no public option moves that depth."""
     adapter = dspy.JSONAdapter()
@@ -225,8 +225,8 @@ async def test_val_rec_001_public_runner_first_child_reservation_reports_depth_o
     assert all("recursive_depth=1" in (status.message or "") for status in statuses)
 
 
-def test_val_rec_001_public_settings_surface_exposes_no_recursion_depth() -> None:
-    """VAL-REC-001: the public settings surface (the composition input for
+def test_public_settings_surface_exposes_no_recursion_depth() -> None:
+    """The public settings surface (the composition input for
     recursion policy) carries bounded width/budget knobs and no recursion
     depth knob under any recursion setting name."""
     from fleet_rlm.config.settings import Settings
@@ -236,8 +236,8 @@ def test_val_rec_001_public_settings_surface_exposes_no_recursion_depth() -> Non
     assert not any("depth" in name for name in recursion_settings)
 
 
-def test_val_rec_005_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
-    """VAL-REC-005: the batch surface is Root-only. A child interpreter
+def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
+    """The batch surface is Root-only. A child interpreter
     namespace cannot resolve it; the failed attempt reserves no further call
     and allocates no additional Sandbox."""
     factory = _RecordingFactory()
@@ -271,10 +271,10 @@ def test_val_rec_005_child_batch_attempt_fails_without_reservation_or_allocation
 
 
 @pytest.mark.parametrize("enabled", [False, True])
-def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_public_composition(
+def test_root_receives_exactly_the_approved_recursive_tools_through_public_composition(
     enabled: bool,
 ) -> None:
-    """VAL-REC-005: the Root native RLM composed through the public Runner
+    """The Root native RLM composed through the public Runner
     receives the approved recursive Tools, including the strict capsule path,
     by their public names."""
     captured: dict[str, object] = {}
@@ -308,8 +308,8 @@ def test_val_rec_005_root_receives_exactly_the_approved_recursive_tools_through_
 
 
 @pytest.mark.asyncio
-async def test_val_rec_023_root_and_child_are_exact_native_rlm_with_positional_interpreter() -> None:
-    """VAL-REC-023: Root and native child are both exact native ``dspy.RLM``
+async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter() -> None:
+    """Root and native child are both exact native ``dspy.RLM``
     instances built through the certified constructor; both are invoked with
     the positional caller-owned interpreter plus named inputs; both produce
     native Predictions with trajectory evidence."""

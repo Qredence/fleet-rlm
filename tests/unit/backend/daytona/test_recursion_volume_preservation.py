@@ -1,6 +1,6 @@
 """P39b shared sibling Volume preservation lanes.
 
-Behavior-only evidence for VAL-REC-021: child cleanup may purge only the
+Behavior-only evidence for child cleanup may purge only the
 closing child's mounted recursive scope. Files in the Root Workspace scope
 and every sibling child scope must remain byte-for-byte present and
 unmodified, proven through before/after sha256 checksum manifests. The
@@ -146,7 +146,7 @@ def _factory(
 
 
 @pytest.mark.asyncio
-async def test_val_rec_021_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
+async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     monkeypatch: pytest.MonkeyPatch, interpreter_box: _InterpreterBox
 ) -> None:
     workspace_id = uuid4()
@@ -227,7 +227,7 @@ async def test_val_rec_021_close_child_a_preserves_root_and_sibling_volume_byte_
 
 
 @pytest.mark.asyncio
-async def test_val_rec_021_child_failure_cleanup_still_preserves_root_and_sibling_volume(
+async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
     monkeypatch: pytest.MonkeyPatch, interpreter_box: _InterpreterBox
 ) -> None:
     workspace_id = uuid4()
@@ -285,7 +285,7 @@ async def test_val_rec_021_child_failure_cleanup_still_preserves_root_and_siblin
 
 
 @pytest.mark.asyncio
-async def test_val_rec_021_cancellation_preserves_volume_state_and_allocates_nothing_further(
+async def test_cancellation_preserves_volume_state_and_allocates_nothing_further(
     monkeypatch: pytest.MonkeyPatch, interpreter_box: _InterpreterBox
 ) -> None:
     workspace_id = uuid4()

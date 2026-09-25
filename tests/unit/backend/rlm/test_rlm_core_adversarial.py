@@ -1,4 +1,4 @@
-"""Adversarial and stress test suite for Phase 2: Native DSPy 3.3.1 RLM Core.
+"""Adversarial and stress contracts for the native DSPy RLM core.
 
 Empirical verification of:
 1. AttachmentContextCapsule boundaries: count limits, payload stress, empty manifests,

@@ -38,7 +38,7 @@ def test_default_mount_matches_design() -> None:
 
 
 def test_removed_volume_namespaces_have_no_production_references() -> None:
-    source_root = Path(__file__).parents[3] / "src" / "fleet_rlm"
+    source_root = Path(__file__).parents[4] / "src" / "fleet_rlm"
     forbidden = (
         "skills_root",
         "memory_root",

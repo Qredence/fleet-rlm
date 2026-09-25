@@ -1,6 +1,5 @@
-"""Adversarial challenge test suite for Direct Daytona SDK Integration.
+"""Adversarial contracts for direct Daytona SDK integration.
 
-Authored by Challenger 1 for Phase 1 empirical verification.
 Targeting:
 1. DaytonaCodeInterpreter.execute() with syntax errors, runtime exceptions,
    timeouts, malformed SUBMIT payloads, boundary code sizes, and large outputs.

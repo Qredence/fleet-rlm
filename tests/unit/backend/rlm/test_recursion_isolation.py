@@ -1,10 +1,16 @@
-"""Behavior contracts for recursion isolation."""
+"""Recursion isolation and recursive content-safety contracts.
+
+* ``test_recursion_isolation.py``: Behavior contracts for recursion isolation.
+* ``test_recursion_content_safety.py``: recursive event content-safety lanes; only approved
+  metadata may appear in recursive Runtime Events, Tool projections, and sanitized failures.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import time
 from collections.abc import Callable
+from dataclasses import fields
 from typing import Any
 from uuid import uuid4
 
@@ -12,6 +18,13 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.rlm.events import (
+    RunFailed,
+    Status,
+    ToolCompleted,
+    ToolFailed,
+    ToolStarted,
+)
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
@@ -41,6 +54,7 @@ from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
+# --- from test_recursion_isolation.py ---------------------------------
 def _executor(
     root_lm: dspy.utils.DummyLM,
     sub_lm: dspy.utils.DummyLM,
@@ -62,10 +76,10 @@ def _lm(answers: Any) -> dspy.utils.DummyLM:
     return dspy.utils.DummyLM(answers, adapter=dspy.JSONAdapter())
 
 
-def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
+def test_two_sequential_children_are_distinct_fresh_native_runtimes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-002: two sequential Root ``rlm_query`` calls build distinct
+    """Two sequential Root ``rlm_query`` calls build distinct
     native RLMs, acquire distinct leases/interpreters/Sandbox ids, close each
     child exactly once before its answer returns, and the second child starts
     from an empty namespace (it cannot resolve the first child's global)."""
@@ -151,8 +165,8 @@ def test_val_rec_002_two_sequential_children_are_distinct_fresh_native_runtimes(
     executor.raise_if_cleanup_failed()
 
 
-def test_val_rec_002_sequential_children_report_independent_completion_evidence() -> None:
-    """VAL-REC-002: each sequential child's completion evidence is scoped to
+def test_sequential_children_report_independent_completion_evidence() -> None:
+    """Each sequential child's completion evidence is scoped to
     its own invocation: per-call completion metadata reports its own call
     index and depth, and the second child's evidence carries no state from
     the first."""
@@ -217,8 +231,8 @@ class RecordingLM(dspy.utils.DummyLM):
 
 
 @pytest.mark.asyncio
-async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_through_the_runner() -> None:
-    """VAL-REC-025: through the public Runner composition, Root LM calls are
+async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_runner() -> None:
+    """Through the public Runner composition, Root LM calls are
     recorded at depth 0, the native child's Root-LM-driven actions at depth
     1, and the depth fallback's Sub-LM call at depth 2; the Sub LM never
     drives Root actions; child LM histories are independent of the Root's;
@@ -312,8 +326,8 @@ async def test_val_rec_025_roles_depths_histories_and_trajectory_are_preserved_t
     assert recorder.close_calls == {1: 1}
 
 
-def test_val_rec_025_child_lm_copies_preserve_callback_ancestry_and_usage_shape() -> None:
-    """VAL-REC-025: the child receives copied policy-owned LM runtimes whose
+def test_child_lm_copies_preserve_callback_ancestry_and_usage_shape() -> None:
+    """The child receives copied policy-owned LM runtimes whose
     identity differs from the Root's but whose role wiring is preserved; the
     child's completion carries the native trajectory."""
     recorder = ChildLeaseRecorder()
@@ -351,8 +365,8 @@ async def _never_cancelled() -> bool:
     return False
 
 
-def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
-    """VAL-REC-022: through the public Runner composition, Root globals
+def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
+    """Through the public Runner composition, Root globals
     survive child return but are absent in every child; each child's own
     globals are absent from Root and from its sibling."""
     recorder = ChildLeaseRecorder()
@@ -454,8 +468,8 @@ def test_val_rec_022_root_child_and_sibling_interpreter_namespaces_are_isolated(
     assert recorder.close_calls == {1: 1, 2: 1}
 
 
-def test_val_rec_024_root_and_child_boundaries_classify_identical_output_matrix() -> None:
-    """VAL-REC-024: the same output matrix run through the Root and child
+def test_root_and_child_boundaries_classify_identical_output_matrix() -> None:
+    """The same output matrix run through the Root and child
     signatures yields identical accepted values and identical closed failure
     categories at the Fleet typed-result boundary."""
     from fleet_rlm.rlm.program import FleetRLMSignature
@@ -503,8 +517,8 @@ def test_val_rec_024_root_and_child_boundaries_classify_identical_output_matrix(
         )
 
 
-def test_val_rec_024_child_oversized_submit_fails_at_the_child_boundary() -> None:
-    """VAL-REC-024: an oversized child SUBMIT is rejected at the child's own
+def test_child_oversized_submit_fails_at_the_child_boundary() -> None:
+    """An oversized child SUBMIT is rejected at the child's own
     Fleet result boundary with the closed too-large category; the child is
     still settled exactly once."""
     recorder = ChildLeaseRecorder()
@@ -528,8 +542,8 @@ def test_val_rec_024_child_oversized_submit_fails_at_the_child_boundary() -> Non
 
 
 @pytest.mark.asyncio
-async def test_val_rec_024_root_oversized_submit_fails_with_the_same_closed_category() -> None:
-    """VAL-REC-024: an oversized Root SUBMIT fails the Run at the Root result
+async def test_root_oversized_submit_fails_with_the_same_closed_category() -> None:
+    """An oversized Root SUBMIT fails the Run at the Root result
     boundary with the same closed too-large public category the child
     boundary uses."""
     adapter = dspy.JSONAdapter()
@@ -572,8 +586,8 @@ async def test_val_rec_024_root_oversized_submit_fails_with_the_same_closed_cate
     assert stream.outcome.public_error_message == "Turn output is too large"
 
 
-def test_val_rec_024_extraction_fallback_termination_parity_between_root_and_child() -> None:
-    """VAL-REC-024: an RLM that never submits terminates through the same
+def test_extraction_fallback_termination_parity_between_root_and_child() -> None:
+    """An RLM that never submits terminates through the same
     certified extraction fallback at Root and child scope: the child's
     recorded termination mode matches the Root RLM's classified mode."""
     recorder = ChildLeaseRecorder()
@@ -620,3 +634,265 @@ def test_val_rec_024_extraction_fallback_termination_parity_between_root_and_chi
     assert rlm_termination_mode(prediction) == "native_extraction_fallback"
     executor.wait_owned()
     executor.raise_if_cleanup_failed()
+
+
+# --- from test_recursion_content_safety.py ----------------------------
+# Sentinel content injected into every private surface. Each token is unique so
+# a leak can be attributed to the exact surface it was placed in. The
+# credential sentinel uses the mission-mandated unmistakable non-secret canary
+# shape.
+SENTINEL_PROMPT = "QRE033-SECRET-PROMPT-bounded-child-task"
+SENTINEL_ANSWER = "QRE033-SECRET-ANSWER-child-result-value"
+SENTINEL_CREDENTIAL = "FAKE-CANARY-key-0000"
+SENTINEL_PROVIDER_ID = "provider-internal-sbx-QRE033-XYZ"
+SENTINEL_MOUNT_PATH = "/home/daytona/fleet/recursive/QRE033/secret-scope"
+_SENTINELS = (
+    SENTINEL_PROMPT,
+    SENTINEL_ANSWER,
+    SENTINEL_CREDENTIAL,
+    SENTINEL_PROVIDER_ID,
+    SENTINEL_MOUNT_PATH,
+)
+
+
+class _RootLM(dspy.utils.DummyLM):
+    """Root LM whose copy() hands the child a distinct scripted runtime."""
+
+    def __init__(self, answers: Any, child_lm: dspy.utils.DummyLM, *, adapter: Any) -> None:
+        super().__init__(answers, adapter=adapter)
+        self._child_lm = child_lm
+
+    def copy(self, **kwargs: Any) -> Any:
+        del kwargs
+        return self._child_lm
+
+
+async def _run_turn(
+    *,
+    root_actions: list[dict[str, Any]],
+    child_answers: list[dict[str, Any]],
+    sub_answers: list[dict[str, Any]],
+    recorder: ChildLeaseRecorder,
+    recursive_options: RecursiveRLMOptions,
+    root_options: RLMOptions | None = None,
+) -> tuple[list[Any], Any]:
+    adapter = dspy.JSONAdapter()
+    child_lm = _lm(child_answers)
+    root_lm = _RootLM(root_actions, child_lm, adapter=adapter)
+    sub_lm = _lm(sub_answers)
+
+    async def never_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="content safety",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root_lm, sub_lm),
+            options=root_options or RLMOptions(max_iters=3, max_llm_calls=5),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=never_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=recursive_options,
+            child_runtime_factory=recorder.factory,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner().stream(context)
+    events: list[Any] = []
+
+    async def consume() -> None:
+        async for event in stream:
+            events.append(event)
+
+    await asyncio.wait_for(consume(), timeout=20)
+    return events, stream
+
+
+def _detail_string_blobs(details: list[Any]) -> list[str]:
+    """Collect every string carried by the given event details."""
+    blobs: list[str] = []
+
+    def walk(value: Any) -> None:
+        if value is None or isinstance(value, (bool, int, float)):
+            return
+        if isinstance(value, str):
+            blobs.append(value)
+            return
+        if isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+            return
+        if isinstance(value, (list, tuple, set, frozenset)):
+            for item in value:
+                walk(item)
+            return
+        blobs.append(repr(value))
+
+    for detail in details:
+        for item in fields(detail):
+            walk(getattr(detail, item.name, None))
+    return blobs
+
+
+def _recursive_statuses(events: list[Any]) -> list[Status]:
+    return [event.detail for event in events if isinstance(event.detail, Status) and event.detail.phase == "recursive"]
+
+
+def _recursive_tool_details(events: list[Any]) -> list[Any]:
+    return [
+        event.detail
+        for event in events
+        if isinstance(event.detail, (ToolStarted, ToolCompleted, ToolFailed))
+        and event.detail.tool_name in {"rlm_query", "rlm_query_batched"}
+    ]
+
+
+def _assert_sentinels_absent(*surfaces: list[Any]) -> None:
+    """No sentinel may appear in any recursive evidence surface."""
+    for surface in surfaces:
+        joined = "\n".join(_detail_string_blobs(surface))
+        for sentinel in _SENTINELS:
+            assert sentinel not in joined, f"recursive evidence leaked sentinel {sentinel!r}"
+
+
+@pytest.mark.asyncio
+async def test_success_child_events_expose_only_approved_metadata() -> None:
+    """Success: a completed depth-1 child emits bounded
+    approved metadata only; sentinels planted in the prompt, answer,
+    credential, provider id, and mount path never surface."""
+    recorder = ChildLeaseRecorder(sandbox_prefix="content-safety-child", volume="content-safety-volume")
+    child_prompt = (
+        f"{SENTINEL_PROMPT} credential={SENTINEL_CREDENTIAL} "
+        f"provider={SENTINEL_PROVIDER_ID} mount={SENTINEL_MOUNT_PATH}"
+    )
+    root_actions = [
+        {
+            "reasoning": "delegate one bounded child",
+            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
+        },
+        {"reasoning": "finish", "code": "SUBMIT(answer='root-done')"},
+    ]
+    child_answers = [
+        {"reasoning": "answer the child", "code": f"SUBMIT(answer={SENTINEL_ANSWER!r})"},
+    ]
+    events, stream = await _run_turn(
+        root_actions=root_actions,
+        child_answers=child_answers,
+        sub_answers=[{"answer": "unused"}],
+        recorder=recorder,
+        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+    )
+
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "completed"
+
+    statuses = _recursive_statuses(events)
+    started = [status for status in statuses if status.status == "child_started"]
+    completed = [status for status in statuses if status.status == "child_completed"]
+    failed = [status for status in statuses if status.status == "child_failed"]
+
+    # Exactly one start then one terminal, in order, for the one child.
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert failed == []
+    assert statuses.index(started[0]) < statuses.index(completed[0])
+
+    # Approved metadata is present on both recursive status events.
+    start_message = started[0].message or ""
+    assert "call_index=1" in start_message
+    assert "recursive_depth=1" in start_message
+    terminal_message = completed[0].message or ""
+    assert "call_index=1" in terminal_message
+    assert "recursive_depth=1" in terminal_message
+    assert "duration_ms=" in terminal_message
+    assert "cleanup_status=completed" in terminal_message
+
+    # The recursive Tool input projection exposes only prompt counts/chars.
+    tool_started = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolStarted)]
+    assert len(tool_started) == 1
+    started_input = dict(tool_started[0].input or {})
+    assert started_input["selected_input_bytes"] > len(child_prompt.encode("utf-8"))
+    assert set(started_input) == {"selected_input_bytes"}
+
+    # The recursive Tool output projection is the bounded completion metadata.
+    tool_completed = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolCompleted)]
+    assert len(tool_completed) == 1
+    output = dict(tool_completed[0].output or {})
+    assert output == {
+        "status": "completed",
+        "call_index": 1,
+        "recursive_depth": 1,
+        "child_iterations": 1,
+        "termination_mode": "typed_submit",
+    }
+
+    # No sentinel leaks through recursive status or Tool evidence.
+    _assert_sentinels_absent(statuses, _recursive_tool_details(events))
+    # The child lease settled exactly once through ownership.
+    assert recorder.call_indexes == [1]
+    assert recorder.close_calls == {1: 1}
+
+
+@pytest.mark.asyncio
+async def test_failed_child_events_stay_bounded_and_sentinel_free() -> None:
+    """Failure: an oversized child answer fails closed with a
+    bounded failure category and sanitized exception string; no sentinel
+    leaks and child_started -> child_failed ordering is preserved."""
+    recorder = ChildLeaseRecorder(sandbox_prefix="content-safety-child", volume="content-safety-volume")
+    oversized_answer = f"{SENTINEL_ANSWER}-" + ("x" * 600)
+    child_prompt = f"{SENTINEL_PROMPT} provider={SENTINEL_PROVIDER_ID} credential={SENTINEL_CREDENTIAL}"
+    root_actions = [
+        {
+            "reasoning": "delegate one child that will oversubmit",
+            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
+        },
+        {"reasoning": "recover and finish", "code": "SUBMIT(answer='recovered')"},
+    ]
+    child_answers = [
+        {"reasoning": "oversubmit", "code": f"SUBMIT(answer={oversized_answer!r})"},
+    ]
+    events, _stream = await _run_turn(
+        root_actions=root_actions,
+        child_answers=child_answers,
+        sub_answers=[{"answer": "unused"}],
+        recorder=recorder,
+        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1, child_max_output_chars=64),
+    )
+
+    statuses = _recursive_statuses(events)
+    started = [status for status in statuses if status.status == "child_started"]
+    failed = [status for status in statuses if status.status == "child_failed"]
+    completed = [status for status in statuses if status.status == "child_completed"]
+
+    assert len(started) == 1
+    assert len(failed) == 1
+    assert completed == []
+    assert statuses.index(started[0]) < statuses.index(failed[0])
+
+    # The failed terminal carries bounded approved metadata, never content.
+    failed_message = failed[0].message or ""
+    assert "call_index=1" in failed_message
+    assert "recursive_depth=1" in failed_message
+    assert "duration_ms=" in failed_message
+    assert "cleanup_status=" in failed_message
+    assert "failure_category=" in failed_message
+
+    # The recursive Tool failure projection is the closed sanitized public
+    # message of the typed oversized-output failure, never the answer body.
+    tool_results = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolCompleted)]
+    assert len(tool_results) == 1
+    assert tool_results[0].output == {"status": "failed", "error_category": "child_failed"}
+
+    # Run failure terminals, when present, are also sentinel-free.
+    run_failed = [event.detail for event in events if isinstance(event.detail, RunFailed)]
+    _assert_sentinels_absent(statuses, _recursive_tool_details(events), run_failed)
+    assert recorder.call_indexes == [1]
+    assert recorder.close_calls == {1: 1}
