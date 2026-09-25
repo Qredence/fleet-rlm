@@ -112,6 +112,50 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
         },
       ];
     }
+    case "data-child-progress": {
+      const value = asRecord(chunk.data);
+      const states = [
+        "not_started",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+      ] as const;
+      const cleanups = ["pending", "complete", "failed", "not_required"] as const;
+      const state = str(value.state);
+      const cleanupState = str(value.cleanup_state);
+      const childId = str(value.child_id);
+      const taskLabel = str(value.task_label);
+      if (
+        !state ||
+        !states.includes(state as (typeof states)[number]) ||
+        !cleanupState ||
+        !cleanups.includes(cleanupState as (typeof cleanups)[number]) ||
+        !childId ||
+        !taskLabel
+      )
+        return [
+          {
+            type: "turn_status",
+            phase: "child",
+            detail: "Child progress details are unavailable.",
+          },
+        ];
+      return [
+        {
+          type: "child_progress",
+          childId,
+          parentRunId: str(value.parent_run_id) ?? str(value.parentRunId) ?? undefined,
+          taskLabel,
+          state: state as (typeof states)[number],
+          elapsedMs: int(value.elapsed_ms) ?? 0,
+          outcome: str(value.outcome),
+          cleanupState: cleanupState as (typeof cleanups)[number],
+          messageId: chunk.id ?? undefined,
+        },
+      ];
+    }
     case "data-attachment": {
       const value = asRecord(chunk.data);
       return [

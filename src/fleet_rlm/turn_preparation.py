@@ -56,6 +56,7 @@ from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import HistoryMessage
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.skills.models import SkillDefinition
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.turn_settlement import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
@@ -263,6 +264,7 @@ class RunEnvironment:
     release: AsyncCleanup
     result_snapshot_sink: ResultSnapshotSink | None = None
     child_runtime_factory: ChildRuntimeFactory | None = None
+    child_result_writer: Callable[[int, str, bytes], Awaitable[str]] | None = None
     context_mount_path: str | None = None
     workspace_memory_store: Any | None = None
     post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
@@ -510,6 +512,7 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
         capabilities=capabilities,
         delegation=DelegationPolicy(
             child_runtime_factory=environment.child_runtime_factory,
+            child_result_writer=environment.child_result_writer,
             recursive_options=plan.recursive_options,
         ),
         selected_skill_count=len(run.input.skill_selections),
@@ -586,6 +589,9 @@ class EmptySkillHost:
     def drain_public_events(self) -> list[dict[str, Any]]:
         return []
 
+    def loaded_definitions(self) -> tuple[SkillDefinition, ...]:
+        return ()
+
 
 def skill_event(item: Mapping[str, Any]) -> SkillActivated | SkillLoaded:
     if item.get("kind") == "skill.activated":
@@ -643,6 +649,10 @@ class PreparedHostCapabilities:
                 )
         values.extend(skill_event(item) for item in self._skills.drain_public_events())
         return tuple(values)
+
+    def loaded_skills(self) -> tuple[SkillDefinition, ...]:
+        """Return the pinned Skills available at the instant of delegation."""
+        return self._skills.loaded_definitions()
 
     def drain_artifact_candidates(self) -> Any:
         if not self._artifact_candidates:

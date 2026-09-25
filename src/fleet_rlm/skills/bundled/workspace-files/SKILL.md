@@ -3,7 +3,7 @@ name: workspace-files
 description: Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.2.0"
+  version: "1.3.0"
   affordances:
     - workspace.files
     - artifacts.publish
@@ -18,6 +18,11 @@ resources:
 # Workspace files
 
 Use Fleet's bound tools instead of inventing host paths. The Turn context reports whether durable workspace tools are available.
+
+Child-local source copies and result files are private intermediate evidence.
+The root validates their revisions and contents before any Workspace write or
+Artifact publication. A child never publishes an Artifact or updates task
+memory on its own; only the root's authorized tools and Turn settlement can do so.
 
 ## Projects (durable deliverables)
 

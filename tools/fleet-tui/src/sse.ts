@@ -112,6 +112,7 @@ function isFleetUIMessageChunk(value: unknown): value is FleetUIMessageChunk {
     case "error":
       return nonEmptyString(value.errorText);
     case "data-status":
+    case "data-child-progress":
     case "data-skill":
     case "data-rlm-code":
     case "data-rlm-output":

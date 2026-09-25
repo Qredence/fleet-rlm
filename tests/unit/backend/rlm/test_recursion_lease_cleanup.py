@@ -87,6 +87,12 @@ class _CountingInterpreter:
         self.behavior = behavior
         self.shutdown_calls = 0
         self.execute_calls = 0
+        self.invocations: list[_CountingInterpreter] = []
+
+    def new_invocation(self, **_kwargs: object) -> _CountingInterpreter:
+        invocation = _CountingInterpreter(self.behavior)
+        self.invocations.append(invocation)
+        return invocation
 
     def start(self) -> None:
         return None
@@ -101,7 +107,7 @@ class _CountingInterpreter:
         if self.behavior == "interpreter_error":
             raise CodeInterpreterError("interpreter process failed")
         answer = "recovered" if self.behavior == "code_error_first" else "child-ok"
-        return wrap_final_output({"answer": answer})
+        return wrap_final_output({"answer": answer, "evidence": [], "gaps": [], "result_files": []})
 
     def shutdown(self) -> None:
         self.shutdown_calls += 1
@@ -151,7 +157,8 @@ def _executor(
     root = dspy.utils.DummyLM(root_actions, adapter=adapter)
     sub = dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter)
 
-    def factory(call_index: int) -> ChildRuntimeLease:
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         return recorder.factory(call_index, behavior=behavior)
 
     return RecursiveRLMExecutor(
@@ -213,22 +220,23 @@ def test_authority_failure_cancels_queued_acquisition_before_any_lease(
     monkeypatch.setattr(recursive_calls, "run_reserved_batch", gated_run_reserved_batch)
 
     class FailingChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             if json.loads(prompt)["task"] == "fail":
                 first_failure.set()
                 raise ChildRuntimeAuthorizationError("authority revoked")
             raise AssertionError("queued sibling must never execute")
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: FailingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(
-        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=1),
     )
 
     began = time.monotonic()
     with pytest.raises(RecursiveBatchError) as raised:
-        executor.batched_tool(capsules=[{"task": task} for task in ["fail", "queued"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["fail", "queued"]])
     assert time.monotonic() - began < 5
 
     # One all-or-nothing batch failure caused by the first child failure.
@@ -259,15 +267,16 @@ def test_deadline_cancels_queued_acquisition_and_join_waits_for_running_lease(
     recorder = _Recorder()
 
     class BlockingChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
             started.set()
             assert release.wait(5)
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(
-        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         options=RecursiveRLMOptions(max_calls=3, max_parallel_children=1),
         # Leave scheduler slack when this ownership-boundary test runs under
@@ -277,7 +286,7 @@ def test_deadline_cancels_queued_acquisition_and_join_waits_for_running_lease(
 
     began = time.monotonic()
     with pytest.raises(TimeoutError, match="batch deadline exceeded"):
-        executor.batched_tool(capsules=[{"task": task} for task in ["blocked", "queued-a", "queued-b"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["blocked", "queued-a", "queued-b"]])
     assert time.monotonic() - began < 1.5
     assert started.is_set()
     # Only the running child acquired a lease; queued siblings never did.
@@ -310,15 +319,16 @@ def test_revoked_authority_cancels_queued_sibling_and_retains_running_child(
     events: list[object] = []
 
     class BlockingChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
             started.set()
             assert release.wait(5)
             return dspy.Prediction(answer="would-have-been-kept", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     executor = _executor(
-        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=1),
         observer=events.append,
@@ -328,7 +338,7 @@ def test_revoked_authority_cancels_queued_sibling_and_retains_running_child(
 
     def run_batch() -> None:
         try:
-            executor.batched_tool(capsules=[{"task": task} for task in ["running", "queued"]])
+            executor.batched_tool(tasks=[{"task": task} for task in ["running", "queued"]])
         except BaseException as exc:
             result["error"] = exc
 
@@ -371,7 +381,10 @@ async def test_runner_cancellation_terminal_outcome_with_same_fence(
         [
             {
                 "reasoning": "batch",
-                "code": "answers = rlm_query_batched(capsules=[{'task': 'alpha'}, {'task': 'beta'}])",
+                "code": (
+                    "answers = rlm_query_batched(tasks=[{'task': 'alpha', 'inputs': []}, "
+                    "{'task': 'beta', 'inputs': []}])"
+                ),
             },
             {"reasoning": "submit", "code": "SUBMIT(answer='root-done')"},
         ],
@@ -386,7 +399,8 @@ async def test_runner_cancellation_terminal_outcome_with_same_fence(
     permits_released = 0
     permit_lock = threading.Lock()
 
-    def counting_factory(call_index: int) -> ChildRuntimeLease:
+    def counting_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         nonlocal permits_held
         with permit_lock:
             permits_held += 1
@@ -404,13 +418,14 @@ async def test_runner_cancellation_terminal_outcome_with_same_fence(
         return lease
 
     class BlockingAlphaChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             if json.loads(prompt)["task"] == "alpha":
                 started.set()
                 assert release.wait(10)
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingAlphaChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
 
     authority = RunAuthority()
     cancel_requested = False
@@ -478,15 +493,15 @@ def test_expired_deadline_performs_no_allocation() -> None:
     no factory call, and no lease acquisition for either recursive surface."""
     recorder = _Recorder()
     executor = _executor(
-        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         deadline=time.monotonic() - 1,
     )
 
     with pytest.raises(TimeoutError, match="deadline exceeded"):
-        executor.tool(capsule={"task": "late child request"})
+        executor.tool(task="late child request", inputs=[])
     with pytest.raises(TimeoutError, match="deadline exceeded"):
-        executor.batched_tool(capsules=[{"task": task} for task in ["late"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["late"]])
 
     assert recorder.call_indexes == []
     assert recorder.leases == []
@@ -516,26 +531,27 @@ def test_one_absolute_deadline_covers_fork_and_batch_join(
     monkeypatch.setattr(RLMModelBundle, "fork_for_child", spy_fork)
 
     class BlockingChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
             started.set()
             assert release.wait(5)
             return dspy.Prediction(answer="late", trajectory=[])
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     # Leave enough spawn slack for full-suite coverage + xdist load. The child
     # blocks on `release.wait(5)`, so widening the deadline only removes the
     # scheduler race without changing what is proven.
     deadline = time.monotonic() + 2.0
     executor = _executor(
-        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         deadline=deadline,
     )
 
     began = time.monotonic()
     with pytest.raises(TimeoutError, match="recursive child batch deadline exceeded"):
-        executor.batched_tool(capsules=[{"task": task} for task in ["blocked"]])
+        executor.batched_tool(tasks=[{"task": task} for task in ["blocked"]])
     elapsed = time.monotonic() - began
     assert started.is_set()
     # Bounded by the one absolute deadline, with a small tolerance.
@@ -589,7 +605,12 @@ def test_child_receives_only_remaining_time_on_forked_lm() -> None:
     [
         (
             "submit",
-            [{"reasoning": "submit directly", "code": "SUBMIT(answer='child-ok')"}],
+            [
+                {
+                    "reasoning": "submit directly",
+                    "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                }
+            ],
             2,
             "child-ok",
         ),
@@ -597,7 +618,7 @@ def test_child_receives_only_remaining_time_on_forked_lm() -> None:
             "code_error_first",
             [
                 {"reasoning": "try failing code", "code": "x = 1 / 0"},
-                {"reasoning": "recover", "code": "SUBMIT(answer='recovered')"},
+                {"reasoning": "recover", "code": "SUBMIT(answer='recovered', evidence=[], gaps=[], result_files=[])"},
             ],
             2,
             "recovered",
@@ -722,19 +743,21 @@ async def test_cancellation_never_shuts_down_caller_owned_child_interpreter() ->
 
 def test_fleet_executor_closes_child_lease_exactly_once() -> None:
     """Executor scope: a valid child answer is delivered through
-    a real native child, and the Fleet executor, as the sole lifecycle owner,
-    closes the lease exactly once before the answer reaches Root code."""
+    a real native child, and DSPy closes its fresh adapter before Fleet closes
+    the lease exactly once."""
     recorder = _Recorder()
     executor = _executor(
-        [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+        [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"}],
         recorder,
     )
 
-    assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
+    assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
 
     interpreter = recorder.interpreters[1]
     assert recorder.close_calls.get(1) == 1
     assert interpreter.shutdown_calls == 1
+    assert len(interpreter.invocations) == 1
+    assert interpreter.invocations[0].shutdown_calls == 1
     # Re-observation never shuts the interpreter down again.
     recorder.leases[0].close()
     assert recorder.close_calls.get(1) == 1
@@ -752,7 +775,7 @@ def test_executor_terminal_child_failure_still_settles_lease_once() -> None:
         behavior="interpreter_error",
     )
 
-    outcome = executor.tool(capsule={"task": "terminal child failure"})
+    outcome = executor.tool(task="terminal child failure", inputs=[])
     assert outcome["status"] == "failed"
     assert outcome["answer"] == ""
 
@@ -773,7 +796,8 @@ def test_valid_child_answer_cannot_override_failed_cleanup() -> None:
     original = RuntimeError("broker cleanup failed")
     lease_holder: dict[str, ChildRuntimeLease] = {}
 
-    def failing_close_factory(call_index: int) -> ChildRuntimeLease:
+    def failing_close_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         lease = recorder.factory(call_index)
         lease_holder["lease"] = lease
         close = lease._close
@@ -786,13 +810,13 @@ def test_valid_child_answer_cannot_override_failed_cleanup() -> None:
         return lease
 
     executor = _executor(
-        [{"reasoning": "submit", "code": "SUBMIT(answer='valid-child-answer')"}],
+        [{"reasoning": "submit", "code": "SUBMIT(answer='valid-child-answer', evidence=[], gaps=[], result_files=[])"}],
         recorder,
         child_runtime_factory=failing_close_factory,
     )
 
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised:
-        executor.tool(capsule={"task": "valid child"})
+        executor.tool(task="valid child", inputs=[])
     # The typed cleanup failure chains the original close error.
     assert raised.value.__cause__ is original
     # The fatal cleanup error is re-observed on every later check and blocks
@@ -800,7 +824,7 @@ def test_valid_child_answer_cannot_override_failed_cleanup() -> None:
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         executor.raise_if_cleanup_failed()
     with pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed"):
-        executor.tool(capsule={"task": "second call after fatal cleanup"})
+        executor.tool(task="second call after fatal cleanup", inputs=[])
     # Cleanup ran exactly once; repeated close re-surfaces without rerunning.
     lease = lease_holder["lease"]
     assert recorder.close_calls.get(1) == 1

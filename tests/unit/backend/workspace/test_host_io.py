@@ -17,6 +17,11 @@ class _Fs:
     def __init__(self) -> None:
         self.files: dict[str, bytes] = {}
 
+    def get_file_info(self, path: str) -> dict[str, object]:
+        if path in self.files:
+            return {"type": "file"}
+        raise FileNotFoundError(path)
+
     def download_file(self, path: str) -> bytes:
         if path not in self.files:
             raise FileNotFoundError(path)

@@ -206,7 +206,10 @@ class _RLMTraceCallback(BaseCallback):
 
             span = start_turn_span(
                 f"RLM.{role}_lm",
-                span_type="LLM",
+                # DSPy autolog owns the provider LLM span and its token usage.
+                # Fleet keeps a diagnostic timing span without advertising a
+                # second countable LM request.
+                span_type="CHAIN",
                 inputs={
                     "role": role,
                     "model": str(model),
@@ -237,8 +240,6 @@ class _RLMTraceCallback(BaseCallback):
             usage = _latest_lm_telemetry(instance, history_length, outputs)
         except Exception:
             usage = {}
-        standard_usage = _mlflow_token_usage(usage)
-        attributes = {"mlflow.chat.tokenUsage": standard_usage} if standard_usage else None
         try:
             response_details = _lm_output_profile(outputs, include_previews=self._recursive_depth == 0)
         except Exception:
@@ -291,9 +292,7 @@ class _RLMTraceCallback(BaseCallback):
                 outputs={
                     "request_status": "completed",
                     **response_details,
-                    **({"token_usage": usage} if usage else {}),
                 },
-                attributes=attributes,
             )
         else:
             span.finish(
@@ -302,9 +301,8 @@ class _RLMTraceCallback(BaseCallback):
                     "request_status": "failed",
                     **failure_outputs,
                     **response_details,
-                    **({"token_usage": usage} if usage else {}),
                 },
-                attributes={**(attributes or {}), **failure_attributes},
+                attributes=failure_attributes,
             )
 
     def last_call_summary(self) -> dict[str, JsonValue]:

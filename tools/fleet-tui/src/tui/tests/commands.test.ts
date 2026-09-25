@@ -127,6 +127,35 @@ describe("command handlers", () => {
     }
   });
 
+  it("/task shows the authorized checkpoint for the current Session", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "Research", status: "active", resumed: true },
+    });
+    ctx.client.getSessionTask = vi.fn().mockResolvedValue({
+      revision: 3,
+      goal: "Compare reports",
+      decisions: ["Use revision abc"],
+      relevant_paths: ["reports/input.md"],
+      source_revisions: { "reports/input.md": "abc" },
+      completed_work: ["Collected sources"],
+      pending_work: ["Verify totals"],
+    });
+
+    const task = listCommands().find((command) => command.name === "task");
+    if (task) await task.handler([], ctx);
+
+    expect(ctx.client.getSessionTask).toHaveBeenCalledWith("session-1");
+    const message = ctx.store.getState().messages.at(-1);
+    expect(message?.kind).toBe("text");
+    if (message?.kind === "text") {
+      expect(message.text).toContain("Compare reports");
+      expect(message.text).toContain("reports/input.md @ abc");
+      expect(message.text).toContain("Verify totals");
+    }
+  });
+
   it("/volume renders the logical Workspace Volume tree", async () => {
     const { ctx } = makeContext();
     ctx.client.listVolumeTree = vi.fn().mockResolvedValue({
@@ -832,6 +861,96 @@ describe("redo / reload / trace", () => {
     if (last?.kind === "text") expect(last.text).toContain("Reloaded session session-1.");
   });
 
+  it("keeps the reloaded retry answer, trace, and feedback on the same Run after a child failure", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/init",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+    });
+    ctx.client.getSession = vi.fn().mockResolvedValue({
+      id: "session-1",
+      title: "T",
+      status: "active",
+      checkpoint_version: 4,
+      created_at: null,
+      updated_at: null,
+    });
+    ctx.client.listTurns = vi.fn().mockResolvedValue([
+      {
+        id: "turn-old-answer",
+        role: "assistant",
+        sequence: 2,
+        status: "completed",
+        metadata: { runId: "run-old", traceId: "trace:old" },
+        parts: [{ type: "data-structured-result", data: { value: { answer: "old answer" } } }],
+      },
+      {
+        id: "turn-retry-answer",
+        role: "assistant",
+        sequence: 4,
+        status: "completed",
+        metadata: { runId: "run-retry", traceId: "trace:retry" },
+        parts: [
+          {
+            type: "data-child-progress",
+            id: "child-partial",
+            data: {
+              child_id: "child-partial",
+              parent_run_id: "run-retry",
+              task_label: "Inspect secondary source",
+              state: "failed",
+              elapsed_ms: 12,
+              outcome: "Secondary source unavailable; partial answer retained",
+              cleanup_state: "complete",
+            },
+          },
+          { type: "data-structured-result", data: { value: { answer: "retry answer" } } },
+        ],
+      },
+    ]);
+    ctx.client.submitTraceFeedback = vi.fn().mockResolvedValue({
+      trace_id: "trace:retry",
+      name: "user_feedback",
+      value: true,
+      assessment_id: "assessment-retry",
+    });
+
+    const reload = listCommands().find((command) => command.name === "reload");
+    if (!reload) throw new Error("reload command missing");
+    await reload.handler([], ctx);
+
+    const state = ctx.store.getState();
+    const answer = state.messages.find(
+      (message) => message.kind === "result" && message.runId === "run-retry",
+    );
+    expect(answer).toMatchObject({ kind: "result", runId: "run-retry" });
+    if (answer?.kind === "result") expect(answer.value).toEqual({ answer: "retry answer" });
+    expect(state.messages).toContainEqual(
+      expect.objectContaining({ kind: "child_progress", runId: "run-retry", state: "failed" }),
+    );
+
+    const trace = listCommands().find((command) => command.name === "trace");
+    if (!trace) throw new Error("trace command missing");
+    trace.handler([], ctx);
+    expect(ctx.store.getState().messages.at(-1)).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("Run: run-retry\nTrace: trace:retry"),
+    });
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    if (!feedback) throw new Error("feedback command missing");
+    await feedback.handler(["up", "partial answer retained"], ctx);
+    expect(ctx.client.submitTraceFeedback).toHaveBeenCalledWith("session-1", {
+      trace_id: "trace:retry",
+      value: true,
+      comment: "partial answer retained",
+    });
+    expect(ctx.store.getState().messages.at(-1)).toMatchObject({
+      kind: "text",
+      text: expect.stringContaining("Run run-retry, trace trace:retry"),
+    });
+  });
+
   it("/reload keeps pending Attachments, Skills, and the /redo prompt for the same Session", async () => {
     const { ctx } = makeContext();
     ctx.store.dispatch({
@@ -917,7 +1036,22 @@ describe("redo / reload / trace", () => {
 
     const last = ctx.store.getState().messages.at(-1);
     expect(last).toMatchObject({ kind: "text", role: "system" });
-    if (last?.kind === "text") expect(last.text).toContain("trace:abc123");
+    if (last?.kind === "text") {
+      expect(last.text).toContain("Run: run-1");
+      expect(last.text).toContain("trace:abc123");
+    }
+  });
+
+  it("/trace reports when tracing is unavailable for the current Run", () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({ type: "run/start", runId: "run-without-trace", delivery: "live" });
+    const trace = listCommands().find((command) => command.name === "trace");
+    if (trace) trace.handler([], ctx);
+    const last = ctx.store.getState().messages.at(-1);
+    if (last?.kind === "text") {
+      expect(last.text).toContain("Tracing is unavailable");
+      expect(last.text).toContain("run-without-trace");
+    }
   });
 
   it("/feedback submits the latest durable execution trace and identifies it", async () => {
@@ -927,6 +1061,7 @@ describe("redo / reload / trace", () => {
       session: { id: "session-1", title: "T", status: "active", resumed: true },
       events: [],
       latestTraceId: "trace:durable-latest",
+      latestTraceRunId: "run:durable-latest",
     });
     ctx.client.submitTraceFeedback = vi.fn().mockResolvedValue({
       trace_id: "trace:durable-latest",
@@ -948,6 +1083,7 @@ describe("redo / reload / trace", () => {
     expect(last).toMatchObject({ kind: "text", role: "system" });
     if (last?.kind === "text") {
       expect(last.text).toContain("trace:durable-latest");
+      expect(last.text).toContain("run:durable-latest");
       expect(last.text).toContain("up");
     }
   });
@@ -981,6 +1117,7 @@ describe("redo / reload / trace", () => {
       session: { id: "session-1", title: "T", status: "active", resumed: true },
       events: [],
       latestTraceId: "trace:retryable",
+      latestTraceRunId: "run:retryable",
     });
     ctx.client.submitTraceFeedback = vi.fn().mockRejectedValue(new Error("request failed"));
 
@@ -990,6 +1127,68 @@ describe("redo / reload / trace", () => {
     expect(ctx.store.getState().lastTraceId).toBe("trace:retryable");
     const last = ctx.store.getState().messages.at(-1);
     if (last?.kind === "text") expect(last.text).toContain("request failed");
+  });
+
+  it("/feedback does not fall back to a previous attempt when the current Run has no trace", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+      events: [],
+      latestTraceId: "trace:previous",
+      latestTraceRunId: "run:previous",
+    });
+    ctx.store.dispatch({ type: "run/start", runId: "run:current", delivery: "live" });
+    ctx.store.dispatch({
+      type: "run/finish",
+      finishReason: "stop",
+      error: null,
+      durationMs: 1,
+      checkpointVersion: 2,
+    });
+    ctx.client.submitTraceFeedback = vi.fn();
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    if (feedback) await feedback.handler(["up"], ctx);
+
+    expect(ctx.client.submitTraceFeedback).not.toHaveBeenCalled();
+    const last = ctx.store.getState().messages.at(-1);
+    if (last?.kind === "text") {
+      expect(last.text).toContain("run:current");
+      expect(last.text).toContain("tracing may be unavailable");
+    }
+  });
+
+  it("/feedback reports tracing unavailability without recording an assessment", async () => {
+    const { ctx } = makeContext();
+    ctx.store.dispatch({
+      type: "session/hydrate",
+      session: { id: "session-1", title: "T", status: "active", resumed: true },
+      events: [],
+      latestTraceId: "trace:unavailable",
+      latestTraceRunId: "run:unavailable",
+    });
+    const { FleetApiError } = await import("../../fleet-api-client.js");
+    ctx.client.submitTraceFeedback = vi
+      .fn()
+      .mockRejectedValue(
+        new FleetApiError(
+          503,
+          "Trace feedback is unavailable",
+          undefined,
+          "trace_feedback_unavailable",
+        ),
+      );
+
+    const feedback = listCommands().find((command) => command.name === "feedback");
+    if (feedback) await feedback.handler(["down"], ctx);
+
+    const last = ctx.store.getState().messages.at(-1);
+    if (last?.kind === "text") {
+      expect(last.text).toContain("Trace feedback is unavailable");
+      expect(last.text).toContain("no assessment was recorded");
+    }
+    expect(ctx.store.getState().lastTraceRunId).toBe("run:unavailable");
   });
 
   it("clears the durable feedback target when hydration switches Sessions", () => {

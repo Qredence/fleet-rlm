@@ -24,6 +24,7 @@ const ALL_LIVE_CHUNK_TYPES = [
   "reasoning-delta",
   "reasoning-end",
   "data-status",
+  "data-child-progress",
   "data-skill",
   "data-rlm-code",
   "data-rlm-output",

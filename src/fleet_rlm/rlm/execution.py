@@ -26,7 +26,6 @@ from uuid import UUID
 import dspy
 from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments import PreparedAttachment
 from fleet_rlm.config.settings import Settings
@@ -73,7 +72,9 @@ from fleet_rlm.rlm.program import (
     sanitize_base_url,
 )
 from fleet_rlm.rlm.recursion import (
+    ChildRequest,
     ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
     ChildRuntimeFactory,
     DelegationMetrics,
     RecursiveRLMExecutor,
@@ -98,7 +99,7 @@ from fleet_rlm.rlm.result import (
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
-from fleet_rlm.skills.models import SkillCard
+from fleet_rlm.skills.models import SkillCard, SkillDefinition
 from fleet_rlm.workspace.memory import MemoryCandidate
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
 
@@ -209,6 +210,8 @@ class PreparedCapabilities(Protocol):
 
     def drain_memory_candidates(self) -> tuple[MemoryCandidate, ...]: ...
 
+    def loaded_skills(self) -> tuple[SkillDefinition, ...]: ...
+
     def record_attachment_accesses(self, attachment_ids: tuple[str, ...]) -> None: ...
 
     async def aclose(self) -> None: ...
@@ -285,6 +288,7 @@ class DelegationPolicy:
     """Cross-sandbox recursive-RLM policy (empty when recursion is disabled)."""
 
     child_runtime_factory: ChildRuntimeFactory | None = None
+    child_result_writer: Callable[[int, str, bytes], Awaitable[str]] | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
     metrics: DelegationMetrics = field(default_factory=DelegationMetrics)
 
@@ -795,6 +799,206 @@ class _RunRuntimeLease:
             await self._release()
 
 
+_MAX_CHILD_STAGE_BYTES = 2_000_000
+_MAX_CHILD_STAGE_FILES = 64
+_CHILD_STAGE_SECONDS = 30.0
+
+
+def _child_source_tool(
+    tools: Mapping[str, dspy.Tool],
+    name: str,
+    *,
+    check_authority: Callable[[], None],
+    deadline: float,
+    **arguments: object,
+) -> Mapping[str, object]:
+    check_authority()
+    if time.monotonic() >= deadline:
+        raise TimeoutError("child input staging deadline exceeded")
+    tool = tools.get(name)
+    if tool is None:
+        raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized")
+    result = tool(**arguments)
+    check_authority()
+    if time.monotonic() >= deadline:
+        raise TimeoutError("child input staging deadline exceeded")
+    if not isinstance(result, Mapping) or result.get("ok") is not True:
+        raise ChildRuntimeAuthorizationError("selected source is unavailable or unauthorized")
+    return result
+
+
+def _child_source_paths(
+    request: ChildRequest,
+    *,
+    tools: Mapping[str, dspy.Tool],
+    check_authority: Callable[[], None],
+    deadline: float,
+) -> tuple[tuple[str, ...], dict[str, tuple[object, ...]]]:
+    pending = list(request.inputs)
+    files: list[str] = []
+    seen: set[str] = set()
+    manifest: dict[str, tuple[object, ...]] = {}
+    while pending:
+        reference = pending.pop()
+        if reference in seen:
+            continue
+        seen.add(reference)
+        if len(seen) > _MAX_CHILD_STAGE_FILES * 2:
+            raise ValueError("selected child source scope contains too many entries")
+        project = reference.startswith("projects/")
+        stat_name = "stat_project_file" if project else "stat_workspace_file"
+        stat = _child_source_tool(tools, stat_name, path=reference, check_authority=check_authority, deadline=deadline)
+        entry = stat.get("entry")
+        if not isinstance(entry, Mapping):
+            raise ValueError("selected source metadata is invalid")
+        kind = entry.get("kind")
+        manifest[reference] = (
+            kind,
+            entry.get("byte_size"),
+            entry.get("checksum_sha256"),
+        )
+        if kind == "file":
+            files.append(reference)
+            if len(files) > _MAX_CHILD_STAGE_FILES:
+                raise ValueError("selected child source scope contains too many files")
+            continue
+        if kind != "directory":
+            raise ValueError("selected source type is unsupported")
+        list_name = "list_project_files" if project else "list_workspace_files"
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while True:
+            listing = _child_source_tool(
+                tools,
+                list_name,
+                path=reference,
+                limit=100,
+                after=cursor,
+                check_authority=check_authority,
+                deadline=deadline,
+            )
+            entries = listing.get("entries")
+            if not isinstance(entries, list):
+                raise ValueError("selected source listing is invalid")
+            for item in entries:
+                if not isinstance(item, Mapping) or not isinstance(item.get("path"), str):
+                    raise ValueError("selected source listing is invalid")
+                child = f"projects/{item['path']}" if project else str(item["path"])
+                ChildRequest(task=request.task, inputs=(child,))
+                if not child.startswith(reference.rstrip("/") + "/"):
+                    raise ValueError("selected source escaped its selected directory")
+                pending.append(child)
+            next_cursor = listing.get("next_cursor")
+            if not listing.get("truncated"):
+                break
+            if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+                raise ValueError("selected source listing cursor is invalid")
+            seen_cursors.add(next_cursor)
+            cursor = next_cursor
+    return tuple(sorted(set(files))), manifest
+
+
+def _read_child_source_file(
+    path: str,
+    *,
+    tools: Mapping[str, dspy.Tool],
+    check_authority: Callable[[], None],
+    deadline: float,
+    byte_limit: int,
+) -> bytes:
+    project = path.startswith("projects/")
+    read_name = "read_project_text" if project else "read_workspace_text"
+    chunks: list[str] = []
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    total = 0
+    while True:
+        page = _child_source_tool(
+            tools,
+            read_name,
+            path=path,
+            cursor=cursor,
+            max_chars=10_000,
+            check_authority=check_authority,
+            deadline=deadline,
+        )
+        content = page.get("content")
+        if not isinstance(content, str):
+            raise ValueError("selected source must be UTF-8 text")
+        total += len(content.encode("utf-8"))
+        if total > byte_limit:
+            raise ValueError("selected child source exceeds its byte bound")
+        chunks.append(content)
+        if page.get("eof") is True:
+            break
+        next_cursor = page.get("next_cursor")
+        if not isinstance(next_cursor, str) or not next_cursor or next_cursor in seen_cursors:
+            raise ValueError("selected source page cursor is invalid")
+        seen_cursors.add(next_cursor)
+        cursor = next_cursor
+    return "".join(chunks).encode("utf-8")
+
+
+def materialize_child_inputs(
+    request: ChildRequest,
+    *,
+    tools: Mapping[str, dspy.Tool],
+    check_authority: Callable[[], None],
+    turn_deadline: float,
+) -> dict[str, bytes]:
+    """Resolve selected text under the prepared Session authority before admission."""
+    deadline = min(turn_deadline, time.monotonic() + _CHILD_STAGE_SECONDS)
+    files, initial_manifest = _child_source_paths(
+        request,
+        tools=tools,
+        check_authority=check_authority,
+        deadline=deadline,
+    )
+    first_pass: dict[str, bytes] = {}
+    total = 0
+    for path in files:
+        remaining = _MAX_CHILD_STAGE_BYTES - total
+        if remaining <= 0:
+            raise ValueError("selected child sources exceed the staging byte bound")
+        content = _read_child_source_file(
+            path,
+            tools=tools,
+            check_authority=check_authority,
+            deadline=deadline,
+            byte_limit=remaining,
+        )
+        first_pass[path] = content
+        total += len(content)
+
+    staged: dict[str, bytes] = {}
+    second_pass_total = 0
+    for path in files:
+        remaining = _MAX_CHILD_STAGE_BYTES - second_pass_total
+        if remaining <= 0:
+            raise ValueError("selected child sources exceed the staging byte bound")
+        content = _read_child_source_file(
+            path,
+            tools=tools,
+            check_authority=check_authority,
+            deadline=deadline,
+            byte_limit=remaining,
+        )
+        if sha256(first_pass[path]).digest() != sha256(content).digest():
+            raise ValueError("selected source changed during child staging")
+        staged[path] = content
+        second_pass_total += len(content)
+
+    final_files, final_manifest = _child_source_paths(
+        request,
+        tools=tools,
+        check_authority=check_authority,
+        deadline=deadline,
+    )
+    if final_files != files or final_manifest != initial_manifest:
+        raise ValueError("selected source changed during child staging")
+    return staged
+
+
 class RLMRunner:
     """Consume only an immutable prepared context and emit no terminal detail."""
 
@@ -1106,7 +1310,6 @@ class RLMRunner:
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
                 raise RLMConfigError("recursive child runtime is unavailable")
-
             application_loop = asyncio.get_running_loop()
 
             def check_selected_authority() -> None:
@@ -1115,75 +1318,38 @@ class RLMRunner:
                 if time.monotonic() >= context.execution.deadline:
                     raise TimeoutError("recursive child deadline exceeded")
 
-            async def read_selected_artifact(artifact_id: UUID, remaining_bytes: int) -> bytes:
-                check_selected_authority()
-                assert spec.read_artifact is not None
-                try:
-                    return await spec.read_artifact(artifact_id, remaining_bytes)
-                except ArtifactNotFoundError:
-                    raise ChildRuntimeAuthorizationError("selected Artifact is unavailable or unauthorized") from None
-                finally:
-                    check_selected_authority()
+            def prepare_child_inputs(request: ChildRequest) -> Mapping[str, bytes]:
+                return materialize_child_inputs(
+                    request,
+                    tools={str(tool.name): tool for tool in spec.tools},
+                    check_authority=check_selected_authority,
+                    turn_deadline=context.execution.deadline,
+                )
 
-            def read_selected_input(reference: str, remaining_bytes: int) -> str:
-                """Reuse prepared read capabilities, never interpret a locator as authority."""
+            def write_child_result(call_index: int, relative_path: str, content: bytes) -> str:
                 check_selected_authority()
-                if reference.startswith("artifact://"):
-                    identifier = reference.removeprefix("artifact://")
-                    try:
-                        artifact_id = UUID(identifier)
-                    except ValueError:
-                        raise ChildRuntimeAuthorizationError(
-                            "selected Artifact is unavailable or unauthorized"
-                        ) from None
-                    if identifier != str(artifact_id) or spec.read_artifact is None:
-                        raise ChildRuntimeAuthorizationError("selected Artifact is unavailable or unauthorized")
-                    # The native callback is an owned blocking child worker. Do
-                    # not cancel this future on timeout: ownership must remain
-                    # until the host read actually settles, even after revocation.
-                    future = asyncio.run_coroutine_threadsafe(
-                        read_selected_artifact(artifact_id, remaining_bytes), application_loop
-                    )
-                    remaining = context.execution.deadline - time.monotonic()
-                    if remaining <= 0:
-                        raise TimeoutError("recursive child deadline exceeded")
-                    try:
-                        # Do not cancel a read that has crossed the fence: the
-                        # application loop retains ownership until the async
-                        # catalog/blob operation settles and performs its
-                        # post-read authority check.  The child worker remains
-                        # owned by the recursive scheduler meanwhile.
-                        raw = future.result(timeout=remaining)
-                    except TimeoutError:
-                        raise TimeoutError("recursive child deadline exceeded") from None
-                    try:
-                        return raw.decode("utf-8")
-                    except UnicodeDecodeError:
-                        raise ValueError("selected input must be UTF-8 text") from None
-                if ":" in reference:
-                    raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
-                tools = {str(tool.name): tool for tool in spec.tools}
-                if reference.startswith("projects/"):
-                    parts = reference.split("/", 2)
-                    if len(parts) != 3 or "read_project_text" not in tools:
-                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
-                    page = tools["read_project_text"](path=reference, max_chars=min(10_000, remaining_bytes))
-                else:
-                    reader = tools.get("read_workspace_text")
-                    if reader is None:
-                        raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
-                    page = reader(path=reference, max_chars=min(10_000, remaining_bytes))
-                # Host reads are synchronous at this boundary, but they still
-                # may cross a revocation/deadline while the filesystem or
-                # mounted Volume is servicing the request.  Recheck before
-                # any bytes are delivered to the child frame.
+                writer = context.delegation.child_result_writer
+                if writer is None:
+                    raise ChildRuntimeAuthorizationError("parent Run result persistence is unavailable")
+
+                async def persist() -> str:
+                    return await writer(call_index, relative_path, content)
+
+                coroutine = persist()
+                try:
+                    future = asyncio.run_coroutine_threadsafe(coroutine, application_loop)
+                except BaseException:
+                    coroutine.close()
+                    raise
+                remaining = context.execution.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ChildRuntimeCleanupError("parent Run result persistence deadline exceeded")
+                try:
+                    reference = future.result(timeout=remaining)
+                except TimeoutError:
+                    raise ChildRuntimeCleanupError("parent Run result persistence did not settle") from None
                 check_selected_authority()
-                if not isinstance(page, Mapping) or page.get("ok") is not True or page.get("eof") is not True:
-                    raise ValueError("select a bounded complete text input before delegation")
-                content = page.get("content")
-                if not isinstance(content, str):
-                    raise ValueError("selected input must be UTF-8 text")
-                return content
+                return reference
 
             recursive_executor = RecursiveRLMExecutor(
                 models=context.execution.models,
@@ -1193,7 +1359,10 @@ class RLMRunner:
                 metrics=context.delegation.metrics,
                 observer=observations.publish,
                 is_authorized=lambda: not context.identity.authority.revoked,
-                selected_input_reader=read_selected_input,
+                input_materializer=prepare_child_inputs,
+                result_writer=write_child_result,
+                parent_run_id=str(context.identity.run_id),
+                loaded_skills=getattr(context.capabilities, "loaded_skills", lambda: ()),
             )
             # Register the executor's owned scheduler before any remaining
             # worker startup step can fail. Externally supplied schedulers are
@@ -1577,7 +1746,7 @@ async def probe_root_lm(
                     interpreter,
                     probe=(
                         "Set marker = 'probe-slice'. On a later REPL iteration call "
-                        "child = rlm_query(capsule={'task': 'Classify the selected value', 'fragments': [marker]}), "
+                        "child = rlm_query(task='Classify the selected value ' + marker, inputs=[]), "
                         "check child['status'] == 'completed', then submit the child answer "
                         "with typed SUBMIT(answer=child['answer']). "
                         "Use at least three REPL iterations and keep the prompt bounded."

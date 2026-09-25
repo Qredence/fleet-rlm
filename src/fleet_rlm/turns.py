@@ -790,6 +790,17 @@ class TurnRuntime:
             on_settlement (Callable[[object], None] | None): Callback invoked when settlement occurs.
             on_cleanup (Callable[[asyncio.Task[None]], None] | None): Callback invoked when cleanup is scheduled.
         """
+        models = getattr(getattr(prepared.execution, "execution", None), "models", None)
+        attempt_metadata = {
+            "fleet.checkpoint_version": str(run.checkpoint_version),
+            "fleet.skill_versions": ",".join(
+                f"{selection.id}@{selection.expected_version}" for selection in run.input.skill_selections
+            ),
+        }
+        for role, lm in (("root", getattr(models, "root_lm", None)), ("sub", getattr(models, "sub_lm", None))):
+            model = getattr(lm, "model", None)
+            if isinstance(model, str) and model:
+                attempt_metadata[f"fleet.{role}_model"] = model
         with turn_trace(
             run.session_id,
             run.run_id,
@@ -800,6 +811,7 @@ class TurnRuntime:
             preparation_span_id=getattr(prepared, "preparation_span_id", None),
             program_fingerprint=str(getattr(prepared, "program_fingerprint", "") or "") or None,
             image_identity=getattr(prepared, "image_identity", None),
+            attempt_metadata=attempt_metadata,
         ) as handle:
             async for event in self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id):
                 yield event

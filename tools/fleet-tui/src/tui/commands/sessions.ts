@@ -1,7 +1,7 @@
-/** Session lifecycle slash commands: /sessions, /rename, /resume, /reload. */
+/** Session lifecycle slash commands: /sessions, /rename, /resume, /reload, /task. */
 
 import { projectDurableTurns } from "../durable-projection.js";
-import { latestDurableTraceId } from "../durable-adapter.js";
+import { latestDurableTraceTarget } from "../durable-adapter.js";
 
 import type { CommandContext, CommandSpec } from "./registry.js";
 import { appendSystem, errorMessage } from "./shared.js";
@@ -117,6 +117,39 @@ export const reloadCommand: CommandSpec = {
   },
 };
 
+export const taskCommand: CommandSpec = {
+  name: "task",
+  description: "Show the current Session's saved task checkpoint",
+  usage: "/task",
+  handler: async (_args, ctx) => {
+    const session = ctx.store.getState().session;
+    if (!session) {
+      appendSystem(ctx.store, "No active Session task.");
+      return;
+    }
+    try {
+      const task = await ctx.client.getSessionTask(session.id);
+      if (ctx.store.getState().session?.id !== session.id) return;
+      const lines = [
+        `Task (revision ${task.revision})`,
+        `Goal: ${task.goal}`,
+        `Decisions: ${task.decisions.length ? task.decisions.join("; ") : "none"}`,
+        `Relevant paths: ${task.relevant_paths.length ? task.relevant_paths.join(", ") : "none"}`,
+        `Source revisions: ${
+          Object.entries(task.source_revisions)
+            .map(([path, revision]) => `${path} @ ${revision}`)
+            .join(", ") || "none"
+        }`,
+        `Completed: ${task.completed_work.length ? task.completed_work.join("; ") : "none"}`,
+        `Pending: ${task.pending_work.length ? task.pending_work.join("; ") : "none"}`,
+      ];
+      appendSystem(ctx.store, lines.join("\n"));
+    } catch (error) {
+      appendSystem(ctx.store, `Failed to load task: ${errorMessage(error)}`);
+    }
+  },
+};
+
 /**
  * Resumes a Fleet Session by loading it into the current session state.
  *
@@ -148,11 +181,13 @@ async function loadSession(
     // "session/hydrate" owns pending-state continuity: it keeps pinned Skills,
     // Attachments, and the /redo prompt for the SAME Session and clears them
     // when switching Sessions, atomically with the message projection.
+    const latestTrace = latestDurableTraceTarget(turns);
     ctx.store.dispatch({
       type: "session/hydrate",
       session: { id: session.id, title: session.title, status: session.status, resumed: true },
       events: projectDurableTurns(turns),
-      latestTraceId: latestDurableTraceId(turns),
+      latestTraceId: latestTrace?.traceId ?? null,
+      latestTraceRunId: latestTrace?.runId ?? null,
     });
     appendSystem(
       ctx.store,

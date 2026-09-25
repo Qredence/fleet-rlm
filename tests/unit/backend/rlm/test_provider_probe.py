@@ -17,7 +17,8 @@ def _interpreter():
     return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
 
-def _child_runtime(call_index: int):
+def _child_runtime(call_index: int, *, profile: str = "semantic-child"):
+    del profile
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
     from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
@@ -36,8 +37,11 @@ async def test_provider_probe_requires_multiple_native_actions_and_typed_submit(
     lm = dspy.utils.DummyLM(
         [
             {"reasoning": "initialize", "code": "marker = 'probe-slice'"},
-            {"reasoning": "delegate", "code": "child = rlm_query(capsule={'task': 'Classify', 'fragments': [marker]})"},
-            {"reasoning": "child submit", "code": "SUBMIT(answer='child-ok')"},
+            {"reasoning": "delegate", "code": "child = rlm_query(task='Classify', inputs=[], context=marker)"},
+            {
+                "reasoning": "child submit",
+                "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+            },
             {"reasoning": "submit", "code": "SUBMIT(answer=child['answer'])"},
         ],
         adapter=dspy.JSONAdapter(),

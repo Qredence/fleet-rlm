@@ -28,13 +28,12 @@ from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
     _materialize_context_manifest,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
-    SubproblemCapsule,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
@@ -273,11 +272,11 @@ def test_child_rlm_cannot_recurse_empirically() -> None:
     # Child code attempts to call rlm_query
     child_code = """
 try:
-    res = rlm_query(capsule={'task': 'nested'})
+    res = rlm_query(task='nested', inputs=[])
     ans = f"rec_success:{res}"
 except Exception as exc:
     ans = f"rec_blocked:{type(exc).__name__}:{exc}"
-SUBMIT(answer=ans)
+SUBMIT(answer=ans, evidence=[], gaps=[], result_files=[])
 """
     # Child reasoning uses root_lm of the forked model bundle
     root_lm = dspy.utils.DummyLM([{"reasoning": "child probe", "code": child_code}], adapter=adapter)
@@ -285,7 +284,8 @@ SUBMIT(answer=ans)
 
     closed_leases: list[str] = []
 
-    def factory(call_index: int) -> ChildRuntimeLease:
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
         def _cleanup() -> None:
@@ -307,14 +307,9 @@ SUBMIT(answer=ans)
         deadline=1e9,
     )
 
-    capsule = SubproblemCapsule(
-        task="Test nested recursion denial",
-        fragments=("probe fragment",),
-        allocation_bytes=1024,
-    )
-    outcome = executor.execute_capsule_outcome(capsule)
-    assert outcome.status == "completed"
-    assert "rec_blocked:NameError:name 'rlm_query' is not defined" in outcome.answer
+    outcome = executor._call_child(task="Test nested recursion denial", inputs=[], context="probe fragment")
+    assert outcome["status"] == "completed"
+    assert "rec_blocked:NameError:name 'rlm_query' is not defined" in outcome["answer"]
     assert len(closed_leases) == 1 and closed_leases[0] == "child-1", "Child lease was closed before outcome returned"
 
 
@@ -322,18 +317,13 @@ def test_child_rlm_tool_namespace_isolation() -> None:
     """Child RLM constructor receives leaf tools only, never rlm_query or rlm_query_batched."""
     sub_lm = dspy.utils.DummyLM([{"answer": "leaf result"}], adapter=dspy.JSONAdapter())
 
-    def read_selected_input(evidence_id: str) -> str:
-        return f"evidence:{evidence_id}"
-
-    child_rlm = build_native_rlm(
+    child_rlm = build_native_rlm_for_test(
         signature=RecursiveSubtaskSignature,
         options=RLMOptions(max_iters=3, max_llm_calls=6, max_output_chars=1000),
-        tools=[dspy.Tool(read_selected_input, name="read_selected_input")],
         sub_lm=sub_lm,
         verbose=False,
     )
 
-    assert "read_selected_input" in child_rlm.tools
     assert "rlm_query" not in child_rlm.tools
     assert "rlm_query_batched" not in child_rlm.tools
 
@@ -349,12 +339,13 @@ def test_child_rlm_executes_leaf_sub_lm_query() -> None:
 
     child_code = """
 summary = llm_query(prompt='Extract summary')
-SUBMIT(answer=f"child_filtered:{summary}")
+SUBMIT(answer=f"child_filtered:{summary}", evidence=[], gaps=[], result_files=[])
 """
     root_lm = dspy.utils.DummyLM([{"reasoning": "child query", "code": child_code}], adapter=adapter)
     sub_lm = dspy.utils.DummyLM([{"summary": "key finding 123"}], adapter=adapter)
 
-    def factory(call_index: int) -> ChildRuntimeLease:
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         return ChildRuntimeLease(
             interpreter,
@@ -371,12 +362,7 @@ SUBMIT(answer=f"child_filtered:{summary}")
         deadline=1e9,
     )
 
-    capsule = SubproblemCapsule(
-        task="Filter with leaf sub-LM",
-        fragments=("data chunk",),
-        allocation_bytes=1024,
-    )
-    outcome = executor.execute_capsule_outcome(capsule)
-    assert outcome.status == "completed"
-    assert "child_filtered" in outcome.answer
-    assert "key finding 123" in outcome.answer
+    outcome = executor._call_child(task="Filter with leaf sub-LM", inputs=[], context="data chunk")
+    assert outcome["status"] == "completed"
+    assert "child_filtered" in outcome["answer"]
+    assert "key finding 123" in outcome["answer"]

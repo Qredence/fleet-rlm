@@ -11,7 +11,7 @@ import pytest
 import fleet_rlm.rlm.execution as runtime_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.events import ChildProgress, ObservationSession, Status, ToolCompleted, ToolStarted
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -21,11 +21,12 @@ from fleet_rlm.rlm.execution import (
     SessionView,
     WorkerOwnership,
 )
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -37,14 +38,14 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
             {"reasoning": "prepare selected data", "code": "root_marker = 'root-only'"},
             {
                 "reasoning": "delegate selected row",
-                "code": "child = rlm_query(capsule={'task': 'classify selected row'})['answer']",
+                "code": "child = rlm_query(task='classify selected row', inputs=[])['answer']",
             },
             {
                 "reasoning": "check child scope",
                 "code": (
                     "\ntry:\n    root_marker\n    child_cannot_see_root = False\n"
                     "except NameError:\n    child_cannot_see_root = True\n"
-                    "SUBMIT(answer=str(child_cannot_see_root))"
+                    "SUBMIT(answer=str(child_cannot_see_root), evidence=[], gaps=[], result_files=[])"
                 ),
             },
             {
@@ -76,7 +77,9 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
         ),
         delegation=DelegationPolicy(
             recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
-            child_runtime_factory=lambda call_index: _child_lease(call_index),
+            child_runtime_factory=lambda call_index, *, profile="semantic-child": _child_lease(
+                call_index, profile=profile
+            ),
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -93,7 +96,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     assert len(tool_started) == len(tool_completed) == 1
     assert isinstance(tool_started[0].detail, ToolStarted)
     assert isinstance(tool_completed[0].detail, ToolCompleted)
-    assert tool_started[0].detail.input == {"selected_input_bytes": 180}
+    assert tool_started[0].detail.input == {"input_count": 0}
     assert tool_completed[0].detail.output == {
         "status": "completed",
         "call_index": 1,
@@ -103,20 +106,25 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     }
     statuses = [event for event in events if isinstance(event.detail, Status) and event.detail.phase == "recursive"]
     assert [event.detail.status for event in statuses] == ["child_started", "child_completed"]
+    child_events = [event for event in events if isinstance(event.detail, ChildProgress)]
+    assert len(child_events) == 2
+    assert all(event.detail.parent_run_id == str(context.identity.run_id) for event in child_events)
+    assert all(event.run_id == context.identity.run_id for event in child_events)
     assert all("classify selected row" not in (event.detail.message or "") for event in statuses)
     assert all("root-complete" not in (event.detail.message or "") for event in statuses)
     assert all(not isinstance(detail, Status) for detail in stream.outcome.execution_details)
 
 
-def _child_lease(call_index: int) -> ChildRuntimeLease:
+def _child_lease(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
     """Create a child runtime lease for a recursive test invocation.
 
     Parameters:
         call_index (int): Index used to identify the child runtime and workspace.
 
     Returns:
-        ChildRuntimeLease: A lease backed by an in-process interpreter.
+                ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
+    del profile
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
         interpreter,
@@ -192,7 +200,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
-        [{"reasoning": "delegate too late", "code": "rlm_query(capsule={'task': 'late child request'})['answer']"}],
+        [{"reasoning": "delegate too late", "code": "rlm_query(task='late child request', inputs=[])['answer']"}],
         adapter=adapter,
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
@@ -208,7 +216,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         """
         return False
 
-    def child_factory(call_index: int) -> ChildRuntimeLease:
+    def child_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         """
         Create a child runtime lease for the specified recursive call index.
 
@@ -218,6 +226,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         Returns:
                 ChildRuntimeLease: The runtime lease for the child call.
         """
+        del profile
         created.append(call_index)
         return _child_lease(call_index)
 
@@ -264,7 +273,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
 
     def capturing_builder(**kwargs: object):
         captured.update(kwargs)
-        return build_native_rlm(**kwargs)
+        return build_native_rlm_for_test(**kwargs)
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.
@@ -309,8 +318,8 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "delegate", "code": "child = rlm_query(capsule={'task': 'small task'})['answer']"},
-            {"reasoning": "child submit", "code": "SUBMIT(answer='child')"},
+            {"reasoning": "delegate", "code": "child = rlm_query(task='small task', inputs=[])['answer']"},
+            {"reasoning": "child submit", "code": "SUBMIT(answer='child', evidence=[], gaps=[], result_files=[])"},
             {"reasoning": "submit anyway", "code": "SUBMIT(answer='unexpected')"},
         ],
         adapter=adapter,
@@ -325,8 +334,9 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
         """
         return False
 
-    def failed_lease(call_index: int) -> ChildRuntimeLease:
+    def failed_lease(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         """Create a child runtime lease whose cleanup raises an error."""
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
         def close() -> None:
@@ -378,7 +388,7 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [
-            {"reasoning": "batch", "code": "answers = rlm_query_batched(capsules=[{'task': 'blocked'}])"},
+            {"reasoning": "batch", "code": "answers = rlm_query_batched(tasks=[{'task': 'blocked', 'inputs': []}])"},
             {"reasoning": "submit", "code": "SUBMIT(answer='root')"},
         ],
         adapter=adapter,
@@ -389,17 +399,19 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
     child_closed = threading.Event()
 
     class BlockingChild:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
             child_started.set()
             release_child.wait(2)
-            return dspy.Prediction(answer="late", trajectory=[])
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     import fleet_rlm.rlm.recursion as recursive_calls
 
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _program: True)
 
-    def child_factory(call_index: int) -> ChildRuntimeLease:
+    def child_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
 
         def close() -> None:

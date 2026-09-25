@@ -984,10 +984,37 @@
             "completed",
             "failed",
             "timed_out",
-            "cancelled"
+            "cancelled",
+            "not_started"
           ],
           "title": "Status",
           "type": "string"
+        },
+        "child_id": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Child Id"
+        },
+        "termination": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Termination"
         },
         "answer": {
           "default": "",
@@ -995,38 +1022,32 @@
           "title": "Answer",
           "type": "string"
         },
-        "source_references": {
+        "evidence": {
           "default": [],
           "items": {
             "type": "string"
           },
           "maxItems": 32,
-          "title": "Source References",
+          "title": "Evidence",
           "type": "array"
         },
-        "delivered_fragments": {
+        "gaps": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 32,
+          "title": "Gaps",
+          "type": "array"
+        },
+        "result_files": {
           "default": [],
           "items": {
             "type": "string"
           },
           "maxItems": 16,
-          "title": "Delivered Fragments",
+          "title": "Result Files",
           "type": "array"
-        },
-        "cited_evidence": {
-          "default": [],
-          "items": {
-            "type": "string"
-          },
-          "maxItems": 48,
-          "title": "Cited Evidence",
-          "type": "array"
-        },
-        "uncertainty": {
-          "default": "",
-          "maxLength": 2000,
-          "title": "Uncertainty",
-          "type": "string"
         },
         "usage": {
           "$ref": "#/$defs/ChildUsage"
@@ -1043,13 +1064,6 @@
           ],
           "default": null,
           "title": "Error Category"
-        },
-        "selected_input_bytes": {
-          "default": 0,
-          "maximum": 50000,
-          "minimum": 0,
-          "title": "Selected Input Bytes",
-          "type": "integer"
         },
         "result_bytes": {
           "default": 0,
@@ -2356,29 +2370,39 @@
       "name": "rlm_query",
       "category": "recursive",
       "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
-      "description": "Solve one bounded iterative subproblem from a capsule containing task, selected fragments, authorized references and allocation_bytes. Returns a typed outcome for Root verification.",
+      "description": "Investigate one bounded task using staged relative input paths. Pass task, inputs, and optional context.",
       "argument_schema": {
         "type": "object",
         "properties": {
-          "capsule": {
-            "additionalProperties": true,
-            "type": "object"
+          "task": {
+            "type": "string"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "context": {
+            "type": "string",
+            "default": ""
           }
         },
         "required": [
-          "capsule"
+          "inputs",
+          "task"
         ],
         "additionalProperties": false
       },
       "result_schema": {
         "$ref": "#/$defs/child_outcome"
       },
-      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and a selected-input reader.",
-      "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
+      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and do not receive recursive tools.",
+      "authorization_policy": "The executor checks live Run authority before input materialization, reservation, child acquisition, and completion; revoked authority fails closed.",
       "event_projection_policy": {
         "mode": "bounded_allowlist",
         "input": [
-          "selected_input_bytes"
+          "input_count"
         ],
         "output": [
           "status",
@@ -2388,7 +2412,9 @@
           "termination_mode"
         ],
         "omits": [
-          "capsule",
+          "task",
+          "inputs",
+          "context",
           "child answers"
         ],
         "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"
@@ -2398,11 +2424,11 @@
       "name": "rlm_query_batched",
       "category": "recursive",
       "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor",
-      "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Pass capsules; ordered typed outcomes include ordinary cleaned-up failures. Use only when every item needs iterative exploration. Root only.",
+      "description": "Solve multiple independent bounded subproblems with isolated child RLMs. Pass tasks containing task, inputs, and optional context; results stay in input order. Use only when every item needs iterative exploration. Root only.",
       "argument_schema": {
         "type": "object",
         "properties": {
-          "capsules": {
+          "tasks": {
             "items": {
               "additionalProperties": true,
               "type": "object"
@@ -2411,20 +2437,19 @@
           }
         },
         "required": [
-          "capsules"
+          "tasks"
         ],
         "additionalProperties": false
       },
       "result_schema": {
         "$ref": "#/$defs/child_outcome_array"
       },
-      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and a selected-input reader.",
-      "authorization_policy": "The executor checks live Run authority before reservation, child acquisition, and completion; revoked authority fails closed.",
+      "availability_policy": "Available only when recursive execution is enabled and only on Root. Children use native semantic calls and do not receive recursive tools.",
+      "authorization_policy": "The executor checks live Run authority before input materialization, reservation, child acquisition, and completion; revoked authority fails closed.",
       "event_projection_policy": {
         "mode": "bounded_allowlist",
         "input": [
-          "capsule_count",
-          "selected_input_bytes"
+          "task_count"
         ],
         "output": [
           "status",
@@ -2432,7 +2457,7 @@
           "peak_child_concurrency"
         ],
         "omits": [
-          "capsules",
+          "tasks",
           "child answers"
         ],
         "source": "src/fleet_rlm/rlm/recursion.py:RecursiveRLMExecutor"

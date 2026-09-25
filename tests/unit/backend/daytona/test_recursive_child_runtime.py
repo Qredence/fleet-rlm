@@ -19,6 +19,7 @@ from fleet_rlm.daytona.runtime import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
+from fleet_rlm.rlm.recursion import ChildRuntimeNotStartedError
 from fleet_rlm.sessions.bindings import require_scoped_volume_subpath
 
 
@@ -27,6 +28,8 @@ class _Fs:
     files: set[str]
     deleted: list[str] = field(default_factory=list)
     directories: set[str] = field(default_factory=set)
+    contents: dict[str, bytes] = field(default_factory=dict)
+    symlinks: set[str] = field(default_factory=set)
 
     async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
         """
@@ -41,12 +44,31 @@ class _Fs:
         """
         assert depth is None
         return [
-            *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)],
-            *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
+            *[
+                SimpleNamespace(path=path, is_dir=False, mode="120777" if path in self.symlinks else "100644")
+                for path in sorted(self.files)
+            ],
+            *[SimpleNamespace(path=path, is_dir=True, mode="040755") for path in sorted(self.directories)],
         ]
+
+    async def get_file_info(self, path: str) -> SimpleNamespace:
+        if path in self.symlinks:
+            return SimpleNamespace(path=path, is_dir=False, size=0, mode="120777")
+        if path in self.directories:
+            return SimpleNamespace(path=path, is_dir=True, size=0, mode="040755")
+        if path in self.files:
+            return SimpleNamespace(path=path, is_dir=False, size=len(self.contents.get(path, b"")), mode="100644")
+        raise FileNotFoundError(path)
 
     async def create_folder(self, path: str, _mode: str) -> None:
         self.directories.add(path)
+
+    async def upload_file(self, data: bytes, path: str) -> None:
+        self.files.add(path)
+        self.contents[path] = data
+
+    async def download_file(self, path: str) -> bytes:
+        return self.contents[path]
 
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
@@ -222,7 +244,7 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     run_id = uuid4()
     session_id = uuid4()
     root_fs = _Fs({"/home/daytona/fleet/workspaces-root.txt"})
-    scratch_file = f"/tmp/fleet/{run_id}/1/intermediate.txt"
+    scratch_file = f"/tmp/fleet/child-data/{run_id}/1/intermediate.txt"
     child_fs = _Fs({"/workspace/persistent.txt", scratch_file})
     root = _Sandbox("root-sandbox", root_fs)
     child = _Sandbox("child-sandbox", child_fs)
@@ -280,10 +302,9 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     ]
 
     await asyncio.to_thread(lease.close)
-
     assert shutdown_calls == [True]
     assert child_fs.files == {"/workspace/persistent.txt"}
-    assert child_fs.deleted == [scratch_file, f"/tmp/fleet/{run_id}/1"]
+    assert child_fs.deleted == [scratch_file, f"/tmp/fleet/child-data/{run_id}/1"]
     assert root_fs.files == {"/home/daytona/fleet/workspaces-root.txt"}
     assert root_fs.deleted == []
     assert platform.deleted == ["child-sandbox"]
@@ -296,13 +317,15 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
     child_fs = _Fs({"/home/daytona/fleet/workspace-file.txt"})
     child = _Sandbox("semantic-child", child_fs)
     platform = _Platform(child)
+    scratch_bindings: list[tuple[object, int | None]] = []
+    run_id = uuid4()
 
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
 
         def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
-            del call_index
+            scratch_bindings.append((_run_id, call_index))
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
@@ -317,7 +340,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
         session_id=uuid4(),
-        run_id=uuid4(),
+        run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
         execution_output_cap=1000,
@@ -327,6 +350,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
 
     assert lease.volume_id == ""
     assert lease.volume_subpath == ""
+    assert scratch_bindings == [(run_id, 1)]
     assert platform.create_calls == [
         {
             "profile": DaytonaEnvironmentProfile.SEMANTIC_CHILD,
@@ -341,10 +365,115 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
     ]
 
     await asyncio.to_thread(lease.close)
-
     assert child_fs.files == {"/home/daytona/fleet/workspace-file.txt"}
     assert child_fs.deleted == []
     assert platform.deleted == ["semantic-child"]
+
+
+@pytest.mark.asyncio
+async def test_child_capacity_refusal_is_bounded_and_does_not_create_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.get_running_loop()
+    admission = DaytonaAdmission(max_active_leases=1)
+    occupied = await admission.acquire(deadline=loop.time() + 1)
+    child = _Sandbox("unstarted-child", _Fs(set()))
+    platform = _Platform(child)
+    monkeypatch.setattr(recursive_child_runtime, "_CHILD_ADMISSION_WAIT_SECONDS", 0.01)
+    factory = recursive_child_runtime.DaytonaRuntime().build_child_factory(
+        loop=loop,
+        platform=platform,
+        admission=admission,
+        volume_id=None,
+        mount_path=None,
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=loop.time() + 5,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+    )
+
+    try:
+        with pytest.raises(ChildRuntimeNotStartedError, match="capacity is unavailable"):
+            await asyncio.to_thread(factory, 1)
+    finally:
+        occupied.release()
+
+    assert platform.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_child_lease_stages_and_harvests_files_in_its_private_directory() -> None:
+    child_fs = _Fs(set())
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    run_id = uuid4()
+    factory = recursive_child_runtime.DaytonaRuntime().build_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    await asyncio.to_thread(lease.stage_files, {"src/main.py": b"answer = 42\n"})
+    private_root = lease.data_path
+    assert private_root == f"/tmp/fleet/child-data/{run_id}/1"
+    assert lease.interpreter._backend._run_scratch_path == private_root
+    assert child_fs.contents[f"{private_root}/src/main.py"] == b"answer = 42\n"
+    child_fs.contents[f"{private_root}/result.txt"] = b"finding"
+    child_fs.files.add(f"{private_root}/result.txt")
+
+    result = await asyncio.to_thread(lease.read_result_files, ["result.txt"])
+    assert result == {"result.txt": b"finding"}
+
+    child_fs.files.add(f"{private_root}/symlink.txt")
+    child_fs.symlinks.add(f"{private_root}/symlink.txt")
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.read_result_files, ["symlink.txt"])
+
+    child_fs.files.add(f"{private_root}/linked/result.txt")
+    child_fs.symlinks.add(f"{private_root}/linked")
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.read_result_files, ["linked/result.txt"])
+
+    with pytest.raises(ValueError, match="safely relative"):
+        await asyncio.to_thread(lease.read_result_files, ["../outside"])
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
+async def test_child_lease_rejects_oversized_or_invalid_staging_before_filesystem_write() -> None:
+    child_fs = _Fs(set())
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    factory = recursive_child_runtime.DaytonaRuntime().build_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    with pytest.raises(ValueError, match="safely relative"):
+        await asyncio.to_thread(lease.stage_files, {"../secret": b"x"})
+    with pytest.raises(ValueError, match="size limit"):
+        await asyncio.to_thread(lease.stage_files, {"large.bin": b"x" * (64 * 1024 * 1024 + 1)})
+    assert child_fs.files == set()
+    await asyncio.to_thread(lease.close)
 
 
 @pytest.mark.asyncio
@@ -375,12 +504,13 @@ async def test_semantic_child_requires_a_configured_snapshot_before_provider_acq
 
 
 @pytest.mark.asyncio
-async def test_semantic_child_can_fall_back_to_volume_backed_workspace_child() -> None:
-    platform = _Platform(_Sandbox("workspace-fallback", _Fs(set())))
+async def test_semantic_child_never_falls_back_to_parent_volume() -> None:
+    platform = _Platform(_Sandbox("unexpected-workspace-fallback", _Fs(set())))
+    admission = DaytonaAdmission(max_active_leases=1)
     factory = recursive_child_runtime.DaytonaRuntime().build_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
-        admission=DaytonaAdmission(max_active_leases=1),
+        admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
@@ -390,13 +520,14 @@ async def test_semantic_child_can_fall_back_to_volume_backed_workspace_child() -
         execution_timeout_s=30,
         execution_output_cap=1000,
         semantic_child_available=False,
-        semantic_child_fallback=True,
     )
 
-    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
-    assert platform.create_calls[0]["profile"] is DaytonaEnvironmentProfile.WORKSPACE_CHILD
-    assert platform.create_calls[0]["volume_id"] == "shared-volume"
-    await asyncio.to_thread(lease.close)
+    with pytest.raises(ValueError, match="FLEET_DAYTONA_CHILD_SNAPSHOT"):
+        await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    assert platform.create_calls == []
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
 
 
 @pytest.mark.asyncio
@@ -573,7 +704,10 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     run_id = uuid4()
-    child = _Sandbox("child-sandbox", _Fs({"/workspace/persistent.txt", f"/tmp/fleet/{run_id}/1/intermediate.txt"}))
+    child = _Sandbox(
+        "child-sandbox",
+        _Fs({"/workspace/persistent.txt", f"/tmp/fleet/child-data/{run_id}/1/intermediate.txt"}),
+    )
     platform = _Platform(child)
 
     class Interpreter:

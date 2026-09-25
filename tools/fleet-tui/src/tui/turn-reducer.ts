@@ -183,6 +183,21 @@ export class TurnEventReducer {
             this.clock,
           ),
         );
+      case "child_progress":
+        return this.save({
+          id: `child-${this.runId}-${event.childId}`,
+          kind: "child_progress",
+          runId: this.runId,
+          childId: event.childId,
+          parentRunId: event.parentRunId ?? this.runId,
+          taskLabel: event.taskLabel,
+          state: event.state,
+          elapsedMs: event.elapsedMs,
+          outcome: event.outcome,
+          cleanupState: event.cleanupState,
+          collapsed: true,
+          ts: this.clock(),
+        });
       case "attachment":
         return this.save(
           attachment(

@@ -14,15 +14,25 @@ function metadataString(turn: FleetTurn, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/** Return the latest assistant execution trace in durable chronological order. */
-export function latestDurableTraceId(turns: FleetTurn[]): string | null {
+export interface DurableTraceTarget {
+  traceId: string;
+  runId: string;
+}
+
+/** Return the latest assistant trace with the Run that produced it. */
+export function latestDurableTraceTarget(turns: FleetTurn[]): DurableTraceTarget | null {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index];
     if (turn?.role !== "assistant") continue;
     const traceId = metadataString(turn, "traceId");
-    if (traceId) return traceId;
+    if (traceId) return { traceId, runId: metadataString(turn, "runId") ?? turn.id };
   }
   return null;
+}
+
+/** Return the latest assistant execution trace in durable chronological order. */
+export function latestDurableTraceId(turns: FleetTurn[]): string | null {
+  return latestDurableTraceTarget(turns)?.traceId ?? null;
 }
 
 export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
@@ -137,6 +147,55 @@ export function adaptDurableTurns(turns: FleetTurn[]): CanonicalEvent[] {
           break;
         case "data-status":
           break;
+        case "data-child-progress": {
+          const value = asRecord(part.data);
+          const state = str(value.state);
+          const cleanupState = str(value.cleanupState) ?? str(value.cleanup_state);
+          const childId = str(value.childId) ?? str(value.child_id) ?? part.id ?? "";
+          const taskLabel = str(value.taskLabel) ?? str(value.task_label) ?? "";
+          const states = [
+            "not_started",
+            "running",
+            "completed",
+            "failed",
+            "cancelled",
+            "timed_out",
+          ];
+          const cleanups = ["pending", "complete", "failed", "not_required"];
+          if (
+            !state ||
+            !states.includes(state) ||
+            !cleanupState ||
+            !cleanups.includes(cleanupState) ||
+            !childId ||
+            !taskLabel
+          ) {
+            events.push({
+              type: "turn_status",
+              phase: "child",
+              detail: "Child progress details are unavailable.",
+            });
+            break;
+          }
+          events.push({
+            type: "child_progress",
+            childId,
+            parentRunId: str(value.parentRunId) ?? str(value.parent_run_id) ?? undefined,
+            taskLabel,
+            state: state as
+              | "not_started"
+              | "running"
+              | "completed"
+              | "failed"
+              | "cancelled"
+              | "timed_out",
+            elapsedMs: int(value.elapsedMs) ?? int(value.elapsed_ms) ?? 0,
+            outcome: str(value.outcome),
+            cleanupState: cleanupState as "pending" | "complete" | "failed" | "not_required",
+            messageId,
+          });
+          break;
+        }
         case "data-skill": {
           const value = asRecord(part.data);
           events.push({

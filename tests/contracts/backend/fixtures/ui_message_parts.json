@@ -45,6 +45,19 @@
     }
   },
   {
+    "type": "data-child-progress",
+    "id": "child-run-1-call-1",
+    "data": {
+      "child_id": "child-1",
+      "task_label": "Inspect selected evidence",
+      "state": "completed",
+      "elapsed_ms": 42,
+      "outcome": "found supporting evidence",
+      "cleanup_state": "complete",
+      "parent_run_id": "11111111-1111-1111-1111-111111111111"
+    }
+  },
+  {
     "type": "data-step",
     "data": {
       "state": "started",

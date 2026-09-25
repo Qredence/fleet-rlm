@@ -176,6 +176,29 @@ class StatusPart:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildProgressPart:
+    child_id: str
+    task_label: str
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int
+    outcome: str | None = None
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
+    parent_run_id: str | None = None
+    type: Literal["child_progress"] = "child_progress"
+
+    def __post_init__(self) -> None:
+        if not self.child_id.strip() or len(self.child_id) > 128:
+            raise CommittedTurnValidationError("child_id must contain 1 to 128 non-blank characters")
+        if not self.task_label.strip() or len(self.task_label) > 240:
+            raise CommittedTurnValidationError("task_label must contain 1 to 240 non-blank characters")
+        _require_nonnegative(self.elapsed_ms, "elapsed_ms")
+        if self.outcome is not None and len(self.outcome) > 500:
+            raise CommittedTurnValidationError("outcome must not exceed 500 characters")
+        if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
+            raise CommittedTurnValidationError("parent_run_id must contain 1 to 128 non-blank characters")
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactPart:
     artifact_id: UUID
     kind: Literal["text", "markdown", "json"]
@@ -244,6 +267,7 @@ CommittedPart: TypeAlias = (
     | AttachmentPart
     | WarningPart
     | StatusPart
+    | ChildProgressPart
     | ArtifactPart
     | UsagePart
     | StructuredResultPart
@@ -260,6 +284,7 @@ _EXECUTION_PARTS = (
     AttachmentPart,
     WarningPart,
     StatusPart,
+    ChildProgressPart,
 )
 
 

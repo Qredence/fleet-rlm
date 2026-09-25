@@ -5,6 +5,66 @@ from __future__ import annotations
 from uuid import uuid4
 
 
+def test_projector_replays_terminal_child_progress_with_the_same_payload() -> None:
+    from fleet_rlm.api.sse import AISDKUIProjector
+    from fleet_rlm.rlm.events import EventRecorder
+    from fleet_rlm.sessions.committed_turn import ChildProgressPart, CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.committed_turn_events import CommittedTurnEventProjector
+
+    turn = CommittedTurn(
+        schema_version=1,
+        parts=(
+            ChildProgressPart(
+                "root:call-3", "Check references", "failed", 930, "No reliable source", "complete", "run-17"
+            ),
+            ChildProgressPart(
+                "root:call-4",
+                "Inspect large input",
+                "not_started",
+                0,
+                "Child admission budget exhausted",
+                "not_required",
+                "run-17",
+            ),
+            UsagePart({"iterations": 1, "observed_lm_usage": {}, "duration_ms": 930}),
+            TextPart("Done"),
+        ),
+    )
+    events = CommittedTurnEventProjector().project(turn, EventRecorder(uuid4(), uuid4()), mode="replay")
+    child = next(event for event in events if event.kind == "child.progress")
+    assert AISDKUIProjector().project(child) == [
+        {
+            "type": "data-child-progress",
+            "id": "root:call-3",
+            "data": {
+                "child_id": "root:call-3",
+                "task_label": "Check references",
+                "state": "failed",
+                "elapsed_ms": 930,
+                "outcome": "No reliable source",
+                "cleanup_state": "complete",
+                "parent_run_id": "run-17",
+            },
+        }
+    ]
+    refused = next(event for event in events if getattr(event.detail, "child_id", None) == "root:call-4")
+    assert AISDKUIProjector().project(refused) == [
+        {
+            "type": "data-child-progress",
+            "id": "root:call-4",
+            "data": {
+                "child_id": "root:call-4",
+                "task_label": "Inspect large input",
+                "state": "not_started",
+                "elapsed_ms": 0,
+                "outcome": "Child admission budget exhausted",
+                "cleanup_state": "not_required",
+                "parent_run_id": "run-17",
+            },
+        }
+    ]
+
+
 def test_projector_replays_every_semantic_part_in_order() -> None:
     from fleet_rlm.rlm.events import EventRecorder
     from fleet_rlm.sessions.committed_turn import (

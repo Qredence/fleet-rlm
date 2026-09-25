@@ -22,7 +22,7 @@ def _avoid_loading_repository_credentials(monkeypatch: pytest.MonkeyPatch) -> No
 def _set_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Populate the selected TOML profile's provider names without real credentials."""
     dotenv_org_id = (dotenv_values(".env").get("FLEET_DAYTONA_ORG_ID") or "").strip()
-    for name in verifier.active_profile_contract().provider_environment_names:
+    for name in verifier._live_profile_contract().provider_environment_names:
         # Organization identity is deliberately dotenv-only in the runtime
         # loader, so keep the process override consistent when a repository
         # ``.env`` is present.  CI without that file still gets a harmless
@@ -36,7 +36,7 @@ def _set_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _clear_provider_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     """Clear every provider name in the selected TOML profile."""
-    for name in verifier.active_profile_contract().provider_environment_names:
+    for name in verifier._live_profile_contract().provider_environment_names:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -233,7 +233,7 @@ def test_main_records_disabled_toml_live_policy(
     monkeypatch.setattr(
         verifier,
         "require_live_execution",
-        lambda: (_ for _ in ()).throw(verifier.FleetConfigurationError("disabled")),
+        lambda **_kwargs: (_ for _ in ()).throw(verifier.FleetConfigurationError("disabled")),
     )
     _set_provider_environment(monkeypatch)
 
@@ -550,11 +550,15 @@ def test_main_records_pytest_failure_without_subprocess_output(
     worktree.mkdir()
     monkeypatch.setattr(verifier, "_create_detached_worktree", lambda *_args, **_kwargs: worktree)
     monkeypatch.setattr(verifier, "_remove_detached_worktree", lambda *_args: None)
-    monkeypatch.setattr(
-        verifier.subprocess,
-        "run",
-        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1),
-    )
+    lane_environments: list[dict[str, str]] = []
+
+    def fail_lane(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        environment = kwargs.get("env")
+        assert isinstance(environment, dict)
+        lane_environments.append(environment)
+        return subprocess.CompletedProcess([], 1)
+
+    monkeypatch.setattr(verifier.subprocess, "run", fail_lane)
 
     assert verifier.main(["--output", str(output)]) == verifier.EXIT_PROOF
     failure = json.loads(output.read_text(encoding="utf-8"))
@@ -562,6 +566,7 @@ def test_main_records_pytest_failure_without_subprocess_output(
     assert failure["passed"] is False
     assert failure["models"] == {"root": "candidate-root", "sub": "candidate-sub"}
     assert failure["qualification"]["profile"] == "daytona-recursive"
+    assert lane_environments[0]["FLEET_CONFIG_PROFILE"] == "daytona-recursive"
     assert failure["qualification"]["limits"] == {
         "lane_count": 2,
         "lane_timeout_seconds": 900,

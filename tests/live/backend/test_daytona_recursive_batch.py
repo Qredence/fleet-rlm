@@ -252,11 +252,13 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
-    original = recursive_child_runtime._acquire_child_runtime
+    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
     lock = threading.Lock()
 
-    async def observed(**kwargs: object) -> recursive_child_runtime.ChildRuntimeLease:
-        lease = await original(**kwargs)  # type: ignore[arg-type]
+    async def observed(
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: object
+    ) -> recursive_child_runtime.ChildRuntimeLease:
+        lease = await original(owner, **kwargs)  # type: ignore[arg-type]
         with lock:
             evidence._active += 1
             evidence.peak_observed = max(evidence.peak_observed, evidence._active)
@@ -280,20 +282,20 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         lease._close = observed_close
         return lease
 
-    monkeypatch.setattr(recursive_child_runtime, "_acquire_child_runtime", observed)
+    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
 
 
 def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
     """Record host-side ``rlm_query_batched`` answers so Root cannot fake order via verify_batch alone."""
-    original = RecursiveRLMExecutor._call_capsules_batched
+    original = RecursiveRLMExecutor._call_children_batched
 
-    def observed(self: RecursiveRLMExecutor, capsules: list[dict[str, object]]) -> list[dict[str, object]]:
-        outcomes = original(self, capsules)
+    def observed(self: RecursiveRLMExecutor, tasks: list[dict[str, object]]) -> list[dict[str, object]]:
+        outcomes = original(self, tasks)
         assert all(item["status"] == "completed" for item in outcomes)
         evidence.batch_answers = [str(item["answer"]).strip() for item in outcomes]
         return outcomes
 
-    monkeypatch.setattr(RecursiveRLMExecutor, "_call_capsules_batched", observed)
+    monkeypatch.setattr(RecursiveRLMExecutor, "_call_children_batched", observed)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
@@ -355,17 +357,23 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
-        preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
         session_id: UUID | None = None
         try:
             created = client.post("/api/sessions", json={"title": "Daytona recursive batch canary"})
             assert created.status_code == 201
             session_id = UUID(created.json()["id"])
             prompt_a = (
-                f'In one iteration call typed SUBMIT(answer="{_TOKEN_A}"). Do not call rlm_query or rlm_query_batched.'
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_A}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
             )
             prompt_b = (
-                f'In one iteration call typed SUBMIT(answer="{_TOKEN_B}"). Do not call rlm_query or rlm_query_batched.'
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_B}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
             )
             response = client.post(
                 f"/api/sessions/{session_id}/turns",
@@ -373,7 +381,8 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
                     "text": (
                         "Execute the narrow native DSPy two-child batch proof. Run exactly one recursive"
                         " Daytona batch. First set prompt_a and prompt_b to the exact strings below, then"
-                        " call outcomes = rlm_query_batched(capsules=[{'task': prompt_a}, {'task': prompt_b}]) once."
+                        " call outcomes = rlm_query_batched(tasks=["
+                        "{'task': prompt_a, 'inputs': []}, {'task': prompt_b, 'inputs': []}]) once."
                         f" prompt_a = {prompt_a!r}. prompt_b = {prompt_b!r}."
                         " Do not call rlm_query, do not call llm_query, and do not nest batching."
                         " After the batch returns, require every outcome status to be completed and set"
@@ -454,7 +463,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
         finally:
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
-    assert cleanup_failures == ()
+            assert cleanup_failures == (), "recursive batch canary cleanup did not settle"
     write_receipt(
         {
             "schema": "fleet.p35d-root-batch/v1",

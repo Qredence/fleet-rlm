@@ -75,6 +75,69 @@ def test_commit_success_coalesces_incremental_output_before_durable_commit() -> 
     assert outputs == [OutputPart(output="first second", step=1)]
 
 
+def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
+    from fleet_rlm.rlm.events import ChildProgress
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.committed_turn import ChildProgressPart
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
+
+    committed = commit_success(
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
+            execution_details=(
+                ChildProgress("root:call-1", "Inspect code", "running", 10),
+                ChildProgress(
+                    "root:call-1", "Inspect code", "completed", 42, "Reviewed two files", "complete", "run-9"
+                ),
+            ),
+        ),
+        (),
+    )
+
+    children = [part for part in committed.parts if isinstance(part, ChildProgressPart)]
+    assert children == [
+        ChildProgressPart("root:call-1", "Inspect code", "completed", 42, "Reviewed two files", "complete", "run-9")
+    ]
+
+
+def test_commit_persists_not_started_child_admission_refusal() -> None:
+    from fleet_rlm.rlm.events import ChildProgress
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.committed_turn import ChildProgressPart
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
+
+    committed = commit_success(
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
+            execution_details=(
+                ChildProgress(
+                    "root:call-2",
+                    "Inspect large input",
+                    "not_started",
+                    0,
+                    "Child admission budget exhausted",
+                    "not_required",
+                ),
+            ),
+        ),
+        (),
+    )
+
+    assert (
+        ChildProgressPart(
+            "root:call-2",
+            "Inspect large input",
+            "not_started",
+            0,
+            "Child admission budget exhausted",
+            "not_required",
+        )
+        in committed.parts
+    )
+
+
 def test_commit_omits_structured_duplicate_for_single_output_prediction() -> None:
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.turn_detail_policy import commit_success

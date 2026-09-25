@@ -7,6 +7,7 @@ from typing import Literal, assert_never
 from fleet_rlm.rlm.events import (
     ArtifactCreated,
     AttachmentRead,
+    ChildProgress,
     EventRecorder,
     RLMCode,
     RLMOutput,
@@ -29,6 +30,7 @@ from fleet_rlm.rlm.events import (
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
+    ChildProgressPart,
     CodePart,
     CommittedPart,
     CommittedTurn,
@@ -116,6 +118,18 @@ def _details(part: CommittedPart):
         return (WarningEvent(message=part.message, code=part.code),)
     if isinstance(part, StatusPart):
         return (Status(phase=part.phase, status=part.status, message=part.message),)
+    if isinstance(part, ChildProgressPart):
+        return (
+            ChildProgress(
+                child_id=part.child_id,
+                task_label=part.task_label,
+                state=part.state,
+                elapsed_ms=part.elapsed_ms,
+                outcome=part.outcome,
+                cleanup_state=part.cleanup_state,
+                parent_run_id=part.parent_run_id,
+            ),
+        )
     if isinstance(part, ArtifactPart):
         return (
             ArtifactCreated(

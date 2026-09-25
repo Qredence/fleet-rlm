@@ -15,6 +15,7 @@ from fleet_rlm.api.dependencies import (
     SessionCatalogDep,
     SessionLifecycleDep,
     SessionPrewarmDep,
+    SessionTaskServiceDep,
     SettingsDep,
     TraceFeedbackServiceDep,
     TurnRuntimeDep,
@@ -26,6 +27,7 @@ from fleet_rlm.api.schemas import (
     SessionListResponse,
     SessionPatchRequest,
     SessionSummaryResponse,
+    SessionTaskResponse,
     SessionTurnPageResponse,
     TraceFeedbackRequest,
     TraceFeedbackResponse,
@@ -41,6 +43,7 @@ from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord, TurnAccess
 from fleet_rlm.sessions.run_state import RunNotFoundError
+from fleet_rlm.sessions.task import TaskCheckpointCorruptError, TaskCheckpointMissingError
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 sessions_router = router
@@ -172,6 +175,41 @@ async def get_session(
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
     return _to_detail(record)
+
+
+@router.get(
+    "/{session_id}/task",
+    response_model=SessionTaskResponse,
+    operation_id="get_session_task",
+    responses={
+        404: {"description": "Session or task checkpoint not found"},
+        503: {"description": "Task checkpoint unavailable"},
+    },
+)
+async def get_session_task(
+    session_id: UUID,
+    identity: LocalScopeDep,
+    service: SessionTaskServiceDep,
+) -> SessionTaskResponse:
+    try:
+        task = await service.read(
+            session_id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+        )
+    except (SessionNotFoundError, TaskCheckpointMissingError) as exc:
+        raise http_error(404, "task_not_found", "Task checkpoint not found") from exc
+    except TaskCheckpointCorruptError as exc:
+        raise http_error(503, "task_unavailable", "Task checkpoint unavailable") from exc
+    return SessionTaskResponse(
+        revision=task.revision,
+        goal=task.goal,
+        decisions=list(task.decisions),
+        relevant_paths=list(task.relevant_paths),
+        source_revisions=dict(task.source_revisions),
+        completed_work=list(task.completed_work),
+        pending_work=list(task.pending_work),
+    )
 
 
 @router.patch(

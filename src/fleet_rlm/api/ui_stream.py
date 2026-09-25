@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from fleet_rlm.api.json_util import to_plain_json
 
@@ -40,6 +40,23 @@ class StatusData(FleetUIDataModel):
     status: str | None = None
     detail: str | None = None
     message: str | None = None
+
+
+class ChildProgressData(FleetUIDataModel):
+    child_id: str = Field(min_length=1, max_length=128)
+    task_label: str = Field(min_length=1, max_length=240)
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int = Field(ge=0)
+    outcome: str | None = Field(default=None, max_length=500)
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"]
+    parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("parent_run_id")
+    @classmethod
+    def _nonblank_parent_run_id(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("parent_run_id must not be blank")
+        return value
 
 
 class SkillData(FleetUIDataModel):
@@ -203,6 +220,13 @@ class DataStatusChunk(FleetUIChunkModel):
     transient: bool | None = None
 
 
+class DataChildProgressChunk(FleetUIChunkModel):
+    type: Literal["data-child-progress"] = "data-child-progress"
+    id: str | None = None
+    data: ChildProgressData
+    transient: bool | None = None
+
+
 class DataSkillChunk(FleetUIChunkModel):
     type: Literal["data-skill"] = "data-skill"
     id: str | None = None
@@ -267,6 +291,7 @@ FleetUIMessageChunk = Annotated[
     | ReasoningDeltaChunk
     | ReasoningEndChunk
     | DataStatusChunk
+    | DataChildProgressChunk
     | DataSkillChunk
     | DataRLMCodeChunk
     | DataRLMOutputChunk
@@ -314,8 +339,10 @@ __all__ = [
     "AbortChunk",
     "ArtifactData",
     "AttachmentData",
+    "ChildProgressData",
     "DataArtifactChunk",
     "DataAttachmentChunk",
+    "DataChildProgressChunk",
     "DataRLMCodeChunk",
     "DataRLMOutputChunk",
     "DataSkillChunk",
