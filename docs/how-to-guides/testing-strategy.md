@@ -8,12 +8,26 @@ database lanes remain explicit.
 
 The [Phase 3 consolidation ledger](../testing/phase3-consolidation-ledger.md)
 records the pre-move ownership inventory, scenario dispositions, and validation.
+The [consolidation ledger](../testing/consolidation-ledger.md) records the
+2026-09-20 reorganization: the behavior-owner sub-package layout, the merges
+that removed single-scenario files, and the layout rule this gate now enforces.
 
 Add regressions to the existing behavior-owning test file by default. Create a
 new file only for a distinct contract, fixture/process boundary, generated-contract
 lane, or live marker. Coverage is a coarse floor, not a reason to test every
 internal branch. Retain independent concurrency, durability, privacy, and provider
 assertions even when nearby tests use similar setup.
+
+`make check-codebase-tree` enforces this admission rule: no `test_*.py` may sit
+flat in `tests/unit/backend/` (organize by behavior owner), and no file outside
+`tests/live/`, `tests/contracts/`, `tests/freeze/`, `tests/e2e/`, and
+`tests/unit/backend/packaging/` may hold fewer than three cases. Those lanes own
+many small files by design — one contract per live canary or API boundary.
+
+`tests/unit/backend/` is grouped by the source module a file primarily
+exercises: `api/`, `chat/`, `cli/`, `composition/`, `config/`, `daytona/`,
+`observability/`, `packaging/`, `persistence/`, `rlm/`, `runtime/`, `sessions/`,
+`skills/`, `turn/`, and `workspace/`.
 
 Shared setup belongs in small `tests/support` modules, existing domain fakes,
 or a narrowly scoped fixture. Do not import collected test functions or fixtures
@@ -25,6 +39,7 @@ claims remain distinct.
 | --- | --- | --- |
 | Backend unit | `tests/unit/backend/` | domain, adapters, configuration, routes, runtime modules |
 | Script unit | `tests/unit/scripts/` | supported helper behavior |
+| Optimization unit | `tests/unit/optimization/` | GEPA orchestration, curated datasets, routing evaluation, sanitized proof receipts |
 | LiteLLM invariant | `tests/unit/test_litellm_invariant.py` | forbids direct application LiteLLM use |
 | Backend contracts | `tests/contracts/backend/` | API, persistence, composition, and boundary contracts |
 | Packaging/release | `tests/unit/backend/packaging/` | artifact metadata, clean installs, CLI guards, and VCS-free builds |
@@ -109,9 +124,9 @@ git diff --check
 
 For separation-of-concerns changes, keep boundary checks close to the
 production seam: composition inventory tests live in
-`tests/unit/backend/test_live_composition.py`, Turn execution tests
+`tests/unit/backend/composition/test_live_composition.py`, Turn execution tests
 in `tests/unit/backend/chat/test_turn_coordinator_execution.py`, binding repository tests
-in `tests/unit/backend/test_sandbox_binding_repository.py`, and pure broker
+in `tests/unit/backend/runtime/test_sandbox_lifecycle.py`, and pure broker
 source and transport tests in `tests/unit/backend/daytona/test_broker.py`. Include
 the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,
 broker-binding, and interpreter-observation suites when changing lifecycle or

@@ -1,18 +1,26 @@
-"""Typed live Fleet UI stream transport contract tests."""
+"""Typed live Fleet UI stream transport and trace-id projection contracts.
+
+* ``test_ui_stream.py``: Typed live Fleet UI stream transport contract tests.
+* ``test_sse_trace_id.py``: SSE projection of optional operator-facing MLflow trace ids.
+"""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
+from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter, fleet_ui_chunk_payload
 from fleet_rlm.composition.testing import create_testing_app
+from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
 
+# --- from test_ui_stream.py -------------------------------------------
 _FIXTURE = (
-    Path(__file__).resolve().parents[3] / "tools" / "fleet-tui" / "src" / "tests" / "fixtures" / "turn-stream.jsonl"
+    Path(__file__).resolve().parents[4] / "tools" / "fleet-tui" / "src" / "tests" / "fixtures" / "turn-stream.jsonl"
 )
 
 
@@ -199,3 +207,19 @@ def test_declared_dynamic_json_boundaries_remain_intentionally_extensible() -> N
     )
     for payload in payloads:
         assert fleet_ui_chunk_payload(json.loads(json.dumps(payload))) == payload
+
+
+# --- from test_sse_trace_id.py ----------------------------------------
+def test_start_and_finish_include_trace_id_when_present() -> None:
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    projector = AISDKUIProjector()
+    start = projector.project(recorder.record(RunStarted(delivery="live", trace_id="tr-abc")))
+    finish = projector.project(recorder.record(RunCompleted(checkpoint_version=1, delivery="live", trace_id="tr-abc")))
+    assert start[0]["messageMetadata"]["traceId"] == "tr-abc"
+    assert finish[-1]["messageMetadata"]["traceId"] == "tr-abc"
+
+
+def test_start_omits_trace_id_when_absent() -> None:
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    payloads = AISDKUIProjector().project(recorder.record(RunStarted(delivery="live")))
+    assert "traceId" not in payloads[0]["messageMetadata"]

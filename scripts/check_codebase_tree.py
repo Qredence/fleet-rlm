@@ -60,9 +60,63 @@ def check_codebase_tree(root: Path = ROOT) -> tuple[list[str], list[str]]:
     return boundary_violations, clarity_violations
 
 
+# Test-layout admission policy. Regressions belong in the existing
+# behavior-owner file; a new file needs a distinct contract, fixture/process
+# boundary, generated-contract lane, or live marker. These lanes own many
+# small files by design and are exempt.
+_LAYOUT_EXEMPT_LANES = (
+    "tests/live/",
+    "tests/contracts/",
+    "tests/freeze/",
+    "tests/e2e/",
+    "tests/unit/backend/packaging/",
+)
+_MIN_CASES_PER_NEW_FILE = 3
+
+
+def _test_case_count(path: Path) -> int:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return sum(
+        1
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
+    )
+
+
+def check_test_layout(root: Path = ROOT) -> list[str]:
+    """Return layout violations for the test suite.
+
+    Enforces two rules: the backend unit root stays organized into
+    behavior-owner sub-packages, and no test file outside the exempt lanes
+    holds fewer than ``_MIN_CASES_PER_NEW_FILE`` cases.
+    """
+    root = root.resolve()
+    tests_root = root / "tests"
+    if not tests_root.is_dir():
+        return []
+
+    violations: list[str] = []
+    backend_root = tests_root / "unit" / "backend"
+    for path in sorted(backend_root.glob("test_*.py")):
+        violations.append(f"{path.relative_to(root)}: flat file in the backend unit root; move it into a sub-package")
+
+    for path in sorted(tests_root.rglob("test_*.py")):
+        relative = path.relative_to(root).as_posix()
+        if relative.startswith(_LAYOUT_EXEMPT_LANES):
+            continue
+        cases = _test_case_count(path)
+        if cases < _MIN_CASES_PER_NEW_FILE:
+            violations.append(
+                f"{relative}: {cases} case(s); merge into the behavior-owner file "
+                f"(minimum {_MIN_CASES_PER_NEW_FILE}) or justify a new lane"
+            )
+    return violations
+
+
 def main() -> int:
     boundary_violations, clarity_violations = check_codebase_tree()
-    if boundary_violations or clarity_violations:
+    layout_violations = check_test_layout()
+    if boundary_violations or clarity_violations or layout_violations:
         print("Backend tree check failed:", file=sys.stderr)
         if boundary_violations:
             print("Boundary:", file=sys.stderr)
@@ -72,8 +126,12 @@ def main() -> int:
             print("Clarity:", file=sys.stderr)
             for violation in clarity_violations:
                 print(f"- {violation}", file=sys.stderr)
+        if layout_violations:
+            print("Test layout:", file=sys.stderr)
+            for violation in layout_violations:
+                print(f"- {violation}", file=sys.stderr)
         return 1
-    print("Canonical backend tree check passed (boundaries + nested-ternary clarity)")
+    print("Canonical backend tree check passed (boundaries + nested-ternary clarity + test layout)")
     return 0
 
 

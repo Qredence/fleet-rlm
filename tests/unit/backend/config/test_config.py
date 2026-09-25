@@ -68,7 +68,7 @@ def test_runtime_policy_has_no_execution_architecture_selector() -> None:
 
 
 def test_committed_policy_declares_default_maas_model_roles() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert set(document["profiles"]) == {
@@ -114,7 +114,7 @@ def test_committed_policy_declares_default_maas_model_roles() -> None:
 
 
 def test_committed_policy_uses_bounded_root_rlm_budget_and_provider_retries() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert {key: document["defaults"]["rlm"][key] for key in ("max_iters", "max_llm_calls", "max_output_chars")} == {
@@ -147,7 +147,7 @@ def test_daytona_profiles_use_expected_model_for_both_roles(
     expected_model: str,
     expected_role: tuple[str, str],
 ) -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     llm = _deep_merge(document["defaults"]["llm"], document["profiles"][profile].get("llm", {}))
@@ -161,7 +161,7 @@ def test_daytona_profiles_use_expected_model_for_both_roles(
 
 
 def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona-recursive"].get("mlflow", {}))
@@ -171,7 +171,7 @@ def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
 
 
 def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert document["defaults"]["mlflow"] == {
@@ -308,7 +308,7 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
 
 
 def test_committed_policy_enables_operator_selected_recursion() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert document["defaults"]["rlm"]["recursion_enabled"] is True
@@ -827,7 +827,7 @@ def test_turn_timeout_must_be_positive(value: int) -> None:
 
 
 def test_autonomous_memory_candidate_categories_default_off() -> None:
-    policy_path = Path(__file__).resolve().parents[3] / "config" / "fleet.toml"
+    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert Settings().rlm_autonomous_memory_categories == ()
