@@ -166,13 +166,13 @@ class HarnessChecker:
         for path in required_toml:
             self._parse_toml(path)
         if (codex_dir / "hooks.json").exists():
-            self._error(
-                ".codex/hooks.json",
-                "deprecated hook source still present; use inline [hooks] in .codex/config.toml only",
-            )
-        for rel_path in (".codex/workspace-bootstrap.zsh",):
+            self._error(".codex/hooks.json", "retired Codex hook source is still present")
+        for rel_path in (
+            ".codex/workspace-bootstrap.zsh",
+            ".codex/cloud-preflight.zsh",
+        ):
             if not (self.repo_root / rel_path).is_file():
-                self._error(rel_path, "required Codex hook/bootstrap script is missing")
+                self._error(rel_path, "required Codex bootstrap/preflight script is missing")
 
     def _check_generated_artifact_controls(self) -> None:
         docs = "\n".join(

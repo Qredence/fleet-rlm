@@ -4,6 +4,15 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$repo_root"
 
+run_harness=true
+if (( $# > 0 )); then
+  if (( $# != 1 )) || [[ "$1" != "--skip-harness" ]]; then
+    echo "Usage: zsh .codex/cloud-preflight.zsh [--skip-harness]" >&2
+    exit 2
+  fi
+  run_harness=false
+fi
+
 branch="$(git branch --show-current)"
 if [[ -z "$branch" ]]; then
   echo "ERROR: Unable to determine current branch (detached HEAD?); use a feature branch based on origin/main." >&2
@@ -27,6 +36,6 @@ fi
 echo "Codex Cloud branch guard: current=$branch base=origin/main"
 git status --short --branch --untracked-files=all
 
-if (( $# == 0 )); then
+if [[ "$run_harness" == true ]]; then
   uv run python scripts/check_harness_engineering.py --skip-script-help
 fi
