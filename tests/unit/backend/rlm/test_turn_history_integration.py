@@ -123,7 +123,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
     prepared = await preparer.prepare(claim, deadline=float("inf"))
@@ -241,7 +241,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
     prepared = await preparer.prepare(claim, deadline=float("inf"))
@@ -334,7 +334,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
     prepared = await preparer.prepare(claim, deadline=float("inf"))
@@ -457,7 +457,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
 

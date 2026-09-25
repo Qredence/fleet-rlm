@@ -437,17 +437,17 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     ledger = _ProofLedger()
     child_evidence = _ChildEvidence()
     _install_child_evidence(monkeypatch, child_evidence, ledger)
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
 
     persisted_child_writes: list[tuple[Any, str, bytes]] = []
-    original_write_private = _DaytonaRunSink.write_private
+    original_write_private = DaytonaRunStorage.write_private
 
     async def observed_write_private(sink: Any, logical_path: str, data: bytes) -> None:
         await original_write_private(sink, logical_path, data)
         if "/children/" in logical_path:
             persisted_child_writes.append((sink, logical_path, bytes(data)))
 
-    monkeypatch.setattr(_DaytonaRunSink, "write_private", observed_write_private)
+    monkeypatch.setattr(DaytonaRunStorage, "write_private", observed_write_private)
 
     def read_persisted_result(_public_reference: str) -> bytes:
         if not child_evidence.cleanup_succeeded or len(persisted_child_writes) != 1:

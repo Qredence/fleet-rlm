@@ -5,7 +5,7 @@ import threading
 
 import pytest
 
-from fleet_rlm.daytona.turn_environment import _cleanup_scratch_before_releasing_invocation
+from fleet_rlm.app_lifecycle import _cleanup_scratch_before_releasing_invocation
 
 
 @pytest.mark.asyncio

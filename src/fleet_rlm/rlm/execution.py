@@ -1086,9 +1086,11 @@ class RLMRunner:
         self,
         *,
         program_builder: ProgramBuilder = build_native_rlm,
+        _adapter_factory: Callable[[Any], Any] | None = None,
         verbose: bool = True,
     ) -> None:
         self._program_builder = program_builder
+        self._adapter_factory = _adapter_factory
         self._verbose = verbose
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
@@ -1612,7 +1614,7 @@ class RLMRunner:
                 history=state_context.session.history,
                 signature=spec.signature,
             )
-            trace = ExecutionTraceAssembler(recursive_executor)
+            trace = ExecutionTraceAssembler(recursive_executor, self._adapter_factory)
             worker = start_rlm_worker(
                 rlm=rlm,
                 context=state_context,

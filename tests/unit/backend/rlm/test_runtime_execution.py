@@ -274,6 +274,12 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         phase_spans.append((name, inputs))
         yield SimpleNamespace(set_outputs=lambda _outputs: None)
 
+    adapter_contexts = []
+
+    def stock_adapter(adapter_context):
+        adapter_contexts.append(adapter_context)
+        return dspy.JSONAdapter()
+
     monkeypatch.setattr(dspy, "context", tracked_context)
     monkeypatch.setattr("fleet_rlm.rlm.events.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
@@ -293,7 +299,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         ),
         capabilities=capabilities,
     )
-    stream = RLMRunner(program_builder=factory.create).stream(context)
+    stream = RLMRunner(program_builder=factory.create, _adapter_factory=stock_adapter).stream(context)
     capabilities.spec = RLMExecutionSpec(
         skill_cards=(
             SkillCard(
@@ -339,7 +345,8 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert contexts[0]["lm"] is context.execution.models.root_lm
     assert contexts[0]["track_usage"] is True
     adapter = contexts[0]["adapter"]
-    assert isinstance(adapter, dspy.JSONAdapter)
+    assert adapter_contexts == [context]
+    assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
     assert dspy.settings.adapter is global_adapter
     assert phase_spans == [

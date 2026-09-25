@@ -6,10 +6,11 @@ import asyncio
 import contextlib
 import inspect
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from pathlib import Path
+from hashlib import sha256
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
@@ -34,6 +35,7 @@ from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.sessions.lifecycle import SessionActiveTurnDrain, SessionLifecycle
+from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer, TurnPreparationPlan
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler, run_deferred_memory_outbox_reconcile
@@ -46,7 +48,7 @@ from fleet_rlm.workspace.mounted_gateway import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.runtime import DaytonaRuntime, DaytonaSandboxSpec
+    from fleet_rlm.daytona.runtime import DaytonaRuntime, DaytonaSandboxSpec, InterpreterLease
     from fleet_rlm.paths import VolumePaths
 
 _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
@@ -54,6 +56,30 @@ _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS = 60.0
 _COMPOSITION_DISPOSAL_TASKS: set[asyncio.Task[Any]] = set()
 _COMPOSITION_DISPOSAL_OWNERS: dict[int, RuntimeInventory] = {}
+
+
+async def _cleanup_scratch_before_releasing_invocation(
+    cleanup: Callable[[], Any] | None,
+    release_invocation: Callable[[], None] | None,
+) -> None:
+    """Keep the Session invocation gate held until threaded scratch cleanup settles."""
+    try:
+        if cleanup is None:
+            return
+        cleanup_task = asyncio.create_task(asyncio.to_thread(cleanup))
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    continue
+            cleanup_task.result()
+            raise
+    finally:
+        if release_invocation is not None:
+            release_invocation()
 
 
 async def _dispose_components(
@@ -216,6 +242,7 @@ async def build_daytona_composition(
     *,
     skill_catalog: SkillCatalog,
     dispatcher: SyncBridgeDispatcher,
+    _adapter_factory: Callable[[Any], Any] | None = None,
 ) -> RuntimeInventory:
     """
     Construct the Daytona runtime inventory and recover cleanly from initialization failures.
@@ -446,7 +473,7 @@ async def build_daytona_composition(
             name="fleet-memory-outbox-reconcile",
         )
 
-        runner = RLMRunner(verbose=resolved.rlm_verbose)
+        runner = RLMRunner(verbose=resolved.rlm_verbose, _adapter_factory=_adapter_factory)
         coordinator = TurnRuntime(
             lifecycle=lifecycle,
             preparation=run_preparation,
@@ -460,7 +487,7 @@ async def build_daytona_composition(
         session_lifecycle = SessionLifecycle(
             session_catalog,
             runtime,
-            active_turn_drain=cast(SessionActiveTurnDrain, run_preparation.environments),
+            active_turn_drain=cast(SessionActiveTurnDrain, runtime),
         )
         route_services = RouteServices(
             turn_runtime=coordinator,
@@ -512,7 +539,12 @@ async def daytona_services(app: FastAPI, settings: Settings) -> AsyncIterator[Ru
     owning_loop = asyncio.get_running_loop()
     dispatcher.set_loop(owning_loop)
     try:
-        inventory = await build_daytona_composition(settings, skill_catalog=skill_catalog, dispatcher=dispatcher)
+        inventory = await build_daytona_composition(
+            settings,
+            skill_catalog=skill_catalog,
+            dispatcher=dispatcher,
+            _adapter_factory=getattr(app.state, "_rlm_adapter_factory", None),
+        )
     except BaseException:
         dispatcher.clear_loop(owning_loop)
         raise
@@ -634,7 +666,172 @@ def build_run_preparation(
     Returns:
         TurnPreparationPlan: Immutable Turn preparation inputs.
     """
-    from fleet_rlm.daytona.turn_environment import _DaytonaEnvironmentProvider
+    from fleet_rlm.daytona.diagnostics import environment_manifest
+    from fleet_rlm.daytona.runtime import (
+        DaytonaAdmissionTimeoutError,
+        DaytonaLeaseAcquisitionTimeoutError,
+        RootSessionSpec,
+        ensure_volume_layout,
+    )
+    from fleet_rlm.turn_preparation import (
+        RunEnvironment,
+        RunPreparationTimeoutError,
+        RunPreparationUnavailableError,
+    )
+    from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    def context_key(run: ClaimedRun) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]:
+        attachment_ids = tuple(str(attachment_id) for attachment_id in run.input.attachment_ids)
+        return (
+            attachment_ids,
+            tuple((str(selection.id), str(selection.expected_version)) for selection in run.input.skill_selections),
+            str(run.run_id) if attachment_ids else None,
+        )
+
+    async def acquire_environment(run: ClaimedRun, *, deadline: float) -> RunEnvironment:
+        key = (run.access.workspace_id, run.session_id)
+        release_invocation: Callable[[], None] | None = None
+        owner: InterpreterLease | None = None
+        try:
+            try:
+                release_invocation = await runtime.begin_root_invocation(*key, deadline=deadline)
+            except TimeoutError:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from None
+
+            async with workspace_gateway.open_sandbox(
+                run.access.workspace_id, purpose="session-volume-layout"
+            ) as io_sandbox:
+                await ensure_volume_layout(
+                    io_sandbox,
+                    volume_paths,
+                    session_id=run.session_id,
+                    run_id=run.run_id,
+                )
+
+            try:
+                owner = await runtime.acquire_root_session(
+                    RootSessionSpec(
+                        workspace_id=key[0],
+                        session_id=key[1],
+                        user_id=run.access.user_id,
+                        run_id=run.run_id,
+                        context_fingerprint=context_key(run),
+                        deadline=deadline,
+                    )
+                )
+            except DaytonaAdmissionTimeoutError as exc:
+                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+            except (DaytonaLeaseAcquisitionTimeoutError, TimeoutError) as exc:
+                raise RunPreparationTimeoutError("Turn preparation timed out") from exc
+
+            assert owner is not None
+            runtime.track_sandbox(owner.sandbox_id)
+            sandbox = owner.sandbox
+            if sandbox is None:
+                raise RuntimeError("acquired Sandbox is unavailable")
+
+            host_io = DaytonaHostIO(
+                run.access.workspace_id,
+                volume_gateway=volume_gateway,
+                workspace_gateway=workspace_gateway,
+                dispatcher=dispatcher,
+                volume_root=str(volume_paths.mount_path),
+                max_file_bytes=settings.max_upload_bytes,
+            )
+            sink = DaytonaRunStorage(
+                sandbox,
+                dispatcher=dispatcher,
+                paths=volume_paths,
+                host_io=host_io,
+                run_id=run.run_id,
+            )
+            session_workspace = DaytonaSandboxWorkspaceStorage(
+                sink.sandbox,
+                volume_root="/workspace",
+                root="/workspace",
+                max_file_bytes=settings.max_upload_bytes,
+                allow_volume_root=True,
+            )
+            project_workspace = host_io.workspace_storage(str(volume_paths.projects_root()))
+
+            async def release_preparation() -> None:
+                cleanup_run_scratch = getattr(owner.interpreter, "cleanup_run_scratch", None)
+                await _cleanup_scratch_before_releasing_invocation(
+                    cleanup_run_scratch if callable(cleanup_run_scratch) else None,
+                    release_invocation,
+                )
+
+            child_runtime_factory = runtime.build_child_factory(
+                volume_id=owner.volume_id,
+                mount_path=runtime.volume_config.mount_path,
+                workspace_id=run.access.workspace_id,
+                session_id=run.session_id,
+                run_id=run.run_id,
+                deadline=deadline,
+                execution_timeout_s=settings.rlm_execution_timeout_s,
+                execution_output_cap=settings.rlm_max_execution_output_chars,
+                is_authorized=lambda: not run.authority.revoked,
+                semantic_child_available=bool(settings.daytona_child_snapshot),
+            )
+
+            async def write_child_result(call_index: int, relative_path: str, data: bytes) -> str:
+                if run.authority.revoked or not isinstance(call_index, int) or call_index < 1:
+                    raise ValueError("child result is no longer authorized")
+                path = PurePosixPath(relative_path)
+                if (
+                    not relative_path
+                    or path.is_absolute()
+                    or ".." in path.parts
+                    or "\\" in relative_path
+                    or ":" in relative_path
+                ):
+                    raise ValueError("child result path is invalid")
+                destination = str(PurePosixPath(sink.scratch_root) / "children" / str(call_index) / path)
+                await sink.write_private(destination, data)
+                if run.authority.revoked:
+                    raise ValueError("child result is no longer authorized")
+                persisted = await sink.read(destination, max_bytes=len(data))
+                if sha256(persisted).digest() != sha256(data).digest():
+                    raise ValueError("child result persistence checksum mismatch")
+                return destination
+
+            bind_run_scratch = getattr(owner.interpreter, "bind_run_scratch", None)
+            if callable(bind_run_scratch):
+                bind_run_scratch(run.run_id)
+            return RunEnvironment(
+                interpreter=owner.interpreter,
+                attachment_sink=sink,
+                artifact_sink=sink,
+                release=release_preparation,
+                result_snapshot_sink=sink,
+                child_runtime_factory=child_runtime_factory,
+                child_result_writer=write_child_result,
+                context_mount_path=sink.scratch_root,
+                workspace_memory_store=host_io.memory_store,
+                volume_fs=sink.volume_fs,
+                session_workspace=session_workspace,
+                project_workspace=project_workspace,
+                resident_release=None,
+                release_is_resident=False,
+                history_format="sandbox",
+                mark_tainted=lambda: runtime.mark_root_tainted(*key),
+                async_bridge=dispatcher,
+                image_identity=environment_manifest(sandbox_spec).digest,
+            )
+        except BaseException:
+            runtime.mark_root_tainted(*key)
+            if owner is not None:
+                try:
+                    await asyncio.shield(runtime.close_root_session(*key, deadline=deadline))
+                except BaseException as exc:
+                    logger.warning(
+                        "Daytona root cleanup failed on error",
+                        extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+                    )
+            if release_invocation is not None:
+                release_invocation()
+            raise
 
     return TurnPreparationPlan(
         models=models,
@@ -650,15 +847,7 @@ def build_run_preparation(
             finalization_seconds=settings.rlm_wrap_up_seconds,
         ),
         attachments=attachment_lifecycle,
-        environments=_DaytonaEnvironmentProvider(
-            runtime=runtime,
-            settings=settings,
-            volume_paths=volume_paths,
-            sandbox_spec=sandbox_spec,
-            dispatcher=dispatcher,
-            workspace_gateway=workspace_gateway,
-            volume_gateway=volume_gateway,
-        ),
+        acquire_environment=acquire_environment,
         task_service=task_service,
         capabilities=DaytonaCapabilityPreparer(
             settings,

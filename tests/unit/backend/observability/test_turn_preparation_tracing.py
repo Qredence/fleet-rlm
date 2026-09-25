@@ -127,7 +127,7 @@ def _make_preparer(*, environments: Any = None) -> Any:
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=environments if environments is not None else Environments(),
+        acquire_environment=(environments if environments is not None else Environments()).acquire,
         capabilities=CapabilityFactory(),
     )
 

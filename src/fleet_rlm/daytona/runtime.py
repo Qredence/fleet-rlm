@@ -392,7 +392,8 @@ def _is_not_found(exc: BaseException) -> bool:
 
 
 def _assert_directory(info: Any) -> None:
-    if not bool(getattr(info, "is_dir", False)):
+    is_directory = info.get("is_dir", False) if isinstance(info, Mapping) else getattr(info, "is_dir", False)
+    if not bool(is_directory):
         raise DaytonaAdapterError(
             message="Workspace Volume layout conflicts with an existing file",
             cause_type="VolumeLayoutConflict",
@@ -1192,6 +1193,7 @@ class InterpreterLease:
     _defer_idle_cleanup: bool = False
     _state: LeaseState = LeaseState.OPEN
     _on_release: Callable[[], None] | None = None
+    _release_task: asyncio.Task[None] | None = field(default=None, repr=False)
     _release_lock: Lock = field(default_factory=Lock, repr=False)
 
     @property
@@ -2879,6 +2881,7 @@ class _ChildCleanupRecord:
     mount_path: str | None
     permit: DaytonaAdmissionPermit
     lease: ChildRuntimeLease | None = None
+    close_task: asyncio.Task[Any] | None = None
 
 
 class _ProviderCallDeadlineError(TimeoutError):
@@ -2922,11 +2925,8 @@ class DaytonaRuntime:
         self._tainted: set[tuple[str, str]] = set()
         self._child_cleanup_records: dict[str, _ChildCleanupRecord] = {}
         self._unidentified_child_sandboxes: list[tuple[SandboxPlatform, Any, DaytonaAdmissionPermit]] = []
-        self._child_close_tasks: set[asyncio.Task[Any]] = set()
         self._child_factories: set[Any] = set()
-        self._workspace_io_leases: set[SandboxLease] = set()
         self._workspace_io_active: set[SandboxLease] = set()
-        self._workspace_io_tasks: set[asyncio.Task[Any]] = set()
         self._sandbox_leases: set[SandboxLease] = set()
         self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
@@ -2964,8 +2964,6 @@ class DaytonaRuntime:
         self._idle_tasks: dict[tuple[UUID, UUID], asyncio.Task[None]] = {}
         self._owned_sandbox_ids: set[str] = set()
         self._owned_sandbox_lock = Lock()
-        self._release_leases: dict[asyncio.Task[None], InterpreterLease] = {}
-        self._late_cleanup_tasks: set[Any] = set()
         self._late_owners: dict[int, _LateOwner] = {}
         self._provider_tasks: set[asyncio.Future[Any]] = set()
         self._client = client
@@ -3224,10 +3222,7 @@ class DaytonaRuntime:
             or self._child_cleanup_records
             or self._unidentified_child_sandboxes
             or self._child_factories
-            or self._workspace_io_leases
             or self._workspace_io_active
-            or any(not task.done() for task in self._workspace_io_tasks)
-            or any(not task.done() for task in self._child_close_tasks)
             or self._late_roots
             or self._late_tasks
             or self._acquisitions
@@ -3238,10 +3233,7 @@ class DaytonaRuntime:
                 for lease in self._sandbox_leases
             )
             or self._late_owners
-            or self._late_cleanup_tasks
-            or any(not lease.closed for lease in self._release_leases.values())
             or any(not task.done() for task in self._provider_tasks)
-            or any(not task.done() for task in self._release_leases)
             or any(not task.done() for task in self._idle_tasks.values())
         )
 
@@ -3251,6 +3243,9 @@ class DaytonaRuntime:
     def _release_settled_sandbox_lease(self, lease: SandboxLease) -> None:
         if lease.state is not LeaseState.OPEN and not lease.has_pending_ownership:
             self._sandbox_leases.discard(lease)
+
+    def _workspace_io_resources(self) -> tuple[SandboxLease, ...]:
+        return tuple(lease for lease in self._sandbox_leases if lease._policy.kind == "volume_io")
 
     def _sync_record(self, key: tuple[str, str], owner: InterpreterLease) -> None:
         """Install the root in its single authoritative Session record."""
@@ -3334,14 +3329,11 @@ class DaytonaRuntime:
         if self._workspace_io_active:
             return False
 
-        for lease in tuple(self._workspace_io_leases):
+        for lease in self._workspace_io_resources():
             try:
                 await self._close_workspace_io_lease(lease, deadline=deadline)
             except BaseException as exc:
                 errors.append(exc)
-        io_tasks = tuple(task for task in self._workspace_io_tasks if not task.done())
-        if io_tasks:
-            await asyncio.wait(io_tasks, timeout=max(0.0, deadline - asyncio.get_running_loop().time()))
 
         for factory in tuple(self._child_factories):
             task = asyncio.create_task(asyncio.to_thread(factory.wait_owned), name="fleet-daytona-child-drain")
@@ -3370,21 +3362,27 @@ class DaytonaRuntime:
             await asyncio.wait(acquisitions, timeout=timeout)
 
         async with self._lock:
-            child_runtime_leases = tuple(
-                record.lease for record in self._child_cleanup_records.values() if record.lease is not None
-            )
+            child_records = tuple(record for record in self._child_cleanup_records.values() if record.lease is not None)
             roots = tuple((record.key, record.root) for record in self._records.values() if record.root is not None)
 
-        for lease in child_runtime_leases:
-            if lease.state is ChildRuntimeLeaseState.FAILED:
-                continue
-            task = asyncio.create_task(asyncio.to_thread(lease.close), name="fleet-daytona-child-lease-close")
-            self._retain_child_task(task)
-        if self._child_close_tasks:
+        for record in child_records:
+            lease = record.lease
+            assert lease is not None
+            task = record.close_task
+            if task is None or task.done():
+                if lease.state is ChildRuntimeLeaseState.FAILED:
+                    continue
+                task = asyncio.create_task(asyncio.to_thread(lease.close), name="fleet-daytona-child-lease-close")
+                record.close_task = task
+                _retain_provider_task(task, self._provider_tasks)
+        child_close_tasks = tuple(
+            record.close_task
+            for record in self._child_cleanup_records.values()
+            if record.close_task is not None and not record.close_task.done()
+        )
+        if child_close_tasks:
             remaining = max(0.0, deadline - asyncio.get_running_loop().time())
-            completed_child_closes, pending_child_closes = await asyncio.wait(
-                tuple(self._child_close_tasks), timeout=remaining
-            )
+            completed_child_closes, pending_child_closes = await asyncio.wait(child_close_tasks, timeout=remaining)
             for task in completed_child_closes:
                 with contextlib.suppress(BaseException):
                     task.result()
@@ -3460,37 +3458,15 @@ class DaytonaRuntime:
                 confirm_poll_interval_s=0.5,
             ),
         )
-        self._workspace_io_leases.add(lease)
         return lease
 
-    def _retain_workspace_io_task(self, task: asyncio.Task[Any]) -> None:
-        self._workspace_io_tasks.add(task)
-
-        def settled(completed: asyncio.Task[Any]) -> None:
-            self._workspace_io_tasks.discard(completed)
-            if not completed.cancelled():
-                with contextlib.suppress(BaseException):
-                    completed.exception()
-
-        task.add_done_callback(settled)
-
-    async def _settle_workspace_io_lease(self, lease: SandboxLease) -> None:
-        if await lease.wait_ownership():
-            self._workspace_io_leases.discard(lease)
-
     async def _close_workspace_io_lease(self, lease: SandboxLease, *, deadline: float | None = None) -> None:
-        close_task = asyncio.create_task(lease.aclose(deadline=deadline), name="fleet-daytona-workspace-io-close")
-        self._retain_workspace_io_task(close_task)
-        receipt = await asyncio.shield(close_task)
-        if receipt.provider.confirmed_absent and not lease.has_pending_ownership:
-            self._workspace_io_leases.discard(lease)
-            return
-        logger.warning(
-            "Workspace I/O Sandbox deletion not confirmed absent within grace period",
-            extra={"sandbox_id": lease._sandbox_id, "provider_error": receipt.provider.error},
-        )
-        task = asyncio.create_task(self._settle_workspace_io_lease(lease), name="fleet-daytona-workspace-io-settle")
-        self._retain_workspace_io_task(task)
+        receipt = await lease.aclose(deadline=deadline)
+        if not receipt.provider.confirmed_absent:
+            logger.warning(
+                "Workspace I/O Sandbox deletion not confirmed absent within grace period",
+                extra={"sandbox_id": lease._sandbox_id, "provider_error": receipt.provider.error},
+            )
 
     @contextlib.asynccontextmanager
     async def open_workspace_sandbox(self, workspace_id: UUID, *, purpose: str) -> AsyncIterator[Any]:
@@ -3527,7 +3503,7 @@ class DaytonaRuntime:
                 await self._close_workspace_io_lease(self._workspace_io_lease(late_sandbox, permit))
 
             task = asyncio.create_task(settle_late_create(), name="fleet-daytona-workspace-io-late-create")
-            self._retain_workspace_io_task(task)
+            _retain_provider_task(task, self._provider_tasks)
             raise
         lease = self._workspace_io_lease(sandbox, permit)
         try:
@@ -3608,8 +3584,8 @@ class DaytonaRuntime:
     def has_pending_cleanup(self) -> bool:
         return bool(
             self._tracked_sandbox_ids
-            or self._workspace_io_leases
-            or any(not task.done() for task in self._workspace_io_tasks)
+            or self._workspace_io_active
+            or self._workspace_io_resources()
             or any(not task.done() for task in self._provider_tasks)
             or (self._client_close_task is not None and not self._client_close_task.done())
             or self.has_pending_ownership
@@ -3625,7 +3601,6 @@ class DaytonaRuntime:
         tasks = tuple(
             task
             for task in (
-                *self._workspace_io_tasks,
                 *self._provider_tasks,
                 *lease_tasks,
                 self._client_close_task,
@@ -3693,17 +3668,6 @@ class DaytonaRuntime:
         finally:
             self._acquisitions.discard(acquisition)
 
-    def _retain_child_task(self, task: asyncio.Task[Any]) -> None:
-        self._child_close_tasks.add(task)
-
-        def settled(completed: asyncio.Task[Any]) -> None:
-            self._child_close_tasks.discard(completed)
-            if not completed.cancelled():
-                with contextlib.suppress(BaseException):
-                    completed.exception()
-
-        task.add_done_callback(settled)
-
     def _forget_child_cleanup_if_settled(self, sandbox_id: str) -> None:
         record = self._child_cleanup_records.get(sandbox_id)
         if record is not None and record.permit._released:
@@ -3749,10 +3713,16 @@ class DaytonaRuntime:
                 self._forget_child_cleanup_if_settled(sandbox_id)
 
         task = asyncio.create_task(settle(), name="fleet-daytona-late-child-create")
-        self._retain_child_task(task)
+        _retain_provider_task(task, self._provider_tasks)
 
     async def _retry_child_cleanup_records(self, *, deadline: float) -> None:
         for sandbox_id, record in tuple(self._child_cleanup_records.items()):
+            pending_close = record.close_task
+            if pending_close is not None and not pending_close.done():
+                remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+                if remaining:
+                    await asyncio.wait({pending_close}, timeout=remaining)
+                continue
             if record.permit._released:
                 self._forget_child_cleanup_if_settled(sandbox_id)
                 continue
@@ -3766,10 +3736,10 @@ class DaytonaRuntime:
                 ),
                 name="fleet-daytona-child-cleanup-retry",
             )
-            self._child_close_tasks.add(task)
+            record.close_task = task
+            _retain_provider_task(task, self._provider_tasks)
 
             def settled(completed: asyncio.Task[Any], sid: str = sandbox_id) -> None:
-                self._child_close_tasks.discard(completed)
                 if not completed.cancelled():
                     with contextlib.suppress(BaseException):
                         completed.exception()
@@ -4359,7 +4329,7 @@ class DaytonaRuntime:
 
     def _track_late_cleanup(self, owner: _LateOwner, task: Any) -> None:
         owner.cleanup_task = task
-        self._late_cleanup_tasks.add(task)
+        _retain_provider_task(task, self._provider_tasks)
         task.add_done_callback(self._settled_late_cleanup)
 
     def _schedule_late_owner_fallback(self, owner: _LateOwner) -> bool:
@@ -4506,7 +4476,6 @@ class DaytonaRuntime:
         return not pending and not self._late_owners
 
     def _settled_late_cleanup(self, task: Any) -> None:
-        self._late_cleanup_tasks.discard(task)
         if task.cancelled():
             return
         with contextlib.suppress(BaseException):
@@ -5096,14 +5065,17 @@ class DaytonaRuntime:
         )
 
     def _start_release_task(self, lease: InterpreterLease) -> asyncio.Task[None]:
-        for task, known in tuple(self._release_leases.items()):
-            if known is lease and not task.done():
-                return task
+        task = lease._release_task
+        if task is not None and not task.done():
+            return task
+        if task is not None and lease.closed:
+            return task
         release_task = asyncio.create_task(
             asyncio.to_thread(lease.release),
             name="fleet-daytona-interpreter-release",
         )
-        self._release_leases[release_task] = lease
+        lease._release_task = release_task
+        _retain_provider_task(release_task, self._provider_tasks)
         release_task.add_done_callback(lambda task: self._settled_release_task(lease, task))
         return release_task
 
@@ -5171,9 +5143,12 @@ class DaytonaRuntime:
             lease._defer_owner_release = True
             lease._defer_idle_cleanup = True
             release_error: BaseException | None = None
-            prior_release_failed = any(
-                known is lease and task.done() and not task.cancelled() and task.exception() is not None
-                for task, known in self._release_leases.items()
+            prior_task = lease._release_task
+            prior_release_failed = (
+                prior_task is not None
+                and prior_task.done()
+                and not prior_task.cancelled()
+                and prior_task.exception() is not None
             )
             if not lease.closed and not prior_release_failed:
                 try:
@@ -5259,9 +5234,8 @@ class DaytonaRuntime:
                 extra={"sandbox_id": sandbox_id, "error_type": type(exc).__name__},
             )
             return
-        for owned_task, owned_lease in tuple(self._release_leases.items()):
-            if owned_lease is lease:
-                self._release_leases.pop(owned_task, None)
+        if lease._release_task is task:
+            lease._release_task = None
         if lease._defer_idle_cleanup or lease._provider_retired:
             return
         if self._idle_stop_seconds is None or lease.session_id is None:
@@ -5415,9 +5389,8 @@ class DaytonaRuntime:
         idle = tuple(self._idle_tasks.values())
         for task in idle:
             task.cancel()
-        release = tuple(task for task in self._release_leases if not task.done())
         provider = tuple(self._provider_tasks)
-        all_tasks = tuple(dict.fromkeys((*idle, *release, *provider, *self._late_cleanup_tasks)))
+        all_tasks = tuple(dict.fromkeys((*idle, *provider)))
         pending: set[asyncio.Future[Any]] = set()
         for task in all_tasks:
             if isinstance(task, asyncio.Future):
@@ -5433,15 +5406,24 @@ class DaytonaRuntime:
         unpublished_leases = {
             id(owner.lease) for owner in self._late_owners.values() if owner.unpublished and owner.lease is not None
         }
+        known_leases = {
+            id(lease): lease
+            for lease in (
+                *(record.root for record in self._records.values()),
+                *self._late_roots.values(),
+                *(owner.lease for owner in self._late_owners.values()),
+            )
+            if lease is not None
+        }
         retry_release = [
             self._start_release_task(lease)
-            for lease in tuple(self._release_leases.values())
+            for lease in known_leases.values()
             if not lease.closed and id(lease) not in unpublished_leases
         ]
         if retry_release:
             remaining = max(0.0, deadline - asyncio.get_running_loop().time())
             _, retry_pending = await asyncio.wait(tuple(retry_release), timeout=remaining)
-            if retry_pending or any(not lease.closed for lease in self._release_leases.values()):
+            if retry_pending or any(not lease.closed for lease in known_leases.values()):
                 return False
 
         return await self._retry_late_owners(deadline)

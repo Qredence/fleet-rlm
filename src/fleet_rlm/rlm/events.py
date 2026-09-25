@@ -1387,6 +1387,7 @@ class ExecutionTraceAssembler:
     """Own the trace phase, DSPy context, and execution-metric projection."""
 
     recursive_executor: RecursiveRLMExecutor | None
+    _adapter_factory: Callable[[Any], Any] | None = None
 
     async def execute(
         self,
@@ -1412,11 +1413,21 @@ class ExecutionTraceAssembler:
             metrics=context.delegation.metrics,
             deadline=context.execution.deadline,
         )
-        adapter = FleetJSONAdapter(
-            deadline=context.execution.deadline,
-            wrap_up_seconds=context.execution.wrap_up_seconds,
-            budget=getattr(context.execution.models, "budget", None),
+        adapter = (
+            self._adapter_factory(context)
+            if self._adapter_factory is not None
+            else FleetJSONAdapter(
+                deadline=context.execution.deadline,
+                wrap_up_seconds=context.execution.wrap_up_seconds,
+                budget=getattr(context.execution.models, "budget", None),
+            )
         )
+
+        def adapter_summary(name: str) -> Mapping[str, Any]:
+            summarize = getattr(adapter, name, None)
+            summary = summarize() if callable(summarize) else {}
+            return summary if isinstance(summary, Mapping) else {}
+
         with (
             turn_phase_span(
                 "RLM.execute",
@@ -1436,9 +1447,10 @@ class ExecutionTraceAssembler:
                 callbacks=dspy_turn_callbacks(trace_callback),
                 # Keep the pinned DSPy JSON action protocol authoritative. A
                 # provider-native token stream is an adapter failure, not a
-                # second grammar that Fleet should reinterpret. FleetJSONAdapter
-                # adds only the bounded corrective re-ask, so one empty or
-                # unparseable action response cannot discard the whole Turn.
+                # second grammar that Fleet should reinterpret. The default
+                # FleetJSONAdapter adds a bounded corrective re-ask; the private
+                # comparison seam can select stock DSPy without changing the
+                # Turn-bound model budget.
                 adapter=adapter,
                 track_usage=True,
             ),
@@ -1455,8 +1467,8 @@ class ExecutionTraceAssembler:
                     context.delegation.metrics,
                     exc,
                     last_lm_call=trace_callback.last_call_summary(),
-                    wrap_up=adapter.wrap_up_summary(),
-                    repair=adapter.repair_summary(),
+                    wrap_up=adapter_summary("wrap_up_summary"),
+                    repair=adapter_summary("repair_summary"),
                 )
                 raise
             finally:
@@ -1467,8 +1479,8 @@ class ExecutionTraceAssembler:
                 started,
                 self.recursive_executor,
                 context.delegation.metrics,
-                wrap_up=adapter.wrap_up_summary(),
-                repair=adapter.repair_summary(),
+                wrap_up=adapter_summary("wrap_up_summary"),
+                repair=adapter_summary("repair_summary"),
                 lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
             )
 

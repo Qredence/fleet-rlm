@@ -142,9 +142,16 @@ remote-resource ownership through settlement. Cancellation, timeout, or
 authority loss stops new child admission; unresolved containment cannot be
 reported as a successful committed Turn.
 
-Turn preparation builds the Run's model-facing capabilities from the scoped
-storage handles supplied by its environment. Daytona acquisition binds those
-handles to the Sandbox and authorized host I/O; it does not build the tool
+`TurnPreparationPlan` owns preparation orchestration and receives one bound
+environment-acquisition callable from application composition. It does not
+retain a stateful provider wrapper. The callable acquires the Session root
+through `DaytonaRuntime`, while the separate Workspace gateway provisions the
+volume layout; these authorities remain distinct.
+`workspace/host_io.py` owns `DaytonaRunStorage`: asynchronous private
+attachment, artifact, and result-snapshot operations route between Run scratch
+and authorized host storage. Its narrow synchronous `volume_fs` view bridges
+the interpreter's storage tools. Turn preparation builds model-facing
+capabilities from the resulting scoped handles; it does not build the tool
 catalog or project task, memory, attachment, or Skill context.
 `sessions/history.py` projects the claimed checkpoint, and
 `sessions/history_transport.py` owns the Sandbox-serializable history form;
@@ -158,10 +165,11 @@ after the inventory has been built.
 The runtime's `DaytonaSessionRecord` is the registry entry for a retained
 Session root and its active invocation. It points directly to the
 `InterpreterLease`; the record owns Session cleanup state, while the runtime
-tracks any asynchronous release task. Each disposable child has one
-Sandbox-keyed runtime record that associates its active lease with pending
-provider cleanup. Children do not pass through the
-root-session registry or a second asynchronous context-manager acquisition
+retains pending provider operations. Each disposable child has one
+Sandbox-keyed cleanup record that owns its active lease, admission permit, and
+close task. Temporary Workspace I/O Sandboxes use the same runtime-owned
+`SandboxLease` records used for confirmed cleanup. Children do not pass through
+the root-session registry or a second asynchronous context-manager acquisition
 path. Cleanup tasks remain attached to their owning `DaytonaRuntime`. Daytona
 owns child lifecycle errors; the RLM executor owns delegation policy. The
 provider runtime does not import recursion policy.

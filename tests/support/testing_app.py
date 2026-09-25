@@ -33,7 +33,6 @@ from fleet_rlm.turn_preparation import (
     PreparedHostCapabilities,
     PreparedTurn,
     RunEnvironment,
-    RunEnvironmentProvider,
     RunPreparation,
     TurnPreparationPlan,
     prepare_host_capabilities,
@@ -270,15 +269,15 @@ class _TestingVolumeFsAdapter:
         self._sink.values.pop(logical_path, None)
 
 
-class TestingRunEnvironmentProvider(RunEnvironmentProvider):
-    async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment:
-        del run, deadline
-        sink = TestingRunSink()
+async def testing_run_environment(run: ClaimedRun, *, deadline: float) -> RunEnvironment:
+    """Return one credential-free Run environment for deterministic tests."""
+    del run, deadline
+    sink = TestingRunSink()
 
-        async def release() -> None:
-            return None
+    async def release() -> None:
+        return None
 
-        return RunEnvironment(TestingInterpreter(), sink, sink, release)
+    return RunEnvironment(TestingInterpreter(), sink, sink, release)
 
 
 class TestingCapabilityPreparer:
@@ -378,7 +377,7 @@ class DeterministicTurnPreparation:
             recursive_options=RecursiveRLMOptions(),
             wrap_up_seconds=wrap_up_seconds,
             attachments=attachments,
-            environments=TestingRunEnvironmentProvider(),
+            acquire_environment=testing_run_environment,
             capabilities=TestingCapabilityPreparer(
                 skill_catalog=skill_catalog or build_bundled_skill_catalog(),
                 models=models,
