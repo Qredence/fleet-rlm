@@ -32,8 +32,8 @@ created and certified on 2026-09-10 (receipt
 `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`).
 At the time of that receipt, the configured `.env` references and code
 fallbacks remained `fleet-rlm-python313-v7` / `fleet-rlm-python313-child-v2`.
-The receipt is historical; consult the active [Phase 6 ledger](../../plans/main-plan.updated.md)
-for current status.
+The receipt is historical; consult the active [Fleet configuration](../../config/fleet.toml)
+and deployed environment for current snapshot selection.
 
 Snapshot provisioning is an explicit operator action. Application startup does
 not create, overwrite, or delete snapshots, and an existing immutable name is
@@ -91,9 +91,9 @@ prerequisite.
 
 ## Historical provider evidence
 
-The Phase 5 public-network policy waiver and its evidence remain recorded in the
-[Phase 6 ledger](../../plans/main-plan.updated.md). That waiver records accepted
-risk; it does not establish network isolation. Historical P2.7 snapshot
+The Phase 5 public-network policy waiver remains an accepted risk in the
+[architecture guidance](../../ARCHITECTURE.md). It does not establish network
+isolation. Historical P2.7 snapshot
 certification evidence remains in its original receipt. The retired Phase 5
 and P2.7 verifier commands are no longer operator entrypoints.
 
