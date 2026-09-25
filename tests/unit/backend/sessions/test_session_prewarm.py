@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException
 
 from fleet_rlm.api.dependencies import get_session_prewarm
-from fleet_rlm.composition.inventory import RuntimeInventory
+from fleet_rlm.app_services import RuntimeInventory
 
 
 class _RecordingManager:
@@ -67,9 +67,26 @@ class _Request:
 
 class _App:
     def __init__(self, *, ready: bool, inventory: RuntimeInventory | None) -> None:
+        from fleet_rlm.app_services import RouteServices
+
         self.state = SimpleNamespace(
             composition_ready=ready,
             runtime_inventory=inventory,
+            route_services=(
+                RouteServices(
+                    turn_runtime=object(),
+                    attachment_lifecycle=object(),
+                    artifact_reader=object(),
+                    session_catalog=object(),
+                    session_lifecycle=object(),
+                    config_policy=object(),
+                    workspace_volume_gateway=object(),
+                    workspace_file_service=object(),
+                    daytona_runtime=inventory.daytona_runtime,
+                )
+                if inventory is not None
+                else None
+            ),
         )
 
 

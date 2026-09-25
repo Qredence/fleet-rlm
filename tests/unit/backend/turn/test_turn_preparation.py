@@ -9,18 +9,21 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_preparation import TestingRunPreparer
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     operations: list[str] = []
 
@@ -95,7 +98,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    prepared = await DefaultRunPreparer(
+    prepared = await TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -116,7 +119,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
 @pytest.mark.asyncio
 async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_failure() -> None:
-    from fleet_rlm.chat.preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -144,7 +147,7 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
 
 @pytest.mark.asyncio
 async def test_precommit_cleanup_closes_only_native_context_then_full_drain_skips_it() -> None:
-    from fleet_rlm.chat.preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -174,13 +177,13 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     import asyncio
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment, RunPreparationTimeoutError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment, RunPreparationTimeoutError
 
     released = False
 
@@ -223,7 +226,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    module = DefaultRunPreparer(
+    module = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -239,13 +242,13 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
     from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
     staged_path = f"/sessions/{session_id}/runs/{run_id}/attachments/{attachment_id}.txt"
@@ -299,7 +302,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    module = DefaultRunPreparer(
+    module = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -317,14 +320,14 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 @pytest.mark.asyncio
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
     from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()
     operations: list[str] = []
@@ -393,7 +396,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
     )
 
     with pytest.raises(ValueError, match="outside"):
-        await DefaultRunPreparer(
+        await TestingRunPreparer(
             models=RLMModelBundle(object(), object()),
             options=RLMOptions(),
             attachments=Attachments(),
@@ -471,7 +474,7 @@ async def test_prelude_heartbeats_are_transient_repeat_at_cadence_and_stop_when_
             self.open_calls = 0
 
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+            from fleet_rlm.turns import OpenedTurnStream
 
             self.open_calls += 1
 
@@ -510,7 +513,7 @@ async def test_prelude_emits_once_before_instant_open_and_failure_maps_to_error_
 
     class Coordinator:
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+            from fleet_rlm.turns import OpenedTurnStream
 
             async def fail():
                 raise RunNotFoundError("claim says no")
@@ -533,11 +536,11 @@ async def test_preparation_cancel_projects_single_abort_frame() -> None:
     from types import SimpleNamespace
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.preparation import RunPreparationCancelledError
+    from fleet_rlm.turn_preparation import RunPreparationCancelledError
 
     class Coordinator:
         def open_owned(self, _command):
-            from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+            from fleet_rlm.turns import OpenedTurnStream
 
             async def fail():
                 raise RunPreparationCancelledError("Turn cancelled")
@@ -557,12 +560,11 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess
+    from fleet_rlm.turns import TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -619,7 +621,7 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
             return Stream()
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
