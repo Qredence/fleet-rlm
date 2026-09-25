@@ -36,6 +36,22 @@ def test_harness_rejects_nested_agent_guides(tmp_path: Path) -> None:
     assert checker.errors[0].detail == "unexpected nested AGENTS.md; only the TUI guide is allowed"
 
 
+def test_harness_inventory_covers_nested_scripts_and_data(tmp_path: Path) -> None:
+    inventory = tmp_path / "scripts/README.md"
+    source = tmp_path / "scripts/benchmarks/helper.py"
+    fixture = tmp_path / "scripts/benchmarks/cases.json"
+    _write(inventory, "`scripts/benchmarks/helper.py`\n")
+    _write(source, "# helper\n")
+    _write(fixture, "[]\n")
+    checker = HarnessChecker(tmp_path, check_script_help=False)
+
+    checker._check_script_inventory()
+
+    assert [(error.path, error.detail) for error in checker.errors] == [
+        ("scripts/benchmarks/cases.json", "script or data file is missing from scripts/README.md")
+    ]
+
+
 def test_harness_default_skips_root_agents_line_budget(tmp_path: Path) -> None:
     over_budget = "\n".join(f"line {index}" for index in range(200))
     _write(tmp_path / "AGENTS.md", over_budget)

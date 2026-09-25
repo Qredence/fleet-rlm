@@ -71,7 +71,7 @@ help:
 	@echo "  make quality-gate     - Alias for the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run instructions, docs quality, and harness hard gates"
-	@echo "                         (use scripts/check_harness_engineering.py --editorial locally for doc hygiene)"
+	@echo "                         (use scripts/check_repo_hygiene.py --editorial for additional doc hygiene)"
 	@echo "  make check-instructions - Validate agent guides and development-skill references"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
@@ -204,12 +204,10 @@ check-release: check-instructions
 	uv run python scripts/validate_release.py metadata
 
 check-instructions:
-	uv run python scripts/check_agents_md_freshness.py
+	uv run python scripts/check_repo_hygiene.py
 
 check-docs: check-instructions
 	uv run python scripts/generate_profile_matrix.py check
-	uv run python scripts/check_docs_quality.py
-	uv run python scripts/check_harness_engineering.py
 
 check-security:
 	uvx pip-audit $(PIP_AUDIT_ARGS)

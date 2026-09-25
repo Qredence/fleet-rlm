@@ -8,6 +8,7 @@ FastAPI session, Daytona resources, assertions, receipt, and strict cleanup.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -18,6 +19,38 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 _TEST = "tests/live/backend/test_daytona_recursive_batch.py::test_daytona_recursive_batch_two_children_through_fastapi"
 
 
+def _require_clean_candidate() -> str:
+    """Require the run to start from a clean, named candidate branch."""
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("canary candidate identity is unavailable") from exc
+    unexpected = [line for line in status if line and not line.startswith("?? .factory/")]
+    if not branch or branch in {"main", "master"} or unexpected:
+        raise RuntimeError("canary requires a clean tracked candidate branch")
+    return sha
+
+
 def _validate_receipt(output: Path) -> None:
     """Require the canary's complete, metadata-only evidence contract."""
     try:
@@ -26,6 +59,25 @@ def _validate_receipt(output: Path) -> None:
         raise RuntimeError("canary receipt is not valid JSON") from exc
     if not isinstance(receipt, dict) or receipt.get("schema") != "fleet.p35d-root-batch/v1":
         raise RuntimeError("canary receipt has an unexpected schema")
+    candidate = receipt.get("candidate")
+    try:
+        expected_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        expected_lock = hashlib.sha256((_REPO_ROOT / "uv.lock").read_bytes()).hexdigest()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("canary candidate identity is unavailable") from exc
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("sha") != expected_sha
+        or candidate.get("tracked_tree_clean") is not True
+        or candidate.get("lockfile_sha256") != expected_lock
+    ):
+        raise RuntimeError("canary receipt does not match the clean candidate")
     if receipt.get("passed") is not True:
         raise RuntimeError("canary receipt does not prove success")
     cleanup = receipt.get("cleanup")
@@ -72,6 +124,10 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--output must name a new receipt")
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         raise SystemExit("set FLEET_LIVE=1 to authorize the credentialed canary")
+    try:
+        _require_clean_candidate()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
     environment = {**os.environ, "FLEET_LIVE_EVIDENCE_PATH": str(output)}
     result = subprocess.run(["uv", "run", "pytest", "-q", _TEST], cwd=_REPO_ROOT, env=environment, check=False)
     if result.returncode:

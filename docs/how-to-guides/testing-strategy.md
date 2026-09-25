@@ -46,7 +46,7 @@ claims remain distinct.
 | End to end | `tests/e2e/` | canonical local process and request flows |
 | TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
 | Database | tests marked `db` | explicit configured database behavior |
-| Daytona MVP | `tests/live/backend/test_fleet_rlm_daytona_mvp.py` | complete real FastAPI/DSPy/Daytona flow, including Session Workspace durability across Sandbox replacement |
+| Native semantic FastAPI contract | `tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi` | single and ordered batch semantic calls, typed submission, zero recursive children, and owned-resource cleanup |
 | Attachment/Artifact durability | `tests/live/backend/test_attachment_artifact_durability.py` | Volume persistence and committed content |
 
 ## Primary non-live gate
@@ -184,7 +184,9 @@ accounting in individual pytest modules.
 | Contract | Operator entry point / evidence | Why live evidence is necessary |
 | --- | --- | --- |
 | Context containment and whole-Sandbox deletion | `test_daytona_containment.py`, `test_daytona_deletion_lifecycle.py`; explicitly requested bounded evidence | Provider process survival and deletion observation cannot be inferred from fake responses. |
-| Snapshot capabilities, Session host tools, recursive child | `scripts/live_p27_snapshot_verify.py`; aggregate JSON receipt | Both immutable images must import and execute through real Daytona and the configured LM. |
+| Snapshot image package and import contract | `scripts/daytona_snapshot.py verify-runtime`; disposable Sandbox result | The selected immutable image must expose its baked Python and dependency contract in Daytona. This does not exercise Fleet's API or RLM path. |
+| Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The receipt includes cleanup evidence and does not certify recursion or containment. |
+| Recursive two-child batch canary | `scripts/live_recursive_batch_canary.py`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
 | Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
 | PostgreSQL contention and migration rehearsal | `scripts/benchmarks/certify_postgres.py --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
@@ -192,19 +194,20 @@ accounting in individual pytest modules.
 | Matched quality/performance | Existing benchmark campaign helpers and fixed dataset; comparison receipt | Real model quality, latency and cost require matched provider runs. Fixture-only Phase 6 cases are not a completed campaign. |
 
 The live pytest opt-out contract is exercised in an isolated subprocess: all
-live cases must skip without operator opt-in. Stable verifier arguments, pytest
-node IDs, evidence environment variables and receipt schemas remain supported.
-Sharing fixtures must not change the meaning of a previously recorded receipt.
+live cases must skip without operator opt-in. Script paths are internal and
+retired commands have no compatibility wrappers. Historical receipts retain
+their original schemas and meanings.
 
 Live pytest suites remain separately marked and require explicit live test
-environment setup. The live verifier scripts instead use `runtime.live_enabled`
-from the selected TOML policy (true by default; set it to `false` to fail
-closed) and still require canonical credentials:
+environment setup. The operator wrappers require both `FLEET_LIVE=1` and
+`runtime.live_enabled` from the selected TOML policy (true by default; set it to
+`false` to fail closed), plus their contract-specific credentials and policy:
 
 ```bash
 FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
   --output .scratch/daytona-lifecycle-benchmark.json
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_fleet_rlm_daytona_mvp.py -q -n 0 --timeout=900
+FLEET_LIVE=1 uv run pytest -q -n 0 --timeout=900 \
+  tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi
 FLEET_LIVE=1 uv run pytest tests/live/backend/test_attachment_artifact_durability.py -q -n 0
 ```
 
@@ -214,21 +217,23 @@ Only a create-through-first-execution p95 at or below ten seconds with all
 twenty measured Sandboxes deleted selects per-Turn lifecycle. A missing,
 partial, slower, or cleanup-failing receipt retains Session Sandboxes.
 
-The complete release-oriented verifier loads `.env` with `override=False`, so
-existing process exports win:
+The native verifier loads `.env` with `override=False`, so existing process
+exports win. It requires the `daytona-native` profile and explicit model IDs:
 
 ```bash
+export FLEET_LIVE=1
+export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
+export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+  --output .scratch/live/native-daytona.json
 ```
 
-This verifier explicitly targets the opt-in `daytona-recursive` profile; the
-shipped default remains `daytona-native`. The [profile matrix](../reference/profile-matrix.md)
-identifies the required provider values. The verifier requires the committed
-configured Root and Sub policy roles, records a passing receipt at
-the exact candidate SHA, verifies provider cleanup and secret isolation, and
-must be paired with same-SHA CI, local release, and human attestations before
-promotion. Historical receipts do not prove a later tip.
+This verifier records the native semantic-call contract and attachment/artifact
+durability contract at the exact candidate SHA. It does not establish
+recursive execution, containment, release readiness, or deployment. Run the
+recursive canary separately when its evidence is authorized and needed; the
+[profile matrix](../reference/profile-matrix.md) lists profile environment
+requirements. Historical receipts do not prove a later tip.
 
 ## Security, packaging, and release
 

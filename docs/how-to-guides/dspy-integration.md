@@ -355,85 +355,52 @@ canary is evidence for this test only and does not promote or release the
 candidate. Replace the snapshot example with the candidate's immutable Daytona
 snapshot name, which must end in `-v` followed by a positive integer.
 
-## Run the Phase 2 Daytona recursive-child canary
+## Current live Daytona contracts
 
-The focused recursive-child canary selects `[profiles.daytona-recursive]`.
-It proves one native DSPy child RLM receives a dedicated Volume-less Daytona
-Sandbox, only its selected source copy, no Root Python marker, and strict
-cleanup before the Root typed `SUBMIT` completes. It does not use a custom
-agent loop or a grandchild Sandbox. The canary does not certify provider network
-isolation; the Phase 5 network-policy waiver remains in force.
-
-```bash
-uv run python scripts/live_phase2_recursive_verify.py \
-  --output .scratch/fleet-rlm-recursive-runtime/evidence/daytona-dspy-recursive-<run-id>.json
-```
-
-The command requires explicit live authorization, `runtime.live_enabled`, a
-clean tracked non-`main` candidate, the recursive profile, and its configured
-model roles. Its receipt
-contains only candidate/dependency identity, non-secret policy identifiers,
-two bounded durations, and boolean assertions. It excludes prompts, answers,
-code, credentials, URLs, trace IDs, Sandbox IDs, Volume IDs, and broker data.
-
-## Run the complete Daytona proof
-
-`live_daytona_verify.py` remains the broader MVP/release proof; it is not
-repurposed for the Phase 1 canary. The release proof is an explicitly invoked,
-policy-gated command that uses the real FastAPI, DSPy, and Daytona path.
-`runtime.live_enabled` is true by
-default; set it to `false` in `config/fleet.toml` to fail closed. Export
-credentials in the invoking shell or keep them in the repository `.env`; never
-place them in the repository or pass them through Fleet API requests.
+The native verifier runs two current contracts against one committed candidate:
+the native single and ordered batch semantic-call path through FastAPI, and the
+staged Attachment / durable Artifact contract across Sandbox replacement.
+It requires explicit live authorization, `runtime.live_enabled`, the
+`daytona-native` profile, bounded Root and Sub model IDs, configured provider
+credentials, and a clean tracked non-`main` candidate.
 
 ```bash
-# Credentials may come from the process environment or repo `.env`
-# (loaded via python-dotenv; existing exports win).
+export FLEET_LIVE=1
+export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
+export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+  --output .scratch/live/native-daytona-run-001.json
 ```
 
-Select the intended provider profile in `[config] default_profile` and restart
-Fleet first. The shipped default is `daytona-native`; select `daytona-recursive`
-explicitly for child-RLM behavior. Use the [profile
-matrix](../reference/profile-matrix.md) to provide the selected profile's environment names.
-Provision the immutable Snapshot named by that profile with the [Daytona
-Snapshot guide](daytona-snapshot.md).
+The output must be a new ignored or out-of-repository path. The command records
+candidate and model identity, contract assertions, bounded counts, resource
+IDs, durability checksums, and cleanup facts. Its `--help` path does not load
+credentials. This proves only the two named contracts; it does not exercise
+recursive child execution or establish containment, promotion, release, or
+deployment.
 
-The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. It resolves
-the configured Root and Sub roles from the selected TOML profile; ambient model
-variables are ignored, and swapped or obsolete model
-pairs fail the precondition. Its `--help` path requires no credentials.
+## Current recursive-batch canary
 
-The proof exercises a typed host Signature, state across RLM iterations,
-single and batched recursive calls, a host Tool, a durable workspace write,
-typed submission, result snapshot commit, strict SSE completion, Sandbox
-replacement, fresh interpreter state, Session History reload, and strict
-Sandbox/Volume cleanup.
+The separate recursive canary runs two native DSPy child RLMs from one ordered
+Root batch, verifies observed concurrency and child trace hierarchy, reuses the
+Root on a second Turn, and requires child cleanup and restored admission. It
+selects the opt-in `daytona-recursive` policy through an isolated policy copy;
+the shipped default remains `daytona-native`. It requires `FLEET_LIVE=1`,
+enabled live policy, configured Daytona/model credentials, and a clean tracked
+non-`main` candidate.
 
-The current proof does not establish Workspace Memory across real
-provider-backed Sandbox replacement and separate Sessions. That live
-cross-Sandbox, cross-Session proof remains gated and has not been run.
+```bash
+FLEET_LIVE=1 uv run python scripts/live_recursive_batch_canary.py \
+  --output /tmp/fleet-rlm-recursive-batch-run-001.json
+```
 
-## Evidence and failure policy
+The receipt is a single canary result. It does not certify containment,
+comparative quality, child promotion, release, or deployment. The Phase 5
+network-policy waiver remains recorded in the active ledger and is not network
+isolation evidence.
 
-The schema-versioned JSON receipt contains only the candidate fingerprint,
-versions and model identifiers, timestamps, resource and correlation ids,
-bounded counts, checksums, and pass/fail facts. It never retains prompts,
-generated code or stdout, Tool arguments or results, Session bodies,
-credentials, provider exception text, or stack traces.
-
-Configured credential values and known secret variable names are checked in
-memory against public Runtime Events, committed data, scoped Volume files,
-Sandbox environment names, application logs, and the receipt. Cleanup failure
-invalidates an otherwise successful proof. A failed receipt uses only one of
-the closed categories `precondition_failed`, `proof_failed`, `cleanup_failed`,
-`receipt_invalid`, or `interrupted` plus the bounded failed phase.
-
-The receipt is local release evidence, not deployment authorization. Full
-source-candidate promotion still requires the matching CI, local release-gate,
-and human-review evidence defined by the release process.
+Both commands are operator-run live checks; they are not part of this scripts
+refactor's local validation.
 
 
 ## Routing evaluation
