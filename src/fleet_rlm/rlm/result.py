@@ -6,7 +6,7 @@ import contextlib
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from math import isfinite
 from types import MappingProxyType
@@ -18,7 +18,7 @@ from pydantic_core import PydanticSerializationError
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.json_types import JsonValue
-from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
+from fleet_rlm.sessions.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.workspace.memory import MemoryCandidate
 
 if TYPE_CHECKING:
@@ -811,7 +811,8 @@ ExecutionDetail: TypeAlias = Any
 @dataclass(frozen=True, slots=True)
 class RLMOutcome:
     terminal_status: TerminalStatus
-    prediction: PredictionResult | None = None
+    prediction: Any | None = None
+    result_contract: ResultContract | None = None
     usage: RLMUsage = field(default_factory=empty_rlm_usage)
     artifact_candidates: tuple[ArtifactCandidate, ...] = ()
     memory_candidates: tuple[MemoryCandidate, ...] = ()
@@ -834,6 +835,23 @@ class RLMOutcome:
         return self.terminal_status == "completed"
 
 
+def project_outcome_prediction(outcome: RLMOutcome) -> RLMOutcome:
+    """Validate a native prediction once before durable settlement or API projection."""
+    contract = outcome.result_contract
+    if not outcome.succeeded or contract is None:
+        return outcome
+    try:
+        projected = validate_prediction(outcome.prediction, contract)
+    except PredictionOutputError as exc:
+        return RLMOutcome(
+            terminal_status="failed",
+            usage=outcome.usage,
+            public_error_message=str(getattr(exc, "public_message", "Turn output is invalid")),
+            duration_ms=outcome.duration_ms,
+        )
+    return replace(outcome, prediction=projected, result_contract=None)
+
+
 __all__ = [
     "ExecutionDetail",
     "PredictionOutputError",
@@ -854,6 +872,7 @@ __all__ = [
     "normalize_prediction_trajectory",
     "observed_usage",
     "prediction_result",
+    "project_outcome_prediction",
     "rlm_termination_mode",
     "sanitize_public_text",
     "sanitize_public_value",

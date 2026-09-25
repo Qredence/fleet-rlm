@@ -17,11 +17,6 @@ from uuid import uuid4
 from fleet_rlm.api.errors import _STATUS_DEFAULTS
 from fleet_rlm.api.routes.turns import _open_failure_frames, _open_failure_message
 from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.chat.preparation import (
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-)
-from fleet_rlm.chat.turn_runtime import terminal
 from fleet_rlm.rlm.events import EventRecorder
 from fleet_rlm.sessions.run_state import (
     FailedRunReceipt,
@@ -31,6 +26,11 @@ from fleet_rlm.sessions.run_state import (
     RunNotFoundError,
 )
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
+from fleet_rlm.turn_preparation import (
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+)
+from fleet_rlm.turns import terminal
 
 _GOLDEN = Path(__file__).resolve().parents[1] / "fixtures" / "failure-taxonomy.json"
 

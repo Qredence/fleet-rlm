@@ -12,10 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 import fleet_rlm
-from fleet_rlm.composition.inventory import RuntimeDatabaseLifecycle
-from fleet_rlm.composition.testing import create_testing_app
+from fleet_rlm.app_services import RuntimeDatabaseLifecycle
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.persistence.database import create_async_engine_from_url
+from tests.support.testing_app import create_testing_app
 
 
 def _settings(tmp_path: Path, database_url: str | None) -> Settings:

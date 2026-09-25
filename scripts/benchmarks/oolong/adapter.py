@@ -662,8 +662,8 @@ async def invoke_live_prediction(
     """Invoke one live prediction through the owned worker / private-loop seam."""
     from fleet_rlm.rlm.budget import TurnBudget
     from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
+    from fleet_rlm.rlm.ownership import OwnedEffect
     from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle, build_model_bundle
-    from fleet_rlm.runtime.owned_effect import OwnedEffect
 
     assert_dspy_version()
     budget = turn_budget if turn_budget is not None else TurnBudget(deadline=deadline)

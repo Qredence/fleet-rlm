@@ -28,7 +28,7 @@ from fleet_rlm.paths import (
     validate_mount_path,
     validate_path_id,
 )
-from fleet_rlm.runtime.errors import WorkspaceConflictError
+from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import (
     WorkspaceEntry,
     WorkspaceListResult,

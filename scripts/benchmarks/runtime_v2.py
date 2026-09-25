@@ -167,8 +167,8 @@ def run(*, repetitions: int = 5) -> dict[str, Any]:
     """
     from fastapi.testclient import TestClient
 
-    from fleet_rlm.composition.testing import create_testing_app
     from fleet_rlm.config.settings import Settings
+    from tests.support.testing_app import create_testing_app
 
     if repetitions < 2:
         raise ValueError("benchmark requires at least two repetitions")

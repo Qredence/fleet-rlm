@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,30 +16,32 @@ import dspy
 from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments import AttachmentLifecycle, PreparedAttachments
-from fleet_rlm.chat.preparation import (
-    DefaultRunPreparer,
-    PreparedHostCapabilities,
-    PreparedRun,
-    RunEnvironment,
-    RunEnvironmentProvider,
-    RunPreparation,
-    prepare_host_capabilities,
-)
-from fleet_rlm.composition.inventory import (
+from fleet_rlm.app_services import (
     CompositionError,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
-    install_runtime_inventory,
+    close_inventory_services,
+    no_provider_recovery_fence,
 )
+from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
+from fleet_rlm.rlm.execution import ProgramBuilder
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
-from fleet_rlm.rlm.runtime import ProgramBuilder
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
+from fleet_rlm.turn_preparation import (
+    PreparedHostCapabilities,
+    PreparedTurn,
+    RunEnvironment,
+    RunEnvironmentProvider,
+    RunPreparation,
+    TurnPreparationPlan,
+    prepare_host_capabilities,
+    prepare_turn,
+)
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
 
@@ -124,8 +127,6 @@ def build_local_inventory(
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.config.policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
         InMemoryRunStateStore,
@@ -133,9 +134,11 @@ def build_local_inventory(
         SqlAlchemyRunStateStore,
         SqlAlchemySessionCatalog,
     )
-    from fleet_rlm.rlm.runtime import RLMRunner
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.execution import RLMRunner
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
+    from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
+    from fleet_rlm.turns import TurnRuntime
 
     session_factory = database.session_factory
     if session_factory is None:
@@ -148,13 +151,14 @@ def build_local_inventory(
         )
         session_catalog = SqlAlchemySessionCatalog(session_factory)
     cleanup = RunCleanupSupervisor(max_jobs=8)
-    lifecycle = RunLifecycleService(
+    settlement = RunSettlementPlan(
         run_state,
         max_artifact_bytes=settings.max_artifact_bytes,
         heartbeat_seconds=settings.run_heartbeat_seconds,
         stale_after_seconds=settings.run_stale_after_seconds,
         cleanup=cleanup,
     )
+    lifecycle = bind_settlement(settlement)
     runner = RLMRunner(program_builder=program_builder)
     coordinator = TurnRuntime(
         lifecycle=lifecycle,
@@ -393,7 +397,7 @@ class DeterministicTurnPreparation:
     ) -> None:
         resolved_options = options or RLMOptions()
         models = RLMModelBundle(TestingLM("testing/root"), TestingLM("testing/sub"))
-        self._module = DefaultRunPreparer(
+        self._module = TurnPreparationPlan(
             models=models,
             options=resolved_options,
             recursive_options=RecursiveRLMOptions(),
@@ -410,17 +414,17 @@ class DeterministicTurnPreparation:
             ),
         )
 
-    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedRun:
-        return await self._module.prepare(run, deadline=deadline)
+    async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
+        return await prepare_turn(self._module, run, deadline=deadline)
 
 
-def install_testing_composition(
+def build_testing_services(
     app: FastAPI,
     settings: Settings,
     *,
     database: RuntimeDatabaseLifecycle | None = None,
 ) -> RuntimeInventory:
-    """Install credential-free deterministic adapters for a test lifespan."""
+    """Build credential-free deterministic adapters for a test lifespan."""
     from fleet_rlm.attachments import WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.paths import volume_paths_from_settings
     from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
@@ -475,7 +479,53 @@ def install_testing_composition(
             )
         ),
     )
-    return install_runtime_inventory(app, inventory)
+    return inventory
+
+
+@asynccontextmanager
+async def offline_services(app: FastAPI, settings: Settings) -> AsyncIterator[RuntimeInventory]:
+    """Own deterministic resources through the same application lifespan path."""
+    from fleet_rlm.persistence.database import (
+        create_async_engine_from_url,
+        create_session_factory,
+        create_tables,
+        is_sqlite_url,
+    )
+
+    engine = None
+    services = None
+    database = None
+    try:
+        session_factory = None
+        if settings.database_url:
+            engine = create_async_engine_from_url(settings.database_url)
+            session_factory = create_session_factory(engine)
+            if is_sqlite_url(settings.database_url):
+                await create_tables(engine)
+        database = RuntimeDatabaseLifecycle(engine=engine, session_factory=session_factory)
+        services = build_testing_services(app, settings, database=database)
+        run_state = services.run_state_store
+        reconcile = getattr(run_state, "reconcile_settling", None)
+        if callable(reconcile):
+            await reconcile(no_provider_recovery_fence)
+        yield services
+    finally:
+        shutdown_error: BaseException | None = None
+        closed = await close_inventory_services(services, drain_seconds=30)
+        if closed.first_error is not None:
+            shutdown_error = closed.first_error
+        if database is not None:
+            try:
+                await database.aclose()
+            except BaseException as exc:
+                shutdown_error = shutdown_error or exc
+        if engine is not None and (database is None or database.engine is not engine):
+            try:
+                await engine.dispose()
+            except BaseException as exc:
+                shutdown_error = shutdown_error or exc
+        if shutdown_error is not None:
+            raise shutdown_error
 
 
 def create_testing_app(*, settings: Settings | None = None) -> FastAPI:
@@ -487,4 +537,4 @@ def create_testing_app(*, settings: Settings | None = None) -> FastAPI:
         resolved = settings_factory(run_environment="daytona")
     else:
         resolved = settings
-    return create_app(settings=resolved, _composition_installer=install_testing_composition)
+    return create_app(settings=resolved, _services_builder=offline_services)

@@ -46,8 +46,8 @@ from fleet_rlm.tool_events import (
 )
 
 if TYPE_CHECKING:
+    from fleet_rlm.rlm.execution import RLMExecutionContext, RLMWorkerHandle, RunToolGuards
     from fleet_rlm.rlm.recursion import RecursiveCallSummary, RecursiveRLMExecutor
-    from fleet_rlm.rlm.runtime import RLMExecutionContext, RLMWorkerHandle, RunToolGuards
 
 
 # ---------------------------------------------------------------------------

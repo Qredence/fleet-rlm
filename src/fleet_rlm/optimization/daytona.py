@@ -21,6 +21,7 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backen
 from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import (
     PredictionOutputError,
@@ -30,7 +31,6 @@ from fleet_rlm.rlm.result import (
     prediction_result,
     rlm_termination_mode,
 )
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 if TYPE_CHECKING:
     from fleet_rlm.optimization.types import OptimizationRecord

@@ -10,7 +10,7 @@ from fleet_rlm.daytona.runtime import (
     DaytonaSandboxSpec,
     VolumeConfig,
 )
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 

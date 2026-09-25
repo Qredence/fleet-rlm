@@ -59,6 +59,7 @@ from fleet_rlm.rlm.events import (
     recursive_summary,
 )
 from fleet_rlm.rlm.output_contract import FleetOutputContract, bind_output_contract
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
@@ -81,6 +82,7 @@ from fleet_rlm.rlm.recursion import (
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     PredictionOutputError,
+    ResultContract,
     RLMConfigError,
     RLMOutcome,
     RunCancelledError,
@@ -90,14 +92,12 @@ from fleet_rlm.rlm.result import (
     empty_rlm_usage,
     normalize_prediction_trajectory,
     observed_usage,
-    prediction_result,
     rlm_termination_mode,
     truncate_public_text,
 )
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.models import SkillCard
 from fleet_rlm.workspace.memory import MemoryCandidate
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata
@@ -121,7 +121,7 @@ AsyncCancellationProbe = Callable[[], Awaitable[bool]]
 class RetainableEnvironmentRelease:
     """Make one prepared environment release transferable to Session state.
 
-    ``PreparedRun.aclose`` calls :meth:`release`, which is a no-op after the
+    ``PreparedTurn.aclose`` calls :meth:`release`, which is a no-op after the
     Runner transfers ownership.  The resident registry later calls
     :meth:`aclose` and forces the provider release exactly once.
     """
@@ -256,7 +256,7 @@ class SessionView:
     # claimed checkpoint. Defaults to an empty ``dspy.History`` so
     # ``dspy.RLM._validate_inputs`` always sees a real instance for the
     # Signature-declared ``history`` input. The production Turn-input
-    # assembly path (``fleet_rlm.chat.preparation.build_dspy_history_for_claim``)
+    # assembly path (``fleet_rlm.turn_preparation.build_dspy_history_for_claim``)
     # overrides this default with the checkpoint materialization.
     history: dspy.History | CommittedSessionHistory = field(default_factory=lambda: dspy.History(messages=[]))
 
@@ -1019,17 +1019,16 @@ class RLMRunner:
         async for event in self._prediction_events(context, observations, prediction[-1]):
             yield event
         duration_ms = int((time.perf_counter() - started) * 1000)
-        result = prediction_result(
-            prediction[-1],
-            spec.signature,
-            schema_id=spec.output_schema_id,
-            schema_version=spec.output_schema_version,
-            max_output_chars=context.execution.options.max_final_output_chars,
-        )
         outcome.append(
             RLMOutcome(
                 terminal_status="completed",
-                prediction=result,
+                prediction=prediction[-1],
+                result_contract=ResultContract(
+                    signature=spec.signature,
+                    schema_id=spec.output_schema_id,
+                    schema_version=spec.output_schema_version,
+                    max_output_chars=context.execution.options.max_final_output_chars,
+                ),
                 usage=observed_usage(
                     prediction[-1],
                     duration_ms=duration_ms,

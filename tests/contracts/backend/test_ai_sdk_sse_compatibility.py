@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.routes.turns import create_turn
 from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import (
     EventRecorder,
     RLMCode,
@@ -30,6 +29,7 @@ from fleet_rlm.rlm.events import (
     ToolCompleted,
     ToolStarted,
 )
+from tests.support.testing_app import create_testing_app
 
 
 class _MockOpenedStream:
@@ -62,7 +62,7 @@ class _MockTurnCoordinator:
         self.opened = opened
 
     def open_owned(self, _command: Any) -> Any:
-        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+        from fleet_rlm.turns import OpenedTurnStream
 
         return OpenedTurnStream(self.opened.run_id, self.opened)
 

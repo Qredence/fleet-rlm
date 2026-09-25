@@ -1,11 +1,4 @@
-"""Daytona runtime environment and per-Turn Run preparation adapters.
-
-Wires the process-owned ``DaytonaRuntime`` and the Turn-facing adapters
-invoked by ``chat.preparation.DefaultRunPreparer``:
-environment acquisition, capability preparation, result sinking, Session
-history projection, and Memory promotion.  Composition wires these adapters;
-it must not re-own them.
-"""
+"""Daytona environment acquisition and Turn-facing capability adapters."""
 
 from __future__ import annotations
 
@@ -22,15 +15,6 @@ from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments import (
     PreparedAttachments,
 )
-from fleet_rlm.chat.preparation import (
-    PreparedHostCapabilities,
-    RunEnvironment,
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-    claim_history_records,
-    prepare_host_capabilities,
-)
-from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.diagnostics import environment_manifest
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox
@@ -46,12 +30,26 @@ from fleet_rlm.daytona.runtime import (
     RootSessionSpec,
     sandbox_spec_from_settings,
 )
-from fleet_rlm.rlm.runtime import RLMExecutionSpec
+from fleet_rlm.rlm.execution import RLMExecutionSpec
 from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
-from fleet_rlm.workspace.memory import MemoryCandidateCollector, build_memory_promotion_intents
+from fleet_rlm.turn_preparation import (
+    PreparedHostCapabilities,
+    RunEnvironment,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+    claim_history_records,
+    prepare_host_capabilities,
+)
+from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+from fleet_rlm.workspace.memory import (
+    MemoryCandidateCollector,
+    build_memory_promotion_intents,
+    prepare_turn_memory_digest,
+    promote_turn_memory_candidates,
+)
 from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.workspace.paths import VolumePaths, volume_paths_from_settings
 from fleet_rlm.workspace.storage import (
@@ -93,54 +91,13 @@ def build_committed_session_history_for_claim(claim: ClaimedRun) -> CommittedSes
     result metadata and never bypasses the claim.
 
     The in-process composition stays on :class:`dspy.History` (see
-    :func:`fleet_rlm.chat.preparation.build_dspy_history_for_claim`);
+    :func:`fleet_rlm.turn_preparation.build_dspy_history_for_claim`);
     this Dayona helper exists to keep the broker able to inject the value
     while preserving the canonical record contract.
     """
     committed_turns, user_requests = claim_history_records(claim)
     records = to_canonical_history_records(committed_turns, user_requests=user_requests)
     return CommittedSessionHistory(records)
-
-
-def _promote_memory_candidates(
-    store: Any,
-    candidates: tuple[Any, ...],
-    *,
-    allowed_categories: tuple[str, ...],
-) -> Any:
-    """
-    Promote memory candidates through the configured memory store.
-
-    Parameters:
-        candidates (tuple[Any, ...]): Memory candidates to promote.
-        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
-
-    Returns:
-        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
-    """
-    from fleet_rlm.workspace.memory import MemoryCandidatePromotionResult, promote_memory_candidates
-
-    if store is None:
-        result = MemoryCandidatePromotionResult(
-            proposed_count=len(candidates),
-            reasons=("store_unavailable",) if candidates else (),
-        )
-    else:
-        result = promote_memory_candidates(
-            store=store,
-            candidates=candidates,
-            allowed_categories=allowed_categories,
-        )
-    if candidates and (result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count):
-        logger.info(
-            "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
-            result.promoted_count,
-            result.duplicate_count,
-            result.dropped_count,
-            result.failure_count,
-            ",".join(result.reasons) or "-",
-        )
-    return result
 
 
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
@@ -373,7 +330,7 @@ class _DaytonaEnvironmentProvider:
             )
             memory_promotion = OwnedPostCommitMemoryPromotion(
                 partial(
-                    _promote_memory_candidates,
+                    promote_turn_memory_candidates,
                     memory_store,
                     allowed_categories=self.settings.rlm_autonomous_memory_categories,
                 )
@@ -454,27 +411,6 @@ class _DaytonaEnvironmentProvider:
                 return False
         self._maybe_release_environment_owner()
         return True
-
-
-async def _prepare_memory_digest(memory_store: Any, *, request: str) -> str:
-    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
-
-    User-visible behavior is unchanged: ANY preparation failure still degrades
-    to no injection. The failure is classified once into a bounded, sanitized
-    diagnostic so provider outages, corrupt stores, invariant violations, and
-    internal defects no longer look identical to operators.
-    """
-    from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest, record_memory_degradation
-
-    try:
-        return await asyncio.to_thread(
-            read_workspace_memory_injection_digest,
-            memory_store,
-            request=request,
-        )
-    except Exception as exc:
-        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
-        return ""
 
 
 @dataclass(slots=True)
@@ -601,7 +537,7 @@ class _LiveCapabilityPreparer:
         # failures degrade to no injection, and search failure degrades to
         # the recency-only fallback. Every degraded operation records one
         # bounded, sanitized diagnostic at this fail-soft seam (P31).
-        memory_digest = await _prepare_memory_digest(memory_store, request=run.input.text)
+        memory_digest = await prepare_turn_memory_digest(memory_store, request=run.input.text)
         attachment_tools = attachment_host.as_tools()
         artifact_tools = artifact_host.as_tools()
         workspace_tools = workspace_host.as_tools()
@@ -733,8 +669,6 @@ __all__ = [
     "_DaytonaEnvironmentProvider",
     "_DaytonaRunSink",
     "_LiveCapabilityPreparer",
-    "_prepare_memory_digest",
-    "_promote_memory_candidates",
     "build_committed_session_history_for_claim",
     "resolve_settings",
 ]

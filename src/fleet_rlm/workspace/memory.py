@@ -1643,6 +1643,95 @@ def record_memory_degradation(
     return degradation
 
 
+async def run_deferred_memory_outbox_reconcile(
+    reconciler: MemoryOutboxReconciler,
+    *,
+    interval_seconds: float = 60.0,
+) -> None:
+    """Periodic outbox sweeps; never blocks startup readiness (P23/QRE-166)."""
+    while True:
+        try:
+            receipt = await reconciler.reconcile_once()
+        except Exception as exc:
+            logger.warning(
+                "Memory outbox reconcile sweep failed (%s); next interval retries",
+                type(exc).__name__,
+                exc_info=exc,
+            )
+        else:
+            if receipt.claimed:
+                logger.info(
+                    "Memory outbox reconcile sweep claimed=%d promoted=%d dropped=%d retried=%d "
+                    "dead_lettered=%d workspaces=%d provider_unavailable=%s",
+                    receipt.claimed,
+                    receipt.promoted,
+                    receipt.dropped,
+                    receipt.retried,
+                    receipt.dead_lettered,
+                    receipt.workspaces,
+                    receipt.provider_unavailable,
+                )
+        await asyncio.sleep(interval_seconds)
+
+
+def promote_turn_memory_candidates(
+    store: Any,
+    candidates: tuple[Any, ...],
+    *,
+    allowed_categories: tuple[str, ...],
+) -> Any:
+    """
+    Promote memory candidates through the configured memory store.
+
+    Parameters:
+        candidates (tuple[Any, ...]): Memory candidates to promote.
+        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
+
+    Returns:
+        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
+    """
+    if store is None:
+        result = MemoryCandidatePromotionResult(
+            proposed_count=len(candidates),
+            reasons=("store_unavailable",) if candidates else (),
+        )
+    else:
+        result = promote_memory_candidates(
+            store=store,
+            candidates=candidates,
+            allowed_categories=allowed_categories,
+        )
+    if candidates and (result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count):
+        logger.info(
+            "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
+            result.promoted_count,
+            result.duplicate_count,
+            result.dropped_count,
+            result.failure_count,
+            ",".join(result.reasons) or "-",
+        )
+    return result
+
+
+async def prepare_turn_memory_digest(memory_store: Any, *, request: str) -> str:
+    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
+
+    User-visible behavior is unchanged: ANY preparation failure still degrades
+    to no injection. The failure is classified once into a bounded, sanitized
+    diagnostic so provider outages, corrupt stores, invariant violations, and
+    internal defects no longer look identical to operators.
+    """
+    try:
+        return await asyncio.to_thread(
+            read_workspace_memory_injection_digest,
+            memory_store,
+            request=request,
+        )
+    except Exception as exc:
+        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
+        return ""
+
+
 __all__ = [
     "OUTCOME_DEADLINE_EXCEEDED",
     "OUTCOME_DUPLICATE",
@@ -1686,8 +1775,11 @@ __all__ = [
     "normalize_memory_candidate_categories",
     "normalize_memory_search_query",
     "normalize_workspace_memory_source",
+    "prepare_turn_memory_digest",
     "promote_memory_candidates",
+    "promote_turn_memory_candidates",
     "read_workspace_memory_injection_digest",
     "record_memory_degradation",
+    "run_deferred_memory_outbox_reconcile",
     "search_workspace_memory_entries",
 ]

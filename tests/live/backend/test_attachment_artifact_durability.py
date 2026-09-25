@@ -29,13 +29,13 @@ from fleet_rlm.attachments import (
     LocalAttachmentCatalog,
     WorkspaceAttachmentPathPolicy,
 )
-from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.daytona.runtime import LeaseRequest
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
-from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+from fleet_rlm.daytona.turn_environment import DaytonaRuntimeResources
+from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._evidence import candidate_identity, write_receipt
 

@@ -7,12 +7,12 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.dependencies import get_mlflow_runtime, get_trace_feedback_service
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.observability.feedback import (
     TraceFeedbackNotFoundError,
     TraceFeedbackResult,
     TraceFeedbackUnavailableError,
 )
+from tests.support.testing_app import create_testing_app
 
 
 class _FeedbackService:

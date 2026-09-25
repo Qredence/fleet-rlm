@@ -18,8 +18,8 @@ from uuid import UUID
 import dspy
 
 from fleet_rlm.json_types import JsonValue
-from fleet_rlm.runtime.errors import FilesystemToolError
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.errors import FilesystemToolError
 from fleet_rlm.workspace.models import (
     WorkspaceCapabilityMetadata,
     WorkspaceConflictError,

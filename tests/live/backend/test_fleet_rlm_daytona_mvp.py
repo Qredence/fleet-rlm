@@ -30,7 +30,7 @@ from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.rlm.events import ToolEventView
-from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
 from fleet_rlm.workspace.paths import volume_paths_from_settings
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
