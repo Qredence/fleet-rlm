@@ -243,7 +243,7 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
 
     assert platform.deleted
     assert admission._semaphore._value == 1
-    assert not runtime._workspace_io_leases
+    assert not runtime._workspace_io_resources()
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)
 
 
@@ -304,7 +304,7 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     confirmed = True
     assert await runtime.wait_pending_cleanup(timeout=2)
     assert admission._semaphore._value == 1
-    assert not runtime._workspace_io_leases
+    assert not runtime._workspace_io_resources()
 
 
 @pytest.mark.asyncio

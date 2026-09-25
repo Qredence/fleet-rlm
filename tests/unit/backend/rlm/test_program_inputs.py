@@ -797,7 +797,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     ).prepare(turn, deadline=float("inf"))
 

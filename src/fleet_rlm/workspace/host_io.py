@@ -3,14 +3,42 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
-from fleet_rlm.paths import UnsafePathError, validate_mount_path
+from fleet_rlm.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
-from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
+from fleet_rlm.workspace.storage import (
+    AsyncDaytonaVolumeFS,
+    DaytonaSandboxVolumeFs,
+    DaytonaSandboxWorkspaceStorage,
+    WorkspaceMemoryStorage,
+)
+
+
+async def _ensure_sandbox_directories(filesystem: Any, directories: Iterable[str]) -> None:
+    for directory in sorted(set(directories), key=lambda value: (value.count("/"), value)):
+        create_folder = getattr(filesystem, "create_folder", None)
+        if not callable(create_folder):
+            raise RuntimeError("Sandbox filesystem cannot create private Run directories")
+        try:
+            created = create_folder(directory, "700")
+            if inspect.isawaitable(created):
+                await created
+        except Exception as create_error:
+            try:
+                info = filesystem.get_file_info(directory)
+                if inspect.isawaitable(info):
+                    info = await info
+            except Exception:
+                raise create_error from None
+            is_directory = info.get("is_dir", False) if isinstance(info, Mapping) else getattr(info, "is_dir", False)
+            if not is_directory:
+                raise create_error from None
 
 
 class _VolumeBlobFs:
@@ -271,3 +299,94 @@ class DaytonaHostIO:
             root=root,
             max_file_bytes=self._max_file_bytes,
         )
+
+
+class DaytonaRunStorage:
+    """Route Run files between private Sandbox scratch and host-authorized storage."""
+
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        dispatcher: SyncBridgeDispatcher,
+        paths: VolumePaths,
+        host_io: DaytonaHostIO,
+        run_id: UUID,
+    ) -> None:
+        self._sandbox = sandbox
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path="/tmp/fleet")
+        self.sandbox = sync_sandbox(sandbox, asyncio.get_running_loop(), dispatcher)
+        self._scratch_fs = DaytonaSandboxVolumeFs(self.sandbox, mount_path="/tmp/fleet")
+        self.host_io = host_io
+        self.scratch_root = f"/tmp/fleet/{run_id}"
+        self._paths = paths
+        self.volume_fs = _RunVolumeFs(self)
+
+    def _is_scratch(self, location: str) -> bool:
+        path = PurePosixPath(location)
+        root = PurePosixPath(self.scratch_root)
+        return path != root and root in path.parents and ".." not in path.parts
+
+    def _sync_target(self, logical_path: str) -> Any:
+        return self._scratch_fs if self._is_scratch(logical_path) else self.host_io.volume_fs
+
+    def result_path(self, session_id: UUID, run_id: UUID) -> str:
+        return str(self._paths.run_result_path(session_id, run_id))
+
+    async def read(self, location: str, *, max_bytes: int) -> bytes:
+        value = (
+            await self._files.read_bytes(location)
+            if self._is_scratch(location)
+            else await self.host_io.volume_fs.aread_bytes(location, max_bytes=max_bytes)
+        )
+        if len(value) > max_bytes:
+            raise ValueError("value exceeds read bound")
+        return value
+
+    async def write(self, location: str, data: bytes) -> None:
+        if self._is_scratch(location):
+            await self._files.write_bytes(location, data)
+        else:
+            await self.host_io.volume_fs.awrite_bytes(location, data)
+
+    async def remove(self, location: str) -> None:
+        if self._is_scratch(location):
+            await self._files.remove_bytes(location)
+        else:
+            await self.host_io.volume_fs.aremove_bytes(location)
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        if not self._is_scratch(logical_path):
+            raise ValueError("Run attachment path is outside Run scratch")
+        parent = PurePosixPath(logical_path).parent.relative_to(PurePosixPath(self.scratch_root))
+        current = PurePosixPath(self.scratch_root)
+        directories = []
+        for part in parent.parts:
+            current /= part
+            directories.append(str(current))
+        await _ensure_sandbox_directories(self._files.fs, directories)
+        await self.write(logical_path, data)
+
+    async def remove_private(self, logical_path: str) -> None:
+        if not self._is_scratch(logical_path):
+            raise ValueError("Run attachment path is outside Run scratch")
+        await self.remove(logical_path)
+
+
+class _RunVolumeFs:
+    """Synchronous VolumeBlobFs view of the Run storage routing policy."""
+
+    def __init__(self, storage: DaytonaRunStorage) -> None:
+        self._storage = storage
+
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
+        return self._storage._sync_target(logical_path).read_bytes(logical_path, max_bytes=max_bytes)
+
+    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+        self._storage._sync_target(logical_path).write_bytes(logical_path, data, max_bytes=max_bytes)
+
+    def exists(self, logical_path: str) -> bool:
+        return self._storage._sync_target(logical_path).exists(logical_path)
+
+    def remove(self, logical_path: str) -> None:
+        self._storage._sync_target(logical_path).remove(logical_path)

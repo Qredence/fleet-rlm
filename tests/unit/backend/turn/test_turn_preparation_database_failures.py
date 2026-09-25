@@ -64,7 +64,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=Capabilities(),
     )
 
@@ -121,7 +121,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=object(),
     )
 
@@ -195,7 +195,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=Capabilities(),
     )
 

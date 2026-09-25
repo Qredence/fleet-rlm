@@ -200,7 +200,7 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     platform = _RecordingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
     release_shutdown = threading.Event()
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
 
     class _BlockingInterpreter:
         def __init__(self, **_kwargs: object) -> None:
@@ -605,7 +605,7 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
     monkeypatch.setattr(recursive_child_runtime, "Thread", _FailingQuarantineThread, raising=False)
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", _BlockingInterpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()
     factory = make_daytona_child_factory(

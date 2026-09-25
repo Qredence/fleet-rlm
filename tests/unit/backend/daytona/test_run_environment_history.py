@@ -127,7 +127,7 @@ def test_daytona_helper_returns_empty_history_for_fresh_session() -> None:
 @pytest.mark.asyncio
 async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() -> None:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
     class Fs:
@@ -163,7 +163,7 @@ async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() 
         volume_root=str(paths.mount_path),
         max_file_bytes=1_000_000,
     )
-    sink = _DaytonaRunSink(
+    sink = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,
         paths=paths,
@@ -181,7 +181,7 @@ async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() 
 
 @pytest.mark.asyncio
 async def test_run_sink_routes_sync_storage_to_host_or_private_scratch() -> None:
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
 
     class SandboxFs:
         def __init__(self) -> None:
@@ -224,7 +224,7 @@ async def test_run_sink_routes_sync_storage_to_host_or_private_scratch() -> None
 
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
-    sink = _DaytonaRunSink(
+    sink = DaytonaRunStorage(
         SimpleNamespace(fs=sandbox_fs),
         dispatcher=dispatcher,
         paths=VolumePaths.from_mount("/volume"),

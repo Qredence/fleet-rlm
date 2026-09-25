@@ -112,7 +112,6 @@ def test_daytona_volume_adapter_removes_exact_file_path() -> None:
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -121,6 +120,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
     values: dict[str, bytes] = {}
@@ -153,7 +153,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         volume_root=str(paths.mount_path),
         max_file_bytes=1_000_000,
     )
-    sink = _DaytonaRunSink(
+    sink = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,
         paths=paths,

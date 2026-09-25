@@ -232,8 +232,7 @@ class RunEnvironment:
     image_identity: str | None = None
 
 
-class RunEnvironmentProvider(Protocol):
-    async def acquire(self, run: ClaimedRun, *, deadline: float) -> RunEnvironment: ...
+RunEnvironmentAcquirer = Callable[..., Awaitable[RunEnvironment]]
 
 
 class RunAttachmentPreparer(Protocol):
@@ -264,7 +263,7 @@ class TurnPreparationPlan:
     models: RLMModelBundle
     options: RLMOptions
     attachments: RunAttachmentPreparer
-    environments: RunEnvironmentProvider
+    acquire_environment: RunEnvironmentAcquirer
     capabilities: CapabilityPreparer
     task_service: SessionTaskService | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
@@ -276,9 +275,6 @@ class TurnPreparationPlan:
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         return await prepare_turn(self, run, deadline=deadline)
-
-    async def aclose(self) -> bool:
-        return await close_turn_preparation(self)
 
 
 async def _check_cancellation(run: ClaimedRun) -> None:
@@ -309,7 +305,7 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
 
     with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
         try:
-            environment = await plan.environments.acquire(run, deadline=deadline)
+            environment = await plan.acquire_environment(run, deadline=deadline)
         except RunPreparationError:
             raise
         except Exception as exc:
@@ -492,23 +488,6 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
         memory_intent_builder=getattr(capabilities, "memory_intent_builder", None),
         image_identity=environment.image_identity,
     )
-
-
-async def close_turn_preparation(plan: TurnPreparationPlan) -> bool:
-    close = getattr(plan.environments, "aclose", None)
-    return bool(await close()) if callable(close) else True
-
-
-async def wait_for_session_idle(
-    plan: TurnPreparationPlan,
-    workspace_id: UUID,
-    session_id: UUID,
-    *,
-    deadline: float,
-) -> None:
-    wait = getattr(plan.environments, "wait_for_session_idle", None)
-    if callable(wait):
-        await wait(workspace_id, session_id, deadline=deadline)
 
 
 async def _prepare_capabilities(
@@ -898,16 +877,14 @@ __all__ = [
     "PreparedTurn",
     "RunAttachmentPreparer",
     "RunEnvironment",
-    "RunEnvironmentProvider",
+    "RunEnvironmentAcquirer",
     "RunPreparation",
     "RunPreparationCancelledError",
     "RunPreparationError",
     "RunPreparationTimeoutError",
     "RunPreparationUnavailableError",
     "TurnPreparationPlan",
-    "close_turn_preparation",
     "prepare_host_capabilities",
     "prepare_turn",
     "skill_event",
-    "wait_for_session_idle",
 ]

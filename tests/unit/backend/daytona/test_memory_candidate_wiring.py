@@ -111,10 +111,10 @@ def _turn():
 
 async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
     from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer, RunEnvironment
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from fleet_rlm.workspace.memory import build_workspace_memory_store
     from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
@@ -139,7 +139,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         volume_root=str(paths.mount_path),
         max_file_bytes=settings.max_upload_bytes,
     )
-    sink = _DaytonaRunSink(
+    sink = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,
         paths=paths,

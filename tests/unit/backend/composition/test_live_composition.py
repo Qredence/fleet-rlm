@@ -128,8 +128,8 @@ async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytes
 
     seen: list[SyncBridgeDispatcher] = []
 
-    async def cancelled_build(_settings, *, skill_catalog, dispatcher=None):
-        del skill_catalog
+    async def cancelled_build(_settings, *, skill_catalog, dispatcher=None, _adapter_factory=None):
+        del skill_catalog, _adapter_factory
         assert dispatcher is not None
         seen.append(dispatcher)
         raise asyncio.CancelledError
@@ -682,6 +682,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
         *,
         skill_catalog: SkillCatalog,
         dispatcher: SyncBridgeDispatcher,
+        _adapter_factory=None,
     ) -> RuntimeInventory:
         assert skill_catalog is app.state.skill_catalog
         assert dispatcher is not None
@@ -854,9 +855,10 @@ async def test_daytona_lifespan_does_not_create_schema(monkeypatch) -> None:
         run_preparation=preparation,
     )
 
-    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None, _adapter_factory=None):
         assert dispatcher is not None  # the install path always injects one (QRE-154)
         assert isinstance(skill_catalog, SkillCatalog)
+        assert _adapter_factory is None
         return inventory
 
     async def fail_tables(_engine):
@@ -946,9 +948,10 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
         memory_outbox_task=memory_outbox_task,
     )
 
-    async def fake_build(_settings, *, skill_catalog, dispatcher=None):
+    async def fake_build(_settings, *, skill_catalog, dispatcher=None, _adapter_factory=None):
         assert dispatcher is not None  # the install path always injects one (QRE-154)
         assert isinstance(skill_catalog, SkillCatalog)
+        assert _adapter_factory is None
         return inventory
 
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)

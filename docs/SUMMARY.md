@@ -10,6 +10,7 @@ current production certification.
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
+* [Structural reduction plan](testing/structural-reduction-plan.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
 * [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)

@@ -128,9 +128,9 @@ class _DaytonaFilesystem:
 
 def _live_capability_environment(settings: Settings, session_id: UUID):
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
     from fleet_rlm.paths import volume_paths_from_settings
     from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from fleet_rlm.workspace.memory import build_workspace_memory_store
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
@@ -145,7 +145,7 @@ def _live_capability_environment(settings: Settings, session_id: UUID):
         volume_root=str(paths.mount_path),
         max_file_bytes=settings.max_upload_bytes,
     )
-    sink = _DaytonaRunSink(
+    sink = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,
         paths=paths,
@@ -287,13 +287,13 @@ def test_invalid_exact_selection_is_generic_inside_the_stream() -> None:
 @pytest.mark.asyncio
 async def test_private_progressive_tools_preload_exact_selection_and_keep_events_metadata_only() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from tests.support.testing_app import TestingCapabilityPreparer, TestingRunEnvironmentProvider
+    from tests.support.testing_app import TestingCapabilityPreparer, testing_run_environment
 
     catalog = _catalog()
     selected = catalog.require(stable_skill_id("long-context"))
     other = catalog.require(stable_skill_id("workspace-files"))
     turn = _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),))
-    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment = await testing_run_environment(turn, deadline=float("inf"))
     prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,
         models=RLMModelBundle(MagicMock(), MagicMock()),
@@ -381,7 +381,7 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
 
 @pytest.mark.asyncio
 async def test_data_analysis_signature_and_report_builder_selection_use_host_tools_only() -> None:
-    from tests.support.testing_app import TestingCapabilityPreparer, TestingRunEnvironmentProvider
+    from tests.support.testing_app import TestingCapabilityPreparer, testing_run_environment
 
     catalog = _catalog()
     csv = b"value,group\n1,a\n2,a\n"
@@ -397,7 +397,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
             SkillSelectionRef(report_builder.card.id, report_builder.card.version),
         ),
     )
-    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment = await testing_run_environment(turn, deadline=float("inf"))
     environment.attachment_sink.values[staged.sandbox_path] = csv
     prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,

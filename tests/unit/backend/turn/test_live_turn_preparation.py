@@ -492,11 +492,15 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 
     settings = Settings(run_environment="daytona")
     from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
 
+    workspace_gateway = InMemoryDaytonaWorkspaceGateway(settings.volume_mount_path)
     resources = SimpleNamespace(
         settings=settings,
         volume_paths=volume_paths_from_settings(settings),
         dispatcher=_test_dispatcher(),
+        workspace_gateway=workspace_gateway,
+        volume_gateway=DaytonaWorkspaceVolumeGateway(workspace_gateway, mount_path=settings.volume_mount_path),
         sandbox_spec=DaytonaSandboxSpec(snapshot="test-snapshot-v1"),
         root_provider=RootProvider(),
         platform=SimpleNamespace(get=AsyncMock(return_value=object())),
@@ -545,7 +549,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None:
-    from fleet_rlm.daytona.turn_environment import _DaytonaEnvironmentProvider
+    from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.turn_preparation import RunPreparationTimeoutError
 
     entered = threading.Event()
@@ -607,16 +611,14 @@ async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None
         _RunClaimToken(uuid4()),
     )
     deadline = asyncio.get_running_loop().time() + (0.05 if mode == "timeout" else 10)
-    provider = _DaytonaEnvironmentProvider(
-        runtime=resources.runtime,
+    preparation = _build_preparation(
+        resources,
+        attachment_lifecycle=object(),
+        skill_catalog=SkillCatalog(()),
         settings=resources.settings,
-        volume_paths=resources.volume_paths,
-        sandbox_spec=resources.sandbox_spec,
-        dispatcher=resources.dispatcher,
-        workspace_gateway=resources.workspace_gateway,
-        volume_gateway=resources.volume_gateway,
+        models=RLMModelBundle(object(), object()),
     )
-    acquisition = asyncio.create_task(provider.acquire(turn, deadline=deadline))
+    acquisition = asyncio.create_task(preparation.acquire_environment(turn, deadline=deadline))
     assert await asyncio.to_thread(entered.wait, 2)
     if mode == "cancel":
         acquisition.cancel()

@@ -107,7 +107,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
         task_service=TaskService(),
     ).prepare(turn, deadline=float("inf"))
@@ -236,7 +236,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=SlowCapabilities(),
     )
 
@@ -312,7 +312,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=FailingCapabilities(),
     )
 
@@ -406,7 +406,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
             models=RLMModelBundle(object(), object()),
             options=RLMOptions(),
             attachments=Attachments(),
-            environments=Environments(),
+            acquire_environment=Environments().acquire,
             capabilities=CapabilityFactory(),
         ).prepare(turn, deadline=float("inf"))
 
