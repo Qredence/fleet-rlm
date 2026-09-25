@@ -21,11 +21,12 @@ from fleet_rlm.rlm.execution import (
     SessionView,
     WorkerOwnership,
 )
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -272,7 +273,7 @@ async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None
 
     def capturing_builder(**kwargs: object):
         captured.update(kwargs)
-        return build_native_rlm(**kwargs)
+        return build_native_rlm_for_test(**kwargs)
 
     async def not_cancelled() -> bool:
         """Indicate that cancellation has not been requested.

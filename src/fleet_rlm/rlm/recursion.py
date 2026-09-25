@@ -24,15 +24,28 @@ from threading import Event, Lock, RLock
 from typing import Any, Literal, Protocol, TypeAlias
 
 import dspy
+from dspy import CodeInterpreter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.errors import (
+    ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
+    ChildRuntimeNotStartedError,
+)
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
-from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, _RLMTraceCallback, is_native_rlm
-from fleet_rlm.rlm.events import ChildProgress, Status, ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm.events import (
+    ChildProgress,
+    Status,
+    ToolEventView,
+    ToolObserver,
+    _RLMTraceCallback,
+    is_native_rlm,
+    observe_tool,
+)
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     FleetJSONAdapter,
@@ -53,21 +66,11 @@ from fleet_rlm.skills.models import SkillDefinition
 # Provider-neutral child-runtime protocol
 # ---------------------------------------------------------------------------
 
-
-class ChildRuntimeCleanupError(RuntimeError):
-    """A child runtime could not be proved clean before Root commit."""
-
-
-class ChildRuntimeAuthorizationError(RuntimeError):
-    """A child runtime operation was attempted after Run authority was revoked."""
+_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 
 
 class ChildInputFailureError(RuntimeError):
     """A selected child input was unavailable without losing Run authority."""
-
-
-class ChildRuntimeNotStartedError(RuntimeError):
-    """The runtime refused child admission before allocating a child resource."""
 
 
 class ChildRuntimeLease(Protocol):
@@ -394,7 +397,6 @@ def _future_failures(futures: set[Future[Any]]) -> list[BaseException]:
 # ---------------------------------------------------------------------------
 
 RLM_NATIVE_CHILD_DEPTH = 1
-_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 _MAX_CHILD_RESULT_BYTES = 50_000
 _MAX_CHILD_TASK_CHARS = 2_000
 _MAX_CHILD_CONTEXT_CHARS = 2_000

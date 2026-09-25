@@ -28,12 +28,12 @@ from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
     _materialize_context_manifest,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
@@ -317,7 +317,7 @@ def test_child_rlm_tool_namespace_isolation() -> None:
     """Child RLM constructor receives leaf tools only, never rlm_query or rlm_query_batched."""
     sub_lm = dspy.utils.DummyLM([{"answer": "leaf result"}], adapter=dspy.JSONAdapter())
 
-    child_rlm = build_native_rlm(
+    child_rlm = build_native_rlm_for_test(
         signature=RecursiveSubtaskSignature,
         options=RLMOptions(max_iters=3, max_llm_calls=6, max_output_chars=1000),
         sub_lm=sub_lm,

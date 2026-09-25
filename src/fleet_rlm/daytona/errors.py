@@ -20,6 +20,19 @@ ProviderFailureKind = Literal[
 
 DEFAULT_SANITIZED_FAILURE_MAX_CHARS = 200
 
+
+class ChildRuntimeCleanupError(RuntimeError):
+    """A child runtime could not be proved clean before Root commit."""
+
+
+class ChildRuntimeAuthorizationError(RuntimeError):
+    """A child runtime operation was attempted after Run authority was revoked."""
+
+
+class ChildRuntimeNotStartedError(RuntimeError):
+    """The runtime refused child admission before allocating a child resource."""
+
+
 _SECRET_PATTERNS = (
     re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*\S+"),
     re.compile(r"(?i)([\"'])(api[_-]?key|token|secret|password|authorization)\1\s*:\s*(?:[\"'])?[^,}\]\s]+"),

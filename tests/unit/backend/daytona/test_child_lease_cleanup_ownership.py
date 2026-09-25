@@ -17,10 +17,10 @@ from fleet_rlm.daytona.runtime import (
     ChildRuntimeLease,
     ChildRuntimeLeaseState,
     DaytonaAdmission,
-    DaytonaRuntime,
     LateCleanupOwner,
 )
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
+from tests.support.session_manager import make_daytona_child_factory
 
 _MOUNT = "/home/daytona/fleet"
 
@@ -113,7 +113,7 @@ def _factory(
     if monkeypatch is not None:
         monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
         monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = DaytonaRuntime().build_child_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
@@ -217,7 +217,7 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", _BlockingInterpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
     loop = asyncio.get_running_loop()
-    factory = DaytonaRuntime().build_child_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
@@ -305,7 +305,7 @@ async def test_admission_restored_exactly_once_on_every_path(
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = DaytonaRuntime().build_child_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
@@ -533,9 +533,6 @@ def test_reentrant_close_from_closing_thread_fails_closed() -> None:
 @pytest.mark.asyncio
 async def test_owner_loop_loss_retains_cleanup_without_provider_settlement() -> None:
     """Lost-loop cleanup retains provider and permit ownership without a new loop."""
-    from fleet_rlm.daytona import runtime as sandbox_module
-
-    previous = set(sandbox_module._UNSCHEDULED_CLOSE_OWNERS)
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
     platform = _RecordingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -546,6 +543,7 @@ async def test_owner_loop_loss_retains_cleanup_without_provider_settlement() -> 
         def call_soon_threadsafe(self, *_args: object, **_kwargs: object) -> None:
             raise RuntimeError("Event loop is closed")
 
+    retained: list[Future[object]] = []
     with pytest.raises(ChildRuntimeCleanupError):
         recursive_child_runtime._close_child_runtime_sync(
             loop=_ClosedLoop(),  # type: ignore[arg-type]
@@ -555,19 +553,16 @@ async def test_owner_loop_loss_retains_cleanup_without_provider_settlement() -> 
             mount_path=_MOUNT,
             interpreter=interpreter,  # type: ignore[arg-type]
             permit=permit,
+            retain_pending_cleanup=retained.append,
         )
 
     assert interpreter.shutdown_calls == 0
     assert platform.deleted == []
     assert platform.probes == []
     assert child.fs.files == {f"{_MOUNT}/child.txt"}
-    retained = set(sandbox_module._UNSCHEDULED_CLOSE_OWNERS) - previous
     assert len(retained) == 1
-    assert sandbox_module.has_pending_lease_ownership()
-    # Explicitly settle this test-owned fake resource to avoid leaking it into
-    # unrelated process-ownership assertions.
-    for future in retained:
-        sandbox_module._UNSCHEDULED_CLOSE_OWNERS.pop(future)
+    assert retained[0].done()
+    assert isinstance(retained[0].exception(), RuntimeError)
     permit.release()
 
 
@@ -613,7 +608,7 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
     monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()
-    factory = DaytonaRuntime().build_child_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,

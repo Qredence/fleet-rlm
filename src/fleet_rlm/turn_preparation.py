@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
-from dataclasses import dataclass, field
-from typing import Any, Protocol
+from dataclasses import dataclass, field, replace
+from functools import partial
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 import dspy
@@ -15,14 +16,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from fleet_rlm.artifacts.models import ArtifactAccess
 from fleet_rlm.artifacts.promotion import RunArtifactSink
 from fleet_rlm.artifacts.reader import ArtifactReader
+from fleet_rlm.artifacts.tools import ArtifactToolHost
 from fleet_rlm.attachments import (
     AttachmentAccess,
     AttachmentRun,
+    AttachmentToolHost,
     PreparedAttachment,
     PreparedAttachments,
     RunAttachmentSink,
 )
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.tracing import turn_phase_span
+from fleet_rlm.paths import VolumePaths
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
@@ -47,25 +52,36 @@ from fleet_rlm.rlm.execution import (
 )
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
-from fleet_rlm.rlm.result import empty_rlm_usage
-from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.context import build_session_context_manifest
-from fleet_rlm.sessions.history import is_committed_conversation_turn, to_dspy_history
+from fleet_rlm.sessions.history import dspy_history_for_claim
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
-from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.sessions.history_transport import committed_history_for_claim
 from fleet_rlm.sessions.run_state import ClaimedRun
+from fleet_rlm.sessions.task import SessionTaskService, task_checkpoint_summary
+from fleet_rlm.sessions.task_tools import SessionTaskToolHost
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.models import SkillDefinition
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.turn_settlement import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
-from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidateCollector
+from fleet_rlm.workspace.memory import (
+    MemoryCandidate,
+    MemoryCandidateCollector,
+    MemoryCandidateToolHost,
+    WorkspaceMemoryToolHost,
+    build_memory_promotion_intents,
+    prepare_turn_memory_digest,
+    promote_turn_memory_candidates,
+)
 from fleet_rlm.workspace.models import (
+    DAYTONA_WORKSPACE_CAPABILITY,
     WORKSPACE_MEMORY_INJECTION_TAIL_BYTES,
     SessionWorkspaceFS,
     WorkspaceCapabilityMetadata,
 )
+from fleet_rlm.workspace.projects import ProjectToolHost
+from fleet_rlm.workspace.storage import StorageSession, VolumeBlobFs
+from fleet_rlm.workspace.workspace import WorkspaceToolHost
 
 AsyncCleanup = Callable[[], Awaitable[Any]]
 
@@ -181,77 +197,6 @@ def _active_task_summary(capabilities: PreparedCapabilities) -> str:
     return summary
 
 
-def claim_history_records(
-    claim: ClaimedRun,
-) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
-    """Project the claimed Session checkpoint to canonical ``(committed_turns, user_requests)``.
-
-    The claimed checkpoint is the immutable ``SessionHistory`` already
-    protected by the Run claim. It may include bounded failure tombstones for
-    audit/retry surfaces; their attached ``CommittedTurn`` metadata lets this
-    projection exclude them while preserving the canonical user/assistant
-    pairing for successful Turns.
-    """
-    committed_turns: list[CommittedTurn] = []
-    user_requests: list[str] = []
-    pending_user_text: str | None = None
-    for message in claim.history.messages:
-        if not isinstance(message, HistoryMessage):
-            continue
-        if message.role == "user":
-            # A second user message without an intervening assistant answer
-            # means the previous user request was never committed; drop it so
-            # the canonical factory never pairs an answer with the wrong
-            # request.
-            pending_user_text = message.content
-            continue
-        if message.role == "assistant":
-            if message.committed_turn is not None and not is_committed_conversation_turn(message.committed_turn):
-                # Failure/cancellation tombstones remain in the bounded
-                # Session audit projection, but never become model context.
-                pending_user_text = None
-                continue
-            if pending_user_text is None:
-                # Defensive: an assistant answer without a prior user
-                # request cannot be paired. The canonical factory would
-                # reject the missing user request through its own
-                # validation, but skipping the orphan here keeps the
-                # projection total.
-                continue
-            committed_turns.append(
-                CommittedTurn(
-                    schema_version=1,
-                    parts=(
-                        UsagePart(value=empty_rlm_usage()),
-                        TextPart(text=message.content),
-                    ),
-                )
-            )
-            user_requests.append(pending_user_text)
-            pending_user_text = None
-    return tuple(committed_turns), tuple(user_requests)
-
-
-def build_dspy_history_for_claim(claim: ClaimedRun) -> dspy.History:
-    """Build the canonical ``dspy.History`` snapshot for one claimed Session checkpoint.
-
-    The helper is the single P44.8 entry point that fetches the committed
-    Turns and user requests for the claimed checkpoint and materializes the
-    exact installed ``dspy.History`` instance. The function never bypasses
-    the claim (it consumes ``ClaimedRun.history``), never reads the durable
-    store directly, and never inspects uncommitted state.
-
-    The returned object is the exact installed ``dspy.History`` Pydantic
-    model (DSPy 3.3.1) materialized through :func:`to_dspy_history` so the
-    canonical conversation factory still applies its terminal-exclusion
-    rules. A claim with no committed Turns yields a valid empty
-    ``dspy.History(messages=[])`` that the native ``dspy.RLM._validate_inputs``
-    contract accepts as the canonical empty History.
-    """
-    committed_turns, user_requests = claim_history_records(claim)
-    return to_dspy_history(committed_turns, user_requests=user_requests)
-
-
 class RunPreparation(Protocol):
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn: ...
 
@@ -267,18 +212,17 @@ class RunEnvironment:
     child_result_writer: Callable[[int, str, bytes], Awaitable[str]] | None = None
     context_mount_path: str | None = None
     workspace_memory_store: Any | None = None
-    post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None
-    memory_intent_builder: MemoryIntentBuilder | None = None
+    volume_fs: VolumeBlobFs | None = None
+    session_workspace: StorageSession | None = None
+    project_workspace: StorageSession | None = None
     # Optional provider-owned root release. ``release`` remains per-Turn when
     # ``release_is_resident`` is false; the resident Session runtime takes
     # ``resident_release`` instead.
     resident_release: AsyncCleanup | None = None
     release_is_resident: bool = True
-    # Provider-specific transport for the canonical committed conversation.
-    # In-process runs use the exact dspy.History built below; Daytona supplies
-    # CommittedSessionHistory because SandboxSerializable values cross its
-    # interpreter boundary while raw Pydantic History does not.
-    history_transport: dspy.History | CommittedSessionHistory | None = None
+    # DSPy in-process interpreters accept native History; the Daytona Sandbox
+    # bridge needs the serializable Session transport.
+    history_format: Literal["dspy", "sandbox"] = "dspy"
     # Synchronous provider fence used when the resident RLM becomes tainted.
     # This is an internal lifecycle hook; it does not cross the HTTP/SSE seam.
     mark_tainted: Callable[[], None] | None = None
@@ -322,6 +266,7 @@ class TurnPreparationPlan:
     attachments: RunAttachmentPreparer
     environments: RunEnvironmentProvider
     capabilities: CapabilityPreparer
+    task_service: SessionTaskService | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
     wrap_up_seconds: float = 300.0
     budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
@@ -346,6 +291,21 @@ async def _check_cancellation(run: ClaimedRun) -> None:
 
 async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
     await _check_cancellation(run)
+
+    if plan.task_service is not None:
+        try:
+            async with asyncio.timeout_at(deadline):
+                await plan.task_service.seed(
+                    run.session_id,
+                    user_id=run.access.user_id,
+                    workspace_id=run.access.workspace_id,
+                    first_request=run.input.text,
+                )
+        except TimeoutError:
+            raise RunPreparationTimeoutError("Turn preparation timed out") from None
+        except (DatabaseConnectionError, OSError, SQLAlchemyError) as exc:
+            raise RunPreparationUnavailableError("Session task state is unavailable") from exc
+        await _check_cancellation(run)
 
     with turn_phase_span("Turn.acquire_environment", inputs={}) as environment_phase:
         try:
@@ -500,9 +460,9 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
             workspace_memory_digest=_workspace_memory_digest(capabilities),
             active_task_summary=_active_task_summary(capabilities),
             history=(
-                environment.history_transport
-                if environment.history_transport is not None
-                else build_dspy_history_for_claim(run)
+                committed_history_for_claim(run)
+                if environment.history_format == "sandbox"
+                else dspy_history_for_claim(run)
             ),
         ),
         execution=ExecutionRuntime(
@@ -528,8 +488,8 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
         artifact_sink=environment.artifact_sink,
         _resources=resources,
         result_snapshot_sink=environment.result_snapshot_sink,
-        post_commit_memory_promotion=environment.post_commit_memory_promotion,
-        memory_intent_builder=environment.memory_intent_builder,
+        post_commit_memory_promotion=getattr(capabilities, "post_commit_memory_promotion", None),
+        memory_intent_builder=getattr(capabilities, "memory_intent_builder", None),
         image_identity=environment.image_identity,
     )
 
@@ -625,6 +585,10 @@ class PreparedHostCapabilities:
         artifacts: Any | None = None,
         preparation_notices: tuple[PreparationNotice, ...] = (),
         memory_candidates: MemoryCandidateCollector | None = None,
+        workspace_memory_digest: str = "",
+        active_task_summary: str = "",
+        post_commit_memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
+        memory_intent_builder: MemoryIntentBuilder | None = None,
     ) -> None:
         self.spec = spec
         self._files = files
@@ -634,6 +598,15 @@ class PreparedHostCapabilities:
         self._artifacts = artifacts
         self._memory_candidates = memory_candidates
         self.preparation_notices = preparation_notices
+        if (
+            not isinstance(workspace_memory_digest, str)
+            or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
+        ):
+            workspace_memory_digest = ""
+        self.workspace_memory_digest = workspace_memory_digest
+        self.active_task_summary = active_task_summary[:2048] if isinstance(active_task_summary, str) else ""
+        self.post_commit_memory_promotion = post_commit_memory_promotion
+        self.memory_intent_builder = memory_intent_builder
 
     def drain_public_details(self) -> tuple[AttachmentRead | SkillActivated | SkillLoaded, ...]:
         values: list[AttachmentRead | SkillActivated | SkillLoaded] = []
@@ -772,9 +745,154 @@ async def prepare_host_capabilities(
     return spec, skill_host, ()
 
 
+@dataclass(slots=True)
+class DaytonaCapabilityPreparer:
+    """Assemble Run capabilities from storage selected by the environment owner."""
+
+    settings: Settings
+    skill_catalog: SkillCatalog
+    volume_paths: VolumePaths
+    artifact_reader: ArtifactReader | None = None
+    task_service: SessionTaskService | None = None
+
+    async def prepare(
+        self,
+        run: ClaimedRun,
+        environment: RunEnvironment,
+        attachments: PreparedAttachments,
+        *,
+        deadline: float,
+    ) -> PreparedHostCapabilities:
+        if (
+            environment.volume_fs is None
+            or environment.session_workspace is None
+            or environment.project_workspace is None
+            or environment.workspace_memory_store is None
+        ):
+            raise TypeError("Daytona environment is missing required capability storage")
+
+        volume_fs = environment.volume_fs
+        session_workspace = environment.session_workspace
+        projects_fs = environment.project_workspace
+
+        def read_child_source(path: str, max_bytes: int) -> bytes:
+            if path.startswith("projects/"):
+                return projects_fs.read_file_bytes(path.removeprefix("projects/"), max_bytes=max_bytes)
+            return session_workspace.read_file_bytes(path, max_bytes=max_bytes)
+
+        attachment_host = AttachmentToolHost(
+            attachments=attachments.refs,
+            staged_attachments=attachments.staged,
+            volume_fs=volume_fs,
+        )
+        artifact_host = ArtifactToolHost(
+            volume_fs=volume_fs,
+            user_id=run.access.user_id,
+            workspace_id=run.access.workspace_id,
+            session_id=run.session_id,
+            run_id=run.run_id,
+            max_artifact_bytes=self.settings.max_artifact_bytes,
+            volume_paths=self.volume_paths,
+        )
+        workspace_host = WorkspaceToolHost(session_workspace, max_file_bytes=self.settings.max_upload_bytes)
+        project_host = ProjectToolHost(projects_fs, max_file_bytes=self.settings.max_upload_bytes)
+        memory_host = WorkspaceMemoryToolHost(environment.workspace_memory_store)
+
+        task_host = None
+        task_summary = ""
+        if self.task_service is not None:
+            checkpoint = await self.task_service.read(
+                run.session_id,
+                user_id=run.access.user_id,
+                workspace_id=run.access.workspace_id,
+            )
+            task_summary = task_checkpoint_summary(checkpoint)
+            if environment.async_bridge is not None:
+                task_host = SessionTaskToolHost(
+                    self.task_service,
+                    session_id=run.session_id,
+                    user_id=run.access.user_id,
+                    workspace_id=run.access.workspace_id,
+                    dispatcher=environment.async_bridge,
+                )
+
+        memory_candidates = None
+        candidate_tools: tuple[Any, ...] = ()
+        candidate_views: dict[str, Any] = {}
+        if self.settings.rlm_autonomous_memory_categories:
+            memory_candidates = MemoryCandidateCollector(
+                run_id=run.run_id,
+                allowed_categories=self.settings.rlm_autonomous_memory_categories,
+            )
+            candidate_host = MemoryCandidateToolHost(memory_candidates)
+            candidate_tools = candidate_host.as_tools()
+            candidate_views = dict(candidate_host.event_views())
+
+        memory_digest = await prepare_turn_memory_digest(environment.workspace_memory_store, request=run.input.text)
+        allowed_categories = tuple(self.settings.rlm_autonomous_memory_categories)
+        memory_promotion = OwnedPostCommitMemoryPromotion(
+            partial(
+                promote_turn_memory_candidates,
+                environment.workspace_memory_store,
+                allowed_categories=allowed_categories,
+            )
+        )
+
+        def memory_intent_builder(run_id: UUID, candidates: tuple[MemoryCandidate, ...]) -> tuple[Any, ...]:
+            return build_memory_promotion_intents(
+                run_id=run_id,
+                candidates=candidates,
+                allowed_categories=allowed_categories,
+            )
+
+        base_views = {
+            **attachment_host.event_views(),
+            **artifact_host.event_views(),
+            **workspace_host.event_views(),
+            **project_host.event_views(),
+            **memory_host.event_views(),
+            **(task_host.event_views() if task_host is not None else {}),
+            **candidate_views,
+        }
+        spec, skill_host, notices = await prepare_host_capabilities(
+            turn=run,
+            skill_catalog=self.skill_catalog,
+            base_tools=(
+                *attachment_host.as_tools(),
+                *artifact_host.as_tools(),
+                *workspace_host.as_tools(),
+                *project_host.as_tools(),
+                *memory_host.as_tools(),
+                *(task_host.as_tools() if task_host is not None else ()),
+                *candidate_tools,
+            ),
+            base_event_views=base_views,
+            workspace=DAYTONA_WORKSPACE_CAPABILITY,
+            workspace_fs=session_workspace,
+            artifact_reader=self.artifact_reader,
+            deadline=deadline,
+        )
+        spec = replace(spec, child_source_reader=read_child_source)
+        return PreparedHostCapabilities(
+            spec,
+            files=attachment_host,
+            artifacts=artifact_host,
+            skills=skill_host,
+            close_files=True,
+            artifact_candidates=True,
+            preparation_notices=notices,
+            workspace_memory_digest=memory_digest,
+            active_task_summary=task_summary,
+            memory_candidates=memory_candidates,
+            post_commit_memory_promotion=memory_promotion,
+            memory_intent_builder=memory_intent_builder,
+        )
+
+
 __all__ = [
     "AsyncCleanup",
     "CapabilityPreparer",
+    "DaytonaCapabilityPreparer",
     "EmptySkillHost",
     "PreparedHostCapabilities",
     "PreparedTurn",
@@ -787,8 +905,6 @@ __all__ = [
     "RunPreparationTimeoutError",
     "RunPreparationUnavailableError",
     "TurnPreparationPlan",
-    "build_dspy_history_for_claim",
-    "claim_history_records",
     "close_turn_preparation",
     "prepare_host_capabilities",
     "prepare_turn",

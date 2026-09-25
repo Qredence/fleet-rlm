@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 import dspy
 
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
-from fleet_rlm.workspace.paths import VolumePaths, as_posix
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 # ---------------------------------------------------------------------------

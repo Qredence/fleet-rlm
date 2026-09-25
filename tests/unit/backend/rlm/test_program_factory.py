@@ -9,8 +9,9 @@ import dspy
 import pytest
 from dspy.utils.exceptions import LMAuthError, LMInvalidRequestError, LMServerError
 
-from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.result import RLMConfigError
+from tests.support.native_rlm import build_native_rlm_for_test
 
 
 class _CopyableLM:
@@ -334,14 +335,14 @@ def test_child_copy_cannot_extend_turn_budget_deadline(monkeypatch: pytest.Monke
 def test_native_builder_passes_explicit_constructor_kwargs() -> None:
     import dspy
 
-    from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions
 
     root = MagicMock(name="root_lm")
     sub = MagicMock(name="sub_lm")
     options = RLMOptions(max_iters=7, max_llm_calls=11, max_output_chars=2048)
     models = RLMModelBundle(root_lm=root, sub_lm=sub)
 
-    rlm = build_native_rlm(options=options, tools=[host_echo], sub_lm=models.sub_lm)
+    rlm = build_native_rlm_for_test(options=options, tools=[host_echo], sub_lm=models.sub_lm)
 
     assert isinstance(rlm, dspy.RLM)
     assert type(rlm) is dspy.RLM
@@ -358,24 +359,24 @@ def test_native_builder_passes_explicit_constructor_kwargs() -> None:
 
 
 def test_each_native_builder_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.program import RLMOptions
 
-    first = build_native_rlm(options=RLMOptions())
-    second = build_native_rlm(options=RLMOptions())
+    first = build_native_rlm_for_test(options=RLMOptions())
+    second = build_native_rlm_for_test(options=RLMOptions())
 
     assert first is not second
 
 
 def test_native_builder_accepts_policy_controlled_host_verbosity() -> None:
-    from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+    from fleet_rlm.rlm.program import RLMOptions
 
-    rlm = build_native_rlm(options=RLMOptions(), verbose=False)
+    rlm = build_native_rlm_for_test(options=RLMOptions(), verbose=False)
 
     assert rlm.verbose is False
 
 
-def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
-    """Static guard: only dspy_contract.py may directly construct native dspy.RLM."""
+def test_program_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
+    """Static guard: program.py is the sole native dspy.RLM construction owner."""
     import ast
     from pathlib import Path
 
@@ -383,7 +384,7 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
     assert (rlm_dir / "program.py").is_file()
     offenders: list[str] = []
     for path in sorted(rlm_dir.glob("*.py")):
-        if path.name in ("dspy_contract.py", "program.py"):
+        if path.name == "program.py":
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
@@ -394,16 +395,16 @@ def test_dspy_contract_is_only_native_dspy_rlm_call_site_in_rlm_package() -> Non
                 offenders.append(path.name)
             if isinstance(func, ast.Name) and func.id == "RLM":
                 offenders.append(path.name)
-    assert offenders == [], f"dspy.RLM constructed outside dspy_contract: {offenders}"
+    assert offenders == [], f"dspy.RLM constructed outside program.py: {offenders}"
 
 
 def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
-    """Static guard: only dspy_interpreter_contract.py and compat modules may import dspy.primitives."""
+    """No production module should depend on DSPy's private primitives package."""
     import ast
     from pathlib import Path
 
     src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
-    allowed = {"rlm/compat_3_3_1.py"}
+    allowed: set[str] = set()
     assert (src_root / "rlm" / "program.py").is_file()
     offenders: list[str] = []
     for path in sorted(src_root.rglob("*.py")):
@@ -427,13 +428,13 @@ def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
     assert offenders == [], f"dspy.primitives imported outside interpreter contract: {offenders}"
 
 
-def test_private_dspy_imports_are_confined_to_compat_layer() -> None:
-    """Static guard: only compat modules may import private DSPy internal packages."""
+def test_dspy_public_types_do_not_use_internal_module_paths() -> None:
+    """Public DSPy types are imported from the package API."""
     import ast
     from pathlib import Path
 
     src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
-    allowed = {"rlm/compat_3_3_1.py"}
+    allowed: set[str] = set()
     assert (src_root / "rlm" / "program.py").is_file()
     offenders: list[str] = []
     for path in sorted(src_root.rglob("*.py")):
@@ -461,7 +462,7 @@ def test_private_dspy_imports_are_confined_to_compat_layer() -> None:
                         or alias.name.startswith("dspy.signatures")
                     ):
                         offenders.append(f"{rel}: {alias.name}")
-    assert offenders == [], f"Private DSPy imports found outside compat layer: {offenders}"
+    assert offenders == [], f"Private DSPy imports found outside direct public imports: {offenders}"
 
 
 @pytest.mark.parametrize(
@@ -484,15 +485,15 @@ def _tool(name):
 @pytest.mark.parametrize("name", ["llm_query", "llm_query_batched", "print", "SUBMIT", "not-valid"])
 def test_native_builder_rejects_namespace_collisions(name):
     with pytest.raises(RLMConfigError):
-        build_native_rlm(signature="question -> answer", options=RLMOptions(), tools=[_tool(name)])
+        build_native_rlm_for_test(signature="question -> answer", options=RLMOptions(), tools=[_tool(name)])
 
 
 def test_native_builder_rejects_duplicate_names_and_keeps_authorized_tools():
-    rlm = build_native_rlm(signature="question -> answer", options=RLMOptions(), tools=[_tool("read_data")])
+    rlm = build_native_rlm_for_test(signature="question -> answer", options=RLMOptions(), tools=[_tool("read_data")])
 
     assert set(rlm.tools) == {"read_data"}
     with pytest.raises(RLMConfigError, match="duplicate"):
-        build_native_rlm(
+        build_native_rlm_for_test(
             signature="question -> answer",
             options=RLMOptions(),
             tools=[_tool("read_data"), _tool("read_data")],

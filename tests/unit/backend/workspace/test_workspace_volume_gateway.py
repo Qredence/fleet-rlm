@@ -13,9 +13,9 @@ import pytest
 from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
 
 from fleet_rlm.daytona.runtime import SandboxLeasePolicy
+from fleet_rlm.paths import UnsafePathError
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
-from fleet_rlm.workspace.paths import UnsafePathError
 from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
 

@@ -254,13 +254,13 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 
 
 @pytest.mark.asyncio
-async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -> None:
-    """A provider-selected Daytona transport reaches the native RLM unchanged."""
+async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -> None:
+    """Turn preparation materializes the Session-owned Sandbox history format."""
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.sessions.history_transport import committed_history_for_claim
     from fleet_rlm.turn_preparation import RunEnvironment
 
     claim = _make_claim(
@@ -269,7 +269,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
             HistoryMessage("assistant", "earlier assistant answer"),
         )
     )
-    transport = build_committed_session_history_for_claim(claim)
+    transport = committed_history_for_claim(claim)
 
     class Sink:
         async def read(self, location, *, max_bytes):
@@ -327,7 +327,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
                 sink,
                 sink,
                 release,
-                history_transport=transport,
+                history_format="sandbox",
             )
 
     preparer = TestingRunPreparer(
@@ -339,7 +339,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
     )
     prepared = await preparer.prepare(claim, deadline=float("inf"))
 
-    assert prepared.execution.session.history is transport
+    assert list(prepared.execution.session.history.messages) == list(transport.messages)
     assert type(prepared.execution.session.history).__name__ == "CommittedSessionHistory"
 
     class Factory:
@@ -360,7 +360,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
     _events = [event async for event in stream]
 
     assert factory.kwargs is not None
-    assert factory.kwargs["history"] is transport
+    assert list(factory.kwargs["history"].messages) == list(transport.messages)
     assert type(factory.kwargs["history"]).__name__ == "CommittedSessionHistory"
     await prepared.aclose()
 

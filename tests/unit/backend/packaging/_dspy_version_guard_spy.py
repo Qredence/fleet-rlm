@@ -57,11 +57,11 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     import fleet_rlm.cli as cli_module
     import fleet_rlm.daytona.runtime as daytona_runtime
     import fleet_rlm.persistence.database as persistence_database
-    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
+    import fleet_rlm.rlm.program as dspy_program
     import fleet_rlm.rlm.program as program
     import tests.support.testing_app as composition_common
 
-    real_guard = dspy_compat.assert_dspy_version
+    real_guard = dspy_program.assert_dspy_version
 
     def recording_guard() -> None:
         order.append("guard")
@@ -71,7 +71,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     # ``composition.testing`` binds the guard at module import time, while
     # ``composition.live``, ``fleet_rlm.app``, and the CLI rebind it lazily
     # at call time; patch both binding styles.
-    dspy_compat.assert_dspy_version = recording_guard
+    dspy_program.assert_dspy_version = recording_guard
     composition_common.assert_dspy_version = recording_guard
     composition_daytona.assert_dspy_version = recording_guard
     app_module.assert_dspy_version = recording_guard
@@ -136,6 +136,7 @@ def _run_composition_local(*, payload: dict[str, Any]) -> None:
 def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
     from fleet_rlm import app_lifecycle as composition_daytona
     from fleet_rlm.config.settings import Settings
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     _stub_daytona_settings_gates()
@@ -144,6 +145,7 @@ def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
             composition_daytona.build_daytona_composition(
                 Settings(run_environment="daytona"),
                 skill_catalog=build_bundled_skill_catalog(),
+                dispatcher=SyncBridgeDispatcher(),
             )
         )
     except _ResourceTripwireError:
@@ -241,10 +243,10 @@ def main(argv: list[str]) -> int:
 
     dspy.__version__ = reported_version
 
-    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
+    import fleet_rlm.rlm.program as dspy_program
 
     rejection_error_type = getattr(
-        dspy_compat,
+        dspy_program,
         "UncertifiedDSpyVersionError",
         _UnsettledGuardRejectionError,
     )

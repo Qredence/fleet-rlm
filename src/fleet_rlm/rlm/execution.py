@@ -25,19 +25,15 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, Self, TypeVar
 from uuid import UUID
 
 import dspy
+from dspy import CodeInterpreter
 from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.attachments import PreparedAttachment
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
-from fleet_rlm.rlm.compat_3_3_1 import (
-    CodeInterpreter,
-    bind_native_rlm_observer,
-    daytona_provider_contract,
-    is_native_rlm,
-)
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     AsyncToolBridge,
@@ -53,7 +49,9 @@ from fleet_rlm.rlm.events import (
     Status,
     ToolEventView,
     WarningEvent,
+    bind_native_rlm_observer,
     has_reasoning,
+    is_native_rlm,
     observe_tool,
     reconcile_trajectory,
     recursive_summary,
@@ -266,7 +264,7 @@ class SessionView:
     # claimed checkpoint. Defaults to an empty ``dspy.History`` so
     # ``dspy.RLM._validate_inputs`` always sees a real instance for the
     # Signature-declared ``history`` input. The production Turn-input
-    # assembly path (``fleet_rlm.turn_preparation.build_dspy_history_for_claim``)
+    # assembly path (``fleet_rlm.sessions.history.dspy_history_for_claim``)
     # overrides this default with the checkpoint materialization.
     history: dspy.History | CommittedSessionHistory = field(default_factory=lambda: dspy.History(messages=[]))
 
@@ -1519,11 +1517,9 @@ class RLMRunner:
             fresh_interpreter = getattr(state_context.execution.interpreter, "new_invocation", None)
             if not callable(fresh_interpreter) and self._program_builder is build_native_rlm:
                 # Serving path: a real native RLM requires the
-                # invocation-scoped factory. The rejecting contract is never
-                # a serving fallback; tests injecting a fake program builder
-                # keep the explicit in-process/test boundary below.
+                # invocation-scoped factory. Tests injecting a fake program
+                # builder retain the explicit in-process boundary below.
                 raise RLMConfigError("native RLM execution requires an invocation-scoped interpreter factory")
-            invocation_factory = fresh_interpreter
             supports_invocation_bindings = bool(
                 getattr(state_context.execution.interpreter, "invocation_scoped_bindings", False)
             )
@@ -1551,6 +1547,13 @@ class RLMRunner:
                         context_capsule=state_context.session.attachment_context,
                         output_contract=output_contract,
                     )
+            else:
+                interpreter = state_context.execution.interpreter
+
+                def invocation_factory(interpreter: Any = interpreter) -> Any:
+                    return interpreter
+
+            invocation_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
 
             rlm = self._program_builder(
                 signature=spec.signature,
@@ -1558,7 +1561,7 @@ class RLMRunner:
                 tools=(all_tools or None) if fleet_dispatch else None,
                 sub_lm=state_context.execution.models.sub_lm,
                 host_tool_dispatch=fleet_dispatch,
-                interpreter_factory=invocation_factory if callable(invocation_factory) else daytona_provider_contract,
+                interpreter_factory=invocation_factory,
                 verbose=self._verbose,
             )
             if not supports_invocation_bindings:
@@ -1810,6 +1813,11 @@ async def probe_root_lm(
     """
 
     interpreter = interpreter_factory()
+
+    def probe_interpreter_factory(interpreter: Any = interpreter) -> Any:
+        return interpreter
+
+    probe_interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
     recursive = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm=root_lm, sub_lm=root_lm),
         options=RecursiveRLMOptions(max_calls=1, max_prompt_chars=2_000),
@@ -1820,6 +1828,7 @@ async def probe_root_lm(
         signature=_ProviderProbeSignature,
         options=RLMOptions(max_iters=4, max_llm_calls=4, max_output_chars=2_000),
         tools=[recursive.tool],
+        interpreter_factory=probe_interpreter_factory,
     )
     try:
         with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=False):

@@ -23,24 +23,24 @@ from fleet_rlm.daytona.errors import ProviderRequestError, classify_provider_err
 from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceTimeout,
-    ChildEnvironmentSpec,
     ChildRuntimeLease,
     DaytonaAdmission,
-    DaytonaRuntime,
     InterpreterLease,
     RootSessionSpec,
     build_daytona_client,
 )
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
+from tests.support.session_manager import make_daytona_runtime
 
 
 # --- Runtime lifecycle -------------------------------------------------
 @pytest.mark.asyncio
 async def test_root_acquisition_maps_sdk_bad_request_without_publishing_a_root() -> None:
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         raise BadRequestException(status=400, reason="api_key=private")
 
-    runtime = DaytonaRuntime(root_acquirer=acquire)
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
 
     with pytest.raises(ProviderRequestError) as raised:
@@ -55,10 +55,11 @@ async def test_root_acquisition_maps_sdk_bad_request_without_publishing_a_root()
 
 @pytest.mark.asyncio
 async def test_root_acquisition_preserves_application_value_error() -> None:
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         raise ValueError("invalid local invariant")
 
-    runtime = DaytonaRuntime(root_acquirer=acquire)
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     with pytest.raises(ValueError, match="invalid local invariant"):
         await runtime.acquire_root_session(RootSessionSpec(workspace_id=uuid4(), session_id=uuid4()))
 
@@ -83,7 +84,7 @@ async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
         user_id=str(uuid4()),
         run_id=str(uuid4()),
     )
-    runtime = DaytonaRuntime()
+    runtime = make_daytona_runtime()
 
     with pytest.raises(ProviderRequestError) as raised, caplog.at_level(logging.WARNING):
         await runtime.release(lease)
@@ -100,16 +101,24 @@ async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
 async def test_runtime_close_retains_a_failed_root_for_retry() -> None:
     calls = 0
 
-    async def release(_lease: object) -> None:
-        nonlocal calls
-        calls += 1
-        if calls == 1:
-            raise RuntimeError("provider close failed")
+    class FailingOnceInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            nonlocal calls
+            del strict_broker_cleanup
+            calls += 1
+            if calls == 1:
+                raise RuntimeError("provider close failed")
 
-    runtime = DaytonaRuntime(
-        root_acquirer=lambda _spec, **_kwargs: object(),
-        root_releaser=release,
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=FailingOnceInterpreter(),
+        sandbox=SimpleNamespace(id="sandbox-1"),
     )
+    runtime = make_daytona_runtime()
+    runtime.acquire = lambda _request, **_kwargs: asyncio.sleep(0, result=lease)  # type: ignore[method-assign]
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
     await runtime.acquire_root_session(spec)
 
@@ -123,101 +132,58 @@ async def test_runtime_close_retains_a_failed_root_for_retry() -> None:
 
 
 @pytest.mark.asyncio
-async def test_successful_child_close_deregisters_from_runtime() -> None:
-    class Lease:
-        def __init__(self) -> None:
-            self.close_calls = 0
-
-        async def close(self) -> None:
-            self.close_calls += 1
-
-    lease = Lease()
-    runtime = DaytonaRuntime(child_acquirer=lambda _spec: lease)
-    spec = ChildEnvironmentSpec()
-
-    async with runtime.open_child(spec):
-        assert len(runtime.children) == 1
-
-    assert runtime.children == ()
-    assert lease.close_calls == 1
-
-
-@pytest.mark.asyncio
 async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdown(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     loop = asyncio.get_running_loop()
     close_calls: list[str] = []
+    runtime = make_daytona_runtime()
 
-    class ProviderFactory:
-        def __call__(self, call_index: int, *, profile: object = None) -> ChildRuntimeLease:
-            assert call_index == 4
-            assert profile is None
-            return ChildRuntimeLease(
-                SimpleNamespace(),
-                "child-sandbox",
-                "child-volume",
-                "recursive/workspace/run/4",
-                lambda: close_calls.append("closed"),
-            )
+    async def acquire_child(*, call_index: int, **_kwargs: object) -> ChildRuntimeLease:
+        assert call_index == 4
+        sandbox_id = "child-sandbox"
+        sandbox = SimpleNamespace(id=sandbox_id)
+        permit = SimpleNamespace(_released=False)
 
-        def wait_owned(self) -> None:
-            return None
+        def close_child() -> None:
+            close_calls.append("closed")
+            permit._released = True
 
-        def raise_if_cleanup_failed(self) -> None:
-            return None
+        runtime._child_cleanup_records[sandbox_id] = runtime_module._ChildCleanupRecord(
+            runtime._platform,
+            sandbox,
+            sandbox_id,
+            None,
+            permit,
+        )
+        return ChildRuntimeLease(
+            SimpleNamespace(),
+            sandbox_id,
+            "child-volume",
+            "recursive/workspace/run/4",
+            close_child,
+        )
 
-    monkeypatch.setattr(runtime_module, "_build_child_runtime_factory", lambda **_kwargs: ProviderFactory())
-    runtime = DaytonaRuntime()
-    factory = runtime.build_child_factory(deadline=loop.time() + 5)
+    monkeypatch.setattr(runtime, "_acquire_child_runtime", acquire_child)
+    factory = runtime.build_child_factory(
+        volume_id="child-volume",
+        mount_path=None,
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        deadline=loop.time() + 5,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
 
     lease = await asyncio.to_thread(factory, 4)
 
     assert runtime.has_pending_ownership
-    assert lease in runtime._child_runtime_leases
+    assert runtime._child_cleanup_records[lease.sandbox_id].lease is lease
     assert await runtime.aclose(deadline=loop.time() + 5)
     assert lease.state.value == "CLOSED"
     assert close_calls == ["closed"]
     assert not runtime.has_pending_ownership
-
-
-@pytest.mark.asyncio
-async def test_child_runtime_uses_configured_rlm_execution_settings(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured: dict[str, object] = {}
-
-    def build_factory(**kwargs: object) -> object:
-        captured.update(kwargs)
-
-        def create(_call_index: int, *, profile: object = None) -> ChildRuntimeLease:
-            assert profile is None
-            return ChildRuntimeLease(SimpleNamespace(), "child-lease", "volume", "scope", lambda: None)
-
-        return create
-
-    monkeypatch.setattr(runtime_module, "_build_child_runtime_factory", build_factory)
-    settings = SimpleNamespace(rlm_execution_timeout_s=37, rlm_max_execution_output_chars=1234)
-    resources = SimpleNamespace(
-        platform=object(),
-        daytona_admission=object(),
-        settings=settings,
-        dispatcher=None,
-    )
-    runtime = DaytonaRuntime(resources)
-    spec = ChildEnvironmentSpec(
-        workspace_id=uuid4(),
-        session_id=uuid4(),
-        run_id=uuid4(),
-        volume_id="volume",
-        mount_path="/home/daytona/fleet",
-        call_index=4,
-    )
-
-    lease = await runtime._acquire_child_from_resources(spec)
-    assert lease.sandbox_id == "child-lease"
-    assert captured["execution_timeout_s"] == 37
-    assert captured["execution_output_cap"] == 1234
 
 
 @pytest.mark.asyncio
@@ -244,7 +210,7 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
 
     platform = Platform()
     admission = DaytonaAdmission(max_active_leases=1)
-    runtime = DaytonaRuntime(
+    runtime = make_daytona_runtime(
         platform=platform,
         volume_client=object(),
         volume_config=SimpleNamespace(paths=lambda: object()),
@@ -263,9 +229,10 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
     monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
     monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
     monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
-    runtime._provisioner = SimpleNamespace(
-        expected_mount=lambda **_kwargs: object(), create=create, verify=lambda *_: None
-    )
+    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
 
     async with runtime.open_workspace_sandbox(uuid4(), purpose="test") as acquired:
         assert acquired is sandbox
@@ -318,15 +285,16 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
     monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
     admission = DaytonaAdmission(max_active_leases=1)
-    runtime = DaytonaRuntime(
+    runtime = make_daytona_runtime(
         platform=Platform(),
         volume_client=object(),
         volume_config=SimpleNamespace(paths=lambda: object()),
         admission=admission,
     )
-    runtime._provisioner = SimpleNamespace(
-        expected_mount=lambda **_kwargs: object(), create=create, verify=lambda *_: None
-    )
+    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
 
     async with runtime.open_workspace_sandbox(uuid4(), purpose="test"):
         pass
@@ -365,8 +333,16 @@ async def test_workspace_io_cancelled_create_is_settled_by_runtime(
 
     monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
     admission = DaytonaAdmission(max_active_leases=1)
-    runtime = DaytonaRuntime(platform=Platform(), volume_client=object(), volume_config=object(), admission=admission)
-    runtime._provisioner = SimpleNamespace(expected_mount=lambda **_kwargs: object(), create=create)
+    runtime = make_daytona_runtime(
+        platform=Platform(),
+        volume_client=object(),
+        volume_config=SimpleNamespace(paths=lambda: object()),
+        admission=admission,
+    )
+    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
 
     async def use_workspace() -> None:
         async with runtime.open_workspace_sandbox(uuid4(), purpose="test"):
@@ -403,7 +379,7 @@ async def test_process_disposal_keeps_client_open_until_tracked_absence() -> Non
         async def close(self) -> None:
             steps.append("client-close")
 
-    runtime = DaytonaRuntime(platform=Platform(), client=Client())
+    runtime = make_daytona_runtime(platform=Platform(), client=Client())
     runtime.track_sandbox("tracked")
 
     assert not await runtime.adispose(drain_seconds=1)
@@ -465,10 +441,8 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
     monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
     loop = asyncio.get_running_loop()
     admission = DaytonaAdmission(max_active_leases=1)
-    runtime = DaytonaRuntime()
+    runtime = make_daytona_runtime(platform=Platform(), admission=admission)
     factory = runtime.build_child_factory(
-        platform=Platform(),
-        admission=admission,
         volume_id="volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),

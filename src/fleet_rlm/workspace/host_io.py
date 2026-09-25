@@ -8,8 +8,8 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.paths import UnsafePathError, validate_mount_path
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
-from fleet_rlm.workspace.paths import UnsafePathError, validate_mount_path
 from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
 
 
@@ -191,6 +191,12 @@ class _HostWorkspaceStorage:
 
     def stat(self, path: str, *, include_checksum: bool | None = None) -> Any:
         return self._call("stat", path, include_checksum=include_checksum)
+
+    def stat_path(self, path: str, *, include_checksum: bool | None = None) -> Any:
+        return self._call("stat_path", path, include_checksum=include_checksum)
+
+    def read_text(self, path: str, *, cursor: str | None = None, max_chars: int = 10_000) -> Any:
+        return self._call("read_text", path, cursor=cursor, max_chars=max_chars)
 
     def read_text_page(
         self,

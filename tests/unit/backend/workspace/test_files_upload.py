@@ -21,8 +21,8 @@ from fleet_rlm.attachments import (
     sanitize_filename,
     validate_upload_size,
 )
-from fleet_rlm.workspace.paths import VolumePaths
-from fleet_rlm.workspace.storage import HostVolumeMirror
+from fleet_rlm.paths import VolumePaths
+from tests.support.workspace_storage import HostVolumeMirror
 
 
 class _Source:

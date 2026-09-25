@@ -36,7 +36,6 @@ from fleet_rlm.rlm.execution import (
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
@@ -50,6 +49,7 @@ from fleet_rlm.rlm.result import (
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
@@ -628,7 +628,7 @@ def test_extraction_fallback_termination_parity_between_root_and_child() -> None
     # Root scope: the same never-submitting behavior yields the same mode.
     async def bare_root() -> Any:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        rlm = build_native_rlm(
+        rlm = build_native_rlm_for_test(
             signature="request -> answer",
             options=RLMOptions(max_iters=1, max_llm_calls=3, max_output_chars=1000),
         )

@@ -294,9 +294,9 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
 
     # The bounded audit pair is retained for retry/listing, but the canonical
     # model-facing history excludes the cancellation tombstone.
-    from fleet_rlm.turn_preparation import build_dspy_history_for_claim
+    from fleet_rlm.sessions.history import dspy_history_for_claim
 
-    assert list(build_dspy_history_for_claim(retried).messages) == []
+    assert list(dspy_history_for_claim(retried).messages) == []
 
 
 @pytest.mark.asyncio

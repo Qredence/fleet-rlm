@@ -13,7 +13,8 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import FinalizationExhausted
-from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
 
@@ -443,7 +444,7 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
     monkeypatch.setattr(adapter, "acall", advance_after_action)
     backend = InProcessInterpreterBackend()
     interpreter = DaytonaCodeInterpreter(backend=backend)
-    rlm = build_native_rlm(signature="request -> answer: str", options=RLMOptions(max_iters=3), verbose=False)
+    rlm = build_native_rlm_for_test(signature="request -> answer: str", options=RLMOptions(max_iters=3), verbose=False)
 
     try:
         with dspy.context(lm=lm, adapter=adapter):
@@ -562,7 +563,7 @@ async def test_sync_async_repair_policy_parity(
     reserve: bool,
     expected_error: type[Exception] | None,
 ) -> None:
-    monkeypatch.setattr("fleet_rlm.rlm.compat_3_3_1.time.monotonic", lambda: 100.0)
+    monkeypatch.setattr("fleet_rlm.rlm.program.time.monotonic", lambda: 100.0)
     sync_lm = _ScriptedLM(texts)
     async_lm = _ScriptedLM(texts)
     options = {"deadline": 105.0, "wrap_up_seconds": 10.0} if reserve else {}

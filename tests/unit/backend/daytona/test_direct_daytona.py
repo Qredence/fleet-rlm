@@ -153,8 +153,9 @@ def test_direct_interpreter_code_execution_stdout():
 
 def test_direct_interpreter_code_execution_submit():
     """Verify DaytonaCodeInterpreter extracts SUBMIT output as FinalOutput."""
+    from dspy import FinalOutput
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, final_output_frame, sandbox_backend
-    from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
     frame = final_output_frame({"answer": "42", "reasoning": "math"})
     mock_code_interpreter = MagicMock()

@@ -60,6 +60,23 @@ class TaskCheckpoint:
     pending_work: tuple[str, ...]
 
 
+def task_checkpoint_summary(checkpoint: TaskCheckpoint) -> str:
+    """Format a bounded reminder for the active Session task."""
+    parts = [f"Goal: {checkpoint.goal[:500]}"]
+    for label, values in (
+        ("Pending", checkpoint.pending_work),
+        ("Decisions", checkpoint.decisions),
+        ("Completed", checkpoint.completed_work),
+        ("Paths", checkpoint.relevant_paths),
+    ):
+        if values:
+            parts.append(f"{label}: " + "; ".join(value[:160] for value in values[-4:]))
+    if checkpoint.source_revisions:
+        pairs = list(checkpoint.source_revisions.items())[:4]
+        parts.append("Source revisions: " + "; ".join(f"{path}: {revision}" for path, revision in pairs))
+    return "\n".join(parts)[:2048]
+
+
 class _SessionAuthorization(Protocol):
     async def get(self, session_id: UUID, *, user_id: UUID, workspace_id: UUID) -> object: ...
 
@@ -341,4 +358,5 @@ __all__ = [
     "TaskCheckpointCorruptError",
     "TaskCheckpointError",
     "TaskCheckpointMissingError",
+    "task_checkpoint_summary",
 ]

@@ -25,12 +25,12 @@ from fleet_rlm.rlm.program import (
     FleetRLMSignature,
     RLMModelBundle,
     RLMOptions,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
@@ -59,7 +59,7 @@ def test_build_native_rlm_binds_sub_lm_and_tools() -> None:
     def custom_leaf_tool(x: str) -> str:
         return f"leaf:{x}"
 
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=5, max_llm_calls=10, max_output_chars=4000),
         tools=[dspy.Tool(custom_leaf_tool, name="custom_leaf")],
@@ -164,7 +164,7 @@ def test_child_sandbox_delegation_strictly_depth_one() -> None:
     assert outcome["status"] == "completed", outcome
     assert outcome["answer"] == "child-done"
 
-    child_rlm = build_native_rlm(
+    child_rlm = build_native_rlm_for_test(
         signature=RecursiveSubtaskSignature,
         options=RLMOptions(max_iters=4, max_llm_calls=8, max_output_chars=2000),
         sub_lm=sub_lm,

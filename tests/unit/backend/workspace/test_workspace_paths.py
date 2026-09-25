@@ -41,10 +41,9 @@ def test_root_is_only_valid_when_explicitly_allowed() -> None:
         _normalize(".")
 
 
-def test_enforces_exact_depth_segment_and_total_utf8_bounds() -> None:
-    assert _normalize("/".join(["a"] * 8)) == "/".join(["a"] * 8)
-    with pytest.raises(ValueError):
-        _normalize("/".join(["a"] * 9))
+def test_enforces_segment_and_total_utf8_bounds_without_an_arbitrary_depth_cap() -> None:
+    deep = "/".join(["a"] * 9)
+    assert _normalize(deep) == deep
 
     assert _normalize("a" * 255) == "a" * 255
     with pytest.raises(ValueError):

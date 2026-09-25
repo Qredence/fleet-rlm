@@ -84,7 +84,7 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
     # any provider, database, or Daytona resource is constructed and before any
     # listener binds. Argument parsing (and --help) stay reachable on any
     # runtime; every serving/diagnostic command is guarded.
-    from fleet_rlm.rlm.compat_3_3_1 import UncertifiedDSpyVersionError, assert_dspy_version
+    from fleet_rlm.rlm.program import UncertifiedDSpyVersionError, assert_dspy_version
 
     try:
         assert_dspy_version()

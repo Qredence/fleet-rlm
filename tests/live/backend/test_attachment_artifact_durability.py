@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -32,8 +33,12 @@ from fleet_rlm.attachments import (
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
-from fleet_rlm.daytona.runtime import LeaseRequest
-from fleet_rlm.daytona.turn_environment import DaytonaRuntimeResources
+from fleet_rlm.daytona.runtime import (
+    DEFAULT_IDLE_STOP_SECONDS,
+    DaytonaRuntime,
+    LeaseRequest,
+    sandbox_spec_from_settings,
+)
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
@@ -119,15 +124,19 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> DaytonaRuntimeResources:
-    return DaytonaRuntimeResources(
+def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> SimpleNamespace:
+    bindings = InMemorySandboxBindingStore()
+    runtime = DaytonaRuntime.from_settings(
         settings,
-        bindings=InMemorySandboxBindingStore(),
+        bindings=bindings,
         cleanup=cleanup,
+        sandbox_spec=sandbox_spec_from_settings(settings),
         max_active_leases=settings.max_active_daytona_leases,
+        idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
         execution_output_cap=settings.rlm_max_execution_output_chars,
         execution_timeout_s=settings.rlm_execution_timeout_s,
     )
+    return SimpleNamespace(runtime=runtime, settings=settings, bindings=bindings, volume_config=runtime.volume_config)
 
 
 @pytest.mark.asyncio

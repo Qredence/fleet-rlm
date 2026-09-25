@@ -8,9 +8,9 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+from fleet_rlm.paths import UnsafePathError
 from fleet_rlm.workspace.host_io import DaytonaHostIO
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
-from fleet_rlm.workspace.paths import UnsafePathError
 
 
 class _Fs:

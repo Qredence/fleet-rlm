@@ -74,6 +74,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         async def acquire(self, turn, *, deadline):
             del turn
             assert deadline > 0
+            operations.append("acquire-environment")
 
             async def release():
                 operations.append("release-environment")
@@ -85,6 +86,10 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             del turn, environment, attachments
             assert deadline > 0
             return Capabilities()
+
+    class TaskService:
+        async def seed(self, *_args, **_kwargs):
+            operations.append("seed-task")
 
     async def not_cancelled():
         return False
@@ -104,6 +109,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         attachments=Attachments(),
         environments=Environments(),
         capabilities=CapabilityFactory(),
+        task_service=TaskService(),
     ).prepare(turn, deadline=float("inf"))
 
     manifest = prepared.execution.session.session_context
@@ -114,7 +120,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     assert prepared.result_snapshot_sink is None
     await prepared.aclose()
     await prepared.aclose()
-    assert operations == ["close-capabilities", "release-environment"]
+    assert operations == ["seed-task", "acquire-environment", "close-capabilities", "release-environment"]
 
 
 @pytest.mark.asyncio

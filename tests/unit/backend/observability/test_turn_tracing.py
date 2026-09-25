@@ -1513,7 +1513,7 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
     from mlflow.tracking import fluent
 
     from fleet_rlm.observability import tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMReasoningCallback, _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMReasoningCallback, _RLMTraceCallback
 
     prior_uri = mlflow.get_tracking_uri()
     mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")

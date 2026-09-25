@@ -178,11 +178,11 @@ def test_build_native_program_uses_dataset_signature(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(oolong_adapter, "build_native_rlm", fake_build_native_rlm)
     monkeypatch.setattr(oolong_adapter, "rlm_options", lambda _settings: object())
 
-    oolong_adapter.build_native_program(MagicMock(), sub_lm=MagicMock(), dataset="real")
+    oolong_adapter.build_native_program(MagicMock(), interpreter_factory=MagicMock, sub_lm=MagicMock(), dataset="real")
     assert captured["signature"] is OolongDNDRLMSignature
 
     captured.clear()
-    oolong_adapter.build_native_program(MagicMock(), sub_lm=MagicMock(), dataset="synth")
+    oolong_adapter.build_native_program(MagicMock(), interpreter_factory=MagicMock, sub_lm=MagicMock(), dataset="synth")
     assert captured["signature"] is FleetRLMSignature
 
 
@@ -307,7 +307,7 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
             lambda *_args, **_kwargs: MagicMock(),
         )
         patcher.setattr("scripts.benchmarks.oolong.adapter._run_prediction_on_worker", lambda *_args: worker_result)
-        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        patcher.setattr("fleet_rlm.rlm.program.assert_dspy_version", lambda: None)
         answer = await invoke_live_prediction(
             settings,
             kwargs,
@@ -354,7 +354,7 @@ async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) ->
             "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
             lambda *_args: MagicMock(answer="Label: spam"),
         )
-        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        patcher.setattr("fleet_rlm.rlm.program.assert_dspy_version", lambda: None)
         patcher.setattr("fleet_rlm.rlm.program.FleetJSONAdapter", capture_adapter)
         await invoke_live_prediction(
             settings,
@@ -393,7 +393,7 @@ async def test_invoke_live_prediction_skips_bundle_when_models_injected(tmp_path
             "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
             lambda *_args: MagicMock(answer="Label: spam"),
         )
-        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        patcher.setattr("fleet_rlm.rlm.program.assert_dspy_version", lambda: None)
         await invoke_live_prediction(
             MagicMock(),
             kwargs,
@@ -449,7 +449,7 @@ async def test_invoke_live_prediction_preserves_partially_injected_model(
             "scripts.benchmarks.oolong.adapter._run_prediction_on_worker",
             lambda *_args: MagicMock(answer="Label: spam"),
         )
-        patcher.setattr("fleet_rlm.rlm.compat_3_3_1.assert_dspy_version", lambda: None)
+        patcher.setattr("fleet_rlm.rlm.program.assert_dspy_version", lambda: None)
         await invoke_live_prediction(
             MagicMock(),
             kwargs,
@@ -643,7 +643,7 @@ async def test_stage_attachment_context_on_lease_uses_volume_mount_paths() -> No
     storage.write_bytes = AsyncMock()
 
     with patch(
-        "fleet_rlm.workspace.storage.AgentAsyncVolumeStorage",
+        "fleet_rlm.workspace.storage.AsyncDaytonaVolumeFS",
         return_value=storage,
     ) as storage_ctor:
         capsule = await stage_attachment_context_on_lease(lease, "hello context")

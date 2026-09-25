@@ -44,8 +44,7 @@ async def test_cancel_owned_run_records_intent_and_is_idempotent() -> None:
     with TestClient(app) as client:
         created = client.post("/api/sessions", json={"title": "t"}, headers=headers)
         session_id = UUID(created.json()["id"])
-        lifecycle = app.state.runtime_inventory.run_lifecycle
-        assert lifecycle is not None
+        lifecycle = app.state.runtime_inventory.route_services.turn_runtime._lifecycle
         started = await lifecycle.begin(
             RunClaim(TurnAccess(user, ws), session_id, TurnInput("question"), "key-2", uuid4())
         )

@@ -30,10 +30,11 @@ from fleet_rlm.rlm.execution import (
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.turn_settlement import TestingRunSettlement
 
 FailureMode = Literal["invalid_output", "malformed_trajectory", "internal_cancel", "timeout"]
@@ -44,7 +45,7 @@ def _build_native(**kwargs: object):
     models = kwargs.pop("models", None)
     if models is not None:
         kwargs["sub_lm"] = models.sub_lm
-    return build_native_rlm(**kwargs)
+    return build_native_rlm_for_test(**kwargs)
 
 
 class _Capabilities:

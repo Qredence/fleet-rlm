@@ -32,7 +32,6 @@ from fleet_rlm.workspace.storage import (
     MAX_STORAGE_LIST_LIMIT,
     MAX_STORAGE_READ_CHARS,
     AsyncStorageSession,
-    HostWorkspaceAccessGateway,
     StorageSession,
 )
 
@@ -762,7 +761,6 @@ __all__ = [
     "PUBLIC_WORKSPACE_NAMESPACE",
     "SESSION_WORKSPACE_NAMESPACE",
     "FilesystemToolError",
-    "HostWorkspaceAccessGateway",
     "SessionWorkspace",
     "WorkspaceAccessGateway",
     "WorkspaceCapabilityMetadata",

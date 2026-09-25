@@ -750,7 +750,7 @@ def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -
 async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.workspace.storage import AsyncWorkspaceStorage
+    from fleet_rlm.workspace.storage import AsyncWorkspaceStorage, WorkspaceStorage
 
     volume_root = tmp_path / "volume"
     root = volume_root / "sessions" / "session" / "workspace"
@@ -762,10 +762,12 @@ async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -
 
     process = AsyncLocalProcess()
     workspace = AsyncWorkspaceStorage(
-        SimpleNamespace(process=process),
-        volume_root=str(volume_root),
-        root=str(root),
-        max_file_bytes=1024,
+        WorkspaceStorage(
+            SimpleNamespace(process=process),
+            volume_root=str(volume_root),
+            root=str(root),
+            max_file_bytes=1024,
+        )
     )
 
     await workspace.write_text("notes/report.txt", "one two one", overwrite=False)

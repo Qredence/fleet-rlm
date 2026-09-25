@@ -25,7 +25,7 @@ from tests.support.testing_app import create_testing_app
 def test_sessions_route_does_not_discover_provider_retirement() -> None:
     source = Path("src/fleet_rlm/api/routes/sessions.py").read_text(encoding="utf-8")
     assert "close_root_session" not in source
-    assert "run_environment_resources" not in source
+    assert "daytona_runtime_owner" not in source
 
 
 def _headers(user_id=None, workspace_id=None):
@@ -90,7 +90,13 @@ def test_task_checkpoint_route_uses_the_authorized_existing_service() -> None:
     with TestClient(app) as client:
         requested_session = UUID(client.post("/api/sessions", json={}).json()["id"])
         inventory = app.state.runtime_inventory
-        install_runtime_inventory(app, replace(inventory, session_task_service=_TaskService()))
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                route_services=replace(inventory.route_services, session_task_service=_TaskService()),
+            ),
+        )
         response = client.get(f"/api/sessions/{requested_session}/task")
 
     assert response.status_code == 200
@@ -115,7 +121,13 @@ def test_missing_task_checkpoint_is_reported_without_creating_one() -> None:
     with TestClient(app) as client:
         session_id = client.post("/api/sessions", json={}).json()["id"]
         inventory = app.state.runtime_inventory
-        install_runtime_inventory(app, replace(inventory, session_task_service=_TaskService()))
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                route_services=replace(inventory.route_services, session_task_service=_TaskService()),
+            ),
+        )
         response = client.get(f"/api/sessions/{session_id}/task")
 
     assert response.status_code == 404
@@ -133,12 +145,18 @@ def test_archive_returns_pending_when_provider_retirement_fails() -> None:
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
         assert inventory is not None
-        assert inventory.session_catalog is not None
+        assert inventory.route_services.session_catalog is not None
         install_runtime_inventory(
             app,
             replace(
                 inventory,
-                session_lifecycle=SessionLifecycle(inventory.session_catalog, _FailingRetirement()),
+                route_services=replace(
+                    inventory.route_services,
+                    session_lifecycle=SessionLifecycle(
+                        inventory.route_services.session_catalog,
+                        _FailingRetirement(),
+                    ),
+                ),
             ),
         )
         created = client.post("/api/sessions", json={"title": "retire-me"})
@@ -183,8 +201,7 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
     headers = {}
     with TestClient(app) as client:
         session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
-        lifecycle = app.state.runtime_inventory.run_lifecycle
-        assert lifecycle is not None
+        lifecycle = app.state.runtime_inventory.route_services.turn_runtime._lifecycle
         started = await lifecycle.begin(RunClaim(access, session_id, TurnInput("question"), "turn-key", uuid4()))
         assert isinstance(started, ClaimedRun)
         await lifecycle.finish(

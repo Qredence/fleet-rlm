@@ -39,7 +39,7 @@ def create_app(
     # The certified-DSPy runtime guard runs before any other startup work so a
     # rejected runtime can never reach provider, database, or Daytona resource
     # construction, nor bind a public listener.
-    from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
+    from fleet_rlm.rlm.program import assert_dspy_version
 
     assert_dspy_version()
     reject_retired_environment_variables()

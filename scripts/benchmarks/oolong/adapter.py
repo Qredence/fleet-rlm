@@ -449,14 +449,14 @@ async def stage_attachment_context_on_lease(
 ) -> AttachmentContextCapsule:
     """Stage ``context_window_text`` on the lease volume using Turn path policy."""
     from fleet_rlm.attachments import AttachmentRun, WorkspaceAttachmentPathPolicy
-    from fleet_rlm.workspace.storage import AgentAsyncVolumeStorage
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     body = context_text.encode("utf-8")
     attachment_uuid = attachment_id or uuid4()
     path_policy = WorkspaceAttachmentPathPolicy(lease.volume_paths)
     run = AttachmentRun(lease.session_id, lease.run_id)
     logical_path = path_policy.run_attachment(run, attachment_uuid, filename)
-    storage = AgentAsyncVolumeStorage(lease.sandbox, mount_path=lease.context_mount_path)
+    storage = AsyncDaytonaVolumeFS(lease.sandbox, mount_path=lease.context_mount_path)
     await storage.write_bytes(logical_path, body)
     return AttachmentContextCapsule(
         (
@@ -580,7 +580,13 @@ def normalize_dnd_answer(answer: str) -> tuple[str, bool]:
     return f"\\boxed{{{text}}}", True
 
 
-def build_native_program(settings: Any, *, sub_lm: Any | None = None, dataset: str = "synth") -> Any:
+def build_native_program(
+    settings: Any,
+    *,
+    interpreter_factory: Any,
+    sub_lm: Any | None = None,
+    dataset: str = "synth",
+) -> Any:
     """Construct the locked native RLM program for one predict call."""
     if sub_lm is None:
         from fleet_rlm.rlm.program import build_model_bundle
@@ -590,6 +596,7 @@ def build_native_program(settings: Any, *, sub_lm: Any | None = None, dataset: s
         signature=oolong_signature(dataset),
         options=rlm_options(settings),
         sub_lm=sub_lm,
+        interpreter_factory=interpreter_factory,
     )
 
 
@@ -599,11 +606,11 @@ async def release_ephemeral_lease(
     staged_paths: Sequence[str] = (),
 ) -> None:
     """Shut down the interpreter, remove staged volume paths, and delete the sandbox."""
-    from fleet_rlm.workspace.storage import AgentAsyncVolumeStorage
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     cleanup_errors: list[BaseException] = []
     if staged_paths:
-        storage = AgentAsyncVolumeStorage(lease.sandbox, mount_path=lease.context_mount_path)
+        storage = AsyncDaytonaVolumeFS(lease.sandbox, mount_path=lease.context_mount_path)
         for logical_path in staged_paths:
             try:
                 await storage.remove(logical_path)
@@ -661,9 +668,8 @@ async def invoke_live_prediction(
 ) -> LivePrediction:
     """Invoke one live prediction through the owned worker / private-loop seam."""
     from fleet_rlm.rlm.budget import TurnBudget
-    from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
     from fleet_rlm.rlm.ownership import OwnedEffect
-    from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle, build_model_bundle
+    from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle, assert_dspy_version, build_model_bundle
 
     assert_dspy_version()
     budget = turn_budget if turn_budget is not None else TurnBudget(deadline=deadline)
@@ -686,7 +692,7 @@ async def invoke_live_prediction(
         bind = getattr(interpreter, "bind_context_capsule", None)
         if callable(bind):
             bind(capsule)
-    rlm = build_native_program(settings, sub_lm=resolved_sub, dataset=dataset)
+    rlm = build_native_program(settings, interpreter_factory=lambda: interpreter, sub_lm=resolved_sub, dataset=dataset)
     invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
     adapter = FleetJSONAdapter(
         deadline=deadline,
