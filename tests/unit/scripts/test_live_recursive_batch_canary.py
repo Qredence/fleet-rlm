@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -12,12 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "verify_child_sandboxes_turn.py"
+_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "live_recursive_batch_canary.py"
 _LIVE_CANARY = Path(__file__).resolve().parents[3] / "tests" / "live" / "backend" / "test_daytona_recursive_batch.py"
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("verify_child_sandboxes_turn", _SCRIPT)
+    spec = importlib.util.spec_from_file_location("live_recursive_batch_canary", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -31,6 +33,30 @@ def _live_module():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def _valid_receipt() -> dict[str, object]:
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=_SCRIPT.parents[1],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    lock_hash = hashlib.sha256((_SCRIPT.parents[1] / "uv.lock").read_bytes()).hexdigest()
+    return {
+        "schema": "fleet.p35d-root-batch/v1",
+        "candidate": {"sha": sha, "lockfile_sha256": lock_hash, "tracked_tree_clean": True},
+        "passed": True,
+        "cleanup": {"confirmed_absent": True, "admission_restored": True},
+        "assertions": {
+            "native_child_count": 2,
+            "ordered_root_batch": True,
+            "peak_child_concurrency": 2,
+            "retained_root_second_turn": True,
+        },
+        "trace": {"root_span": "fleet_turn", "trace_id": "tr-1", "child_spans": 2},
+    }
 
 
 def test_help_is_side_effect_free() -> None:
@@ -57,17 +83,32 @@ def test_live_authorization_is_required_before_pytest(tmp_path: Path) -> None:
     assert not output.exists()
 
 
+def test_dirty_candidate_is_rejected_before_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
+    module = _module()
+    calls: list[list[str]] = []
+
+    def git(command, **_kwargs):
+        calls.append(command)
+        stdout = {
+            "branch": "feature/scripts-prune",
+            "rev-parse": "a" * 40,
+            "status": " M scripts/README.md\n",
+        }[command[1]]
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", git)
+    with pytest.raises(RuntimeError, match="clean tracked candidate"):
+        module._require_clean_candidate()
+
+    assert [call[1] for call in calls] == ["branch", "rev-parse", "status"]
+
+
 def test_receipt_validation_requires_trace_hierarchy(tmp_path: Path) -> None:
     module = _module()
     output = tmp_path / "receipt.json"
-    output.write_text(
-        '{"schema":"fleet.p35d-root-batch/v1","passed":true,'
-        '"cleanup":{"confirmed_absent":true,"admission_restored":true},'
-        '"assertions":{"native_child_count":2,"ordered_root_batch":true,'
-        '"peak_child_concurrency":2,"retained_root_second_turn":true},'
-        '"trace":{"root_span":"fleet_turn","trace_id":"tr-1","child_spans":1}}',
-        encoding="utf-8",
-    )
+    receipt = _valid_receipt()
+    receipt["trace"]["child_spans"] = 1  # type: ignore[index]
+    output.write_text(json.dumps(receipt), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="root and child traces"):
         module._validate_receipt(output)
@@ -76,16 +117,20 @@ def test_receipt_validation_requires_trace_hierarchy(tmp_path: Path) -> None:
 def test_receipt_validation_accepts_complete_evidence(tmp_path: Path) -> None:
     module = _module()
     output = tmp_path / "receipt.json"
-    output.write_text(
-        '{"schema":"fleet.p35d-root-batch/v1","passed":true,'
-        '"cleanup":{"confirmed_absent":true,"admission_restored":true},'
-        '"assertions":{"native_child_count":2,"ordered_root_batch":true,'
-        '"peak_child_concurrency":2,"retained_root_second_turn":true},'
-        '"trace":{"root_span":"fleet_turn","trace_id":"tr-1","child_spans":2}}',
-        encoding="utf-8",
-    )
+    output.write_text(json.dumps(_valid_receipt()), encoding="utf-8")
 
     module._validate_receipt(output)
+
+
+def test_receipt_validation_rejects_a_different_candidate(tmp_path: Path) -> None:
+    module = _module()
+    output = tmp_path / "receipt.json"
+    receipt = _valid_receipt()
+    receipt["candidate"]["sha"] = "0" * 40  # type: ignore[index]
+    output.write_text(json.dumps(receipt), encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="clean candidate"):
+        module._validate_receipt(output)
 
 
 def test_trace_hierarchy_rejects_wrong_parentage() -> None:

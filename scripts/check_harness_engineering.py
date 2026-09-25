@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
-"""Validate the repo-local harness engineering control surface."""
+"""Support checks for the repo-local harness engineering control surface."""
 
 from __future__ import annotations
 
-import argparse
 import ast
 import re
 import subprocess
@@ -15,17 +13,16 @@ from pathlib import Path
 ROOT_AGENTS_LINE_BUDGET = 140
 SAFE_SCRIPT_HELP = frozenset(
     {
-        "check_agents_md_freshness.py",
+        "check_repo_hygiene.py",
         "check_codebase_tree.py",
         "check_dependency_boundaries.py",
-        "check_docs_quality.py",
-        "check_harness_engineering.py",
         "generate_profile_matrix.py",
         "generate_stream_fixture.py",
         "generate_tui_chunk_validation.py",
         "openapi_tools.py",
         "validate_release.py",
-        "verify_child_sandboxes_turn.py",
+        "live_daytona_verify.py",
+        "live_recursive_batch_canary.py",
     }
 )
 REQUIRED_GUIDANCE_FILES = (
@@ -196,11 +193,18 @@ class HarnessChecker:
             self._error("scripts/README.md", "script inventory is missing")
             return
         inventory = inventory_path.read_text(encoding="utf-8")
-        for script in sorted((self.repo_root / "scripts").glob("*.py")):
+        for script in sorted((self.repo_root / "scripts").rglob("*")):
+            if not script.is_file() or script.name == "README.md" or "__pycache__" in script.parts:
+                continue
             rel_path = script.relative_to(self.repo_root).as_posix()
-            if script.name not in inventory and rel_path not in inventory:
-                self._error(rel_path, "top-level Python helper is missing from scripts/README.md")
-            if self.check_script_help and script.name in SAFE_SCRIPT_HELP:
+            if f"`{rel_path}`" not in inventory:
+                self._error(rel_path, "script or data file is missing from scripts/README.md")
+            if (
+                self.check_script_help
+                and script.suffix == ".py"
+                and script.name != "__init__.py"
+                and script.name in SAFE_SCRIPT_HELP
+            ):
                 self._check_script_help(script)
 
     def _control_surface_files(self) -> list[Path]:
@@ -316,45 +320,5 @@ class HarnessChecker:
         self.errors.append(HarnessError(path=path, detail=detail))
 
 
-def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=Path(__file__).resolve().parents[1],
-        help="Repository root to validate.",
-    )
-    parser.add_argument(
-        "--skip-script-help",
-        action="store_true",
-        help="Skip executing top-level scripts with --help.",
-    )
-    parser.add_argument(
-        "--editorial",
-        action="store_true",
-        help="Also run editorial documentation and stale-marker checks.",
-    )
-    return parser.parse_args(argv)
-
-
-def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint."""
-    args = parse_args(argv)
-    checker = HarnessChecker(
-        repo_root=args.repo_root.resolve(),
-        check_script_help=not args.skip_script_help,
-        editorial=args.editorial,
-    )
-    errors = checker.run()
-    if errors:
-        print("Harness engineering checks failed:", file=sys.stderr)
-        for error in errors:
-            print(f"- {error.path}: {error.detail}", file=sys.stderr)
-        return 1
-    print("OK: harness engineering checks passed.")
-    return 0
-
-
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit("Run the consolidated checker: uv run python scripts/check_repo_hygiene.py")

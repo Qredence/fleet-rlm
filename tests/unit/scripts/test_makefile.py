@@ -96,7 +96,7 @@ def test_quality_graph_runs_shared_checks_once(tmp_path: Path) -> None:
     for command in (
         ["run", "python", "scripts/openapi_tools.py", "check"],
         ["run", "python", "scripts/generate_stream_fixture.py", "check"],
-        ["run", "python", "scripts/check_agents_md_freshness.py"],
+        ["run", "python", "scripts/check_repo_hygiene.py"],
     ):
         assert commands.count(command) == 1
 

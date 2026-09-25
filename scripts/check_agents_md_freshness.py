@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Validation script for AGENTS.md freshness.
+"""Support checks for repository AGENTS.md freshness.
 
 This script validates that AGENTS.md files stay consistent with the codebase by:
 1. Checking that referenced paths and files exist
@@ -13,10 +12,8 @@ This ensures AGENTS.md documentation remains accurate as the codebase evolves.
 
 from __future__ import annotations
 
-import argparse
 import re
 import subprocess
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, NamedTuple
@@ -440,41 +437,5 @@ class AgentsMdValidator:
                 )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build and return an ArgumentParser for validating AGENTS.md freshness.
-
-    Returns an ArgumentParser configured to check AGENTS.md files for broken links,
-    missing paths, invalid Makefile targets, and cross-references.
-    """
-    parser = argparse.ArgumentParser(description="Validate AGENTS.md freshness against the live repository")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=Path(__file__).resolve().parents[1],
-        help="Repository root containing AGENTS.md files to validate",
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    """Run AGENTS.md freshness validation."""
-    args = build_parser().parse_args(argv)
-    repo_root = args.repo_root.resolve()
-
-    print("Validating AGENTS.md freshness...")
-
-    validator = AgentsMdValidator(repo_root)
-    errors = validator.validate_all()
-
-    if errors:
-        print("\nERROR: AGENTS.md freshness validation failed:\n")
-        for error in errors:
-            print(f"  [{error.file}] {error.issue}: {error.detail}")
-        return 1
-
-    print("OK: AGENTS.md freshness validation passed.")
-    return 0
-
-
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit("Run the consolidated checker: uv run python scripts/check_repo_hygiene.py")

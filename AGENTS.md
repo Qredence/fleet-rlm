@@ -14,6 +14,9 @@ feature roadmap or a substitute for executable behavior.
   [CONTRIBUTING.md](CONTRIBUTING.md) for setup, [docs/index.md](docs/index.md)
   for task guidance, and [tools/fleet-tui/AGENTS.md](tools/fleet-tui/AGENTS.md)
   for terminal-client work.
+- Use [scripts/README.md](scripts/README.md) as the inventory of retained script
+  commands, support modules, and data; `make check-docs` runs the unified
+  repository-hygiene checks for that inventory and active repository guidance.
 - Update architecture guidance when a durable owner or trust boundary changes.
   Keep sequencing, task status, and dated evidence in the relevant plan or
   ledger rather than duplicating a roadmap here.

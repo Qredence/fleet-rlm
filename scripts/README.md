@@ -1,81 +1,105 @@
 # Maintained scripts
 
-Run commands from the repository root with `uv run python`. `--help` is safe
-inspection, not authorization for a credentialed operation. Current runtime
-policy comes from `config/fleet.toml`: Fleet uses retained broker execution and
-child RLM tools follow the selected profile policy. A receipt proves only its
-recorded candidate and topology.
+Run repository commands from the root with `uv run python`. The inventory below
+distinguishes executable commands from implementation modules and data. Current
+runtime policy comes from `config/fleet.toml`; a receipt describes only the
+candidate and behavior its contract records.
 
-## Deterministic generation and repository checks
+## Repository checks and generated contracts
 
-| Script | Purpose |
+| Path | Role |
 | --- | --- |
-| `openapi_tools.py` | Generate or check backend OpenAPI. |
-| `generate_stream_fixture.py` | Generate or check the deterministic TUI stream fixture. |
-| `generate_tui_chunk_validation.py` | Generate or check TUI chunk-validation tables. |
-| `generate_profile_matrix.py` | Generate or check the TOML-derived profile matrix. |
-| `check_codebase_tree.py` | Enforce canonical import and route boundaries. |
-| `check_dependency_boundaries.py` | Check domain dependency directions. |
-| `import_walk.py` | Shared AST import walker for boundary checkers. |
-| `check_docs_quality.py` | Check active documentation links and structure. |
-| `check_agents_md_freshness.py` | Check agent-guide reachability. |
-| `check_harness_engineering.py` | Check repository harness conventions. |
-| `validate_release.py` / `release_smoke.py` | Validate package metadata, artifacts, and installed-wheel smoke behavior. |
+| `scripts/check_repo_hygiene.py` | Single entrypoint for AGENTS freshness, active docs, harness rules, script inventory, and active script references. `--editorial` adds local editorial checks. |
+| `scripts/check_agents_md_freshness.py` | Support module for AGENTS checks; not a separate command. |
+| `scripts/check_docs_quality.py` | Support module for active documentation checks; not a separate command. |
+| `scripts/check_harness_engineering.py` | Support module for harness checks; not a separate command. |
+| `scripts/check_codebase_tree.py` | Enforce code ownership, API route, and test-layout constraints. |
+| `scripts/check_dependency_boundaries.py` | Enforce domain dependency direction and content boundaries. |
+| `scripts/import_walk.py` | Shared AST import walker for architecture checkers. |
+| `scripts/openapi_tools.py` | Generate or check the OpenAPI contract. |
+| `scripts/generate_stream_fixture.py` | Generate or check the deterministic TUI stream fixture. |
+| `scripts/generate_tui_chunk_validation.py` | Generate or check TUI chunk-validation tables. |
+| `scripts/generate_profile_matrix.py` | Generate or check the TOML-derived profile matrix. |
+| `scripts/validate_release.py` | Validate package metadata, artifacts, and release hygiene. |
+| `scripts/release_smoke.py` | Exercise the installed wheel through a local smoke check. |
+| `scripts/normalize_release_artifacts.py` | Normalize wheel and sdist metadata for reproducible release identities. |
 
 Use the matching Make target where one exists. Generated contracts and the
 profile matrix must be regenerated from their owning source, never edited by
-hand.
+hand. Codebase-tree and dependency-boundary checks remain separate because they
+guard different architectural rules.
 
-## Local maintenance and operator entrypoints
+## Database, Daytona, and release operations
 
-| Script | Purpose |
+| Path | Role |
 | --- | --- |
-| `db_init.py` | Apply Alembic to the configured database target. |
-| `migrate_sqlite_to_postgres.py` | Run the explicit one-time database import. |
-| `daytona_snapshot.py` | Plan, create, check, or verify immutable Daytona snapshots. |
-| `inventory_db_heads.py` | Record a read-only deployed database-head inventory. |
-| `lakebase_preflight.py` | Run the sanitized Lakebase readiness preflight. |
-| `normalize_release_artifacts.py` | Normalize wheel and sdist metadata for reproducible release identities. |
-| `validate_mlflow_tracing.py` | Validate tracing for the selected policy. |
-| `codex_feedback_loop.py` | Run local Codex feedback-loop probes. |
-| `deployment_observability.py` | Inspect release observability inputs. |
-| `circleci_trigger_release.py` | Trigger and await the release workflow. |
-| `benchmarks/curate_mlflow.py` | Read selected local MLflow root requests and seal explicit agent-reviewed expectations with grouped splits; never run optimization. |
+| `scripts/db_init.py` | Apply Alembic migrations to the configured database target. |
+| `scripts/migrate_sqlite_to_postgres.py` | Run the explicit one-time database import. |
+| `scripts/lakebase_preflight.py` | Run the sanitized Lakebase readiness preflight. |
+| `scripts/daytona_snapshot.py` | Plan, create, check, or verify immutable Daytona snapshots. |
+| `scripts/benchmark_daytona_lifecycle.py` | Measure bounded Daytona lifecycle behavior. |
+| `scripts/live_daytona_verify.py` | Run the native semantic FastAPI contract and attachment/artifact durability contract on one committed candidate. |
+| `scripts/live_recursive_batch_canary.py` | Run the separately authorized recursive-batch canary; see the scope limits below. |
+| `scripts/validate_mlflow_tracing.py` | Run the selected-policy MLflow tracing smoke check. |
+| `scripts/deployment_observability.py` | Inspect release observability inputs. |
+| `scripts/circleci_trigger_release.py` | Trigger and await the release workflow. |
 
-These commands may contact providers or mutate external state. Invoke them only
-with the required explicit operator authorization and their documented policy,
-credential, target, spend, and receipt arguments. They do not promote a
-snapshot, enable paid capacity, or certify a deployment by themselves.
+Credentialed commands require explicit operator intent and their documented
+policy, target, credential, spend, and receipt arguments. The live Daytona
+verifier requires `FLEET_LIVE=1`, the `daytona-native` profile, explicit bounded
+Root and Sub model IDs, provider credentials, a clean tracked candidate branch,
+and a new ignored or out-of-repository receipt path. `--help` does not load
+credentials or authorize a run.
 
-## Live verification and evaluation entrypoints
+The native verifier records that the native single and ordered batch semantic
+calls pass through FastAPI, that staged attachment bytes are readable during a
+Run, that Artifact bytes remain readable after sandbox replacement with the
+shared volume, and that the tested cleanup paths settle. It does not exercise
+recursive child execution or establish provider containment, child promotion,
+release readiness, or deployment.
 
-| Script | Purpose |
+The recursive-batch canary in `scripts/live_recursive_batch_canary.py` requires
+`FLEET_LIVE=1`, enabled live policy, a clean non-main candidate, and a new
+receipt outside the repository. Its receipt checks two ordered child outcomes,
+observed peak concurrency of two, root reuse on a second turn, trace hierarchy,
+cleanup, and restored admission. It is one canary run; it does not establish
+containment certification, comparative quality, promotion, release, or
+deployment. Keep Phase 6 status and evidence in its active ledger.
+
+## Current evaluation and operator tools
+
+| Path | Role |
 | --- | --- |
-| `live_daytona_verify.py` | Run the broader Daytona MVP and durability verifier. |
-| `live_phase5_verify.py` | Prove sandbox research, dependency recovery, repository work, volume replacement, and cleanup in disposable Daytona Sandboxes. |
-| `verify_child_sandboxes_turn.py` | Run the maintained two-child recursive-batch canary with an explicit new receipt path. |
-| `benchmark_daytona_lifecycle.py` | Measure Daytona lifecycle behavior. |
-| `benchmarks/run_rlm_latency.py` / `run_routing_eval.py` | Run bounded latency, quality, or routing evaluations. |
-| `benchmarks/run_oolong_predict.py` | Run the official Oolong predict adapter (dry N=1 or live). |
-| `benchmarks/certify_mlflow.py` / `certify_postgres.py` / `certify_daytona_sdk.py` | Run bounded certification lanes. |
-| `benchmarks/record_mlflow_campaign.py` | Attach bounded evidence to MLflow. |
-| `benchmarks/rlm_eval_dataset.py`, `enable_monitoring.py`, `align_judges.py` | Manage the operator-gated evaluation loop. |
-| `benchmarks/runtime_v2.py` / `corpus_chain.py` | Run deterministic protocol and corpus fixtures. |
+| `scripts/benchmarks/run_rlm_latency.py` | Run the current Phase 6 latency, evaluation, and campaign workflows. |
+| `scripts/benchmarks/run_routing_eval.py` | Run bounded routing plans and live evaluation. |
+| `scripts/benchmarks/run_oolong_predict.py` | Run the official Oolong prediction adapter. |
+| `scripts/benchmarks/rlm_eval_dataset.py` | Manage the evaluation dataset and trace-linked examples. |
+| `scripts/benchmarks/certify_mlflow.py` | Run bounded MLflow backend certification. |
+| `scripts/benchmarks/certify_postgres.py` | Run bounded PostgreSQL and migration certification. |
+| `scripts/benchmarks/enable_monitoring.py` | Manage operator-gated production monitoring. |
+| `scripts/benchmarks/align_judges.py` | Prepare and run operator-gated judge alignment. |
+| `scripts/benchmarks/annotate_traces.py` | Annotate selected evaluation traces. |
+| `scripts/benchmarks/manage_prompts.py` | Manage prompt registry entries and trace links. |
 
-`adapter_replay.py` and `campaign.py` are support modules for these entrypoints,
-not standalone operator workflows. Keep dated campaign results in the ADR 006
-status ledger; do not convert partial, local, or failed receipts into a product
-or certification claim.
+## Support modules and data
 
-## Required boundaries
+These files are used by retained commands and are not standalone operator
+workflows.
 
-- Prefer `make check-docs`, `make api-check`, `make stream-check`, and
-  `make profile-matrix` for deterministic verification.
-- Live Daytona and provider commands require the selected policy to allow live
-  execution and require explicit operator intent; never infer or load secrets
-  merely to satisfy a check.
-- Use a new receipt path for each operator run. Do not overwrite receipts,
-  promote configured snapshot references, or alter profiles as a side effect of
-  a verification command.
-- Historical P-phase receipts remain evidence records. Current behavior comes
-  from code, tests, `config/fleet.toml`, and generated contract checks.
+| Path | Role |
+| --- | --- |
+| `scripts/benchmarks/__init__.py` | Python package marker. |
+| `scripts/benchmarks/campaign.py` | Shared bounded evaluation campaign support. |
+| `scripts/benchmarks/corpus_chain.py` | Deterministic corpus and chain support. |
+| `scripts/benchmarks/judges.py` | Shared evaluation judge support. |
+| `scripts/benchmarks/scorers.py` | Evaluation scorers used by retained runners. |
+| `scripts/benchmarks/usage_cost.py` | Usage and cost accounting support. |
+| `scripts/benchmarks/oolong/__init__.py` | Oolong helper package marker. |
+| `scripts/benchmarks/oolong/adapter.py` | Oolong prediction adapter implementation. |
+| `scripts/benchmarks/oolong/scoring.py` | Oolong scoring implementation. |
+| `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed row used to validate the Oolong fixture contract. |
+| `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen Phase 6 evaluation case manifest. |
+
+Historical ledgers and receipts remain evidence records and are not rewritten
+by this inventory. Current behavior is defined by code, tests, `config/fleet.toml`,
+and generated-contract checks.

@@ -1,4 +1,10 @@
-"""Run the bounded credentialed Daytona MVP proof and validate its receipt."""
+#!/usr/bin/env python3
+"""Run the native semantic FastAPI and attachment durability live contracts.
+
+This operator command checks one committed candidate with the configured
+``daytona-native`` policy. It does not certify recursive execution, provider
+containment, release readiness, or deployment.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +15,6 @@ import os
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -18,53 +23,40 @@ from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import (
     ProfileEnvironmentContract,
+    active_profile,
     load_profile_environment_contracts,
     require_live_execution,
 )
-from fleet_rlm.config.settings import FleetConfigurationError, Settings
-from fleet_rlm.snapshot_contract import validate_snapshot_name
+from fleet_rlm.config.settings import FleetConfigurationError
 
-RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v2"
+RECEIPT_SCHEMA = "fleet.live-daytona-verification/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
-P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
-_LIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_complete_daytona_mvp_through_fastapi"
+LIVE_AUTH_VALUES = frozenset({"1", "true", "yes"})
+LIVE_PROFILE = "daytona-native"
+ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
+SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_LIVE_ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
-_LIVE_SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
-_LIVE_PROFILE = "daytona-recursive"
-_MAX_MODEL_ID_CHARS = 256
-_DURABILITY_TEST = "tests/live/backend/test_attachment_artifact_durability.py"
+_NATIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
+_DURABILITY_TEST = (
+    "tests/live/backend/test_attachment_artifact_durability.py::"
+    "test_staged_attachment_is_readable_and_artifact_survives_replacement"
+)
 DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
     "live-b5-attachment-artifact-durability-evidence.json"
 )
-_SUCCESS_FIELDS = frozenset(
+_NATIVE_ASSERTIONS = frozenset(
     {
-        "schema",
-        "candidate",
-        "timing",
-        "models",
-        "qualification",
-        "resources",
-        "counts",
-        "streaming",
-        "checksums",
-        "assertions",
-        "lanes",
-        "external_promotion",
-        "failure",
-        "passed",
+        "single_semantic_call_succeeded",
+        "ordered_batch_results_verified",
+        "one_budgeted_sub_lm_call_per_prompt",
+        "typed_submit",
+        "no_full_child_sandbox",
+        "cleanup_passed",
     }
 )
-_FAILURE_CATEGORIES = frozenset(
-    {
-        "precondition_failed",
-        "proof_failed",
-        "cleanup_failed",
-        "receipt_invalid",
-        "interrupted",
-    }
+_DURABILITY_ASSERTIONS = frozenset(
+    {"attachment_readable", "artifact_survived_replacement", "shared_volume_checksum_verified"}
 )
-
 
 EXIT_PRECONDITION = 2
 EXIT_PROOF = 3
@@ -73,23 +65,7 @@ EXIT_INTERRUPTED = 130
 
 
 class ReceiptError(ValueError):
-    """Raised when the live proof receipt is missing or outside its contract."""
-
-    def __init__(self, phase: str) -> None:
-        super().__init__(phase)
-        self.phase = phase
-
-
-@dataclass(frozen=True, slots=True)
-class LaneResult:
-    """Bounded outcome for one verifier lane."""
-
-    name: str
-    order: int
-    passed: bool
-
-    def as_dict(self) -> dict[str, object]:
-        return {"order": self.order, "passed": self.passed}
+    """A lane did not produce evidence matching its active contract."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -98,47 +74,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--output",
         type=Path,
         required=True,
-        help="Ignored or out-of-repository path for the bounded JSON receipt.",
+        help="New ignored or out-of-repository JSON receipt path.",
     )
     parser.add_argument(
         "--timeout-seconds",
         type=int,
         default=900,
-        help="Pytest timeout for the live proof (default: 900).",
+        help="Per-contract pytest timeout in seconds (default: 900).",
     )
-    parser.add_argument("--session-snapshot", help="immutable Session snapshot for P2.7 certification")
     return parser
-
-
-def pytest_command(timeout_seconds: int) -> list[str]:
-    return [
-        "uv",
-        "run",
-        "pytest",
-        _LIVE_TEST,
-        "-q",
-        "-n",
-        "0",
-        f"--timeout={timeout_seconds}",
-    ]
-
-
-def lane_command(lane: str, timeout_seconds: int) -> list[str]:
-    """Return the one-shot pytest command for a named proof lane."""
-    if lane == "attachment_artifact_durability":
-        return [
-            "uv",
-            "run",
-            "pytest",
-            _DURABILITY_TEST,
-            "-q",
-            "-n",
-            "0",
-            f"--timeout={timeout_seconds}",
-        ]
-    if lane == "fastapi_dspy_daytona_mvp":
-        return pytest_command(timeout_seconds)
-    raise ValueError(f"unknown proof lane: {lane}")
 
 
 def _utc_now() -> str:
@@ -148,10 +92,10 @@ def _utc_now() -> str:
 def _git(*args: str, cwd: Path | None = None) -> str:
     completed = subprocess.run(
         ["git", *args],
+        cwd=cwd,
         check=True,
         capture_output=True,
         text=True,
-        cwd=cwd,
     )
     return completed.stdout.strip()
 
@@ -166,59 +110,225 @@ def _candidate() -> tuple[str, str]:
     return sha, branch
 
 
-def _installed_versions(worktree: Path, child_env: dict[str, str]) -> dict[str, str]:
-    """Read proof dependency versions from the detached candidate environment."""
-    try:
-        completed = subprocess.run(
-            [
-                "uv",
-                "run",
-                "python",
-                "-c",
-                (
-                    "import importlib.metadata as metadata, json, sys; "
-                    "print(json.dumps({'python': sys.version.split()[0], "
-                    "'dspy': metadata.version('dspy'), 'daytona': metadata.version('daytona')}))"
-                ),
-            ],
-            cwd=worktree,
-            env=child_env,
-            check=True,
-            capture_output=True,
-            text=True,
+def _profile_contract() -> ProfileEnvironmentContract:
+    contract = next(
+        (item for item in load_profile_environment_contracts() if item.name == LIVE_PROFILE),
+        None,
+    )
+    if contract is None:
+        raise FleetConfigurationError(f"required live profile is missing: {LIVE_PROFILE}")
+    return contract
+
+
+def _valid_model_pair(models: object) -> bool:
+    return bool(
+        isinstance(models, dict)
+        and set(models) == {"root", "sub"}
+        and all(
+            isinstance(value, str)
+            and 0 < len(value) <= 256
+            and not any(character.isspace() or ord(character) < 32 for character in value)
+            for value in models.values()
         )
-        versions = json.loads(completed.stdout)
-    except (json.JSONDecodeError, subprocess.SubprocessError) as exc:
-        raise RuntimeError("required proof package is not installed") from exc
+    )
+
+
+def _candidate_models() -> dict[str, str]:
+    models = {"root": os.environ.get(ROOT_MODEL_ENV, ""), "sub": os.environ.get(SUB_MODEL_ENV, "")}
+    if not _valid_model_pair(models):
+        raise ValueError("set bounded FLEET_LIVE_ROOT_MODEL and FLEET_LIVE_SUB_MODEL values")
+    return models
+
+
+def _path_is_allowed(path: Path) -> bool:
+    try:
+        root = Path(_git("rev-parse", "--show-toplevel")).resolve()
+    except (OSError, subprocess.SubprocessError):
+        return False
+    try:
+        path.resolve().relative_to(root)
+    except ValueError:
+        return True
+    ignored = subprocess.run(
+        ["git", "check-ignore", "-q", "--", str(path.resolve())],
+        cwd=root,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return ignored.returncode == 0
+
+
+def _write_once(path: Path, payload: dict[str, Any]) -> None:
+    """Atomically publish one receipt, refusing to replace an existing file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        text=True,
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, sort_keys=True)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.link(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _failure_receipt(
+    *,
+    started_at: str,
+    category: str,
+    phase: str,
+    sha: str | None = None,
+    branch: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "schema": RECEIPT_SCHEMA,
+        "candidate": None
+        if sha is None or branch is None
+        else {
+            "sha": sha,
+            "branch": branch,
+            "tracked_tree_clean": True,
+        },
+        "timing": {"started_at": started_at, "finished_at": _utc_now()},
+        "failure": {"category": category, "phase": phase},
+        "passed": False,
+    }
+
+
+def _load_json(path: Path, *, phase: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ReceiptError(phase) from exc
+    if not isinstance(value, dict):
+        raise ReceiptError(phase)
+    return value
+
+
+def _validate_durability_receipt(
+    path: Path,
+    *,
+    worktree: Path,
+    sha: str,
+    lockfile_sha256: str,
+) -> dict[str, Any]:
+    receipt = _load_json(path, phase="durability_receipt")
+    candidate = receipt.get("candidate")
+    assertions = receipt.get("assertions")
+    cleanup = receipt.get("cleanup")
     if (
-        not isinstance(versions, dict)
-        or set(versions) != {"python", "dspy", "daytona"}
-        or not all(isinstance(value, str) and value for value in versions.values())
+        receipt.get("schema") != "fleet.p35d-attachment-artifact/v1"
+        or receipt.get("passed") is not True
+        or not isinstance(candidate, dict)
+        or candidate.get("sha") != sha
+        or candidate.get("lockfile_sha256") != lockfile_sha256
+        or candidate.get("tracked_tree_clean") is not True
+        or not isinstance(assertions, dict)
+        or any(assertions.get(name) is not True for name in _DURABILITY_ASSERTIONS)
+        or not isinstance(cleanup, dict)
+        or cleanup.get("confirmed_absent") is not True
+        or cleanup.get("admission_restored") is not True
     ):
-        raise RuntimeError("required proof package is not installed")
-    return versions
+        raise ReceiptError("durability_receipt_contract")
+
+    evidence_path = worktree / DURABILITY_EVIDENCE_RELATIVE
+    evidence = _load_json(evidence_path, phase="durability_evidence")
+    artifact_id = evidence.get("artifact_id")
+    checksum = evidence.get("artifact_checksum")
+    sandbox_ids = evidence.get("sandbox_ids")
+    volume_id = evidence.get("volume_id")
+    if (
+        evidence.get("git_commit") != sha
+        or evidence.get("uv_lock_fingerprint") != lockfile_sha256[:16]
+        or evidence.get("staged_readable") is not True
+        or evidence.get("artifact_survived_replace") is not True
+        or not isinstance(artifact_id, str)
+        or not artifact_id
+        or not isinstance(checksum, str)
+        or len(checksum) != 64
+        or any(char not in "0123456789abcdef" for char in checksum)
+        or not isinstance(sandbox_ids, list)
+        or len(sandbox_ids) < 2
+        or not all(isinstance(item, str) and item for item in sandbox_ids)
+        or not isinstance(volume_id, str)
+        or not volume_id
+    ):
+        raise ReceiptError("durability_evidence_contract")
+    return {
+        "attachment_readable": True,
+        "artifact_survived_replacement": True,
+        "artifact_id": artifact_id,
+        "artifact_checksum": checksum,
+        "sandbox_ids": sandbox_ids,
+        "volume_id": volume_id,
+    }
 
 
-def _lockfile_sha256(worktree: Path) -> str:
-    lockfile = worktree / "uv.lock"
-    if not lockfile.is_file():
-        raise RuntimeError("candidate lockfile is missing")
-    return hashlib.sha256(lockfile.read_bytes()).hexdigest()
+def _validate_native_receipt(
+    path: Path,
+    *,
+    sha: str,
+    lockfile_sha256: str,
+    models: dict[str, str],
+) -> dict[str, Any]:
+    receipt = _load_json(path, phase="native_receipt")
+    candidate = receipt.get("candidate")
+    assertions = receipt.get("assertions")
+    counts = receipt.get("counts")
+    resources = receipt.get("resources")
+    if (
+        receipt.get("schema") != "fleet.daytona-mvp-proof/v2"
+        or receipt.get("passed") is not True
+        or receipt.get("failure") is not None
+        or not isinstance(candidate, dict)
+        or candidate.get("sha") != sha
+        or candidate.get("lockfile_sha256") != lockfile_sha256
+        or candidate.get("tracked_tree_clean") is not True
+        or receipt.get("models") != models
+        or not isinstance(assertions, dict)
+        or set(assertions) != _NATIVE_ASSERTIONS
+        or any(assertions.get(name) is not True for name in _NATIVE_ASSERTIONS)
+        or not isinstance(counts, dict)
+        or counts.get("single_lm_calls") != 1
+        or counts.get("batched_lm_prompts") != 3
+        or counts.get("recursive_calls") != 0
+        or counts.get("sse_done") != 1
+        or not isinstance(resources, dict)
+        or not all(isinstance(resources.get(name), str) and resources[name] for name in ("session_id", "run_id"))
+        or not isinstance(resources.get("sandbox_ids"), list)
+        or not resources["sandbox_ids"]
+        or not all(isinstance(item, str) and item for item in resources["sandbox_ids"])
+    ):
+        raise ReceiptError("native_receipt_contract")
+    return {
+        "passed": True,
+        "assertions": {name: True for name in sorted(_NATIVE_ASSERTIONS)},
+        "counts": counts,
+        "resources": resources,
+    }
 
 
 def _create_detached_worktree(sha: str, repo_root: Path) -> Path:
-    parent = Path(tempfile.mkdtemp(prefix=".fleet-live-proof-", dir=repo_root.parent))
+    parent = Path(tempfile.mkdtemp(prefix=".fleet-live-daytona-", dir=repo_root.parent))
     worktree = parent / "checkout"
     try:
-        completed = subprocess.run(
+        result = subprocess.run(
             ["git", "worktree", "add", "--detach", str(worktree), sha],
             cwd=repo_root,
             check=False,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        if completed.returncode != 0:
-            raise RuntimeError("could not create detached proof worktree")
+        if result.returncode:
+            raise RuntimeError("could not create candidate worktree")
         return worktree
     except BaseException:
         parent.rmdir()
@@ -234,767 +344,188 @@ def _remove_detached_worktree(worktree: Path, repo_root: Path) -> None:
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    if parent.name.startswith(".fleet-live-proof-") and parent.parent == repo_root.parent:
+    if parent.name.startswith(".fleet-live-daytona-") and parent.parent == repo_root.parent:
         parent.rmdir()
 
 
-def _run_lane(
+def _pytest_command(test: str, timeout_seconds: int) -> list[str]:
+    return ["uv", "run", "pytest", "-q", "-n", "0", f"--timeout={timeout_seconds}", test]
+
+
+def _run_contract(
+    test: str,
     *,
-    lane: str,
     timeout_seconds: int,
     worktree: Path,
-    child_env: dict[str, str],
-) -> LaneResult:
-    completed = subprocess.run(
-        lane_command(lane, timeout_seconds),
+    environment: dict[str, str],
+    receipt_path: Path,
+) -> None:
+    child_environment = {**environment, EVIDENCE_ENV: str(receipt_path)}
+    result = subprocess.run(
+        _pytest_command(test, timeout_seconds),
         cwd=worktree,
-        env=child_env,
+        env=child_environment,
         timeout=timeout_seconds + 60,
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
-    order = 1 if lane == "attachment_artifact_durability" else 2
-    return LaneResult(name=lane, order=order, passed=completed.returncode == 0)
-
-
-def _path_is_allowed(path: Path) -> bool:
-    resolved = path.expanduser().resolve()
-    try:
-        root = Path(_git("rev-parse", "--show-toplevel")).resolve()
-    except (OSError, subprocess.SubprocessError):
-        return False
-    try:
-        resolved.relative_to(root)
-    except ValueError:
-        return True
-    checked = subprocess.run(
-        ["git", "check-ignore", "-q", "--", str(resolved)],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return checked.returncode == 0
-
-
-def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        text=True,
-    )
-    temporary = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(encoded)
-            handle.flush()
-            os.fsync(handle.fileno())
-        temporary.replace(path)
-    finally:
-        temporary.unlink(missing_ok=True)
-
-
-def _failure_receipt(
-    *,
-    category: str,
-    phase: str,
-    started_at: str,
-    sha: str | None = None,
-    branch: str | None = None,
-    models: dict[str, str] | None = None,
-    qualification: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    receipt: dict[str, Any] = {
-        "schema": RECEIPT_SCHEMA,
-        "candidate": None
-        if sha is None or branch is None
-        else {
-            "sha": sha,
-            "branch": branch,
-            "tracked_tree_clean": True,
-        },
-        "timing": {
-            "started_at": started_at,
-            "finished_at": _utc_now(),
-        },
-        "failure": {"category": category, "phase": phase},
-        "passed": False,
-    }
-    if models is not None and qualification is not None:
-        receipt["models"] = dict(models)
-        receipt["qualification"] = qualification
-    return receipt
-
-
-def _load_receipt(path: Path) -> dict[str, Any]:
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ReceiptError("receipt_json") from exc
-    if not isinstance(payload, dict):
-        raise ReceiptError("receipt_json")
-    return payload
-
-
-def _validate_success_receipt(payload: dict[str, Any], *, sha: str) -> None:
-    if set(payload) != _SUCCESS_FIELDS:
-        raise ReceiptError("receipt_fields")
-    if payload.get("schema") != RECEIPT_SCHEMA:
-        raise ReceiptError("receipt_schema")
-    candidate = payload.get("candidate")
-    if not isinstance(candidate, dict) or set(candidate) != {
-        "sha",
-        "branch",
-        "tracked_tree_clean",
-        "versions",
-        "lockfile_sha256",
-    }:
-        raise ReceiptError("candidate_fields")
-    if candidate.get("sha") != sha:
-        raise ReceiptError("candidate_fingerprint")
-    if candidate.get("tracked_tree_clean") is not True:
-        raise ReceiptError("candidate_fingerprint")
-    versions = candidate.get("versions")
-    if not isinstance(versions, dict) or set(versions) != {"python", "dspy", "daytona"}:
-        raise ReceiptError("candidate_versions")
-    if not all(isinstance(value, str) and 0 < len(value) <= 64 for value in versions.values()):
-        raise ReceiptError("candidate_versions")
-    lockfile_checksum = candidate.get("lockfile_sha256")
-    if (
-        not isinstance(lockfile_checksum, str)
-        or len(lockfile_checksum) != 64
-        or any(character not in "0123456789abcdef" for character in lockfile_checksum)
-    ):
-        raise ReceiptError("candidate_fingerprint")
-    assertions = payload.get("assertions")
-    required_assertions = {
-        "typed_submit",
-        "stateful_iterations",
-        "fresh_replacement_context",
-        "workspace_survived_replacement",
-        "history_reload_identical",
-        "secret_audit_passed",
-        "cleanup_passed",
-    }
-    if not isinstance(assertions, dict) or set(assertions) != required_assertions:
-        raise ReceiptError("receipt_assertions")
-    if any(assertions[name] is not True for name in required_assertions):
-        raise ReceiptError("receipt_assertions")
-    if payload.get("passed") is not True or payload.get("failure") is not None:
-        raise ReceiptError("receipt_result")
-    required_fields = {
-        "timing": {"started_at", "finished_at", "duration_ms"},
-        "models": {"root", "sub"},
-        "resources": {"session_id", "run_ids", "sandbox_ids", "volume_id"},
-        "counts": {
-            "iterations",
-            "single_lm_calls",
-            "batched_lm_calls",
-            "host_tool_calls",
-            "sse_start",
-            "sse_finish",
-            "sse_done",
-        },
-        "streaming": {"first_delta_ms", "delta_count", "fields"},
-        "checksums": {"snapshot_sha256", "workspace_sha256", "typed_result_sha256"},
-    }
-    for name, fields in required_fields.items():
-        section = payload.get(name)
-        if not isinstance(section, dict) or set(section) != fields:
-            raise ReceiptError(f"receipt_{name}")
-    if not _qualification_is_valid(payload["qualification"]):
-        raise ReceiptError("receipt_qualification")
-    timing = payload["timing"]
-    if (
-        any(
-            not isinstance(timing[name], str) or not 0 < len(timing[name]) <= 64
-            for name in ("started_at", "finished_at")
-        )
-        or not isinstance(timing["duration_ms"], int)
-        or isinstance(timing["duration_ms"], bool)
-        or not 0 <= timing["duration_ms"] <= 86_400_000
-    ):
-        raise ReceiptError("receipt_timing")
-    resources = payload["resources"]
-    if (
-        not isinstance(resources["session_id"], str)
-        or not 0 < len(resources["session_id"]) <= 128
-        or not isinstance(resources["volume_id"], str)
-        or not 0 < len(resources["volume_id"]) <= 128
-        or not isinstance(resources["run_ids"], list)
-        or not 1 <= len(resources["run_ids"]) <= 4
-        or any(not isinstance(value, str) or not 0 < len(value) <= 128 for value in resources["run_ids"])
-        or not isinstance(resources["sandbox_ids"], list)
-        or not 1 <= len(resources["sandbox_ids"]) <= 4
-        or any(not isinstance(value, str) or not 0 < len(value) <= 128 for value in resources["sandbox_ids"])
-    ):
-        raise ReceiptError("receipt_resources")
-    checksums = payload["checksums"]
-    if any(
-        not isinstance(value, str)
-        or len(value) != 64
-        or any(character not in "0123456789abcdef" for character in value)
-        for value in checksums.values()
-    ):
-        raise ReceiptError("receipt_checksums")
-    counts = payload["counts"]
-    if any(
-        not isinstance(value, int) or isinstance(value, bool) or not 0 <= value <= 1_000_000
-        for value in counts.values()
-    ):
-        raise ReceiptError("receipt_counts")
-    streaming = payload["streaming"]
-    if (
-        not isinstance(streaming, dict)
-        or set(streaming) != {"first_delta_ms", "delta_count", "fields"}
-        or not isinstance(streaming["first_delta_ms"], int)
-        or isinstance(streaming["first_delta_ms"], bool)
-        or not 0 <= streaming["first_delta_ms"] <= 86_400_000
-        or not isinstance(streaming["delta_count"], int)
-        or isinstance(streaming["delta_count"], bool)
-        or not 1 <= streaming["delta_count"] <= 1_000_000
-        or not isinstance(streaming["fields"], list)
-        or not streaming["fields"]
-        or any(value not in {"reasoning", "code"} for value in streaming["fields"])
-    ):
-        raise ReceiptError("receipt_streaming")
-
-
-def _validate_lane_evidence(payload: dict[str, Any]) -> dict[str, Any]:
-    required = {
-        "gate",
-        "staged_readable",
-        "artifact_id",
-        "artifact_checksum",
-        "artifact_survived_replace",
-        "sandbox_ids",
-        "volume_id",
-    }
-    allowed = required | {"git_commit", "uv_lock_fingerprint", "workspace_id", "volume_subpath", "staged_path_prefix"}
-    if not required <= set(payload) or not set(payload) <= allowed or payload.get("gate") != "B5":
-        raise ReceiptError("durability_receipt")
-    if payload.get("staged_readable") is not True or payload.get("artifact_survived_replace") is not True:
-        raise ReceiptError("durability_assertions")
-    artifact_id = payload.get("artifact_id")
-    artifact_checksum = payload.get("artifact_checksum")
-    volume_id = payload.get("volume_id")
-    sandbox_ids = payload.get("sandbox_ids")
-    if (
-        not isinstance(artifact_id, str)
-        or not artifact_id
-        or len(artifact_id) > 128
-        or not isinstance(volume_id, str)
-        or not volume_id
-        or len(volume_id) > 128
-        or not isinstance(artifact_checksum, str)
-        or len(artifact_checksum) != 64
-        or any(character not in "0123456789abcdef" for character in artifact_checksum)
-        or not isinstance(sandbox_ids, list)
-        or not 1 <= len(sandbox_ids) <= 4
-        or any(not isinstance(value, str) or not value or len(value) > 128 for value in sandbox_ids)
-    ):
-        raise ReceiptError("durability_evidence")
-    return {
-        "attachment_readable": True,
-        "artifact_survived_replacement": True,
-        "artifact_id": artifact_id,
-        "artifact_checksum": artifact_checksum,
-        "sandbox_ids": list(sandbox_ids),
-        "volume_id": volume_id,
-    }
-
-
-def _load_durability_evidence(worktree: Path) -> dict[str, Any]:
-    path = worktree / DURABILITY_EVIDENCE_RELATIVE
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ReceiptError("durability_receipt") from exc
-    if not isinstance(payload, dict):
-        raise ReceiptError("durability_receipt")
-    return _validate_lane_evidence(payload)
-
-
-def _build_success_receipt(
-    payload: dict[str, Any],
-    *,
-    sha: str,
-    branch: str,
-    lockfile_sha256: str,
-    versions: dict[str, str],
-    models: dict[str, str],
-    qualification: dict[str, Any],
-    durability_evidence: dict[str, Any],
-) -> dict[str, Any]:
-    receipt = dict(payload)
-    candidate = receipt.get("candidate")
-    if not isinstance(candidate, dict):
-        raise ReceiptError("candidate_fields")
-    receipt["candidate"] = {
-        "sha": sha,
-        "branch": branch,
-        "tracked_tree_clean": True,
-        "versions": versions,
-        "lockfile_sha256": lockfile_sha256,
-    }
-    receipt["qualification"] = qualification
-    if receipt.get("models") != models:
-        raise ReceiptError("receipt_models")
-    receipt["lanes"] = {
-        "attachment_artifact_durability": {
-            **LaneResult("attachment_artifact_durability", 1, True).as_dict(),
-            "evidence": durability_evidence,
-        },
-        "fastapi_dspy_daytona_mvp": {
-            **LaneResult("fastapi_dspy_daytona_mvp", 2, True).as_dict(),
-        },
-    }
-    receipt["external_promotion"] = {
-        "candidate_sha": sha,
-        "ci": "pending",
-        "human_approval": "pending",
-    }
-    _validate_success_receipt_extended(
-        receipt,
-        sha=sha,
-        branch=branch,
-        lockfile_sha256=lockfile_sha256,
-        expected_models=models,
-    )
-    return receipt
-
-
-def _validate_success_receipt_extended(
-    payload: dict[str, Any],
-    *,
-    sha: str,
-    branch: str,
-    lockfile_sha256: str,
-    expected_models: dict[str, str] | None = None,
-) -> None:
-    _validate_success_receipt(payload, sha=sha)
-    candidate = payload["candidate"]
-    if candidate.get("branch") != branch or candidate.get("lockfile_sha256") != lockfile_sha256:
-        raise ReceiptError("candidate_fingerprint")
-    models = payload.get("models")
-    if not _models_are_valid(models):
-        raise ReceiptError("receipt_models")
-    if expected_models is not None and models != expected_models:
-        raise ReceiptError("receipt_models")
-    lanes = payload.get("lanes")
-    if not isinstance(lanes, dict) or set(lanes) != {
-        "attachment_artifact_durability",
-        "fastapi_dspy_daytona_mvp",
-    }:
-        raise ReceiptError("receipt_lanes")
-    durability = lanes["attachment_artifact_durability"]
-    mvp = lanes["fastapi_dspy_daytona_mvp"]
-    if (
-        not isinstance(durability, dict)
-        or set(durability) != {"order", "passed", "evidence"}
-        or durability.get("order") != 1
-        or durability.get("passed") is not True
-        or not isinstance(durability.get("evidence"), dict)
-        or not isinstance(mvp, dict)
-        or set(mvp) != {"order", "passed"}
-        or mvp.get("order") != 2
-        or mvp.get("passed") is not True
-    ):
-        raise ReceiptError("receipt_lanes")
-    evidence = durability["evidence"]
-    if not isinstance(evidence, dict) or set(evidence) != {
-        "attachment_readable",
-        "artifact_survived_replacement",
-        "artifact_id",
-        "artifact_checksum",
-        "sandbox_ids",
-        "volume_id",
-    }:
-        raise ReceiptError("durability_evidence")
-    external = payload.get("external_promotion")
-    if external != {"candidate_sha": sha, "ci": "pending", "human_approval": "pending"}:
-        raise ReceiptError("external_promotion")
-
-
-def _bounded_failure_is_valid(payload: dict[str, Any], *, sha: str) -> bool:
-    base_fields = {"schema", "candidate", "timing", "failure", "passed"}
-    qualified_fields = base_fields | {"models", "qualification"}
-    payload_fields = set(payload)
-    if payload_fields not in (base_fields, qualified_fields):
-        return False
-    candidate = payload.get("candidate")
-    timing = payload.get("timing")
-    failure = payload.get("failure")
-    bounded = bool(
-        payload.get("schema") == RECEIPT_SCHEMA
-        and isinstance(candidate, dict)
-        and set(candidate) == {"sha", "branch", "tracked_tree_clean"}
-        and candidate.get("sha") == sha
-        and candidate.get("tracked_tree_clean") is True
-        and isinstance(timing, dict)
-        and set(timing) == {"started_at", "finished_at"}
-        and isinstance(failure, dict)
-        and set(failure) == {"category", "phase"}
-        and failure.get("category") in _FAILURE_CATEGORIES
-        and isinstance(failure.get("phase"), str)
-        and payload.get("passed") is False
-    )
-    if not bounded:
-        return False
-    if payload_fields == base_fields:
-        return True
-    return _models_are_valid(payload.get("models")) and _qualification_is_valid(payload.get("qualification"))
-
-
-def _write_failure(
-    output: Path,
-    *,
-    category: str,
-    phase: str,
-    started_at: str,
-    sha: str | None = None,
-    branch: str | None = None,
-    models: dict[str, str] | None = None,
-    qualification: dict[str, Any] | None = None,
-) -> None:
-    _atomic_write(
-        output,
-        _failure_receipt(
-            category=category,
-            phase=phase,
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        ),
-    )
+    if result.returncode:
+        raise RuntimeError(test.rsplit("::", 1)[-1])
 
 
 def _load_repo_env() -> None:
-    """Load repo ``.env`` into the process without overriding exported values."""
     load_dotenv(_REPO_ROOT / ".env", override=False)
-
-
-def _qualification_metadata(
-    settings: Settings,
-    contract: ProfileEnvironmentContract,
-    *,
-    session_snapshot_override: str | None,
-    timeout_seconds: int,
-) -> dict[str, Any]:
-    """Return bounded, non-secret context for one candidate qualification."""
-    return {
-        "profile": contract.name,
-        "snapshots": {
-            "session": session_snapshot_override or settings.daytona_snapshot,
-            "child": settings.daytona_child_snapshot,
-        },
-        "limits": {
-            "lane_timeout_seconds": timeout_seconds,
-            "subprocess_grace_seconds": 60,
-            "lane_count": 2,
-        },
-    }
-
-
-def _qualification_is_valid(value: object) -> bool:
-    """Validate the non-secret qualification context recorded in a receipt."""
-    if not isinstance(value, dict) or set(value) != {"profile", "snapshots", "limits"}:
-        return False
-    profile = value["profile"]
-    snapshots = value["snapshots"]
-    limits = value["limits"]
-    return bool(
-        isinstance(profile, str)
-        and 0 < len(profile) <= 128
-        and isinstance(snapshots, dict)
-        and set(snapshots) == {"session", "child"}
-        and all(
-            snapshot is None or (isinstance(snapshot, str) and 0 < len(snapshot) <= 128)
-            for snapshot in snapshots.values()
-        )
-        and isinstance(limits, dict)
-        and set(limits) == {"lane_timeout_seconds", "subprocess_grace_seconds", "lane_count"}
-        and all(isinstance(limit, int) and not isinstance(limit, bool) for limit in limits.values())
-        and 0 < limits["lane_timeout_seconds"] <= 86_400
-        and limits["subprocess_grace_seconds"] == 60
-        and limits["lane_count"] == 2
-    )
-
-
-def _required_provider_environment(contract: ProfileEnvironmentContract) -> tuple[str, ...]:
-    """Return policy-derived provider environment names without exposing values."""
-    return contract.provider_environment_names
-
-
-def _live_profile_contract() -> ProfileEnvironmentContract:
-    """Return the recursive policy contract this verifier qualifies."""
-    contract = next(
-        (candidate for candidate in load_profile_environment_contracts() if candidate.name == _LIVE_PROFILE),
-        None,
-    )
-    if contract is None:
-        raise FleetConfigurationError(f"required live proof profile is missing: {_LIVE_PROFILE}")
-    return contract
-
-
-def _models_are_valid(models: object) -> bool:
-    """Validate a bounded Root/Sub model pair without a production allowlist."""
-    return bool(
-        isinstance(models, dict)
-        and set(models) == {"root", "sub"}
-        and isinstance(models.get("root"), str)
-        and 0 < len(models["root"]) <= _MAX_MODEL_ID_CHARS
-        and not any(character.isspace() or ord(character) < 32 for character in models["root"])
-        and isinstance(models.get("sub"), str)
-        and 0 < len(models["sub"]) <= _MAX_MODEL_ID_CHARS
-        and not any(character.isspace() or ord(character) < 32 for character in models["sub"])
-    )
-
-
-def _candidate_models_from_environment() -> dict[str, str]:
-    """Return the explicit Root/Sub pair selected for one live qualification."""
-    models = {
-        "root": os.environ.get(_LIVE_ROOT_MODEL_ENV, ""),
-        "sub": os.environ.get(_LIVE_SUB_MODEL_ENV, ""),
-    }
-    if not _models_are_valid(models):
-        raise ValueError("live qualification requires bounded FLEET_LIVE_ROOT_MODEL and FLEET_LIVE_SUB_MODEL")
-    return models
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
     started_at = _utc_now()
+
     if not 1 <= args.timeout_seconds <= 86_400 or not _path_is_allowed(output):
-        print("Live proof precondition failed.", file=sys.stderr)
+        print("Live verification output or timeout precondition failed.", file=sys.stderr)
         return EXIT_PRECONDITION
+    if output.exists():
+        print("Live verification output must be a new file.", file=sys.stderr)
+        return EXIT_PRECONDITION
+
+    if os.environ.get("FLEET_LIVE", "").strip().lower() not in LIVE_AUTH_VALUES:
+        _write_once(
+            output, _failure_receipt(started_at=started_at, category="precondition_failed", phase="live_authorization")
+        )
+        print("Set FLEET_LIVE=1 to authorize the credentialed live verification.", file=sys.stderr)
+        return EXIT_PRECONDITION
+
     _load_repo_env()
     try:
-        settings = require_live_execution(profile=_LIVE_PROFILE)
-        contract = _live_profile_contract()
-    except FleetConfigurationError:
-        _write_failure(
-            output,
-            category="precondition_failed",
-            phase="environment",
-            started_at=started_at,
-        )
-        print("Live proof precondition failed.", file=sys.stderr)
-        return EXIT_PRECONDITION
-    required_environment = _required_provider_environment(contract)
-    if any(not os.environ.get(name) for name in required_environment):
-        _write_failure(
-            output,
-            category="precondition_failed",
-            phase="environment",
-            started_at=started_at,
-        )
-        print("Live proof precondition failed.", file=sys.stderr)
-        return EXIT_PRECONDITION
-    try:
+        require_live_execution(profile=LIVE_PROFILE)
+        if active_profile(require_live_execution()) != LIVE_PROFILE:
+            raise FleetConfigurationError(f"the configured default profile must be {LIVE_PROFILE}")
+        contract = _profile_contract()
+        models = _candidate_models()
+        missing = [name for name in contract.provider_environment_names if not os.environ.get(name)]
+        if missing:
+            raise FleetConfigurationError("live profile credentials are incomplete")
         sha, branch = _candidate()
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        _write_failure(
-            output,
-            category="precondition_failed",
-            phase="candidate",
-            started_at=started_at,
-        )
-        print("Live proof candidate precondition failed.", file=sys.stderr)
-        return EXIT_PRECONDITION
-    try:
-        models = _candidate_models_from_environment()
-    except ValueError:
-        _write_failure(
-            output,
-            category="precondition_failed",
-            phase="models",
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-        )
-        print("Live proof model precondition failed.", file=sys.stderr)
-        return EXIT_PRECONDITION
-    child_env = os.environ.copy()
-    child_env.pop("FLEET_ROOT_MODEL", None)
-    child_env.pop("FLEET_SUB_MODEL", None)
-    child_env["FLEET_CONFIG_PROFILE"] = _LIVE_PROFILE
-    child_env[_LIVE_ROOT_MODEL_ENV] = models["root"]
-    child_env[_LIVE_SUB_MODEL_ENV] = models["sub"]
-    normalized_session_snapshot: str | None = None
-    if args.session_snapshot is not None:
-        try:
-            normalized_session_snapshot = validate_snapshot_name(args.session_snapshot)
-            child_env[P27_SESSION_SNAPSHOT_ENV] = normalized_session_snapshot
-        except ValueError:
-            _write_failure(
-                output, category="precondition_failed", phase="snapshot", started_at=started_at, sha=sha, branch=branch
-            )
-            print("Live proof snapshot precondition failed.", file=sys.stderr)
-            return EXIT_PRECONDITION
-    qualification = _qualification_metadata(
-        settings,
-        contract,
-        session_snapshot_override=normalized_session_snapshot,
-        timeout_seconds=args.timeout_seconds,
-    )
-    worktree: Path | None = None
-    lockfile_sha256: str | None = None
-    interrupted = False
-    failure: tuple[str, str] | None = None
-    try:
         repo_root = Path(_git("rev-parse", "--show-toplevel")).resolve()
+        lockfile_sha256 = hashlib.sha256((repo_root / "uv.lock").read_bytes()).hexdigest()
+    except (FleetConfigurationError, OSError, RuntimeError, ValueError, subprocess.SubprocessError):
+        _write_once(
+            output, _failure_receipt(started_at=started_at, category="precondition_failed", phase="policy_or_candidate")
+        )
+        print("Live verification policy or candidate precondition failed.", file=sys.stderr)
+        return EXIT_PRECONDITION
+
+    worktree: Path | None = None
+    failure: tuple[str, str] | None = None
+    native_evidence: dict[str, Any] | None = None
+    durability_evidence: dict[str, Any] | None = None
+    try:
         worktree = _create_detached_worktree(sha, repo_root)
-        receipt_path = worktree / ".fleet-live-proof-receipt.json"
-        child_env[EVIDENCE_ENV] = str(receipt_path)
-        try:
-            first_lane = _run_lane(
-                lane="attachment_artifact_durability",
-                timeout_seconds=args.timeout_seconds,
-                worktree=worktree,
-                child_env=child_env,
-            )
-            if not first_lane.passed:
-                failure = ("proof_failed", "attachment_artifact_durability")
-            else:
-                durability_evidence = _load_durability_evidence(worktree)
-                second_lane = _run_lane(
-                    lane="fastapi_dspy_daytona_mvp",
-                    timeout_seconds=args.timeout_seconds,
-                    worktree=worktree,
-                    child_env=child_env,
-                )
-                if not second_lane.passed:
-                    failure = ("proof_failed", "fastapi_dspy_daytona_mvp")
-                else:
-                    receipt = _load_receipt(receipt_path)
-                    lockfile_sha256 = _lockfile_sha256(worktree)
-                    receipt = _build_success_receipt(
-                        receipt,
-                        sha=sha,
-                        branch=branch,
-                        lockfile_sha256=lockfile_sha256,
-                        versions=_installed_versions(worktree, child_env),
-                        models=models,
-                        qualification=qualification,
-                        durability_evidence=durability_evidence,
-                    )
-                    _atomic_write(output, receipt)
-        except (KeyboardInterrupt, subprocess.TimeoutExpired):
-            interrupted = True
-        except (ReceiptError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
-            failure = (
-                "receipt_invalid" if isinstance(exc, ReceiptError) else "proof_failed",
-                getattr(exc, "phase", "lane"),
-            )
-    except (KeyboardInterrupt, subprocess.TimeoutExpired):
-        interrupted = True
-    except (OSError, RuntimeError, subprocess.SubprocessError):
-        failure = ("proof_failed", "worktree")
+        environment = os.environ.copy()
+        environment[ROOT_MODEL_ENV] = models["root"]
+        environment[SUB_MODEL_ENV] = models["sub"]
+        environment.pop("FLEET_ROOT_MODEL", None)
+        environment.pop("FLEET_SUB_MODEL", None)
+        durability_receipt_path = worktree.parent / "durability-receipt.json"
+        _run_contract(
+            _DURABILITY_TEST,
+            timeout_seconds=args.timeout_seconds,
+            worktree=worktree,
+            environment=environment,
+            receipt_path=durability_receipt_path,
+        )
+        durability_evidence = _validate_durability_receipt(
+            durability_receipt_path,
+            worktree=worktree,
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+        )
+        durability_receipt_path.unlink(missing_ok=True)
+
+        native_receipt_path = worktree.parent / "native-receipt.json"
+        _run_contract(
+            _NATIVE_TEST,
+            timeout_seconds=args.timeout_seconds,
+            worktree=worktree,
+            environment=environment,
+            receipt_path=native_receipt_path,
+        )
+        native_evidence = _validate_native_receipt(
+            native_receipt_path,
+            sha=sha,
+            lockfile_sha256=lockfile_sha256,
+            models=models,
+        )
+        native_receipt_path.unlink(missing_ok=True)
+    except KeyboardInterrupt:
+        failure = ("interrupted", "contract")
+    except subprocess.TimeoutExpired:
+        failure = ("proof_failed", "timeout")
+    except ReceiptError as exc:
+        failure = ("receipt_invalid", str(exc))
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        failure = ("proof_failed", str(exc))
     finally:
         if worktree is not None:
             try:
                 _remove_detached_worktree(worktree, repo_root)
             except (OSError, RuntimeError, subprocess.SubprocessError):
-                failure = ("cleanup_failed", "worktree")
+                failure = ("cleanup_failed", "candidate_worktree")
 
-    if interrupted:
-        _write_failure(
-            output,
-            category="interrupted",
-            phase="lane",
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        )
-        print("Live proof was interrupted.", file=sys.stderr)
-        return EXIT_INTERRUPTED
+    candidate = {
+        "sha": sha,
+        "branch": branch,
+        "tracked_tree_clean": True,
+        "lockfile_sha256": lockfile_sha256,
+    }
     if failure is not None:
         category, phase = failure
-        _write_failure(
-            output,
-            category=category,
-            phase=phase,
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        )
-        if category == "receipt_invalid":
-            print("Live proof receipt validation failed.", file=sys.stderr)
+        try:
+            _write_once(
+                output,
+                _failure_receipt(
+                    started_at=started_at,
+                    category=category,
+                    phase=phase,
+                    sha=sha,
+                    branch=branch,
+                ),
+            )
+        except FileExistsError:
+            print("Live verification receipt path was already claimed.", file=sys.stderr)
             return EXIT_RECEIPT
-        if category == "cleanup_failed":
-            print("Live proof cleanup failed.", file=sys.stderr)
-            return EXIT_PROOF
-        if phase == "worktree":
-            print("Live proof worktree precondition failed.", file=sys.stderr)
-            return EXIT_PRECONDITION
-        print("Live proof failed; inspect the bounded receipt.", file=sys.stderr)
-        return EXIT_PROOF
+        if category == "interrupted":
+            print("Live verification was interrupted.", file=sys.stderr)
+            return EXIT_INTERRUPTED
+        print("Live verification failed; inspect its bounded receipt.", file=sys.stderr)
+        return EXIT_RECEIPT if category == "receipt_invalid" else EXIT_PROOF
 
-    if not output.exists():
-        _write_failure(
-            output,
-            category="receipt_invalid",
-            phase="receipt_json",
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        )
-        print("Live proof receipt validation failed.", file=sys.stderr)
-        return EXIT_RECEIPT
-
+    receipt = {
+        "schema": RECEIPT_SCHEMA,
+        "candidate": candidate,
+        "policy": {"profile": LIVE_PROFILE, "models": models},
+        "timing": {"started_at": started_at, "finished_at": _utc_now()},
+        "contracts": {
+            "attachment_artifact_durability": {"passed": True, "evidence": durability_evidence},
+            "native_semantic_fastapi": native_evidence,
+        },
+        "scope": [
+            "staged attachment is readable during a Run",
+            "artifact bytes remain readable with the shared volume after sandbox replacement",
+            "native single and ordered batch semantic calls pass through FastAPI",
+            "the native contract reports zero recursive child calls",
+            "owned Daytona resources settle through the tested cleanup paths",
+        ],
+        "passed": True,
+    }
     try:
-        receipt = _load_receipt(output)
-        if lockfile_sha256 is None:
-            raise ReceiptError("candidate_fingerprint")
-        _validate_success_receipt_extended(
-            receipt,
-            sha=sha,
-            branch=branch,
-            lockfile_sha256=lockfile_sha256,
-            expected_models=models,
-        )
-    except (ReceiptError, KeyError):
-        _write_failure(
-            output,
-            category="receipt_invalid",
-            phase="receipt_fields",
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        )
-        print("Live proof receipt validation failed.", file=sys.stderr)
+        _write_once(output, receipt)
+    except FileExistsError:
+        print("Live verification receipt path was already claimed.", file=sys.stderr)
         return EXIT_RECEIPT
-
-    if receipt["models"] != models:
-        _write_failure(
-            output,
-            category="receipt_invalid",
-            phase="receipt_models",
-            started_at=started_at,
-            sha=sha,
-            branch=branch,
-            models=models,
-            qualification=qualification,
-        )
-        print("Live proof receipt validation failed.", file=sys.stderr)
-        return EXIT_RECEIPT
-
-    print(f"Live Daytona MVP proof passed; bounded receipt: {output}")
+    print(f"Native Daytona contracts passed; receipt: {output}")
     return 0
 
 
