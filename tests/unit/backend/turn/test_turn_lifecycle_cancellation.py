@@ -10,12 +10,12 @@ from uuid import uuid4
 import pytest
 
 from tests.support.turn_lifecycle import claimed_run, completed_outcome
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 @pytest.mark.asyncio
 async def test_cancellation_during_artifact_write_waits_then_removes_written_path() -> None:
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
     turn = claimed_run()
     data = b"artifact"
@@ -59,7 +59,7 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
 
     sink = Sink()
     task = asyncio.create_task(
-        RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
             turn,
             completed_outcome(
                 usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2}, candidates=(candidate,)
@@ -80,7 +80,6 @@ async def test_cancellation_during_artifact_write_waits_then_removes_written_pat
 
 @pytest.mark.asyncio
 async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
     turn = claimed_run()
     write_started, release_write = asyncio.Event(), asyncio.Event()
@@ -110,7 +109,7 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 
     snapshot = Snapshot()
     task = asyncio.create_task(
-        RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
             turn,
             completed_outcome(
                 usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
@@ -131,7 +130,6 @@ async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() 
 
 @pytest.mark.asyncio
 async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
 
     turn = claimed_run()
     commit_started, release_commit = asyncio.Event(), asyncio.Event()
@@ -165,7 +163,7 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
     snapshot = Snapshot()
     task = asyncio.create_task(
-        RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
             turn,
             completed_outcome(
                 usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
@@ -190,7 +188,6 @@ async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() 
 
 @pytest.mark.asyncio
 async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
     turn = claimed_run()
@@ -225,7 +222,7 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
     store, snapshot = Store(), Snapshot()
     task = asyncio.create_task(
-        RunLifecycleService(store, max_artifact_bytes=1024).finish(
+        TestingRunSettlement(store, max_artifact_bytes=1024).finish(
             turn,
             completed_outcome(
                 usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
@@ -247,7 +244,6 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
 @pytest.mark.asyncio
 async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -264,7 +260,7 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
         workspace_id=access.workspace_id,
         title="cancelled attempt",
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     turn = await lifecycle.begin(RunClaim(access, session.id, TurnInput("draft the report"), "key-cancel", uuid4()))
     settle = await lifecycle.settle(turn, RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
@@ -298,14 +294,13 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
 
     # The bounded audit pair is retained for retry/listing, but the canonical
     # model-facing history excludes the cancellation tombstone.
-    from fleet_rlm.chat.preparation import build_dspy_history_for_claim
+    from fleet_rlm.turn_preparation import build_dspy_history_for_claim
 
     assert list(build_dspy_history_for_claim(retried).messages) == []
 
 
 @pytest.mark.asyncio
 async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_usage() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -320,7 +315,7 @@ async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_
         workspace_id=access.workspace_id,
         title="preparation cancel",
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     turn = await lifecycle.begin(RunClaim(access, session.id, TurnInput("gather two facts"), "key-prep", uuid4()))
     usage = {"iterations": 3, "observed_lm_usage": {"root": {"total_tokens": 12}}, "duration_ms": 7}
@@ -336,7 +331,6 @@ async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_
 
 @pytest.mark.asyncio
 async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
         PredictionResult,
@@ -358,7 +352,7 @@ async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
         workspace_id=access.workspace_id,
         title="interleaved",
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     first = await lifecycle.begin(RunClaim(access, session.id, TurnInput("one"), "key-1", uuid4()))
     committed = await lifecycle.finish(

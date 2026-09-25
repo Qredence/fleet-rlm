@@ -9,6 +9,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("failure_type", [OSError, SQLAlchemyError], ids=["os-error", "sqlalchemy-error"])
@@ -800,7 +802,6 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
     outside live idempotency replay."""
     from sqlalchemy import select
 
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import RunRow, SessionRow, TurnRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.sessions import SqlAlchemySessionCatalog
@@ -835,7 +836,7 @@ async def test_sql_cancelled_settlement_persists_bounded_tombstone_rows() -> Non
             await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
 
         store = SqlAlchemyRunStateStore(factory)
-        lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+        lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
         turn = await lifecycle.begin(RunClaim(access, session_id, TurnInput("draft the report"), "key-cancel", uuid4()))
         assert isinstance(turn, ClaimedRun)
         await lifecycle.settle(turn, RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))

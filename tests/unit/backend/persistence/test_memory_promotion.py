@@ -15,6 +15,7 @@ import pytest
 from sqlalchemy import func, select
 
 from tests.support.memory_intents import _intents, _seed_with_intents
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 # --- from test_memory_promotion_intents.py ----------------------------
@@ -260,13 +261,12 @@ async def test_failed_transition_never_touches_the_outbox() -> None:
 
 @pytest.mark.asyncio
 async def test_finish_inserts_intents_through_the_lifecycle() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.workspace.memory import build_memory_promotion_intents
 
     engine, factory, store, run = await _seed_store()
     try:
-        lifecycle = RunLifecycleService(store, max_artifact_bytes=1024, heartbeat_seconds=10, stale_after_seconds=60)
+        lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024, heartbeat_seconds=10, stale_after_seconds=60)
         outcome = RLMOutcome(
             "completed",
             prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
@@ -290,12 +290,11 @@ async def test_finish_inserts_intents_through_the_lifecycle() -> None:
 
 @pytest.mark.asyncio
 async def test_finish_without_builder_or_candidates_inserts_no_intents() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     engine, factory, store, run = await _seed_store()
     try:
-        lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+        lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
         outcome = RLMOutcome(
             "completed",
             prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
@@ -606,9 +605,9 @@ async def test_policy_change_at_delivery_completes_without_provider() -> None:
 
 @pytest.mark.asyncio
 async def test_fast_path_success_completes_outbox_rows() -> None:
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,
@@ -626,7 +625,7 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
     )
     engine, factory, store, run, _access = await _seed_with_intents("sqlite+aiosqlite:///:memory:", commit=False)
     try:
-        lifecycle = RunLifecycleService(
+        lifecycle = TestingRunSettlement(
             store, max_artifact_bytes=1024, memory_outbox=SqlAlchemyMemoryPromotionOutbox(factory)
         )
         promotion = OwnedPostCommitMemoryPromotion(
@@ -653,9 +652,9 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
 
 @pytest.mark.asyncio
 async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None:
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,
@@ -671,7 +670,7 @@ async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None
     )
     engine, factory, store, run, _access = await _seed_with_intents("sqlite+aiosqlite:///:memory:", commit=False)
     try:
-        lifecycle = RunLifecycleService(
+        lifecycle = TestingRunSettlement(
             store, max_artifact_bytes=1024, memory_outbox=SqlAlchemyMemoryPromotionOutbox(factory)
         )
 

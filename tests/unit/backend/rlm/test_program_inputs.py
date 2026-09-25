@@ -23,7 +23,6 @@ from pydantic import ValidationError
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError
 from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
 from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
-from fleet_rlm.chat.preparation import prepare_host_capabilities
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -42,8 +41,10 @@ from fleet_rlm.sessions.run_state import (
     _RunClaimToken,
 )
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+from fleet_rlm.turn_preparation import prepare_host_capabilities
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
+from tests.support.turn_preparation import TestingRunPreparer
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 from tests.unit.backend.rlm.test_recursion_policy_surface import _context, _RecordingFactory
 
@@ -790,7 +791,7 @@ async def test_prepared_artifact_is_read_on_application_loop_with_turn_scope_and
     assert stream.outcome is not None
     assert stream.outcome.succeeded is (case == "valid")
     if case == "valid":
-        assert stream.outcome.prediction.display_text == "selected évidence [reference-1]"
+        assert stream.outcome.prediction.answer == "selected évidence [reference-1]"
     expected_reads = {
         "valid": ["authorized", "content"],
         "revoked": ["authorized", "content"],
@@ -805,14 +806,14 @@ async def test_prepared_artifact_is_read_on_application_loop_with_turn_scope_and
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     session_id = uuid4()
     messages = tuple(
@@ -893,7 +894,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         not_cancelled,
         _RunClaimToken(uuid4(), 7),
     )
-    prepared = await DefaultRunPreparer(
+    prepared = await TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),

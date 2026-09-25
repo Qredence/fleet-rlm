@@ -48,9 +48,9 @@ def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
 
 
 def test_daytona_run_environment_exposes_committed_session_history_helper() -> None:
-    """``composition/daytona_run_preparation.py`` exposes a ``CommittedSessionHistory`` builder."""
+    """The Daytona Turn adapter exposes a ``CommittedSessionHistory`` builder."""
 
-    from fleet_rlm.composition import daytona_run_preparation as run_environment
+    from fleet_rlm.daytona import turn_environment as run_environment
 
     assert hasattr(run_environment, "build_committed_session_history_for_claim")
     helper = run_environment.build_committed_session_history_for_claim
@@ -60,7 +60,7 @@ def test_daytona_run_environment_exposes_committed_session_history_helper() -> N
 def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> None:
     """The helper returns ``CommittedSessionHistory`` and never ``dspy.History``."""
 
-    from fleet_rlm.composition.daytona_run_preparation import build_committed_session_history_for_claim
+    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
 
     claim = _make_claim(
         history_messages=(
@@ -79,8 +79,8 @@ def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> 
 def test_daytona_helper_records_equal_canonical_history_records() -> None:
     """The Dayona transport records equal :func:`to_canonical_history_records` output."""
 
-    from fleet_rlm.chat.preparation import claim_history_records
-    from fleet_rlm.composition.daytona_run_preparation import build_committed_session_history_for_claim
+    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
+    from fleet_rlm.turn_preparation import claim_history_records
 
     claim = _make_claim(
         history_messages=(
@@ -106,7 +106,7 @@ def test_daytona_helper_records_equal_canonical_history_records() -> None:
 def test_daytona_helper_skips_orphan_user_messages_without_assistant_answers() -> None:
     """Orphan user messages never pair with the next assistant answer."""
 
-    from fleet_rlm.composition.daytona_run_preparation import build_committed_session_history_for_claim
+    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
 
     claim = _make_claim(
         history_messages=(
@@ -128,7 +128,7 @@ def test_daytona_helper_skips_orphan_user_messages_without_assistant_answers() -
 def test_daytona_helper_returns_empty_history_for_fresh_session() -> None:
     """A claim with no committed Turns still produces a valid empty transport."""
 
-    from fleet_rlm.composition.daytona_run_preparation import build_committed_session_history_for_claim
+    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
 
     claim = _make_claim(history_messages=())
     transport = build_committed_session_history_for_claim(claim)

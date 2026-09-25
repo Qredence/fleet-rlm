@@ -6,7 +6,7 @@ import pytest
 def test_canonical_turn_runtime_exposes_execution_deadline_behavior() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.turns import TurnRuntime
 
     runtime = TurnRuntime.__new__(TurnRuntime)
     runtime._turn_timeout_seconds = 7.0
@@ -21,13 +21,13 @@ async def test_successful_native_context_cleanup_precedes_durable_finish() -> No
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import TurnRuntime
 
     order: list[str] = []
 
@@ -73,13 +73,13 @@ async def test_native_context_cleanup_failure_blocks_durable_success() -> None:
     from types import SimpleNamespace
     from uuid import uuid4
 
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import TurnRuntime
 
     finished = False
 

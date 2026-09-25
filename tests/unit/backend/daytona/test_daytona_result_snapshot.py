@@ -7,6 +7,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 def test_result_snapshot_is_deterministic_strict_utf8_and_closed() -> None:
     from fleet_rlm.result_snapshot import encode_result_snapshot
@@ -108,8 +110,7 @@ def test_daytona_volume_adapter_removes_exact_file_path() -> None:
 
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.composition.daytona_run_preparation import _DaytonaRunSink
+    from fleet_rlm.daytona.turn_environment import _DaytonaRunSink
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -182,7 +183,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
                 True,
             )
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",

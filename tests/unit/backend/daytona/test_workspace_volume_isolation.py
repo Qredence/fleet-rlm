@@ -19,8 +19,8 @@ from fleet_rlm.daytona.runtime import (
     verify_sandbox_workspace_mount,
     volume_mount_spec,
 )
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
-from fleet_rlm.runtime.bindings import (
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
+from fleet_rlm.sessions.bindings import (
     SandboxBinding,
     require_scoped_volume_subpath,
     workspace_volume_subpath,

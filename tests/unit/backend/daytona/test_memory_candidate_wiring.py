@@ -60,9 +60,9 @@ def _turn():
 
 
 async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
-    from fleet_rlm.chat.preparation import RunEnvironment
-    from fleet_rlm.composition.daytona_run_preparation import _LiveCapabilityPreparer
+    from fleet_rlm.daytona.turn_environment import _LiveCapabilityPreparer
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     volume_root = tmp_path / "volume"
     volume_root.mkdir()

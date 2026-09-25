@@ -32,7 +32,7 @@ from fleet_rlm.rlm.recursion import (
     SubproblemCapsule,
 )
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor as ProductionRecursiveRLMExecutor
-from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.sessions.run_state import RunAuthority
 from tests.live.backend.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 

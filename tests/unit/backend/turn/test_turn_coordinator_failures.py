@@ -11,13 +11,15 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 def test_terminal_maps_turn_output_too_large_public_message() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.chat.turn_runtime import terminal
     from fleet_rlm.rlm.events import EventRecorder, RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
+    from fleet_rlm.turns import terminal
 
     event = terminal(
         EventRecorder(uuid4(), uuid4()),
@@ -34,9 +36,9 @@ def test_terminal_maps_turn_output_too_large_public_message() -> None:
 
 
 def test_terminal_preserves_provider_endpoint_not_found_message_from_durable_failure() -> None:
-    from fleet_rlm.chat.turn_runtime import terminal
     from fleet_rlm.rlm.events import PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE, EventRecorder, RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
+    from fleet_rlm.turns import terminal
 
     event = terminal(
         EventRecorder(uuid4(), uuid4()),
@@ -64,9 +66,6 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     from hashlib import sha256
 
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
@@ -76,9 +75,10 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         RunTimedOut,
         Status,
     )
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]
     access = TurnAccess(uuid4(), uuid4())
@@ -168,7 +168,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
     cleanup = RunCleanupSupervisor()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
@@ -205,10 +205,6 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
 @pytest.mark.asyncio
 async def test_open_preparation_failure_is_durable_before_stream_and_releases_claim() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.preparation import RunPreparationUnavailableError
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -216,10 +212,12 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
         RunClaim,
         RunFailure,
     )
+    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=100)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -255,12 +253,10 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
 async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.preparation import RunPreparationTimeoutError
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     class Span:
         request_id = "tr-preparation-timeout"
@@ -292,7 +288,7 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
-    authoritative = RunLifecycleService(store, max_artifact_bytes=100)
+    authoritative = TestingRunSettlement(store, max_artifact_bytes=100)
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id,
         workspace_id=access.workspace_id,
@@ -349,12 +345,10 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
 @pytest.mark.asyncio
 async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_order() -> None:
 
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -409,7 +403,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
             return Stream()
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -431,13 +425,11 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 @pytest.mark.asyncio
 async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     updates: list[dict[str, object]] = []
 
@@ -534,7 +526,7 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
             return Stream()
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(CommitFailingStore(), max_artifact_bytes=100),
+        lifecycle=TestingRunSettlement(CommitFailingStore(), max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
         mlflow_tracing_enabled=True,
@@ -560,15 +552,13 @@ async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch:
 async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.observability import tracing as turn_tracing
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     token = turn_tracing._fleet_trace_active.set(True)
     try:
@@ -661,7 +651,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
 
         cleanup = RunCleanupSupervisor()
         coordinator = TurnRuntime(
-            lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+            lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=Runner(),
             cleanup=cleanup,

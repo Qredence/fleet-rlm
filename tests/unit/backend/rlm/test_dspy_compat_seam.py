@@ -245,14 +245,14 @@ async def test_runner_rejects_native_build_without_invocation_factory() -> None:
     from types import SimpleNamespace
     from uuid import uuid4 as _uuid4
 
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities

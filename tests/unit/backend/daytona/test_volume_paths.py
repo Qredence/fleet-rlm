@@ -14,7 +14,7 @@ from fleet_rlm.daytona.runtime import (
     volume_config_from_settings,
     volume_mount_spec,
 )
-from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
+from fleet_rlm.sessions.bindings import require_scoped_volume_subpath
 from fleet_rlm.workspace.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
     UnsafePathError,

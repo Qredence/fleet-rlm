@@ -12,9 +12,10 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.chat.turn_runtime import TurnRuntime
 from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.workspace.memory import MemoryCandidate
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 def _turn():
@@ -210,8 +211,8 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
 
 @pytest.mark.asyncio
 async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> None:
-    from fleet_rlm.chat import run_lifecycle as lifecycle_module
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion, RunLifecycleService
+    from fleet_rlm import turn_settlement as lifecycle_module
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
 
     monkeypatch.setattr(lifecycle_module, "_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S", 0.01)
     started = threading.Event()
@@ -231,7 +232,7 @@ async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> N
         learning="bounded post-commit effect",
         byte_size=29,
     )
-    service = RunLifecycleService(object(), max_artifact_bytes=1024)
+    service = TestingRunSettlement(object(), max_artifact_bytes=1024)
     promotion = OwnedPostCommitMemoryPromotion(blocked_promotion)
     owned: asyncio.Task[None] | None = None
     began = time.perf_counter()
@@ -253,8 +254,8 @@ async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_prepared_run_retains_resources_until_timed_out_promotion_settles() -> None:
-    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
-    from fleet_rlm.chat.run_lifecycle import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
 
     started = threading.Event()
     release_promotion = threading.Event()
@@ -273,10 +274,10 @@ async def test_prepared_run_retains_resources_until_timed_out_promotion_settles(
     assert attempt.status == "deadline_exceeded"
     assert started.is_set()
 
-    prepared = PreparedRun(
+    prepared = PreparedTurn(
         execution=cast("Any", object()),
         artifact_sink=cast("Any", object()),
-        _resources=_PreparedRunResources((release_resources,)),
+        _resources=_PreparedTurnResources((release_resources,)),
         post_commit_memory_promotion=promotion,
     )
     close = asyncio.create_task(prepared.aclose())
@@ -379,7 +380,7 @@ class _DriverLifecycle:
 
 
 def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 
     cleanup = RunCleanupSupervisor()
 
@@ -433,9 +434,9 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
+    from fleet_rlm.turns import ClaimHeartbeat
 
     spy = _PromotionSpy()
     outcome = RLMOutcome("failed", public_error_message="provider stream interrupted")

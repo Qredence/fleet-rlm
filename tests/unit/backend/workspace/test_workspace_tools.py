@@ -11,7 +11,7 @@ import pytest
 
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
 from fleet_rlm.rlm.events import ToolFailed, WarningEvent, observe_tool
-from fleet_rlm.rlm.runtime import RunToolGuards
+from fleet_rlm.rlm.execution import RunToolGuards
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 
 

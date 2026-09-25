@@ -19,7 +19,7 @@ from fleet_rlm.daytona.runtime import (
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
-from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
+from fleet_rlm.sessions.bindings import require_scoped_volume_subpath
 
 
 @dataclass

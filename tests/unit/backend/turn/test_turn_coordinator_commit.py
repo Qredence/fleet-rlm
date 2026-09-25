@@ -12,7 +12,12 @@ from types import SimpleNamespace
 from typing import ClassVar
 from uuid import UUID, uuid4
 
+import dspy
 import pytest
+
+from fleet_rlm.rlm.program import FleetRLMSignature
+from fleet_rlm.rlm.result import ResultContract, RLMOutcome, project_outcome_prediction
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 # --- from test_turn_coordinator_commit.py -----------------------------
@@ -23,9 +28,6 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
 
     importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
@@ -40,6 +42,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.sessions.committed_turn import ArtifactPart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunClaim
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -136,7 +139,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
             return Stream(execution)
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -178,13 +181,11 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
 
     importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -264,7 +265,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
             return Stream()
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -291,9 +292,6 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     import importlib
 
     importlib.import_module("fleet_rlm.rlm.result")
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
@@ -303,6 +301,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     from fleet_rlm.sessions.catalog import SequenceCursor
     from fleet_rlm.sessions.committed_turn import TextPart, UsagePart
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput, UserTurnRecord
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
     engine = create_async_engine_from_url(f"sqlite+aiosqlite:///{tmp_path / 'turns.db'}")
@@ -371,7 +370,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         runner = Runner()
         store = SqlAlchemyRunStateStore(factory)
         coordinator = TurnRuntime(
-            lifecycle=RunLifecycleService(store, max_artifact_bytes=100),
+            lifecycle=TestingRunSettlement(store, max_artifact_bytes=100),
             preparation=Preparation(),
             runner=runner,
         )
@@ -410,8 +409,6 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
 
 @pytest.mark.asyncio
 async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -420,6 +417,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
         CommittedTurnReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -524,15 +522,13 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 # --- from test_turn_coordinator_concurrency.py ------------------------
 @pytest.mark.asyncio
 async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)
@@ -554,10 +550,10 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
             peak_preparations = max(peak_preparations, active_preparations)
             await asyncio.sleep(0.02)
             active_preparations -= 1
-            return PreparedRun(
+            return PreparedTurn(
                 execution=SimpleNamespace(run_id=run.run_id, session_id=run.session_id),
                 artifact_sink=None,
-                _resources=_PreparedRunResources(()),
+                _resources=_PreparedTurnResources(()),
             )
 
     class Stream:
@@ -586,7 +582,7 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
 
     cleanup = RunCleanupSupervisor()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
@@ -622,11 +618,10 @@ async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities
 # --- from test_turn_coordinator_replay.py -----------------------------
 @pytest.mark.asyncio
 async def test_replay_bypasses_preparation_and_runner() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import CommittedRunReplay
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     run_id, session_id = uuid4(), uuid4()
     replay = CommittedRunReplay(
@@ -661,3 +656,32 @@ async def test_replay_bypasses_preparation_and_runner() -> None:
         "run.completed",
     ]
     assert events[-1].detail.delivery == "replay"
+
+
+def test_native_prediction_is_projected_at_turn_boundary() -> None:
+    native = dspy.Prediction(answer="done")
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=native,
+        result_contract=ResultContract(FleetRLMSignature),
+    )
+
+    projected = project_outcome_prediction(outcome)
+
+    assert outcome.prediction is native
+    assert projected.prediction.display_text == "done"
+    assert projected.result_contract is None
+
+
+def test_invalid_native_prediction_cannot_reach_successful_settlement() -> None:
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=dspy.Prediction(answer=""),
+        result_contract=ResultContract(FleetRLMSignature),
+    )
+
+    projected = project_outcome_prediction(outcome)
+
+    assert projected.terminal_status == "failed"
+    assert projected.prediction is None
+    assert projected.public_error_message == "Turn output is invalid"

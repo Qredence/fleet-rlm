@@ -11,9 +11,9 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.composition.daytona_workspace_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
 from fleet_rlm.daytona.runtime import SandboxLeasePolicy
 from fleet_rlm.workspace.models import WorkspaceEntry
+from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
 from fleet_rlm.workspace.paths import UnsafePathError
 
 

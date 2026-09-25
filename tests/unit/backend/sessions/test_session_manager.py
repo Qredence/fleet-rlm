@@ -20,7 +20,7 @@ from fleet_rlm.daytona.runtime import (
     LeaseRequest,
     RootSessionSpec,
 )
-from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.sessions.bindings import SandboxBinding
 from tests.support.session_manager import (
     _FakeFilesystem,
     _FakePlatform,

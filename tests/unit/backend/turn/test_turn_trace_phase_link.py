@@ -19,6 +19,7 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.observability import tracing
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 class _FakeSpan:
@@ -158,13 +159,11 @@ async def _run_success_turn(
     Returns:
         list[Any]: Events emitted during the turn.
     """
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     importlib.import_module("fleet_rlm.rlm.result")
 
@@ -239,7 +238,7 @@ async def _run_success_turn(
             return Stream(execution)
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
         mlflow_tracing_enabled=tracing_enabled,
@@ -258,12 +257,12 @@ def _real_prepared_run(run_id: Any, session_id: Any) -> Any:
     """
     Create a prepared run with the specified run and session identifiers.
     """
-    from fleet_rlm.chat.preparation import PreparedRun, _PreparedRunResources
+    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
 
-    return PreparedRun(
+    return PreparedTurn(
         execution=cast("Any", SimpleNamespace(run_id=run_id, session_id=session_id)),
         artifact_sink=cast("Any", object()),
-        _resources=_PreparedRunResources(()),
+        _resources=_PreparedTurnResources(()),
     )
 
 

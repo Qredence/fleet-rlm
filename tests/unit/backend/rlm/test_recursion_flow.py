@@ -8,13 +8,11 @@ from uuid import uuid4
 import dspy
 import pytest
 
-import fleet_rlm.rlm.runtime as runtime_module
+import fleet_rlm.rlm.execution as runtime_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.events import ObservationSession, Status, ToolCompleted, ToolStarted
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
-from fleet_rlm.rlm.recursion import RecursiveRLMOptions
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
@@ -23,9 +21,11 @@ from fleet_rlm.rlm.runtime import (
     SessionView,
     WorkerOwnership,
 )
-from fleet_rlm.runtime.authority import RunAuthority
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
+from fleet_rlm.sessions.run_state import RunAuthority
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -86,7 +86,7 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "root-complete"
+    assert stream.outcome.prediction.answer == "root-complete"
     assert stream.outcome.usage["iterations"] == 3
     tool_started = [event for event in events if event.kind == "tool.started"]
     tool_completed = [event for event in events if event.kind == "tool.completed"]

@@ -13,9 +13,8 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.app_lifecycle import build_run_preparation
 from fleet_rlm.attachments import AttachmentRef
-from fleet_rlm.chat.preparation import RunPreparationUnavailableError
-from fleet_rlm.composition.live import build_run_preparation
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.runtime import DaytonaAdmission
 from fleet_rlm.rlm.program import RLMModelBundle
@@ -24,6 +23,8 @@ from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     _RunClaimToken,
 )
+from fleet_rlm.turn_preparation import RunPreparationUnavailableError, prepare_turn
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 def _test_runtime(resources):
@@ -162,13 +163,17 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    prepared = await build_run_preparation(
-        resources,
-        attachment_lifecycle=Attachments(),
-        skill_catalog=skill_catalog,
-        settings=resources.settings,
-        models=RLMModelBundle(object(), object()),
-    ).prepare(turn, deadline=float("inf"))
+    prepared = await prepare_turn(
+        build_run_preparation(
+            resources,
+            attachment_lifecycle=Attachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn,
+        deadline=float("inf"),
+    )
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
     budget = prepared.execution.execution.models.budget
@@ -298,7 +303,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
@@ -320,7 +324,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             )
             raise AssertionError((claimed, failure))
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -360,13 +364,17 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    prepared2 = await build_run_preparation(
-        resources,
-        attachment_lifecycle=NoAttachments(),
-        skill_catalog=skill_catalog,
-        settings=resources.settings,
-        models=RLMModelBundle(object(), object()),
-    ).prepare(turn2, deadline=float("inf"))
+    prepared2 = await prepare_turn(
+        build_run_preparation(
+            resources,
+            attachment_lifecycle=NoAttachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn2,
+        deadline=float("inf"),
+    )
     digest = prepared2.execution.session.workspace_memory_digest
     assert f" -->: {learning}\n" in digest
     assert len(digest.encode("utf-8")) <= 4_096
@@ -425,13 +433,17 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     )
 
     with pytest.raises(RunPreparationUnavailableError) as caught:
-        await build_run_preparation(
-            resources,
-            attachment_lifecycle=Attachments(),
-            skill_catalog=SkillCatalog(()),
-            settings=resources.settings,
-            models=RLMModelBundle(object(), object()),
-        ).prepare(turn, deadline=float("inf"))
+        await prepare_turn(
+            build_run_preparation(
+                resources,
+                attachment_lifecycle=Attachments(),
+                skill_catalog=SkillCatalog(()),
+                settings=resources.settings,
+                models=RLMModelBundle(object(), object()),
+            ),
+            turn,
+            deadline=float("inf"),
+        )
     assert str(caught.value) == "Turn environment is unavailable"
     assert "secret" not in str(caught.value)
 
@@ -439,8 +451,8 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None:
-    from fleet_rlm.chat.preparation import RunPreparationTimeoutError
-    from fleet_rlm.composition.daytona_run_preparation import _DaytonaEnvironmentProvider
+    from fleet_rlm.daytona.turn_environment import _DaytonaEnvironmentProvider
+    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
 
     entered = threading.Event()
     release_lookup = threading.Event()

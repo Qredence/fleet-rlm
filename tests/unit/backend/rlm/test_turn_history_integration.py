@@ -6,7 +6,7 @@ the same instance is forwarded to the native ``dspy.RLM`` call through
 ``build_rlm_input_kwargs(history=...)``.
 
 The test wires a minimal in-process ``ClaimedRun`` through
-``DefaultRunPreparer.prepare`` and records the kwargs the runner forwards
+``TestingRunPreparer.prepare`` and records the kwargs the runner forwards
 to the inner program. Identity is asserted on the ``history`` value so
 the preparation implementation cannot mutate, copy, or replace
 the canonical conversation between the claim and the native call.
@@ -21,6 +21,8 @@ import dspy
 import pytest
 
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+from tests.support.turn_preparation import TestingRunPreparer
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
@@ -48,10 +50,10 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
     """The in-process Turn preparation path passes the same ``dspy.History`` instance."""
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import HistoryMessage
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     history_messages = (
         HistoryMessage("user", "earlier user request"),
@@ -117,7 +119,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
 
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -172,9 +174,9 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
     """A claim with no committed Turns still carries a valid empty ``dspy.History``."""
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     claim = _make_claim(history_messages=())
 
@@ -235,7 +237,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -256,10 +258,10 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
     """A provider-selected Daytona transport reaches the native RLM unchanged."""
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.composition.daytona_run_preparation import build_committed_session_history_for_claim
+    from fleet_rlm.daytona.turn_environment import build_committed_session_history_for_claim
+    from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     claim = _make_claim(
         history_messages=(
@@ -328,7 +330,7 @@ async def test_daytona_preparation_forwards_sandbox_history_transport_to_rlm() -
                 history_transport=transport,
             )
 
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -371,28 +373,27 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     recording Program below derives its Turn-2 answer from
     ``history.messages[-1]["answer"]``. Turn 1 commits through the real
     store/lifecycle so Turn 2's claimed checkpoint carries the committed
-    record through store → claim → ``DefaultRunPreparer`` → ``RLMRunner``.
+    record through store → claim → ``TestingRunPreparer`` → ``RLMRunner``.
     No history Tool is installed, so the content dependence is provable.
     """
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         RunClaim,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id, workspace_id=access.workspace_id, title="history-derived"
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     class Sink:
         async def read(self, location, *, max_bytes):
@@ -452,7 +453,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
 
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
@@ -529,4 +530,4 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     # Content dependence: the Turn-2 answer is computed FROM the injected
     # History, not a constant and not a history-Tool read.
     assert stream_two.outcome.prediction is not None
-    assert stream_two.outcome.prediction.display_text == "derived:turn-one-answer"
+    assert stream_two.outcome.prediction.answer == "derived:turn-one-answer"
