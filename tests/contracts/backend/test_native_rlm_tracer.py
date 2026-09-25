@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -46,6 +47,20 @@ def _build_native(**kwargs: object):
 class _ActionPredictor(dspy.Predict):
     def __init__(self) -> None:
         super().__init__("variables_info, repl_history, iteration -> reasoning, code")
+
+
+class _SelectedEvidenceActions(_ActionPredictor):
+    def __init__(self, *codes: str) -> None:
+        super().__init__()
+        self._codes = codes
+        self.histories: list[object] = []
+
+    async def aforward(self, **kwargs: Any) -> dspy.Prediction:
+        self.histories.append(kwargs["repl_history"])
+        return dspy.Prediction(
+            reasoning="inspect selected evidence and verify coverage",
+            code=self._codes[len(self.histories) - 1],
+        )
 
 
 class _StatefulActionPredictor(_ActionPredictor):
@@ -296,6 +311,111 @@ async def test_native_extract_fallback_receives_accumulated_repl_history() -> No
     assert prediction.final_reasoning == "Extract forced final output"
     assert [entry["reasoning"] for entry in prediction.trajectory] == ["initialize", "extend"]
     interpreter.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_code", "final_code", "expected"),
+    [
+        (
+            "position = request.find('TARGET: planted evidence')\n"
+            "selected = request[position:position + 24]\n"
+            "_out = {'found': position >= 0, 'selected': selected}",
+            "SUBMIT(answer=selected)",
+            "TARGET: planted evidence",
+        ),
+        (
+            "records = request.splitlines()\n"
+            "coverage = {'seen': len(records), 'expected': 1000}\n"
+            "matches = [row for row in records if 'TARGET:' in row]\n"
+            "_out = {'coverage': coverage, 'matches': matches}",
+            "assert coverage['seen'] == coverage['expected']\n"
+            "SUBMIT(answer=matches[0] + ' (1000/1000 records checked)')",
+            "1000/1000 records checked",
+        ),
+        (
+            "records = request.splitlines()\n"
+            "checked = records[:500]\n"
+            "_out = {'seen': len(checked), 'expected': len(records)}",
+            "SUBMIT(answer=f'Incomplete coverage: {len(checked)}/{len(records)} records checked')",
+            "Incomplete coverage: 500/1000",
+        ),
+        (
+            "records = request.splitlines()\n"
+            "reference = records[0].split('alias: ')[1]\n"
+            "_out = {'prerequisite_reference': reference}",
+            "selected = next(row for row in records if row.startswith(reference))\nSUBMIT(answer=selected)",
+            "record-0999: TARGET: planted evidence",
+        ),
+    ],
+    ids=["sparse-selection", "exhaustive-last-partition", "interrupted-coverage", "dependent-prerequisite"],
+)
+async def test_native_root_retains_large_evidence_and_reports_coverage(
+    first_code: str,
+    final_code: str,
+    expected: str,
+) -> None:
+    source = "\n".join(
+        f"record-{index:04d}: "
+        f"{'alias: record-0999' if index == 0 else 'TARGET: planted evidence' if index == 999 else 'ordinary'}"
+        for index in range(1000)
+    )
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    rlm = _build_native(
+        models=RLMModelBundle(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
+        options=RLMOptions(max_iters=2),
+        signature="request -> answer: str",
+    )
+    actions = _SelectedEvidenceActions(first_code, final_code)
+    rlm.generate_action = actions
+    try:
+        prediction = await rlm.acall(interpreter, request=source)
+        assert expected in prediction.answer
+        assert len(actions.histories) == 2
+        assert source not in str(actions.histories[1].entries[0].output)
+        assert set(rlm._make_llm_tools()) == {"llm_query", "llm_query_batched"}
+        assert "rlm_query" not in rlm.tools
+    finally:
+        interpreter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_native_semantic_batch_keeps_order_error_slots_and_prompt_budget() -> None:
+    class SubLM:
+        def __call__(self, prompt: str) -> list[dict[str, str]]:
+            if prompt == "slow":
+                time.sleep(0.03)
+            if prompt == "error":
+                raise dspy.LMError("synthetic provider failure")
+            return [{"text": prompt.upper()}]
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    rlm = _build_native(
+        models=RLMModelBundle(root_lm=object(), sub_lm=SubLM()),  # type: ignore[arg-type]
+        options=RLMOptions(max_iters=3, max_llm_calls=3),
+        signature="request -> answer: str",
+    )
+    actions = _SelectedEvidenceActions(
+        "results = llm_query_batched(['slow', 'error', 'fast'])\n"
+        "validated = {index: value for index, value in enumerate(results) "
+        "if isinstance(value, str) and not value.startswith('[ERROR]')}\n"
+        "gaps = [index for index in range(len(results)) if index not in validated]\n"
+        "_out = {'ordered': results[0] == 'SLOW' and results[2] == 'FAST', "
+        "'error_slot': results[1].startswith('[ERROR]'), 'valid_count': len(validated), 'gaps': gaps}",
+        "llm_query('fourth')",
+        "assert results[0] == 'SLOW' and results[2] == 'FAST'\n"
+        "assert results[1].startswith('[ERROR]')\n"
+        "assert validated == {0: 'SLOW', 2: 'FAST'} and gaps == [1]\n"
+        "SUBMIT(answer='2 valid results, 1 unresolved gap, and per-prompt budget verified')",
+    )
+    rlm.generate_action = actions
+    try:
+        prediction = await rlm.acall(interpreter, request="verify native semantic calls")
+        assert prediction.answer == "2 valid results, 1 unresolved gap, and per-prompt budget verified"
+        assert "LLM call limit exceeded" in actions.histories[2].entries[1].output
+        assert "rlm_query" not in rlm.tools
+    finally:
+        interpreter.shutdown()
 
 
 @pytest.mark.asyncio

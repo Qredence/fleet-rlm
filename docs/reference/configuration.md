@@ -150,7 +150,7 @@ recursive depth;
 
 The `[rlm]` recursion settings include `recursion_enabled` (currently `true`
 in the operator-selected shipped default) and bound the native
-`rlm_query(capsule=...)` child harness: `recursion_max_calls`,
+`rlm_query(task=..., inputs=..., context=...)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
 `recursion_max_parallel_children` bounds the number of independent child RLMs

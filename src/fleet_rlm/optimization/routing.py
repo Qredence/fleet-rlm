@@ -128,8 +128,8 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
     ),
     RoutingScenario(
         "recursive-native-semantic",
-        "Call rlm_query(capsule={'task': 'Use native llm_query to classify phosphorus as an element; "
-        "return only element or not element'}). Check the typed outcome status and use its answer.",
+        "Call rlm_query(task='Use native llm_query to classify phosphorus as an element; "
+        "return only element or not element', inputs=[]). Check the typed outcome status and use its answer.",
         "recursive_child",
         "element",
     ),

@@ -82,6 +82,16 @@ def test_failed_batch_does_not_partially_debit() -> None:
     assert budget.snapshot()["recursive_children"] == 0
 
 
+def test_unstarted_child_reservation_can_be_released_once() -> None:
+    budget = TurnBudget(deadline=time.monotonic() + 60, limits=BudgetLimits(recursive_children=1))
+    budget.reserve(BudgetDimension.RECURSIVE_CHILDREN)
+    budget.release_unstarted_recursive_child()
+    assert budget.snapshot()["recursive_children"] == 0
+    budget.reserve(BudgetDimension.RECURSIVE_CHILDREN)
+    with pytest.raises(TurnBudgetExhausted):
+        budget.reserve(BudgetDimension.RECURSIVE_CHILDREN)
+
+
 def test_model_children_and_copies_share_budget_without_mutating_templates() -> None:
     class CountingLM(dspy.BaseLM):
         def forward(self, *_args, **_kwargs):
