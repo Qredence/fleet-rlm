@@ -54,7 +54,7 @@ uv run --with datasets python scripts/benchmarks/run_oolong_predict.py \
 
 Live mode acquires an ephemeral volume-backed Daytona interpreter through
 ``fleet_rlm.daytona.runtime.acquire_ephemeral_interpreter`` (shared
-``SandboxProvisioner`` seam), stages `context_window_text` on the workspace
+Daytona runtime path), stages `context_window_text` on the workspace
 volume using `WorkspaceAttachmentPathPolicy` (same layout as Turn
 `AttachmentContextCapsule` staging), constructs `build_native_rlm(...)`, and
 invokes `await rlm.acall(interpreter, **kwargs)` with `FleetJSONAdapter` so

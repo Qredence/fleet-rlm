@@ -50,7 +50,7 @@ from fleet_rlm.observability.tracing import (
     turn_phase_span,
     turn_trace,
 )
-from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.program import DeadlineLMProxy
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]

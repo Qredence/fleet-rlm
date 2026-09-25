@@ -137,8 +137,8 @@ def trace_failure_category(exc: BaseException) -> str:
         str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``wrap_up_rejected``,
             ``timeout``, ``cancelled``, or the normalized diagnostic cause type.
     """
+    from fleet_rlm.daytona.errors import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
     from fleet_rlm.rlm.budget import FinalizationExhausted
-    from fleet_rlm.rlm.recursion import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
 
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"

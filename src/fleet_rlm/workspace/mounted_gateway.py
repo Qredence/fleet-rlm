@@ -13,15 +13,16 @@ from typing import Any
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import CompletedRun
+from fleet_rlm.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, validate_mount_path
 from fleet_rlm.workspace.storage import (
-    AgentAsyncStorageSession,
-    AgentAsyncVolumeStorage,
+    AsyncDaytonaVolumeFS,
     AsyncStorageSession,
+    AsyncVolumeStorage,
+    AsyncWorkspaceStorage,
     VolumeFile,
-    WorkspaceVolumeSession,
+    WorkspaceStorage,
 )
 
 
@@ -46,7 +47,7 @@ def _public_entry(entry: WorkspaceEntry, checksum: str | None = None) -> Workspa
 
 
 class _DaytonaWorkspaceFileSession:
-    def __init__(self, workspace: AgentAsyncStorageSession, *, max_file_bytes: int) -> None:
+    def __init__(self, workspace: AsyncStorageSession, *, max_file_bytes: int) -> None:
         self._workspace = workspace
         self._max_file_bytes = max_file_bytes
 
@@ -172,7 +173,7 @@ class _DaytonaWorkspaceFileSession:
 class _DaytonaWorkspaceVolumeSession:
     def __init__(self, sandbox: object, *, mount_path: str) -> None:
         self._mount_path = validate_mount_path(mount_path)
-        self._files = AgentAsyncVolumeStorage(sandbox, mount_path=str(self._mount_path))
+        self._files = AsyncDaytonaVolumeFS(sandbox, mount_path=str(self._mount_path))
 
     def _path(self, logical_path: str) -> str:
         path = PurePosixPath(logical_path)
@@ -251,11 +252,13 @@ class DaytonaWorkspaceGateway:
     ) -> AsyncIterator[AsyncStorageSession]:
         async with self.open_sandbox(workspace_id, purpose=purpose) as sandbox:
             yield _DaytonaWorkspaceFileSession(
-                AgentAsyncStorageSession(
-                    sandbox,
-                    volume_root=str(self._paths.mount_path),
-                    root=str(self._paths.files_root()),
-                    max_file_bytes=self._max_file_bytes,
+                AsyncWorkspaceStorage(
+                    WorkspaceStorage(
+                        sandbox,
+                        volume_root=str(self._paths.mount_path),
+                        root=str(self._paths.files_root()),
+                        max_file_bytes=self._max_file_bytes,
+                    )
                 ),
                 max_file_bytes=self._max_file_bytes,
             )
@@ -299,7 +302,7 @@ class DaytonaWorkspaceVolumeGateway:
         workspace_id: UUID,
         *,
         purpose: str | None = None,
-    ) -> AsyncIterator[WorkspaceVolumeSession]:
+    ) -> AsyncIterator[AsyncVolumeStorage]:
         async with self._gateway.open_sandbox(
             workspace_id,
             purpose=purpose or "workspace-volume-io",

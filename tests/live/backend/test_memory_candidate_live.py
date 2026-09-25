@@ -21,8 +21,8 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.workspace.memory import read_workspace_memory_injection_digest
-from fleet_rlm.workspace.paths import volume_paths_from_settings
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._mvp_support import (
     _SECRET_NAMES,
@@ -159,7 +159,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
 
     try:
         with TestClient(app) as client:
-            resources = app.state.runtime_inventory.run_environment_resources
+            resources = app.state.runtime_inventory.daytona_runtime_owner
             preparation = app.state.runtime_inventory.run_preparation
             assert resources is not None and preparation is not None
             portal = client.portal
@@ -207,14 +207,14 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 binding = portal.call(resources.bindings.get, session_id)
                 assert binding is not None and binding.sandbox_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                sandbox = sync_sandbox(portal.call(resources.runtime._platform.get, binding.sandbox_id), portal_loop)
+                sandbox = sync_sandbox(portal.call(resources._platform.get, binding.sandbox_id), portal_loop)
                 paths = volume_paths_from_settings(settings)
                 from fleet_rlm.workspace.memory import WorkspaceMemory
-                from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+                from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
 
                 memory_store = WorkspaceMemory.from_storage(
                     WorkspaceMemoryStorage(
-                        AgentStorageSession(
+                        WorkspaceStorage(
                             sandbox,
                             volume_root=str(paths.root),
                             root=str(paths.root),

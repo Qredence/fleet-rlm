@@ -374,7 +374,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
     app = create_app(settings=settings)
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
-        resources = inventory.run_environment_resources
+        resources = inventory.daytona_runtime_owner
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
@@ -472,8 +472,8 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             close = getattr(runtime, "close_root_session", None)
             if callable(close):
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
-            assert resources.runtime._admission._semaphore._value == settings.max_active_daytona_leases
-            assert resources.runtime.active_leases.holder(session_id) is None
+            assert resources._admission._semaphore._value == settings.max_active_daytona_leases
+            assert resources.active_leases.holder(session_id) is None
             structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
             assert len(structured) == 1
             assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
@@ -547,7 +547,7 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
     cleanup_failures: tuple[str, ...] = ()
     trace_id: str | None = None
     with TestClient(app) as client:
-        resources = app.state.runtime_inventory.run_environment_resources
+        resources = app.state.runtime_inventory.daytona_runtime_owner
         preparation = app.state.runtime_inventory.run_preparation
         assert resources is not None
         assert preparation is not None

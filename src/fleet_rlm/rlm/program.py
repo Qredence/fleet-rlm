@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import dspy
+from dspy import BaseLM, Signature
 from dspy.utils.exceptions import AdapterParseError, LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,15 +32,7 @@ from fleet_rlm.rlm.budget import (
     ProviderAdmission,
     TurnBudget,
 )
-from fleet_rlm.rlm.compat_3_3_1 import (
-    BaseLM,
-    Signature,
-    _is_empty_adapter_parse,
-    _iteration_is_action,
-    _iteration_is_final,
-    daytona_provider_contract,
-)
-from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
+from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError, truncate_public_text
 from fleet_rlm.rlm.submit_validation import is_finalization_action
 from fleet_rlm.workspace.models import (
     UNAVAILABLE_WORKSPACE_CAPABILITY,
@@ -58,6 +51,49 @@ if TYPE_CHECKING:
 RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
+CERTIFIED_DSPY_VERSION = "3.3.1"
+_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
+
+
+class UncertifiedDSpyVersionError(RuntimeError):
+    """Raised when the runtime DSPy version differs from the pinned release."""
+
+
+def assert_dspy_version() -> None:
+    """Fail fast if the installed DSPy differs from the lockfile contract."""
+    version = getattr(dspy, "__version__", None)
+    if version != CERTIFIED_DSPY_VERSION:
+        truncated = truncate_public_text(str(version or ""), max_len=64)
+        raise UncertifiedDSpyVersionError(
+            f"Fleet Agent is certified on DSPy {CERTIFIED_DSPY_VERSION}; "
+            f"found installed DSPy {truncated!r} (expected exactly DSPy {CERTIFIED_DSPY_VERSION}). "
+            "Run `uv sync` to align dependencies."
+        )
+
+
+def _iteration_parts(inputs: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Parse DSPy's action iteration marker emitted by ``dspy.RLM``."""
+    value = inputs.get("iteration")
+    if not isinstance(value, str):
+        return None
+    try:
+        current, total = (int(part.strip()) for part in value.split("/", 1))
+    except (ValueError, TypeError):
+        return None
+    return (current, total) if current >= 1 and total >= current else None
+
+
+def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
+    return _iteration_parts(inputs) is not None
+
+
+def _iteration_is_final(inputs: Mapping[str, Any]) -> bool:
+    parts = _iteration_parts(inputs)
+    return parts is not None and parts[0] == parts[1]
+
+
+def _is_empty_adapter_parse(exc: BaseException) -> bool:
+    return _EMPTY_RESPONSE_MARKER in str(getattr(exc, "message", "") or exc)
 
 
 def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
@@ -1558,7 +1594,7 @@ def build_native_rlm(
     skill_instructions: Sequence[str] = (),
     recursion_enabled: bool = False,
     host_tool_dispatch: bool = True,
-    interpreter_factory: Callable[[], Any] = daytona_provider_contract,
+    interpreter_factory: Callable[[], Any],
     verbose: bool = True,
 ) -> Any:
     """Construct one fresh native DSPy RLM from its invocation inputs.

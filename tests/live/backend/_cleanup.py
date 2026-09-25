@@ -38,7 +38,7 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
         tuple[str, ...]: Cleanup failure labels, including "sandbox", "tracking", or "volume".
     """
     failures: list[str] = []
-    for sandbox_id in sorted(set(resources.runtime._tracked_sandbox_ids)):
+    for sandbox_id in sorted(set(resources._tracked_sandbox_ids)):
 
         async def delete_sandbox(sandbox_id: str = sandbox_id) -> None:
             """Delete the specified Daytona sandbox if it exists.
@@ -46,22 +46,22 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
             Parameters:
                 sandbox_id (str): Identifier of the sandbox to delete.
             """
-            sandbox = await resources.runtime._platform.get(sandbox_id)
+            sandbox = await resources._platform.get(sandbox_id)
             if sandbox is not None:
-                await resources.runtime._platform.delete(sandbox)
+                await resources._platform.delete(sandbox)
 
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")
     try:
-        resources.runtime._tracked_sandbox_ids.clear()
+        resources._tracked_sandbox_ids.clear()
     except Exception:
         failures.append("tracking")
 
     async def delete_volume() -> None:
         """Delete the configured volume if it exists."""
-        volume = await resources.runtime._client.volume.get(volume_name, create=False)
+        volume = await resources._client.volume.get(volume_name, create=False)
         if volume is not None:
-            await resources.runtime._client.volume.delete(volume)
+            await resources._client.volume.delete(volume)
 
     if not await _retry_cleanup(delete_volume):
         failures.append("volume")

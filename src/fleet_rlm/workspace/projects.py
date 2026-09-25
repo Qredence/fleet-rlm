@@ -9,9 +9,10 @@ from typing import Any, NoReturn
 import dspy
 
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.paths import UnsafePathError, validate_project_slug
 from fleet_rlm.tool_events import ToolEventView
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
-from fleet_rlm.workspace.paths import UnsafePathError, normalize_workspace_path, validate_project_slug
+from fleet_rlm.workspace.paths import normalize_workspace_path
 from fleet_rlm.workspace.storage import MAX_STORAGE_LIST_LIMIT, MAX_STORAGE_READ_CHARS, StorageSession
 from fleet_rlm.workspace.workspace import (
     FilesystemToolError,

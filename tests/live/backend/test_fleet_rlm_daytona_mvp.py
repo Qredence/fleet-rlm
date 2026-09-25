@@ -29,10 +29,10 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
-from fleet_rlm.workspace.paths import volume_paths_from_settings
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._mvp_support import (
     _SECRET_NAMES,
@@ -336,7 +336,7 @@ def _session_volume_files(sandbox: Any, session_dir: str) -> list[bytes]:
 
 
 async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBinding:
-    return await resources.runtime.replace(
+    return await resources.replace(
         binding,
         workspace_id=binding.workspace_id,
         user_id=LocalScope().user_id,
@@ -371,7 +371,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
     cleanup_failures: tuple[str, ...] = ()
 
     with TestClient(app) as client:
-        resources = app.state.runtime_inventory.run_environment_resources
+        resources = app.state.runtime_inventory.daytona_runtime_owner
         assert resources is not None
         portal = client.portal
         assert portal is not None
@@ -453,7 +453,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert binding is not None
             assert binding.sandbox_id is not None
             sandbox_ids.add(binding.sandbox_id)
-            assert portal.call(resources.runtime._platform.get, binding.sandbox_id) is not None
+            assert portal.call(resources._platform.get, binding.sandbox_id) is not None
         finally:
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
@@ -575,7 +575,7 @@ def test_complete_daytona_mvp_through_fastapi(
         app.add_middleware(_FirstStreamDeltaMiddleware, probe=first_delta_probe)
         with TestClient(app) as client:
             inventory = app.state.runtime_inventory
-            resources = inventory.run_environment_resources
+            resources = inventory.daytona_runtime_owner
             preparation = inventory.run_preparation
             assert resources is not None
             assert preparation is not None
@@ -681,9 +681,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                first_sandbox = sync_sandbox(
-                    portal.call(resources.runtime._platform.get, binding.sandbox_id), portal_loop
-                )
+                first_sandbox = sync_sandbox(portal.call(resources._platform.get, binding.sandbox_id), portal_loop)
                 assert first_sandbox is not None
                 first_fs = DaytonaSandboxVolumeFs(first_sandbox)
                 paths = volume_paths_from_settings(settings)
@@ -727,7 +725,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert replacement.volume_id == binding.volume_id
                 assert replacement.mount_path == binding.mount_path
                 assert replacement.volume_subpath == binding.volume_subpath
-                resources.runtime.track_sandbox(replacement.sandbox_id)
+                resources.track_sandbox(replacement.sandbox_id)
 
                 phase = "second_turn"
                 second = client.post(
@@ -790,7 +788,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert assistants[0] == first_assistant
                 assert _structured_part(assistants[0]) == first_structured
                 replacement_sandbox = sync_sandbox(
-                    portal.call(resources.runtime._platform.get, replacement.sandbox_id), portal_loop
+                    portal.call(resources._platform.get, replacement.sandbox_id), portal_loop
                 )
                 assert replacement_sandbox is not None
                 replacement_env_names = _sandbox_environment_names(replacement_sandbox)
@@ -971,7 +969,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     try:
         with TestClient(app) as client:
             inventory = app.state.runtime_inventory
-            resources = inventory.run_environment_resources
+            resources = inventory.daytona_runtime_owner
             preparation = inventory.run_preparation
             assert resources is not None
             assert preparation is not None

@@ -10,7 +10,6 @@ import asyncio
 import contextlib
 import inspect
 import logging
-import math
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
@@ -20,10 +19,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
 from threading import Condition, Lock, get_ident
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias
 from uuid import UUID, uuid4
 
 from fleet_rlm.daytona.errors import (
+    ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
+    ChildRuntimeNotStartedError,
     DaytonaAdapterError,
     ProviderRequestError,
     is_safe_pre_creation_retry,
@@ -41,13 +43,6 @@ from fleet_rlm.daytona.interpreter import (
 )
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
-from fleet_rlm.rlm.recursion import (
-    _CHILD_STAGE_MAX_BYTES,
-    ChildRuntimeAuthorizationError,
-    ChildRuntimeCleanupError,
-    ChildRuntimeFactory,
-    ChildRuntimeNotStartedError,
-)
 from fleet_rlm.sessions.bindings import (
     BindingGenerationAuthority,
     SandboxBinding,
@@ -74,7 +69,6 @@ CHILD_CLEANUP_RESULT_TIMEOUT_S = 60.0
 CHILD_DELETE_CONFIRM_TIMEOUT_S = 120.0
 CHILD_DELETE_CONFIRM_POLL_S = 1.0
 _CHILD_ADMISSION_WAIT_SECONDS = 5.0
-_CHILD_CLEANUP_RESULT_TIMEOUT_S = CHILD_CLEANUP_RESULT_TIMEOUT_S
 _CHILD_STAGE_MAX_FILES = 256
 _CHILD_RESULT_MAX_BYTES = 16 * 1024 * 1024
 _CHILD_RESULT_MAX_ENTRIES = 1024
@@ -83,6 +77,7 @@ _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, Sys
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
 DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v2"
 DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
+_PROVIDER_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
 SESSION_RESOURCES: tuple[int, int, int] = (4, 8, 8)
@@ -518,85 +513,53 @@ def verify_sandbox_spec(sandbox: Any, spec: DaytonaSandboxSpec) -> None:
         )
 
 
-class SandboxProvisioner:
-    """One strict async policy boundary for creation, provenance, mount, and layout."""
+def _expected_workspace_mount(
+    volume_config: VolumeConfig,
+    volume_id: str,
+    workspace_id: UUID,
+) -> ExpectedWorkspaceMount:
+    mount = volume_mount_spec(volume_config, volume_id, workspace_id=workspace_id)
+    return ExpectedWorkspaceMount(
+        volume_id=mount["volume_id"],
+        volume_subpath=mount["subpath"],
+        mount_path=mount["mount_path"],
+        workspace_id=workspace_id,
+    )
 
-    def __init__(
-        self,
-        *,
-        platform: SandboxPlatform,
-        volume_config: VolumeConfig,
-        sandbox_spec: DaytonaSandboxSpec,
-    ) -> None:
-        self._platform = platform
-        self._volume_config = volume_config
-        self._sandbox_spec = sandbox_spec
 
-    def expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
-        mount = volume_mount_spec(self._volume_config, volume_id, workspace_id=workspace_id)
-        return ExpectedWorkspaceMount(
-            volume_id=mount["volume_id"],
-            volume_subpath=mount["subpath"],
-            mount_path=mount["mount_path"],
-            workspace_id=workspace_id,
+async def _create_daytona_sandbox(
+    platform: SandboxPlatform,
+    expected: ExpectedWorkspaceMount,
+    *,
+    labels: dict[str, str],
+    ephemeral: bool,
+) -> Any:
+    """Create a sandbox from its already validated Volume binding."""
+    try:
+        return await platform.create(
+            volume_id=expected.volume_id,
+            mount_path=str(expected.mount_path),
+            volume_subpath=(
+                require_session_workspace_subpath(
+                    expected.volume_subpath,
+                    workspace_id=expected.workspace_id,
+                    session_id=expected.session_id,
+                )
+                if expected.session_id is not None
+                else require_scoped_volume_subpath(
+                    expected.volume_subpath,
+                    workspace_id=expected.workspace_id,
+                )
+            ),
+            labels=labels,
+            ephemeral=ephemeral,
         )
-
-    async def create(
-        self,
-        expected: ExpectedWorkspaceMount,
-        *,
-        labels: dict[str, str],
-        ephemeral: bool,
-    ) -> Any:
-        try:
-            return await self._platform.create(
-                volume_id=expected.volume_id,
-                mount_path=str(expected.mount_path),
-                volume_subpath=(
-                    require_session_workspace_subpath(
-                        expected.volume_subpath,
-                        workspace_id=expected.workspace_id,
-                        session_id=expected.session_id,
-                    )
-                    if expected.session_id is not None
-                    else require_scoped_volume_subpath(
-                        expected.volume_subpath,
-                        workspace_id=expected.workspace_id,
-                    )
-                ),
-                labels=labels,
-                ephemeral=ephemeral,
-            )
-        except Exception as exc:
-            raise map_provider_error(exc) from exc
-
-    def verify(self, sandbox: Any, expected: ExpectedWorkspaceMount) -> None:
-        verify_sandbox_workspace_mount(sandbox, expected)
-        verify_sandbox_spec(sandbox, self._sandbox_spec)
-
-    async def verify_run_layout(
-        self,
-        sandbox: Any,
-        expected: ExpectedWorkspaceMount,
-        *,
-        session_id: UUID,
-        run_id: UUID,
-    ) -> None:
-        self.verify(sandbox, expected)
-        if expected.session_id is not None:
-            await ensure_execution_layout(sandbox, run_id=run_id)
-        else:
-            await ensure_volume_layout(
-                sandbox,
-                self._volume_config.paths(),
-                session_id=session_id,
-                run_id=run_id,
-            )
+    except Exception as exc:
+        raise map_provider_error(exc) from exc
 
 
 _VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
 _VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
-_DAYTONA_CLOUD_API_URL = "https://app.daytona.io/api"
 ProviderState = Literal[
     "missing",
     "running",
@@ -859,21 +822,17 @@ async def acquire_ephemeral_interpreter(
     purpose: str,
     workspace_id: UUID | None = None,
 ) -> EphemeralInterpreterLease:
-    """Acquire one ephemeral volume-backed interpreter through ``SandboxProvisioner``."""
+    """Acquire one ephemeral volume-backed interpreter for an operator script."""
     client = build_daytona_client(settings)
     spec = sandbox_spec_from_settings(settings)
     platform = LiveDaytonaPlatform(client, spec)
     volume_client = LiveDaytonaVolumeClient(client)
     volume_config = volume_config_from_settings(settings)
-    provisioner = SandboxProvisioner(
-        platform=platform,
-        volume_config=volume_config,
-        sandbox_spec=spec,
-    )
     resolved_workspace = workspace_id or uuid4()
     volume_id = await get_or_create_volume_id(volume_client, volume_config)
-    expected = provisioner.expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
-    sandbox = await provisioner.create(
+    expected = _expected_workspace_mount(volume_config, volume_id, resolved_workspace)
+    sandbox = await _create_daytona_sandbox(
+        platform,
         expected,
         labels={
             "fleet-package": "fleet_rlm",
@@ -895,9 +854,11 @@ async def acquire_ephemeral_interpreter(
             sandbox = refreshed
         session_id = uuid4()
         run_id = uuid4()
-        await provisioner.verify_run_layout(
+        verify_sandbox_workspace_mount(sandbox, expected)
+        verify_sandbox_spec(sandbox, spec)
+        await ensure_volume_layout(
             sandbox,
-            expected,
+            volume_config.paths(),
             session_id=session_id,
             run_id=run_id,
         )
@@ -1140,27 +1101,6 @@ LeaseKind: TypeAlias = Literal[
 ]
 
 
-def _cleanup_failed(value: Any) -> bool:
-    if value is None:
-        return False
-    if value is False:
-        return True
-    if bool(getattr(value, "failed", False)):
-        return True
-    if getattr(value, "first_error", None) is not None:
-        return True
-    quarantine = getattr(value, "quarantine", None)
-    return bool(getattr(quarantine, "quarantined", False))
-
-
-async def await_cleanup(callback: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """Invoke sync or async cleanup without changing exception identity."""
-    result = callback(*args, **kwargs)
-    if inspect.isawaitable(result):
-        return await result
-    return result
-
-
 class LeaseState(StrEnum):
     OPEN = "OPEN"
     CLOSING = "CLOSING"
@@ -1246,7 +1186,7 @@ class InterpreterLease:
     sandbox: Any | None = None
     requires_sandbox_deletion: bool = False
     binding_generation: int = 1
-    _released: bool = False
+    context_fingerprint: object | None = None
     _provider_retired: bool = False
     _defer_owner_release: bool = False
     _defer_idle_cleanup: bool = False
@@ -1272,7 +1212,7 @@ class InterpreterLease:
 
     def release(self) -> None:
         with self._release_lock:
-            if self._released:
+            if self.closed:
                 return
             self._state = LeaseState.CLOSING
             try:
@@ -1284,138 +1224,10 @@ class InterpreterLease:
             except BaseException:
                 self._state = LeaseState.FAILED
                 raise
-            self._released = True
             self._state = LeaseState.CLOSED
             if self._on_release is not None and not self._defer_owner_release:
                 with contextlib.suppress(BaseException):
                     self._on_release()
-
-
-class RootSessionLease:
-    """Cancellation-safe handle for a session's root sandbox lease."""
-
-    def __init__(
-        self,
-        key: Any,
-        lease: Any,
-        release_callback: Callable[[Any], Awaitable[Any] | Any],
-        on_closed: Callable[[RootSessionLease], Awaitable[Any] | Any] | None = None,
-        *,
-        spec: Any | None = None,
-        sandbox: Any | None = None,
-        interpreter: Any | None = None,
-        broker: Any | None = None,
-        volume: Any | None = None,
-        volume_id: str | None = None,
-        mount_path: str | None = None,
-        volume_subpath: str | None = None,
-    ) -> None:
-        self.key = key
-        self.spec = spec
-        self.lease = lease
-        self.release_callback = release_callback
-        self.on_closed = on_closed
-        self.sandbox = sandbox if sandbox is not None else getattr(lease, "sandbox", None)
-        self.interpreter = interpreter if interpreter is not None else getattr(lease, "interpreter", None)
-        self.broker = broker
-        self.volume = volume if volume is not None else getattr(lease, "volume", None)
-        sandbox_id = getattr(lease, "sandbox_id", None) or getattr(self.sandbox, "id", None)
-        self.sandbox_id = str(sandbox_id or "")
-        vol_id = getattr(lease, "volume_id", None)
-        self.volume_id = volume_id or (str(vol_id) if vol_id else None)
-        mp = getattr(lease, "mount_path", None)
-        self.mount_path = mount_path or (str(mp) if mp else None)
-        vsub = getattr(lease, "volume_subpath", None)
-        self.volume_subpath = volume_subpath or (str(vsub) if vsub else None)
-        self._state = LeaseState.OPEN
-        self._close_lock = asyncio.Lock()
-        self._close_task: asyncio.Task[None] | None = None
-        self._close_error: BaseException | None = None
-        self._notify_on_close = False
-        self._close_barrier: Callable[[], Awaitable[Any] | Any] | None = None
-
-    @property
-    def state(self) -> LeaseState:
-        return self._state
-
-    @property
-    def status(self) -> LeaseState:
-        return self.state
-
-    @property
-    def closed(self) -> bool:
-        return self._state is LeaseState.CLOSED
-
-    @property
-    def closing(self) -> bool:
-        return self._state is LeaseState.CLOSING
-
-    @property
-    def failed(self) -> bool:
-        return self._state is LeaseState.FAILED
-
-    @property
-    def close_error(self) -> BaseException | None:
-        return self._close_error
-
-    def set_close_barrier(self, barrier: Callable[[], Awaitable[Any] | Any] | None) -> None:
-        self._close_barrier = barrier
-
-    async def try_set_close_barrier(self, barrier: Callable[[], Awaitable[Any] | Any] | None) -> bool:
-        async with self._close_lock:
-            if self._state is not LeaseState.OPEN:
-                return False
-            self._close_barrier = barrier
-            return True
-
-    async def close(self, *, notify: bool = True, deadline: float | None = None) -> None:
-        async with self._close_lock:
-            if self._state is LeaseState.CLOSED:
-                return
-            self._notify_on_close = self._notify_on_close or notify
-            task = self._close_task
-            if task is None:
-                self._state = LeaseState.CLOSING
-                task = asyncio.create_task(self._perform_close(), name="fleet-daytona-root-lease-close")
-                self._close_task = task
-        if deadline is None:
-            await asyncio.shield(task)
-            return
-        remaining = deadline - asyncio.get_running_loop().time()
-        if remaining <= 0:
-            raise TimeoutError("root Session lease close timed out")
-        await asyncio.wait_for(asyncio.shield(task), timeout=remaining)
-
-    async def _perform_close(self) -> None:
-        current = asyncio.current_task()
-        try:
-            if self._close_barrier is not None:
-                await await_cleanup(self._close_barrier)
-            result = await await_cleanup(self.release_callback, self.lease)
-            if _cleanup_failed(self.lease) or _cleanup_failed(result):
-                raise RuntimeError("root Session cleanup failed")
-        except BaseException as exc:
-            async with self._close_lock:
-                if self._close_task is current:
-                    self._state = LeaseState.FAILED
-                    self._close_error = exc
-                    self._close_task = None
-            raise
-
-        async with self._close_lock:
-            if self._close_task is not current:
-                return
-            self._state = LeaseState.CLOSED
-            self._close_error = None
-            self._close_task = None
-            notify = self._notify_on_close
-            self._notify_on_close = False
-        if notify and self.on_closed is not None:
-            with contextlib.suppress(BaseException):
-                await await_cleanup(self.on_closed, self)
-
-    async def release(self) -> None:
-        await self.close()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1518,80 +1330,29 @@ def _sandbox_id_or_none(sandbox: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
-_DEFERRED_CLOSE_TASKS: set[asyncio.Task[None]] = set()
-_PROVIDER_REQUEST_OWNERS: set[tuple[asyncio.Future[Any], SandboxLease]] = set()
-_CLOSE_TASK_OWNERS: set[tuple[asyncio.Future[Any], SandboxLease]] = set()
-_FAILED_LEASE_OWNERS: dict[int, SandboxLease] = {}
-_UNSCHEDULED_CLOSE_OWNERS: dict[
-    Future[Any], tuple[asyncio.AbstractEventLoop, Callable[[], Coroutine[Any, Any, Any]]]
-] = {}
-
-
-def _retain_close_task(task: asyncio.Future[Any], lease: SandboxLease) -> None:
-    entry = (task, lease)
-    _CLOSE_TASK_OWNERS.add(entry)
-
-    def settled(completed: asyncio.Future[Any]) -> None:
-        _CLOSE_TASK_OWNERS.discard(entry)
-        if not completed.cancelled():
-            with contextlib.suppress(BaseException):
-                completed.exception()
-
-    task.add_done_callback(settled)
-
-
-def has_pending_lease_ownership() -> bool:
-    """Return True if any lease task, provider request, or quarantined lease is unsettled."""
-    return bool(
-        any(not task.done() for task in _DEFERRED_CLOSE_TASKS)
-        or any(not task.done() for task, _ in _PROVIDER_REQUEST_OWNERS)
-        or any(not task.done() for task, _ in _CLOSE_TASK_OWNERS)
-        or _FAILED_LEASE_OWNERS
-        or _UNSCHEDULED_CLOSE_OWNERS
-    )
-
-
-async def wait_lease_ownership(*, timeout: float | None = None) -> bool:
-    tasks = tuple(
-        task
-        for task in (
-            *tuple(task for task in _DEFERRED_CLOSE_TASKS if not task.done()),
-            *tuple(task for task, _lease in _PROVIDER_REQUEST_OWNERS if not task.done()),
-            *tuple(task for task, _lease in _CLOSE_TASK_OWNERS if not task.done()),
-        )
-    )
-    if not tasks:
-        return not has_pending_lease_ownership()
-    if timeout is None:
-        await asyncio.gather(*(asyncio.shield(task) for task in tasks), return_exceptions=True)
-        return not has_pending_lease_ownership()
-    _, pending = await asyncio.wait(tasks, timeout=timeout)
-    return not pending and not has_pending_lease_ownership()
-
-
 class SandboxLease:
     """Owns one Sandbox handle and its confirmed, idempotent close."""
 
     def __init__(
         self,
         *,
-        kind: LeaseKind,
+        owner: DaytonaRuntime,
         sandbox: Any | None,
         sandbox_id: str | None = None,
         platform: SandboxPlatform | None = None,
         permit: DaytonaAdmissionPermit | None = None,
         interpreter: Any | None = None,
         purge: LeasePurgeHook | None = None,
-        policy: SandboxLeasePolicy | None = None,
+        policy: SandboxLeasePolicy,
     ) -> None:
-        self._policy = policy or SandboxLeasePolicy(kind=kind)
+        self._owner = owner
+        self._policy = policy
         self._sandbox = sandbox
         self._sandbox_id = sandbox_id or _sandbox_id_or_none(sandbox)
         self._platform = platform
         self._permit = permit
         self._interpreter = interpreter
         self._purge = purge
-        self._closed = False
         self._state = LeaseState.OPEN
         self._receipt: SandboxLeaseReceipt | None = None
         self._close_lock = asyncio.Lock()
@@ -1599,14 +1360,12 @@ class SandboxLease:
         self._interpreter_task: asyncio.Task[InterpreterCloseOutcome] | None = None
         self._deferred_close_task: asyncio.Task[None] | None = None
         self._provider_tasks: set[asyncio.Future[Any]] = set()
+        self._ownership_failed = False
+        owner._retain_sandbox_lease(self)
 
     @property
     def state(self) -> LeaseState:
         return self._state
-
-    @property
-    def closed(self) -> bool:
-        return self._closed
 
     @property
     def closing(self) -> bool:
@@ -1619,7 +1378,9 @@ class SandboxLease:
     @property
     def has_pending_ownership(self) -> bool:
         return bool(
-            any(not task.done() for task in self._provider_tasks)
+            self._ownership_failed
+            or (self._close_task is not None and not self._close_task.done())
+            or any(not task.done() for task in self._provider_tasks)
             or (self._deferred_close_task is not None and not self._deferred_close_task.done())
         )
 
@@ -1675,15 +1436,13 @@ class SandboxLease:
 
     def _retain_provider_task(self, task: asyncio.Future[Any]) -> None:
         self._provider_tasks.add(task)
-        _PROVIDER_REQUEST_OWNERS.add((task, self))
 
         def settled(completed: asyncio.Future[Any]) -> None:
             self._provider_tasks.discard(completed)
-            _PROVIDER_REQUEST_OWNERS.discard((completed, self))
-            if completed.cancelled():
-                return
-            with contextlib.suppress(BaseException):
-                completed.exception()
+            if not completed.cancelled():
+                with contextlib.suppress(BaseException):
+                    completed.exception()
+            self._owner._release_settled_sandbox_lease(self)
 
         task.add_done_callback(settled)
 
@@ -1852,6 +1611,23 @@ class SandboxLease:
                 if self._permit is not None:
                     self._permit.release()
                     self._permit = None
+                provider = replace(provider, error=None)
+                receipt = self._receipt
+                if receipt is not None:
+                    held = receipt.admission.held
+                    self._receipt = replace(
+                        receipt,
+                        provider=provider,
+                        admission=AdmissionOutcome(
+                            held=held,
+                            released=held,
+                            released_after="confirmed_cleanup" if held else "not_held",
+                        ),
+                        quarantine=QuarantineOutcome(),
+                        duration_s=receipt.duration_s + provider.duration_s,
+                        first_error=None,
+                    )
+                    self._state = LeaseState.CLOSED
                 return
             await asyncio.sleep(retry_delay)
 
@@ -1898,19 +1674,15 @@ class SandboxLease:
 
     def _retain_deferred_close(self, task: asyncio.Task[None]) -> None:
         self._deferred_close_task = task
-        _DEFERRED_CLOSE_TASKS.add(task)
 
         def settled(completed: asyncio.Task[None]) -> None:
-            _DEFERRED_CLOSE_TASKS.discard(completed)
             if completed.cancelled():
-                _FAILED_LEASE_OWNERS[id(self)] = self
-                return
-            with contextlib.suppress(BaseException):
-                error = completed.exception()
-            if error is None:
-                _FAILED_LEASE_OWNERS.pop(id(self), None)
+                self._ownership_failed = True
             else:
-                _FAILED_LEASE_OWNERS[id(self)] = self
+                with contextlib.suppress(BaseException):
+                    error = completed.exception()
+                self._ownership_failed = error is not None
+            self._owner._release_settled_sandbox_lease(self)
 
         task.add_done_callback(settled)
 
@@ -2082,12 +1854,10 @@ class SandboxLease:
         except BaseException:
             self._close_task = None
             self._state = LeaseState.FAILED
-            self._closed = False
             raise
         self._receipt = receipt
         self._close_task = None
         self._state = _receipt_state(receipt)
-        self._closed = True
         return receipt
 
     async def _run_async_close(self) -> SandboxLeaseReceipt:
@@ -2099,23 +1869,25 @@ class SandboxLease:
                 if self._close_task is current:
                     self._close_task = None
                     self._state = LeaseState.FAILED
-                    self._closed = False
             raise
         async with self._close_lock:
             if self._close_task is current:
                 self._receipt = receipt
                 self._close_task = None
                 self._state = _receipt_state(receipt)
-                self._closed = True
         return receipt
 
     async def aclose(self, *, deadline: float | None = None) -> SandboxLeaseReceipt:
         task: asyncio.Future[SandboxLeaseReceipt] | None = None
+        existing_receipt: SandboxLeaseReceipt | None = None
+        retry_task: asyncio.Task[None] | None = None
         async with self._close_lock:
             if self._receipt is not None:
-                return self._receipt
-            task = self._close_task
-            if task is None:
+                existing_receipt = self._receipt
+                retry_task = self._deferred_close_task
+            else:
+                task = self._close_task
+            if existing_receipt is None and task is None:
                 coroutine = self._run_async_close()
                 try:
                     task = asyncio.create_task(coroutine, name="fleet-sandbox-lease-close")
@@ -2125,9 +1897,11 @@ class SandboxLease:
                         loop=asyncio.get_running_loop(),
                         build=self._run_fallback_close,
                     )
+                    if execution.future.done():
+                        self._ownership_failed = True
                     task = asyncio.ensure_future(asyncio.wrap_future(execution.future))
                 self._close_task = task
-                _retain_close_task(task, self)
+                task.add_done_callback(self._settled_close_task)
                 self._state = LeaseState.CLOSING
                 if task.done() and self._receipt is None:
                     failed = task.cancelled()
@@ -2137,7 +1911,16 @@ class SandboxLease:
                     if failed:
                         self._close_task = None
                         self._state = LeaseState.FAILED
-                        self._closed = False
+        if existing_receipt is not None:
+            if retry_task is not None and not retry_task.done():
+                if deadline is None:
+                    await asyncio.shield(retry_task)
+                else:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        raise TimeoutError("Sandbox lease cleanup timed out")
+                    await asyncio.wait_for(asyncio.shield(retry_task), timeout=remaining)
+            return self._receipt or existing_receipt
         assert task is not None
         if deadline is None:
             return await asyncio.shield(task)
@@ -2175,6 +1958,12 @@ class SandboxLease:
                 return False
         return not self.has_pending_ownership
 
+    def _settled_close_task(self, completed: asyncio.Future[Any]) -> None:
+        if not completed.cancelled():
+            with contextlib.suppress(BaseException):
+                completed.exception()
+        self._owner._release_settled_sandbox_lease(self)
+
 
 @dataclass(slots=True)
 class OwnedCloseExecution:
@@ -2195,7 +1984,6 @@ def schedule_owned_close(
         if inspect.iscoroutine(coroutine):
             coroutine.close()
         failure: Future[Any] = Future()
-        _UNSCHEDULED_CLOSE_OWNERS[failure] = (loop, build)
         failure.set_exception(exc)
         return OwnedCloseExecution(future=failure)
 
@@ -2241,7 +2029,6 @@ class ChildRuntimeLease:
     _read_result_files: Callable[[Sequence[str]], Mapping[str, bytes]] | None = field(
         default=None, repr=False, kw_only=True
     )
-    _on_closed: Callable[[ChildRuntimeLease], None] | None = field(default=None, repr=False)
     _state: ChildRuntimeLeaseState = field(default=ChildRuntimeLeaseState.OPEN, init=False, repr=False)
     _close_error: BaseException | None = field(default=None, init=False, repr=False)
     _condition: Condition = field(default_factory=Condition, init=False, repr=False)
@@ -2318,8 +2105,6 @@ class ChildRuntimeLease:
                 self._state = ChildRuntimeLeaseState.CLOSED
                 self._closing_thread_id = None
                 self._condition.notify_all()
-            if self._on_closed is not None:
-                self._on_closed(self)
 
 
 class LateCleanupOwner:
@@ -2599,7 +2384,7 @@ def close_child_runtime_sync(
     mount_path: str | None,
     interpreter: Any,
     permit: DaytonaAdmissionPermit,
-    retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
+    retain_pending_cleanup: Callable[[Future[Any]], None],
     cleanup_result_timeout_s: float = CHILD_CLEANUP_RESULT_TIMEOUT_S,
     cleanup_child_runtime: Callable[..., Coroutine[Any, Any, None]] | None = None,
     confirm_timeout_s: float = CHILD_DELETE_CONFIRM_TIMEOUT_S,
@@ -2630,8 +2415,7 @@ def close_child_runtime_sync(
             raise ChildRuntimeCleanupError("recursive child interpreter shutdown failed") from shutdown_error
 
     execution = schedule_owned_close(loop=loop, build=close_on_owner_loop)
-    if retain_pending_cleanup is not None:
-        retain_pending_cleanup(execution.future)
+    retain_pending_cleanup(execution.future)
     try:
         execution.future.result(timeout=cleanup_result_timeout_s)
     except _CLEANUP_EXCEPTIONS as exc:
@@ -2647,7 +2431,7 @@ def _close_child_runtime_sync(
     mount_path: str | None,
     interpreter: Any,
     permit: Any,
-    retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
+    retain_pending_cleanup: Callable[[Future[Any]], None],
 ) -> None:
     close_child_runtime_sync(
         loop=loop,
@@ -2658,7 +2442,7 @@ def _close_child_runtime_sync(
         interpreter=interpreter,
         permit=permit,
         retain_pending_cleanup=retain_pending_cleanup,
-        cleanup_result_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S,
+        cleanup_result_timeout_s=CHILD_CLEANUP_RESULT_TIMEOUT_S,
     )
 
 
@@ -2780,95 +2564,6 @@ def require_authorized(is_authorized: Callable[[], bool] | None) -> None:
         raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
 
 
-def _build_child_runtime_factory(
-    *,
-    owner: DaytonaRuntime,
-    loop: asyncio.AbstractEventLoop,
-    dispatcher: SyncBridgeDispatcher | None = None,
-    platform: SandboxPlatform,
-    admission: DaytonaAdmission,
-    volume_id: str | None,
-    mount_path: str | None,
-    workspace_id: UUID,
-    run_id: UUID,
-    session_id: UUID | None = None,
-    deadline: float,
-    execution_timeout_s: int,
-    execution_output_cap: int,
-    is_authorized: Callable[[], bool] | None = None,
-    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
-    semantic_child_available: bool = True,
-) -> ChildRuntimeFactory:
-    late_owner = LateCleanupOwner(loop=loop, wait_timeout_s=_CHILD_CLEANUP_RESULT_TIMEOUT_S)
-
-    def create(
-        call_index: int,
-        *,
-        selected_profile: DaytonaEnvironmentProfile | str | None = None,
-    ) -> ChildRuntimeLease:
-        chosen_profile = selected_profile if selected_profile is not None else profile
-        if not isinstance(chosen_profile, DaytonaEnvironmentProfile):
-            chosen_profile = DaytonaEnvironmentProfile(str(chosen_profile))
-        if chosen_profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and not semantic_child_available:
-            raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
-        acquisition_coroutine = owner._acquire_child_runtime(
-            loop=loop,
-            dispatcher=dispatcher,
-            platform=platform,
-            admission=admission,
-            volume_id=volume_id,
-            mount_path=mount_path,
-            profile=chosen_profile,
-            workspace_id=workspace_id,
-            session_id=session_id,
-            run_id=run_id,
-            call_index=call_index,
-            deadline=deadline,
-            execution_timeout_s=execution_timeout_s,
-            execution_output_cap=execution_output_cap,
-            is_authorized=is_authorized,
-            retain_pending_cleanup=late_owner.retain,
-            interpreter_factory=DaytonaCodeInterpreter,
-            sandbox_backend_factory=sandbox_backend,
-            close_child_runtime=_close_child_runtime_sync,
-            cleanup_after_failed_acquire=cleanup_after_failed_acquire,
-        )
-        try:
-            acquisition = asyncio.run_coroutine_threadsafe(acquisition_coroutine, loop)
-        except BaseException as exc:
-            acquisition_coroutine.close()
-            raise ChildRuntimeCleanupError("recursive child runtime acquisition failed") from exc
-        try:
-            return acquisition.result(timeout=max(0.0, deadline - time.monotonic()))
-        except DaytonaAdmissionTimeoutError:
-            if time.monotonic() < deadline:
-                raise ChildRuntimeNotStartedError("child capacity is unavailable") from None
-            raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
-        except TimeoutError:
-            late_owner.adopt_late_acquisition(acquisition, lambda lease: lease.close())
-            raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
-
-    class Factory:
-        def __call__(
-            self,
-            call_index: int,
-            *,
-            profile: DaytonaEnvironmentProfile | str | None = None,
-        ) -> ChildRuntimeLease:
-            return create(call_index, selected_profile=profile)
-
-        def wait_owned(self) -> None:
-            late_owner.wait_owned()
-
-        def raise_if_cleanup_failed(self) -> None:
-            late_owner.raise_if_failed()
-
-        def has_unresolved(self) -> bool:
-            return late_owner.has_unresolved()
-
-    return Factory()
-
-
 _DAYTONA_CLOUD_API_URL = "https://app.daytona.io/api"
 
 
@@ -2961,13 +2656,6 @@ def _optional_text(value: Any) -> str | None:
     return text if text else None
 
 
-def _lease_fingerprint(lease: Any) -> object | None:
-    spec = getattr(lease, "spec", None)
-    if spec is not None and hasattr(spec, "context_fingerprint"):
-        return spec.context_fingerprint
-    return getattr(lease, "context_fingerprint", None)
-
-
 async def _maybe_await(value: Any) -> Any:
     if inspect.isawaitable(value):
         return await value
@@ -3001,47 +2689,6 @@ class RootSessionSpec:
     def fingerprint(self) -> object | None:
         """Alias for the context selector used for root reuse."""
         return self.context_fingerprint
-
-
-@dataclass(frozen=True, slots=True)
-class ChildEnvironmentSpec:
-    """Immutable selectors and bounds for one disposable child."""
-
-    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD
-    workspace_id: UUID | str | None = None
-    session_id: UUID | str | None = None
-    run_id: UUID | str | None = None
-    call_index: int = 0
-    volume_id: str | None = None
-    mount_path: str | None = None
-    volume_subpath: str | None = None
-    deadline: float | None = None
-    execution_timeout_s: int | None = None
-    execution_output_cap: int | None = None
-    is_authorized: Callable[[], bool] | None = None
-
-    def __post_init__(self) -> None:
-        profile = self.profile
-        if not isinstance(profile, DaytonaEnvironmentProfile):
-            try:
-                profile = DaytonaEnvironmentProfile(str(profile))
-            except ValueError as exc:
-                raise ValueError("unknown Daytona child environment profile") from exc
-            object.__setattr__(self, "profile", profile)
-        if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and (
-            self.volume_id or self.mount_path or self.volume_subpath
-        ):
-            raise ValueError("SemanticChild cannot carry a Workspace Volume binding")
-        if not isinstance(self.call_index, int) or isinstance(self.call_index, bool) or self.call_index < 0:
-            raise ValueError("call_index must be a non-negative integer")
-        if self.deadline is not None and not isinstance(self.deadline, (int, float)):
-            raise TypeError("deadline must be numeric or None")
-
-    @property
-    def key(self) -> tuple[str, str] | None:
-        if self.workspace_id is None or self.session_id is None:
-            return None
-        return (_identity_text(self.workspace_id, "workspace_id"), _identity_text(self.session_id, "session_id"))
 
 
 async def _close_child_lease(lease: Any) -> Any:
@@ -3091,154 +2738,16 @@ class DaytonaSessionRecord:
 
     workspace_id: str
     session_id: str
-    sandbox_id: str | None = None
-    volume_id: str | None = None
-    mount_path: str | None = None
-    volume_subpath: str | None = None
-    binding_generation: int = 0
-    active_invocation_id: str | None = None
+    root: InterpreterLease | None = None
     cleanup_state: SessionCleanupState = SessionCleanupState.ACTIVE
 
     @property
     def key(self) -> tuple[str, str]:
-        """Return the stable root registry key."""
+        """Return the stable Session resource key."""
         return (self.workspace_id, self.session_id)
-
-    def begin_invocation(self, invocation_id: str) -> None:
-        """Mark one invocation active; the Sandbox stays owned across it."""
-        if self.active_invocation_id is not None:
-            raise RuntimeError("session already has an active invocation")
-        self.active_invocation_id = invocation_id
-
-    def end_invocation(self, invocation_id: str) -> None:
-        """Release the invocation marker without retiring the Sandbox."""
-        if self.active_invocation_id != invocation_id:
-            raise RuntimeError("invocation marker does not match the active invocation")
-        self.active_invocation_id = None
-
-
-class ChildEnvironment:
-    """Async context-managed view over one strictly disposable child lease."""
-
-    def __init__(
-        self,
-        spec: ChildEnvironmentSpec,
-        lease: Any,
-        *,
-        sandbox: Any | None = None,
-        on_closed: Callable[[RootSessionLease], Any] | None = None,
-    ) -> None:
-        self.spec = spec
-        self.lease = lease
-        self.sandbox = sandbox if sandbox is not None else getattr(lease, "sandbox", None)
-        self.interpreter = getattr(lease, "interpreter", None)
-        sandbox_id = getattr(lease, "sandbox_id", None) or getattr(self.sandbox, "id", None)
-        self.sandbox_id = str(sandbox_id or "")
-        self.volume_id = _optional_text(getattr(lease, "volume_id", None)) or spec.volume_id
-        self.volume_subpath = _optional_text(getattr(lease, "volume_subpath", None)) or spec.volume_subpath
-        self.mount_path = _optional_text(getattr(lease, "mount_path", None)) or spec.mount_path
-        self._owner = RootSessionLease(
-            spec.key or ("child", str(spec.call_index)),
-            lease,
-            _close_child_lease,
-            on_closed=on_closed,
-            sandbox=self.sandbox,
-            interpreter=self.interpreter,
-            volume=self.volume_id,
-            volume_id=self.volume_id,
-            mount_path=self.mount_path,
-            volume_subpath=self.volume_subpath,
-        )
-
-    @property
-    def state(self) -> LeaseState:
-        return self._owner.state
-
-    @property
-    def status(self) -> LeaseState:
-        return self.state
-
-    @property
-    def closed(self) -> bool:
-        return self._owner.closed
-
-    @property
-    def closing(self) -> bool:
-        return self._owner.closing
-
-    @property
-    def failed(self) -> bool:
-        return self._owner.failed
-
-    @property
-    def close_error(self) -> BaseException | None:
-        return self._owner.close_error
-
-    async def close(self, *, deadline: float | None = None) -> None:
-        await self._owner.close(deadline=deadline)
-
-    async def __aenter__(self) -> ChildEnvironment:
-        if self.state is not LeaseState.OPEN:
-            raise RuntimeError("child environment is no longer open")
-        return self
-
-    async def __aexit__(self, _exc_type: Any, _exc: Any, _tb: Any) -> None:
-        await self.close(deadline=self.spec.deadline)
-
-
-class _ChildContext:
-    """One-shot context object usable both directly and after ``await``."""
-
-    def __init__(self, runtime: DaytonaRuntime, spec: ChildEnvironmentSpec) -> None:
-        self._runtime = runtime
-        self._spec = spec
-        self._entered = False
-        self._environment: ChildEnvironment | None = None
-
-    def __await__(self):
-        async def identity() -> _ChildContext:
-            return self
-
-        return identity().__await__()
-
-    async def __aenter__(self) -> ChildEnvironment:
-        if self._entered:
-            raise RuntimeError("child context cannot be entered twice")
-        self._entered = True
-        self._environment = await self._runtime._acquire_child(self._spec)
-        try:
-            return await self._environment.__aenter__()
-        except BaseException:
-            await self._environment.close()
-            raise
-
-    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
-        if self._environment is not None:
-            await self._environment.__aexit__(exc_type, exc, tb)
 
 
 logger = logging.getLogger(__name__)
-
-
-_PREWARM_CLAIM_WAIT_SECONDS = 60.0
-
-
-async def _claim_session_lease(
-    registry: ActiveLeaseRegistry, session_id: UUID, run_id: UUID, *, workspace_id: UUID, deadline: float
-) -> None:
-    loop = asyncio.get_running_loop()
-    claim_wait_deadline = loop.time() + _PREWARM_CLAIM_WAIT_SECONDS
-    while True:
-        try:
-            registry.acquire(session_id, run_id, workspace_id=workspace_id)
-            return
-        except ActiveLeaseConflictError as exc:
-            if run_id == PREWARM_RUN_ID or exc.holder_run_id != PREWARM_RUN_ID:
-                raise
-        remaining = min(deadline, claim_wait_deadline) - loop.time()
-        if remaining <= 0:
-            raise DaytonaLeaseAcquisitionTimeoutError("Daytona lease acquisition timed out") from None
-        await asyncio.sleep(min(0.2, remaining))
 
 
 def _retain_provider_task(task: asyncio.Future[Any], owner: set[asyncio.Future[Any]]) -> None:
@@ -3296,9 +2805,6 @@ async def _provider_call(
 async def _settle_provider_task(task: asyncio.Future[Any]) -> Any:
     await OwnedEffect.from_task(task).settle()
     return task.result()
-
-
-DEFAULT_IDLE_STOP_SECONDS = 300.0
 
 
 def _sandbox_id(sandbox: Any) -> str:
@@ -3372,6 +2878,7 @@ class _ChildCleanupRecord:
     sandbox_id: str
     mount_path: str | None
     permit: DaytonaAdmissionPermit
+    lease: ChildRuntimeLease | None = None
 
 
 class _ProviderCallDeadlineError(TimeoutError):
@@ -3398,35 +2905,21 @@ class DaytonaRuntime:
 
     def __init__(
         self,
-        resources: Any | None = None,
         *,
-        platform: Any = None,
-        volume_client: Any = None,
-        volume_config: Any = None,
-        bindings: Any = None,
+        platform: SandboxPlatform,
+        volume_client: VolumeClient,
+        volume_config: VolumeConfig,
+        bindings: BindingStoreLike,
+        sandbox_spec: DaytonaSandboxSpec,
+        client: Any,
         admission: DaytonaAdmission | None = None,
-        sandbox_spec: Any = None,
         cleanup: RunCleanupSupervisor | None = None,
         idle_stop_seconds: float | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
         dispatcher: SyncBridgeDispatcher | None = None,
-        root_acquirer: Callable[..., Any] | None = None,
-        root_factory: Callable[..., Any] | None = None,
-        root_releaser: Callable[..., Any] | None = None,
-        child_acquirer: Callable[..., Any] | None = None,
-        child_factory: Callable[..., Any] | None = None,
-        client: Any = None,
-        settings: Any = None,
     ) -> None:
-        self._resources = resources
-        self._root_acquirer = root_acquirer or root_factory
-        self._root_releaser = root_releaser
-        self._child_acquirer = child_acquirer or child_factory
-        self._roots: dict[tuple[str, str], RootSessionLease] = {}
         self._tainted: set[tuple[str, str]] = set()
-        self._children: set[ChildEnvironment] = set()
-        self._child_runtime_leases: set[ChildRuntimeLease] = set()
         self._child_cleanup_records: dict[str, _ChildCleanupRecord] = {}
         self._unidentified_child_sandboxes: list[tuple[SandboxPlatform, Any, DaytonaAdmissionPermit]] = []
         self._child_close_tasks: set[asyncio.Task[Any]] = set()
@@ -3434,6 +2927,7 @@ class DaytonaRuntime:
         self._workspace_io_leases: set[SandboxLease] = set()
         self._workspace_io_active: set[SandboxLease] = set()
         self._workspace_io_tasks: set[asyncio.Task[Any]] = set()
+        self._sandbox_leases: set[SandboxLease] = set()
         self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
         self._key_locks: dict[tuple[str, str], asyncio.Lock] = {}
@@ -3443,7 +2937,7 @@ class DaytonaRuntime:
         # Sandbox is released, stopped, or deleted and the durable binding
         # is fenced. A timed-out or cancelled create never loses ownership.
         self._late_tasks: set[asyncio.Task[Any]] = set()
-        self._late_roots: set[RootSessionLease] = set()
+        self._late_roots: dict[int, InterpreterLease] = {}
         self._acquisitions: set[asyncio.Task[Any]] = set()
         # Bounded provider-capacity admission owned by the runtime. The
         # semaphore is only held around provider operations, never across a
@@ -3470,34 +2964,21 @@ class DaytonaRuntime:
         self._idle_tasks: dict[tuple[UUID, UUID], asyncio.Task[None]] = {}
         self._owned_sandbox_ids: set[str] = set()
         self._owned_sandbox_lock = Lock()
-        self._release_tasks: set[asyncio.Task[None]] = set()
-        self._handled_release_tasks: set[asyncio.Task[None]] = set()
         self._release_leases: dict[asyncio.Task[None], InterpreterLease] = {}
         self._late_cleanup_tasks: set[Any] = set()
         self._late_owners: dict[int, _LateOwner] = {}
         self._provider_tasks: set[asyncio.Future[Any]] = set()
         self._client = client
-        self._settings = settings if settings is not None else getattr(resources, "settings", None)
         self._tracked_sandbox_ids: list[str] = []
         self._client_close_lock = Lock()
         self._client_close_task: asyncio.Task[Any] | None = None
         self._client_closed = False
-        self._provisioner = SandboxProvisioner(
-            platform=platform, volume_config=volume_config, sandbox_spec=sandbox_spec
-        )
-
-        if platform is not None:
-            self._root_acquirer = self._root_acquirer or self._acquire_from_resources
-            self._root_releaser = self._root_releaser or self._release_from_resources
-        if platform is not None or resources is not None:
-            self._child_acquirer = self._child_acquirer or self._acquire_child_from_resources
 
     @classmethod
     def from_settings(
         cls,
         settings: Settings,
         *,
-        environment_specs: dict[DaytonaEnvironmentProfile, DaytonaSandboxSpec],
         sandbox_spec: DaytonaSandboxSpec,
         bindings: BindingStoreLike,
         cleanup: RunCleanupSupervisor,
@@ -3508,6 +2989,18 @@ class DaytonaRuntime:
         dispatcher: SyncBridgeDispatcher | None,
     ) -> DaytonaRuntime:
         """Construct one process-owned SDK graph within the runtime boundary."""
+        environment_specs = {DaytonaEnvironmentProfile.SESSION: sandbox_spec}
+        if getattr(settings, "daytona_child_snapshot", None):
+            environment_specs[DaytonaEnvironmentProfile.SEMANTIC_CHILD] = sandbox_spec_from_settings(
+                settings,
+                DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+            )
+        environment_specs[DaytonaEnvironmentProfile.WORKSPACE_CHILD] = DaytonaSandboxSpec(
+            snapshot=sandbox_spec.snapshot,
+            python_version=sandbox_spec.python_version,
+            base_image=sandbox_spec.base_image,
+            profile=DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+        )
         client = build_daytona_client(settings)
         platform = LiveDaytonaPlatform(client, sandbox_spec, environment_specs)
         volume_client = LiveDaytonaVolumeClient(client)
@@ -3525,8 +3018,11 @@ class DaytonaRuntime:
             execution_timeout_s=execution_timeout_s,
             dispatcher=dispatcher,
             client=client,
-            settings=settings,
         )
+
+    @property
+    def volume_config(self) -> VolumeConfig:
+        return self._volume_config
 
     @property
     def state(self) -> DaytonaRuntimeState:
@@ -3534,34 +3030,35 @@ class DaytonaRuntime:
         return self._state
 
     @property
-    def roots(self) -> tuple[RootSessionLease, ...]:
+    def roots(self) -> tuple[InterpreterLease, ...]:
         """Return a view of retained root leases."""
-        return tuple(self._roots.values())
+        return tuple(record.root for record in self._records.values() if record.root is not None)
 
     def owns_open_root(self, workspace_id: UUID | str | None, session_id: UUID | str) -> bool:
         """Return True when an OPEN root retains this Session."""
         sid = _identity_text(session_id, "session_id")
         if workspace_id is not None:
             try:
-                owner = self._roots.get((_identity_text(workspace_id, "workspace_id"), sid))
+                record = self._records.get((_identity_text(workspace_id, "workspace_id"), sid))
             except ValueError:
-                owner = None
-            if owner is not None and not owner.closed:
+                record = None
+            if self._record_retains_root(record):
                 return True
         return any(
-            not owner.closed and isinstance(owner.key, tuple) and len(owner.key) > 1 and str(owner.key[1]) == sid
-            for owner in tuple(self._roots.values())
+            self._record_retains_root(record) and record.session_id == sid for record in tuple(self._records.values())
         )
 
-    @property
-    def children(self) -> tuple[ChildEnvironment, ...]:
-        """Return a view of currently owned disposable children."""
-        return tuple(self._children)
+    @staticmethod
+    def _record_retains_root(record: DaytonaSessionRecord | None) -> bool:
+        """Return whether a Session record still owns its provider Sandbox."""
+        return (
+            record is not None and record.root is not None and record.cleanup_state is not SessionCleanupState.RETIRED
+        )
 
     async def begin_root_invocation(
-        self, workspace_id: UUID, session_id: UUID, invocation_id: UUID, *, deadline: float
+        self, workspace_id: UUID, session_id: UUID, *, deadline: float
     ) -> Callable[[], None]:
-        """Serialize a root invocation and retain its bounded identity until release."""
+        """Serialize one invocation for a retained Session Sandbox."""
         if self._state is not DaytonaRuntimeState.OPEN:
             raise RuntimeError("Daytona runtime is not accepting invocations")
         key = (str(workspace_id), str(session_id))
@@ -3571,8 +3068,7 @@ class DaytonaRuntime:
         if self._state is not DaytonaRuntimeState.OPEN:
             gate.release()
             raise RuntimeError("Daytona runtime is not accepting invocations")
-        record = self._records.setdefault(key, DaytonaSessionRecord(*key))
-        record.begin_invocation(str(invocation_id))
+        self._records.setdefault(key, DaytonaSessionRecord(*key))
         released = False
 
         def release() -> None:
@@ -3580,7 +3076,6 @@ class DaytonaRuntime:
             if released:
                 return
             released = True
-            record.end_invocation(str(invocation_id))
             gate.release()
 
         return release
@@ -3592,7 +3087,14 @@ class DaytonaRuntime:
                 async with gate:
                     pass
 
-    async def acquire_root_session(self, spec: RootSessionSpec) -> RootSessionLease:
+    async def _release_root(self, lease: InterpreterLease, *, deadline: float | None) -> None:
+        if deadline is None:
+            await self.release(lease)
+            return
+        async with asyncio.timeout_at(deadline):
+            await self.release(lease)
+
+    async def acquire_root_session(self, spec: RootSessionSpec) -> InterpreterLease:
         """Acquire or reuse the root for ``(workspace_id, session_id)``."""
         if not isinstance(spec, RootSessionSpec):
             raise TypeError("spec must be RootSessionSpec")
@@ -3609,23 +3111,22 @@ class DaytonaRuntime:
         # unrelated session: only this key is serialized, and the global
         # registry lock is held solely for short state checks and installs.
         async with key_lock:
-            binding = None
-            if self._bindings is not None:
-                binding = await _provider_call(
-                    self._bindings.get(UUID(key[1])),
-                    deadline=spec.deadline,
-                    operation="binding lookup",
-                    owner=self._provider_tasks,
-                )
+            binding = await _provider_call(
+                self._bindings.get(UUID(key[1])),
+                deadline=spec.deadline,
+                operation="binding lookup",
+                owner=self._provider_tasks,
+            )
             async with self._lock:
                 if self._state is not DaytonaRuntimeState.OPEN:
                     raise RuntimeError("Daytona runtime is not accepting root Sessions")
-                current = self._roots.get(key)
+                record = self._records.get(key)
+                current = record.root if record is not None else None
                 must_replace = current is not None and (
                     current.state is not LeaseState.OPEN
                     or key in self._tainted
                     or spec.force_new
-                    or _lease_fingerprint(current) != spec.context_fingerprint
+                    or current.context_fingerprint != spec.context_fingerprint
                     or (
                         binding is not None
                         and (
@@ -3643,38 +3144,35 @@ class DaytonaRuntime:
                 binding_changed = (
                     current is not None
                     and binding is not None
-                    and (
-                        binding.sandbox_id != current.sandbox_id
-                        or binding.generation != getattr(current.lease, "binding_generation", None)
-                    )
+                    and (binding.sandbox_id != current.sandbox_id or binding.generation != current.binding_generation)
                 )
                 if current is not None and not must_replace and not binding_changed:
                     return current
                 stale = current if must_replace or binding_changed else None
 
             if stale is not None:
-                await stale.close(notify=False, deadline=spec.deadline)
+                await self._release_root(stale, deadline=spec.deadline)
                 async with self._lock:
-                    if self._roots.get(key) is stale:
-                        self._roots.pop(key, None)
+                    record = self._records.get(key)
+                    if record is not None and record.root is stale:
+                        record.root = None
+                        record.cleanup_state = SessionCleanupState.RETIRED
 
             try:
-                raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
+                owner = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
             except Exception as exc:
                 mapped = map_daytona_sdk_error(exc)
                 if mapped is exc:
                     raise
                 raise mapped from exc
-            owner = self._coerce_root(spec, raw)
             async with self._lock:
                 if self._state is DaytonaRuntimeState.OPEN:
-                    self._roots[key] = owner
                     self._tainted.discard(key)
                     self._sync_record(key, owner)
                     return owner
-                self._late_roots.add(owner)
-            await owner.close()
-            self._late_roots.discard(owner)
+                self._late_roots[id(owner)] = owner
+            await self._release_root(owner, deadline=None)
+            self._late_roots.pop(id(owner), None)
             raise RuntimeError("Daytona runtime closed during root acquisition")
 
     async def discard_stale_root_session(
@@ -3692,19 +3190,20 @@ class DaytonaRuntime:
         """
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
         async with self._lock:
-            owner = self._roots.get(key)
+            record = self._records.get(key)
+            owner = record.root if record is not None else None
             if owner is None:
                 return
             self._mark_record(key, SessionCleanupState.RELEASING)
         try:
-            await owner.close(notify=False, deadline=deadline)
+            await self._release_root(owner, deadline=deadline)
         except BaseException:
             async with self._lock:
                 self._mark_record(key, SessionCleanupState.UNRESOLVED)
             raise
         async with self._lock:
-            if self._roots.get(key) is owner:
-                self._roots.pop(key, None)
+            if record is not None and record.root is owner:
+                record.root = None
             self._mark_record(key, SessionCleanupState.RETIRED)
 
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
@@ -3721,9 +3220,7 @@ class DaytonaRuntime:
     def has_pending_ownership(self) -> bool:
         """Whether roots, children, or late acquisitions remain unsettled."""
         return bool(
-            self._roots
-            or self._children
-            or self._child_runtime_leases
+            any(record.root is not None for record in self._records.values())
             or self._child_cleanup_records
             or self._unidentified_child_sandboxes
             or self._child_factories
@@ -3736,27 +3233,32 @@ class DaytonaRuntime:
             or self._acquisitions
             or any(gate.locked() for gate in self._invocation_gates.values())
             or self._owned_sandbox_ids
+            or any(
+                lease.state in {LeaseState.OPEN, LeaseState.CLOSING} or lease.has_pending_ownership
+                for lease in self._sandbox_leases
+            )
             or self._late_owners
             or self._late_cleanup_tasks
-            or any(not lease._released for lease in self._release_leases.values())
+            or any(not lease.closed for lease in self._release_leases.values())
             or any(not task.done() for task in self._provider_tasks)
-            or any(not task.done() for task in self._release_tasks)
+            or any(not task.done() for task in self._release_leases)
             or any(not task.done() for task in self._idle_tasks.values())
         )
 
-    def _sync_record(self, key: tuple[str, str], owner: RootSessionLease) -> None:
-        """Refresh the resource record from the installed root lease."""
+    def _retain_sandbox_lease(self, lease: SandboxLease) -> None:
+        self._sandbox_leases.add(lease)
+
+    def _release_settled_sandbox_lease(self, lease: SandboxLease) -> None:
+        if lease.state is not LeaseState.OPEN and not lease.has_pending_ownership:
+            self._sandbox_leases.discard(lease)
+
+    def _sync_record(self, key: tuple[str, str], owner: InterpreterLease) -> None:
+        """Install the root in its single authoritative Session record."""
         record = self._records.get(key)
         if record is None:
             record = DaytonaSessionRecord(workspace_id=key[0], session_id=key[1])
             self._records[key] = record
-        record.sandbox_id = str(owner.sandbox_id or "") or None
-        record.volume_id = owner.volume_id
-        record.mount_path = owner.mount_path
-        record.volume_subpath = owner.volume_subpath
-        generation = getattr(getattr(owner, "lease", None), "binding_generation", None)
-        if isinstance(generation, int) and not isinstance(generation, bool):
-            record.binding_generation = generation
+        record.root = owner
         record.cleanup_state = SessionCleanupState.ACTIVE
 
     def _mark_record(self, key: tuple[str, str], state: SessionCleanupState) -> None:
@@ -3764,34 +3266,27 @@ class DaytonaRuntime:
         if record is not None:
             record.cleanup_state = state
 
-    def _retain_late_acquisition(self, spec: RootSessionSpec, acquisition: asyncio.Task[Any]) -> None:
+    def _retain_late_acquisition(self, acquisition: asyncio.Task[InterpreterLease]) -> None:
         """Retain the actual provider operation and close its unpublished result."""
 
         async def settle() -> None:
             try:
-                raw = await asyncio.shield(acquisition)
+                owner = await asyncio.shield(acquisition)
             except BaseException:
                 # Provider failure has no returned lease. The provider's
                 # acquisition path retains any partially created resource.
                 return
-            owner = self._coerce_root(spec, raw)
-            self._late_roots.add(owner)
+            self._late_roots[id(owner)] = owner
             try:
-                await owner.close()
+                await self._release_root(owner, deadline=None)
             except BaseException:
                 # Keep the concrete lease for shutdown retry.
                 return
-            self._late_roots.discard(owner)
+            self._late_roots.pop(id(owner), None)
 
         task = asyncio.create_task(settle(), name="fleet-daytona-late-acquisition-cleanup")
         self._late_tasks.add(task)
         task.add_done_callback(self._late_tasks.discard)
-
-    def open_child(self, spec: ChildEnvironmentSpec) -> _ChildContext:
-        """Return a disposable child context."""
-        if not isinstance(spec, ChildEnvironmentSpec):
-            raise TypeError("spec must be ChildEnvironmentSpec")
-        return _ChildContext(self, spec)
 
     async def close_root_session(
         self,
@@ -3803,13 +3298,14 @@ class DaytonaRuntime:
         """Close one retained root."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
         async with self._lock:
-            owner = self._roots.get(key)
+            record = self._records.get(key)
+            owner = record.root if record is not None else None
         if owner is None:
             return
         async with self._lock:
             self._mark_record(key, SessionCleanupState.RELEASING)
         try:
-            await owner.close(deadline=deadline)
+            await self._release_root(owner, deadline=deadline)
         except BaseException:
             async with self._lock:
                 self._mark_record(key, SessionCleanupState.UNRESOLVED)
@@ -3874,9 +3370,10 @@ class DaytonaRuntime:
             await asyncio.wait(acquisitions, timeout=timeout)
 
         async with self._lock:
-            children = tuple(self._children)
-            child_runtime_leases = tuple(self._child_runtime_leases)
-            roots = tuple(self._roots.values())
+            child_runtime_leases = tuple(
+                record.lease for record in self._child_cleanup_records.values() if record.lease is not None
+            )
+            roots = tuple((record.key, record.root) for record in self._records.values() if record.root is not None)
 
         for lease in child_runtime_leases:
             if lease.state is ChildRuntimeLeaseState.FAILED:
@@ -3893,37 +3390,25 @@ class DaytonaRuntime:
                     task.result()
             if pending_child_closes:
                 return False
-            self._child_runtime_leases = {
-                lease
-                for lease in self._child_runtime_leases
-                if lease.state is not ChildRuntimeLeaseState.CLOSED and lease.sandbox_id in self._child_cleanup_records
-            }
 
         await self._retry_child_cleanup_records(deadline=deadline)
 
-        for child in children:
+        for key, root in roots:
+            assert root is not None
             try:
-                await child.close(deadline=deadline)
-            except BaseException as exc:
-                errors.append(exc)
-            else:
-                if child.closed:
-                    async with self._lock:
-                        self._children.discard(child)
-
-        for root in roots:
-            try:
-                await root.close(deadline=deadline)
+                async with asyncio.timeout_at(deadline):
+                    await self.release(root)
             except BaseException as exc:
                 errors.append(exc)
                 async with self._lock:
-                    self._mark_record(root.key, SessionCleanupState.UNRESOLVED)
+                    self._mark_record(key, SessionCleanupState.UNRESOLVED)
             else:
                 if root.closed:
                     async with self._lock:
-                        if self._roots.get(root.key) is root:
-                            self._roots.pop(root.key, None)
-                        self._mark_record(root.key, SessionCleanupState.RETIRED)
+                        record = self._records.get(key)
+                        if record is not None and record.root is root:
+                            record.root = None
+                        self._mark_record(key, SessionCleanupState.RETIRED)
 
         # Drain concrete late acquisitions without cancelling provider work.
         async with self._lock:
@@ -3940,13 +3425,14 @@ class DaytonaRuntime:
         else:
             late_pending = []
 
-        for owner in tuple(self._late_roots):
+        for owner in tuple(self._late_roots.values()):
             try:
-                await owner.close(deadline=deadline)
+                async with asyncio.timeout_at(deadline):
+                    await self.release(owner)
             except BaseException as exc:
                 errors.append(exc)
             else:
-                self._late_roots.discard(owner)
+                self._late_roots.pop(id(owner), None)
 
         provider_settled = await self._drain_provider_ownership(
             drain_seconds=max(0.0, deadline - asyncio.get_running_loop().time())
@@ -3961,7 +3447,7 @@ class DaytonaRuntime:
 
     def _workspace_io_lease(self, sandbox: Any, permit: DaytonaAdmissionPermit) -> SandboxLease:
         lease = SandboxLease(
-            kind="volume_io",
+            owner=self,
             sandbox=sandbox,
             sandbox_id=getattr(sandbox, "id", None),
             platform=self._platform,
@@ -4011,16 +3497,17 @@ class DaytonaRuntime:
         """Own one temporary mounted Sandbox through confirmed remote cleanup."""
         if self._state is not DaytonaRuntimeState.OPEN:
             raise RuntimeError("Daytona runtime is not accepting Workspace I/O")
-        if self._volume_client is None or self._volume_config is None or self._platform is None:
-            raise RuntimeError("Daytona Workspace I/O is not configured")
-        volume_id = await get_or_create_volume_id(self._volume_client, self._volume_config)
-        expected = self._provisioner.expected_mount(volume_id=volume_id, workspace_id=workspace_id)
+        platform = self._platform
+        volume_config = self._volume_config
+        volume_id = await get_or_create_volume_id(self._volume_client, volume_config)
+        expected = _expected_workspace_mount(volume_config, volume_id, workspace_id)
         permit = await self._admission.acquire(deadline=float("inf"), host_io=True)
         if self._state is not DaytonaRuntimeState.OPEN:
             permit.release()
             raise RuntimeError("Daytona runtime closed during Workspace I/O admission")
         create_task = asyncio.create_task(
-            self._provisioner.create(
+            _create_daytona_sandbox(
+                platform,
                 expected,
                 labels={"fleet-package": "fleet_rlm", "purpose": purpose, "workspace_id": str(workspace_id)},
                 ephemeral=True,
@@ -4047,8 +3534,9 @@ class DaytonaRuntime:
             await sandbox.refresh_data()
             if sandbox_state(sandbox) != "running":
                 raise RuntimeError("Workspace I/O Sandbox did not reach running state")
-            self._provisioner.verify(sandbox, expected)
-            await ensure_shared_volume_layout(sandbox, self._volume_config.paths())
+            verify_sandbox_workspace_mount(sandbox, expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
+            await ensure_shared_volume_layout(sandbox, volume_config.paths())
             self._workspace_io_active.add(lease)
             yield sandbox
         finally:
@@ -4124,12 +3612,24 @@ class DaytonaRuntime:
             or any(not task.done() for task in self._workspace_io_tasks)
             or any(not task.done() for task in self._provider_tasks)
             or (self._client_close_task is not None and not self._client_close_task.done())
+            or self.has_pending_ownership
         )
 
     async def wait_pending_cleanup(self, *, timeout: float | None = None) -> bool:
+        lease_tasks = tuple(
+            task
+            for lease in self._sandbox_leases
+            for task in (lease._close_task, lease._deferred_close_task, *tuple(lease._provider_tasks))
+            if task is not None and not task.done()
+        )
         tasks = tuple(
             task
-            for task in (*self._workspace_io_tasks, *self._provider_tasks, self._client_close_task)
+            for task in (
+                *self._workspace_io_tasks,
+                *self._provider_tasks,
+                *lease_tasks,
+                self._client_close_task,
+            )
             if task is not None and not task.done()
         )
         if tasks:
@@ -4154,28 +3654,31 @@ class DaytonaRuntime:
     async def close(self, *, deadline: float | None = None) -> bool:
         return await self.aclose(deadline=deadline)
 
-    async def _acquire_root_from_provider(self, spec: RootSessionSpec, *, force_new: bool) -> Any:
+    async def _acquire_root_from_provider(self, spec: RootSessionSpec, *, force_new: bool) -> InterpreterLease:
         if spec.deadline is not None and spec.deadline <= asyncio.get_running_loop().time():
             raise TimeoutError("root Session acquisition timed out")
-        acquirer = self._root_acquirer
-        if acquirer is None:
-            raise RuntimeError("no root acquirer configured")
 
-        async def _call() -> Any:
+        async def _call() -> InterpreterLease:
             # Capacity is admitted only around this provider operation.
             # The registry lock is not held here (acquire_root_session
             # releases it before this call), so one session's network wait
             # never blocks an unrelated session's registry access.
             async with _admitted(self._capacity, spec.deadline):
-                try:
-                    sig = inspect.signature(acquirer)
-                except (TypeError, ValueError):
-                    sig = None
-                if sig is not None and "force_new" in sig.parameters:
-                    res = acquirer(spec, force_new=force_new)
-                else:
-                    res = acquirer(spec)
-                return await _maybe_await(res)
+                lease = await self.acquire(
+                    LeaseRequest(
+                        session_id=_coerce_uuid(spec.session_id, "session_id"),
+                        user_id=_coerce_uuid(spec.user_id or uuid4(), "user_id"),
+                        workspace_id=_coerce_uuid(spec.workspace_id, "workspace_id"),
+                        run_id=_coerce_uuid(spec.run_id, "run_id") if spec.run_id is not None else None,
+                    ),
+                    deadline=spec.deadline if spec.deadline is not None else float("inf"),
+                    force_new=force_new,
+                )
+                if lease.sandbox is None:
+                    await self.release(lease)
+                    raise RuntimeError("acquired Daytona Sandbox is unavailable")
+                lease.context_fingerprint = spec.context_fingerprint
+                return lease
 
         acquisition = asyncio.create_task(_call(), name="fleet-daytona-root-acquisition")
         self._acquisitions.add(acquisition)
@@ -4185,122 +3688,10 @@ class DaytonaRuntime:
             remaining = max(0.0, spec.deadline - asyncio.get_running_loop().time())
             return await asyncio.wait_for(asyncio.shield(acquisition), timeout=remaining)
         except (TimeoutError, asyncio.CancelledError):
-            self._retain_late_acquisition(spec, acquisition)
+            self._retain_late_acquisition(acquisition)
             raise
         finally:
             self._acquisitions.discard(acquisition)
-
-    def _coerce_root(self, spec: RootSessionSpec, raw: Any) -> RootSessionLease:
-        sandbox: Any | None = None
-        candidate = raw
-        if isinstance(raw, tuple) and len(raw) == 2:
-            candidate, sandbox = raw
-        if isinstance(candidate, RootSessionLease):
-            candidate.spec = spec
-            candidate.key = spec.key
-            if sandbox is not None:
-                candidate.sandbox = sandbox
-            return candidate
-
-        releaser = self._root_releaser
-        if releaser is None:
-            release_method = getattr(candidate, "release", None)
-            if not callable(release_method):
-                release_method = getattr(candidate, "close", None)
-            if not callable(release_method):
-                raise TypeError("root acquisition did not return a releasable lease")
-
-            async def releaser(_lease: Any) -> Any:
-                return await _maybe_await(release_method())
-
-        return RootSessionLease(
-            spec.key,
-            candidate,
-            releaser,
-            spec=spec,
-            sandbox=sandbox,
-            interpreter=getattr(candidate, "interpreter", None),
-            broker=getattr(candidate, "broker", None),
-            volume=getattr(candidate, "volume", None),
-            volume_id=getattr(candidate, "volume_id", None),
-            mount_path=getattr(candidate, "mount_path", None),
-            volume_subpath=getattr(candidate, "volume_subpath", None),
-        )
-
-    async def _acquire_child(self, spec: ChildEnvironmentSpec) -> ChildEnvironment:
-        if self._state is not DaytonaRuntimeState.OPEN:
-            raise RuntimeError("Daytona runtime is not accepting child Environments")
-        acquirer = self._child_acquirer
-        if acquirer is None:
-            raise RuntimeError("Daytona child acquisition is unavailable")
-        if spec.deadline is not None and spec.deadline <= asyncio.get_running_loop().time():
-            raise TimeoutError("child Environment acquisition timed out")
-
-        async def _call() -> Any:
-            res = acquirer(spec)
-            return await _maybe_await(res)
-
-        if spec.deadline is None:
-            raw = await _call()
-        else:
-            remaining = max(0.0, spec.deadline - asyncio.get_running_loop().time())
-            raw = await asyncio.wait_for(_call(), timeout=remaining)
-
-        environment = self._coerce_child(spec, raw)
-        async with self._lock:
-            environment._owner.on_closed = self._deregister_child
-            self._children.add(environment)
-            self._sync_child_record(environment)
-        return environment
-
-    def _coerce_child(self, spec: ChildEnvironmentSpec, raw: Any) -> ChildEnvironment:
-        sandbox: Any | None = None
-        candidate = raw
-        if isinstance(raw, tuple) and len(raw) == 2:
-            candidate, sandbox = raw
-        if isinstance(candidate, ChildEnvironment):
-            return candidate
-        return ChildEnvironment(spec, candidate, sandbox=sandbox)
-
-    def _sync_child_record(self, environment: ChildEnvironment) -> None:
-        """Refresh the runtime-owned record for one disposable child lease."""
-        spec = environment.spec
-        if spec.workspace_id is None or spec.session_id is None:
-            return
-        key = (
-            _identity_text(spec.workspace_id, "workspace_id"),
-            _identity_text(spec.session_id, "session_id"),
-        )
-        record = self._records.get(key)
-        if record is None:
-            record = DaytonaSessionRecord(workspace_id=key[0], session_id=key[1])
-            self._records[key] = record
-        # A child record never replaces root Sandbox/Volume ownership; it only
-        # tracks the disposable lease's cleanup position. Child reasoning
-        # lives in rlm/recursion.py and requests leases here.
-        record.cleanup_state = SessionCleanupState.ACTIVE
-
-    async def _deregister_child(self, owner: RootSessionLease) -> None:
-        """Forget a child only after its provider cleanup has succeeded."""
-        async with self._lock:
-            self._children = {child for child in self._children if child._owner is not owner}
-
-    async def _acquire_from_resources(self, spec: RootSessionSpec, *, force_new: bool = False, **_kwargs: Any) -> Any:
-        request = LeaseRequest(
-            session_id=_coerce_uuid(spec.session_id, "session_id"),
-            user_id=_coerce_uuid(spec.user_id or uuid4(), "user_id"),
-            workspace_id=_coerce_uuid(spec.workspace_id, "workspace_id"),
-            run_id=_coerce_uuid(spec.run_id, "run_id") if spec.run_id is not None else None,
-        )
-        deadline = spec.deadline if spec.deadline is not None else float("inf")
-        lease = await self.acquire(request, deadline=deadline, force_new=force_new)
-        sandbox = lease.sandbox
-        if sandbox is None:
-            raise RuntimeError("acquired Daytona Sandbox is unavailable")
-        return lease, sandbox
-
-    async def _release_from_resources(self, lease: Any) -> Any:
-        return await self.release(lease)
 
     def _retain_child_task(self, task: asyncio.Task[Any]) -> None:
         self._child_close_tasks.add(task)
@@ -4317,9 +3708,6 @@ class DaytonaRuntime:
         record = self._child_cleanup_records.get(sandbox_id)
         if record is not None and record.permit._released:
             self._child_cleanup_records.pop(sandbox_id, None)
-            self._child_runtime_leases = {
-                lease for lease in self._child_runtime_leases if lease.sandbox_id != sandbox_id
-            }
 
     def _adopt_late_child_create(
         self,
@@ -4395,10 +3783,6 @@ class DaytonaRuntime:
     async def _acquire_child_runtime(
         self,
         *,
-        loop: asyncio.AbstractEventLoop,
-        dispatcher: Any = None,
-        platform: SandboxPlatform,
-        admission: DaytonaAdmission,
         volume_id: str | None,
         mount_path: str | None,
         profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
@@ -4409,18 +3793,14 @@ class DaytonaRuntime:
         deadline: float,
         execution_timeout_s: int,
         execution_output_cap: int,
+        retain_pending_cleanup: Callable[[Future[Any]], None],
         is_authorized: Callable[[], bool] | None = None,
-        retain_pending_cleanup: Callable[[Future[Any]], None] | None = None,
-        interpreter_factory: Callable[..., Any] = DaytonaCodeInterpreter,
-        sandbox_backend_factory: Callable[..., Any] = sandbox_backend,
-        close_child_runtime: Callable[..., None] = _close_child_runtime_sync,
-        cleanup_after_failed_acquire: Callable[..., Any] = cleanup_after_failed_acquire,
-        sandbox_id_for_fn: Callable[[Any], str] | None = None,
-        require_authorized_fn: Callable[[Callable[[], bool] | None], None] | None = None,
     ) -> ChildRuntimeLease:
-        sandbox_id_resolver = sandbox_id_for_fn or sandbox_id_for
-        authorization_check = require_authorized_fn or require_authorized
-        authorization_check(is_authorized)
+        loop = asyncio.get_running_loop()
+        platform = self._platform
+        admission = self._admission
+        dispatcher = self._dispatcher
+        require_authorized(is_authorized)
         if not isinstance(profile, DaytonaEnvironmentProfile):
             profile = DaytonaEnvironmentProfile(str(profile))
         semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
@@ -4443,7 +3823,7 @@ class DaytonaRuntime:
         # paths from FLEET_RUN_SCRATCH.
         child_files_path = scratch_path
         try:
-            authorization_check(is_authorized)
+            require_authorized(is_authorized)
             labels = {"fleet.runtime": "recursive-child"}
             if semantic:
                 labels["fleet.profile"] = profile.value
@@ -4472,12 +3852,12 @@ class DaytonaRuntime:
                 )
                 permit = None
                 raise
-            sandbox_id = sandbox_id_resolver(sandbox)
+            sandbox_id = sandbox_id_for(sandbox)
             child_sandbox_id = sandbox_id
             self._child_cleanup_records[child_sandbox_id] = _ChildCleanupRecord(
                 platform, sandbox, child_sandbox_id, None if semantic else scratch_path, permit
             )
-            authorization_check(is_authorized)
+            require_authorized(is_authorized)
             if not semantic:
                 fs = _sandbox_filesystem(sandbox)
                 await _ensure_directories(
@@ -4489,8 +3869,8 @@ class DaytonaRuntime:
                         scratch_path,
                     ),
                 )
-            interpreter = interpreter_factory(
-                backend=sandbox_backend_factory(
+            interpreter = DaytonaCodeInterpreter(
+                backend=sandbox_backend(
                     sandbox,
                     loop=loop,
                     dispatcher=dispatcher,
@@ -4509,7 +3889,7 @@ class DaytonaRuntime:
                 return future.result(timeout=max(0.0, deadline - time.monotonic()))
 
             def stage_child_files(files: Mapping[str, bytes]) -> None:
-                validated = _validate_child_file_mapping(files, max_bytes=_CHILD_STAGE_MAX_BYTES)
+                validated = _validate_child_file_mapping(files, max_bytes=_PROVIDER_CHILD_STAGE_MAX_BYTES)
 
                 async def stage() -> None:
                     fs = _sandbox_filesystem(sandbox)
@@ -4568,7 +3948,7 @@ class DaytonaRuntime:
                                 raise ValueError("child result files exceed the configured size limit")
                         content = await read_file(sandbox, target)
                         total += len(content)
-                        if len(content) > _CHILD_STAGE_MAX_BYTES or total > _CHILD_RESULT_MAX_BYTES:
+                        if len(content) > _PROVIDER_CHILD_STAGE_MAX_BYTES or total > _CHILD_RESULT_MAX_BYTES:
                             raise ValueError("child result files exceed the configured size limit")
                         output[relative] = content
                     return output
@@ -4577,7 +3957,7 @@ class DaytonaRuntime:
 
             def close() -> None:
                 try:
-                    close_child_runtime(
+                    _close_child_runtime_sync(
                         loop=loop,
                         platform=platform,
                         sandbox=sandbox,
@@ -4622,67 +4002,73 @@ class DaytonaRuntime:
                     self._forget_child_cleanup_if_settled(sandbox_id)
             raise
 
-    async def _acquire_child_from_resources(self, spec: ChildEnvironmentSpec, **_kwargs: Any) -> Any:
-        resources = self._resources
-        platform = self._platform or getattr(resources, "platform", None)
-        admission = self._admission
-        if platform is None or admission is None:
-            raise RuntimeError("Daytona child specification is incomplete")
-        if spec.workspace_id is None or spec.run_id is None:
-            raise RuntimeError("Daytona child specification is incomplete")
-        if spec.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD and (
-            not spec.volume_id or not spec.mount_path or spec.session_id is None
-        ):
-            raise RuntimeError("WorkspaceChild specification requires a Volume binding")
-
+    def build_child_factory(
+        self,
+        *,
+        volume_id: str | None,
+        mount_path: str | None,
+        workspace_id: UUID,
+        run_id: UUID,
+        deadline: float,
+        execution_timeout_s: int,
+        execution_output_cap: int,
+        session_id: UUID | None = None,
+        is_authorized: Callable[[], bool] | None = None,
+        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+        semantic_child_available: bool = True,
+    ) -> Callable[..., Any]:
+        """Build one synchronous recursion factory owned by this runtime."""
         loop = asyncio.get_running_loop()
-        settings = self._settings
-        factory = self.build_child_factory(
-            loop=loop,
-            dispatcher=self._dispatcher,
-            platform=platform,
-            admission=admission,
-            volume_id=spec.volume_id,
-            mount_path=spec.mount_path,
-            workspace_id=_coerce_uuid(spec.workspace_id, "workspace_id"),
-            session_id=(_coerce_uuid(spec.session_id, "session_id") if spec.session_id is not None else None),
-            run_id=_coerce_uuid(spec.run_id, "run_id"),
-            deadline=spec.deadline if spec.deadline is not None else float("inf"),
-            execution_timeout_s=(
-                spec.execution_timeout_s
-                if spec.execution_timeout_s is not None
-                else execution_timeout_s_from_settings(settings)
-            ),
-            execution_output_cap=(
-                spec.execution_output_cap
-                if spec.execution_output_cap is not None
-                else getattr(settings, "rlm_max_execution_output_chars", DEFAULT_EXECUTION_OUTPUT_CHARS)
-            ),
-            is_authorized=spec.is_authorized,
-            profile=spec.profile,
-        )
-        return await asyncio.to_thread(factory, spec.call_index)
-
-    def build_child_factory(self, **options: Any) -> ChildRuntimeFactory:
-        """Build a synchronous recursion factory whose leases remain runtime-owned."""
-        loop = options.pop("loop", None) or asyncio.get_running_loop()
         self._application_loop = loop
-        options.setdefault("platform", self._platform)
-        options.setdefault("admission", self._admission)
-        options.setdefault("dispatcher", self._dispatcher)
-        provider_factory = cast(Any, _build_child_runtime_factory(owner=self, loop=loop, **options))
+        late_owner = LateCleanupOwner(loop=loop, wait_timeout_s=CHILD_CLEANUP_RESULT_TIMEOUT_S)
+        runtime = self
 
         class RuntimeChildFactory:
-            def __call__(self, call_index: int, *, profile: Any = None) -> Any:
-                if self_runtime._state is not DaytonaRuntimeState.OPEN:
+            def __call__(
+                self,
+                call_index: int,
+                *,
+                profile: DaytonaEnvironmentProfile | str | None = None,
+            ) -> ChildRuntimeLease:
+                if runtime._state is not DaytonaRuntimeState.OPEN:
                     raise RuntimeError("Daytona runtime is not accepting child leases")
-                lease = provider_factory(call_index, profile=profile)
-                lease._on_closed = self_runtime._child_lease_closed
-                registration = asyncio.run_coroutine_threadsafe(self_runtime._register_child_lease(lease), loop)
-                configured_deadline = float(options.get("deadline", float("inf")))
-                timeout = max(0.0, configured_deadline - loop.time()) if math.isfinite(configured_deadline) else None
+                selected_profile = profile if profile is not None else profile_default
+                if not isinstance(selected_profile, DaytonaEnvironmentProfile):
+                    selected_profile = DaytonaEnvironmentProfile(str(selected_profile))
+                if selected_profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD and not semantic_child_available:
+                    raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
+                acquisition_coroutine = runtime._acquire_child_runtime(
+                    volume_id=volume_id,
+                    mount_path=mount_path,
+                    profile=selected_profile,
+                    workspace_id=workspace_id,
+                    session_id=session_id,
+                    run_id=run_id,
+                    call_index=call_index,
+                    deadline=deadline,
+                    execution_timeout_s=execution_timeout_s,
+                    execution_output_cap=execution_output_cap,
+                    is_authorized=is_authorized,
+                    retain_pending_cleanup=late_owner.retain,
+                )
                 try:
-                    registration.result(timeout=timeout)
+                    acquisition = asyncio.run_coroutine_threadsafe(acquisition_coroutine, loop)
+                except BaseException as exc:
+                    acquisition_coroutine.close()
+                    raise ChildRuntimeCleanupError("recursive child runtime acquisition failed") from exc
+                try:
+                    lease = acquisition.result(timeout=max(0.0, deadline - time.monotonic()))
+                except DaytonaAdmissionTimeoutError:
+                    if time.monotonic() < deadline:
+                        raise ChildRuntimeNotStartedError("child capacity is unavailable") from None
+                    raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
+                except TimeoutError:
+                    late_owner.adopt_late_acquisition(acquisition, lambda pending: pending.close())
+                    raise TimeoutError("recursive child runtime acquisition deadline exceeded") from None
+
+                registration = asyncio.run_coroutine_threadsafe(runtime._register_child_lease(lease), loop)
+                try:
+                    registration.result(timeout=max(0.0, deadline - loop.time()))
                 except BaseException:
                     lease.close()
                     raise
@@ -4690,16 +4076,16 @@ class DaytonaRuntime:
 
             def wait_owned(self) -> None:
                 try:
-                    provider_factory.wait_owned()
+                    late_owner.wait_owned()
                 except ChildRuntimeCleanupError:
-                    if provider_factory.has_unresolved() or self_runtime._child_cleanup_records:
+                    if late_owner.has_unresolved() or runtime._child_cleanup_records:
                         raise
-                loop.call_soon_threadsafe(self_runtime._child_factories.discard, self)
+                loop.call_soon_threadsafe(runtime._child_factories.discard, self)
 
             def raise_if_cleanup_failed(self) -> None:
-                provider_factory.raise_if_cleanup_failed()
+                late_owner.raise_if_failed()
 
-        self_runtime = self
+        profile_default = profile
         factory = RuntimeChildFactory()
         self._child_factories.add(factory)
         return factory
@@ -4708,14 +4094,12 @@ class DaytonaRuntime:
         async with self._lock:
             if self._state is not DaytonaRuntimeState.OPEN:
                 raise RuntimeError("Daytona runtime closed during child acquisition")
-            self._child_runtime_leases.add(lease)
-
-    def _child_lease_closed(self, lease: ChildRuntimeLease) -> None:
-        loop = self._dispatcher.service_loop() if self._dispatcher is not None else None
-        if loop is None:
-            loop = self._application_loop
-        if loop is not None and loop.is_running() and not loop.is_closed():
-            loop.call_soon_threadsafe(self._child_runtime_leases.discard, lease)
+            record = self._child_cleanup_records.get(lease.sandbox_id)
+            if record is None:
+                raise RuntimeError("child Sandbox resource record is unavailable")
+            if record.lease is not None and record.lease is not lease:
+                raise RuntimeError("child Sandbox resource record already owns a lease")
+            record.lease = lease
 
     @property
     def active_leases(self) -> ActiveLeaseRegistry:
@@ -4828,7 +4212,7 @@ class DaytonaRuntime:
         return task
 
     def _expected_mount(self, *, volume_id: str, workspace_id: UUID) -> ExpectedWorkspaceMount:
-        return self._provisioner.expected_mount(volume_id=volume_id, workspace_id=workspace_id)
+        return _expected_workspace_mount(self._volume_config, volume_id, workspace_id)
 
     def _expected_execution_mount(
         self, *, volume_id: str, workspace_id: UUID, session_id: UUID
@@ -4848,8 +4232,16 @@ class DaytonaRuntime:
         confirm_timeout_s: float = 120.0,
         provider_request_timeout_s: float | None = 30.0,
     ) -> SandboxLease:
+        for lease in self._sandbox_leases:
+            if (
+                lease._sandbox is None
+                and lease._sandbox_id == sandbox_id
+                and lease._policy.kind == "retained_session"
+                and (lease.state in {LeaseState.OPEN, LeaseState.CLOSING} or lease.has_pending_ownership)
+            ):
+                return lease
         return SandboxLease(
-            kind="retained_session",
+            owner=self,
             sandbox=None,
             sandbox_id=sandbox_id,
             platform=self._platform,
@@ -4857,6 +4249,7 @@ class DaytonaRuntime:
                 kind="retained_session",
                 interpreter_shutdown=False,
                 provider_action="delete",
+                confirm_absence=True,
                 confirm_timeout_s=confirm_timeout_s,
                 provider_request_timeout_s=provider_request_timeout_s,
             ),
@@ -5276,7 +4669,7 @@ class DaytonaRuntime:
         if deadline is not None:
             timeout_s = max(0.1, min(timeout_s, deadline - asyncio.get_running_loop().time()))
         fence_lease = SandboxLease(
-            kind="recovery_fence",
+            owner=self,
             sandbox=None,
             sandbox_id=binding.sandbox_id,
             platform=self._platform,
@@ -5446,7 +4839,8 @@ class DaytonaRuntime:
         if sandbox is None:
             return None
         try:
-            self._provisioner.verify(sandbox, context.expected)
+            verify_sandbox_workspace_mount(sandbox, context.expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
             sandbox = await self._ensure_running(
                 sandbox,
                 sandbox_state(sandbox),
@@ -5454,7 +4848,8 @@ class DaytonaRuntime:
                 mount_path=context.expected.mount_path,
                 deadline=deadline,
             )
-            self._provisioner.verify(sandbox, context.expected)
+            verify_sandbox_workspace_mount(sandbox, context.expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
             return sandbox
         except ProviderRequestError:
             raise
@@ -5520,13 +4915,22 @@ class DaytonaRuntime:
         deadline: float | None = None,
     ) -> None:
         del created_sandbox
+
+        async def verify_and_layout() -> None:
+            verify_sandbox_workspace_mount(sandbox, expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
+            if expected.session_id is not None:
+                await ensure_execution_layout(sandbox, run_id=run_id)
+            else:
+                await ensure_volume_layout(
+                    sandbox,
+                    self._volume_config.paths(),
+                    session_id=session_id,
+                    run_id=run_id,
+                )
+
         await _provider_call(
-            self._provisioner.verify_run_layout(
-                sandbox,
-                expected,
-                session_id=session_id,
-                run_id=run_id,
-            ),
+            verify_and_layout(),
             deadline=deadline,
             operation="Sandbox verification",
             owner=self._provider_tasks,
@@ -5590,7 +4994,7 @@ class DaytonaRuntime:
             )
 
         cleanup = SandboxLease(
-            kind="retained_session" if created_sandbox else "recovery_fence",
+            owner=self,
             sandbox=sandbox,
             sandbox_id=sandbox_id,
             platform=self._platform,
@@ -5699,7 +5103,6 @@ class DaytonaRuntime:
             asyncio.to_thread(lease.release),
             name="fleet-daytona-interpreter-release",
         )
-        self._release_tasks.add(release_task)
         self._release_leases[release_task] = lease
         release_task.add_done_callback(lambda task: self._settled_release_task(lease, task))
         return release_task
@@ -5713,7 +5116,6 @@ class DaytonaRuntime:
             if mapped is exc:
                 raise
             raise mapped from exc
-        self._settled_release_task(lease, release_task)
 
     async def release(self, lease: InterpreterLease) -> None:
         unpublished = self._late_owners.get(id(lease))
@@ -5773,7 +5175,7 @@ class DaytonaRuntime:
                 known is lease and task.done() and not task.cancelled() and task.exception() is not None
                 for task, known in self._release_leases.items()
             )
-            if not lease._released and not prior_release_failed:
+            if not lease.closed and not prior_release_failed:
                 try:
                     await self._release_interpreter(lease)
                 except BaseException as exc:
@@ -5786,7 +5188,6 @@ class DaytonaRuntime:
                 # Provider retirement has contained the failed local release.
                 # Mark the lease terminal so future shutdown retries cannot
                 # reopen a broker that no longer has a remote owner.
-                lease._released = True
                 lease._state = LeaseState.CLOSED
 
             callback = lease._on_release
@@ -5845,11 +5246,6 @@ class DaytonaRuntime:
         await self._quarantine(lease, request, deadline=deadline)
 
     def _settled_release_task(self, lease: InterpreterLease, task: asyncio.Task[None]) -> None:
-        if task in self._handled_release_tasks:
-            self._handled_release_tasks.discard(task)
-            return
-        self._handled_release_tasks.add(task)
-        self._release_tasks.discard(task)
         if task.cancelled():
             return
         try:
@@ -6019,7 +5415,7 @@ class DaytonaRuntime:
         idle = tuple(self._idle_tasks.values())
         for task in idle:
             task.cancel()
-        release = tuple(self._release_tasks)
+        release = tuple(task for task in self._release_leases if not task.done())
         provider = tuple(self._provider_tasks)
         all_tasks = tuple(dict.fromkeys((*idle, *release, *provider, *self._late_cleanup_tasks)))
         pending: set[asyncio.Future[Any]] = set()
@@ -6040,12 +5436,12 @@ class DaytonaRuntime:
         retry_release = [
             self._start_release_task(lease)
             for lease in tuple(self._release_leases.values())
-            if not lease._released and id(lease) not in unpublished_leases
+            if not lease.closed and id(lease) not in unpublished_leases
         ]
         if retry_release:
             remaining = max(0.0, deadline - asyncio.get_running_loop().time())
             _, retry_pending = await asyncio.wait(tuple(retry_release), timeout=remaining)
-            if retry_pending or any(not lease._released for lease in self._release_leases.values()):
+            if retry_pending or any(not lease.closed for lease in self._release_leases.values()):
                 return False
 
         return await self._retry_late_owners(deadline)
@@ -6164,7 +5560,8 @@ class DaytonaRuntime:
                 deadline=deadline,
                 settle_on_deadline=False,
             )
-            self._provisioner.verify(sandbox, expected)
+            verify_sandbox_workspace_mount(sandbox, expected)
+            verify_sandbox_spec(sandbox, self._sandbox_spec)
             new_binding = SandboxBinding(
                 session_id=binding.session_id,
                 sandbox_id=_sandbox_id(sandbox),
@@ -6245,7 +5642,8 @@ class DaytonaRuntime:
         )
         try:
             return await _provider_call(
-                self._provisioner.create(
+                _create_daytona_sandbox(
+                    self._platform,
                     expected,
                     labels={
                         "session_id": str(request.session_id),

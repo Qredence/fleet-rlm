@@ -9,15 +9,15 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.rlm.program import build_native_rlm
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
+from tests.support.native_rlm import build_native_rlm_for_test
 
 
 def _build_native(**kwargs: object):
     models = kwargs.pop("models", None)
     if models is not None:
         kwargs["sub_lm"] = models.sub_lm
-    return build_native_rlm(**kwargs)
+    return build_native_rlm_for_test(**kwargs)
 
 
 @pytest.mark.asyncio

@@ -19,12 +19,14 @@ import re
 import shlex
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
+from dspy import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.utils.callback import BaseCallback, with_callbacks
 
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
@@ -35,14 +37,6 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
-from fleet_rlm.rlm.compat_3_3_1 import (
-    PUBLIC_FINAL_OUTPUT_LABEL,
-    CodeExecutionError,
-    CodeInterpreterError,
-    is_final_output,
-    needs_binding_refresh,
-    wrap_final_output,
-)
 from fleet_rlm.rlm.events import (
     ObservationObserver,
     RLMCode,
@@ -64,6 +58,27 @@ from fleet_rlm.rlm.result import (
 )
 
 logger = logging.getLogger(__name__)
+
+PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
+
+
+def copy_output_fields(output_fields: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Copy DSPy signature metadata before adding interpreter-local bindings."""
+    return deepcopy(output_fields) if output_fields is not None else None
+
+
+def needs_binding_refresh(*, desired_generation: int, installed_generation: int, broker_ready: bool) -> bool:
+    """Return whether invocation-local interpreter bindings are stale."""
+    return desired_generation != installed_generation or not broker_ready
+
+
+def wrap_final_output(value: Any) -> FinalOutput:
+    return FinalOutput(value)
+
+
+def is_final_output(value: Any) -> bool:
+    return isinstance(value, FinalOutput)
+
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120

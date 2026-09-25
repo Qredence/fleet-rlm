@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -20,13 +20,13 @@ from fleet_rlm.attachments import AttachmentLifecycle
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.validation import CompositionError
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.rlm.execution import RLMRunner
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.turn_preparation import RunPreparation
-from fleet_rlm.turn_settlement import RunLifecycle
 from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
@@ -66,17 +66,14 @@ class DaytonaRuntimeSurface(Protocol):
         pass
 
 
-class RuntimeProcessResources(Protocol):
-    """Closeable process-scoped resources owned by one runtime composition."""
+class DaytonaRuntimeOwner(Protocol):
+    """Lifecycle surface of the process-owned DaytonaRuntime."""
 
-    @property
-    def runtime(self) -> DaytonaRuntimeSurface: ...
+    def has_pending_cleanup(self) -> bool: ...
+
+    async def wait_pending_cleanup(self, *, timeout: float | None = None) -> bool: ...
 
     async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
-
-
-class RuntimeInventoryError(RuntimeError):
-    """Raised when a runtime inventory is incomplete or invalid."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,22 +114,15 @@ class RuntimeDatabaseLifecycle:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeInventory:
-    """Complete dynamic service graph installed for one application lifespan."""
+    """Route services and optional process resources for one application lifespan."""
 
-    turn_runtime: TurnRuntime | None = None
-    attachment_lifecycle: AttachmentLifecycle | None = None
-    artifact_reader: ArtifactReader | None = None
-    session_catalog: SessionCatalog | None = None
-    run_lifecycle: RunLifecycle | None = None
+    route_services: RouteServices
     run_preparation: RunPreparation | None = None
     run_cleanup_supervisor: RunCleanupSupervisor | None = None
     run_state_store: SettlingRunStateStore | None = None
-    config_policy: ConfigPolicyService | None = None
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
-    run_environment_resources: RuntimeProcessResources | None = None
+    daytona_runtime_owner: DaytonaRuntimeOwner | None = None
     model_bundle: RLMModelBundle | None = None
-    workspace_volume_gateway: WorkspaceVolumeGateway | None = None
-    workspace_file_service: WorkspaceFileService | None = None
     # The Daytona lifespan clears its own loop authority via clear_loop().
     bridge_dispatcher: SyncBridgeDispatcher | None = None
     # Best-effort post-readiness orphan sweep; cancelled at dispose. It must
@@ -141,39 +131,7 @@ class RuntimeInventory:
     # Best-effort post-readiness Memory promotion outbox sweep (P23); cancelled
     # at dispose like the orphan sweep and never readiness-gating.
     memory_outbox_task: asyncio.Task[None] | None = None
-    # Optional explicit runner owner; kept after existing fields for positional
-    # compatibility with provider-neutral inventory construction.
-    runner: object | None = None
-    session_lifecycle: SessionLifecycle | None = None
-    session_task_service: SessionTaskService | None = None
-
-    _REQUIRED_ROUTE_FIELDS: ClassVar[tuple[str, ...]] = (
-        "turn_runtime",
-        "attachment_lifecycle",
-        "artifact_reader",
-        "session_catalog",
-        "session_lifecycle",
-        "run_lifecycle",
-        "config_policy",
-        "workspace_volume_gateway",
-        "workspace_file_service",
-    )
-
-    def validate_complete(self) -> None:
-        """Require every dynamic route-facing service before readiness is published."""
-        missing = tuple(name for name in self._REQUIRED_ROUTE_FIELDS if getattr(self, name) is None)
-        if missing:
-            raise RuntimeInventoryError("runtime inventory missing required service(s): " + ", ".join(missing))
-
-    @property
-    def db_engine(self) -> AsyncEngine | None:
-        return self.database.engine
-
-    @property
-    def daytona_runtime(self) -> DaytonaRuntimeSurface | None:
-        if self.run_environment_resources is None:
-            return None
-        return self.run_environment_resources.runtime
+    runner: RLMRunner | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -191,22 +149,6 @@ class RouteServices:
     daytona_runtime: DaytonaRuntimeSurface | None
     session_task_service: SessionTaskService | None = None
 
-    @classmethod
-    def from_inventory(cls, inventory: RuntimeInventory) -> RouteServices:
-        inventory.validate_complete()
-        return cls(
-            turn_runtime=cast(TurnRuntime, inventory.turn_runtime),
-            attachment_lifecycle=cast(AttachmentLifecycle, inventory.attachment_lifecycle),
-            artifact_reader=cast(ArtifactReader, inventory.artifact_reader),
-            session_catalog=cast(SessionCatalog, inventory.session_catalog),
-            session_lifecycle=cast(SessionLifecycle, inventory.session_lifecycle),
-            config_policy=cast(ConfigPolicyService, inventory.config_policy),
-            workspace_volume_gateway=cast(WorkspaceVolumeGateway, inventory.workspace_volume_gateway),
-            workspace_file_service=cast(WorkspaceFileService, inventory.workspace_file_service),
-            daytona_runtime=inventory.daytona_runtime,
-            session_task_service=inventory.session_task_service,
-        )
-
 
 def get_route_services(app: FastAPI) -> RouteServices | None:
     services = getattr(app.state, "route_services", None)
@@ -223,9 +165,8 @@ def get_runtime_inventory(app: FastAPI) -> RuntimeInventory | None:
 
 def install_runtime_inventory(app: FastAPI, inventory: RuntimeInventory) -> RuntimeInventory:
     """Publish a complete runtime graph and mark composition ready last."""
-    routes = RouteServices.from_inventory(inventory)
     app.state.runtime_inventory = inventory
-    app.state.route_services = routes
+    app.state.route_services = inventory.route_services
     app.state.composition_ready = True
     return inventory
 
@@ -293,11 +234,9 @@ async def close_inventory_services(
         except Exception as exc:
             errors.append(exc)
 
-    runner = getattr(inventory, "runner", None)
-    close_runner = getattr(runner, "aclose", None)
-    if callable(close_runner):
+    if inventory.runner is not None:
         try:
-            await close_runner(drain_seconds=drain_seconds)
+            await inventory.runner.aclose(drain_seconds=drain_seconds)
         except asyncio.CancelledError as exc:
             cancellation = cancellation or exc
         except Exception as exc:
@@ -326,11 +265,10 @@ async def close_inventory_services(
 __all__ = [
     "CloseServicesResult",
     "CompositionError",
+    "DaytonaRuntimeOwner",
     "DaytonaRuntimeSurface",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
-    "RuntimeInventoryError",
-    "RuntimeProcessResources",
     "SettlingRunStateStore",
     "clear_runtime_inventory",
     "close_inventory_services",

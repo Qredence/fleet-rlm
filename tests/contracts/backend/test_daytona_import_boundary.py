@@ -74,17 +74,22 @@ def test_only_daytona_package_imports_daytona_sdk() -> None:
     assert violators == [], f"Daytona SDK imports outside daytona/: {violators}"
 
 
-def test_rlm_recursive_executor_uses_provider_neutral_child_runtime_contract() -> None:
+def test_rlm_recursive_executor_does_not_import_daytona_runtime() -> None:
     path = PACKAGE_ROOT / "rlm" / "recursion.py"
     imports = _imported_modules(ast.parse(path.read_text(encoding="utf-8")))
-    assert not any(m.startswith("fleet_rlm.daytona") for m in imports)
+    assert "fleet_rlm.daytona.runtime" not in imports
+    assert "fleet_rlm.rlm.recursion" not in _imported_modules(
+        ast.parse((PACKAGE_ROOT / "daytona" / "runtime.py").read_text(encoding="utf-8"))
+    )
 
 
-def test_child_runtime_cleanup_and_authorization_errors_have_provider_neutral_identity() -> None:
-    from fleet_rlm.daytona.runtime import (
+def test_child_runtime_cleanup_and_authorization_errors_have_shared_identity() -> None:
+    from fleet_rlm.daytona.errors import (
         ChildRuntimeAuthorizationError as DaytonaAuthorizationError,
     )
-    from fleet_rlm.daytona.runtime import ChildRuntimeCleanupError as DaytonaCleanupError
+    from fleet_rlm.daytona.errors import (
+        ChildRuntimeCleanupError as DaytonaCleanupError,
+    )
     from fleet_rlm.rlm.recursion import (
         ChildRuntimeAuthorizationError,
         ChildRuntimeCleanupError,

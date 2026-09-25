@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from fleet_rlm.app_services import (
     CompositionError,
+    RouteServices,
     RuntimeDatabaseLifecycle,
     RuntimeInventory,
     close_inventory_services,
@@ -23,9 +24,8 @@ from fleet_rlm.app_services import (
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.rlm.compat_3_3_1 import assert_dspy_version
 from fleet_rlm.rlm.execution import ProgramBuilder
-from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, rlm_options
+from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, assert_dspy_version, rlm_options
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
@@ -121,6 +121,8 @@ def build_local_inventory(
     artifact_reader: ArtifactReader,
     preparation: RunPreparation,
     program_builder: ProgramBuilder,
+    workspace_volume_gateway: Any,
+    workspace_file_service: Any,
 ) -> RuntimeInventory:
     """Build the shared in-memory/SQL inventory for one local runtime."""
     assert_dspy_version()
@@ -167,18 +169,24 @@ def build_local_inventory(
         mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
         mlflow_expose_trace_id=settings.mlflow_expose_trace_id,
     )
-    return RuntimeInventory(
+    session_lifecycle = SessionLifecycle(session_catalog, NoOpSessionRetirement())
+    route_services = RouteServices(
         turn_runtime=coordinator,
-        runner=runner,
         attachment_lifecycle=attachment_lifecycle,
         artifact_reader=artifact_reader,
         session_catalog=session_catalog,
-        session_lifecycle=SessionLifecycle(session_catalog, NoOpSessionRetirement()),
-        run_lifecycle=lifecycle,
+        session_lifecycle=session_lifecycle,
+        config_policy=ConfigPolicyService.from_settings(settings),
+        workspace_volume_gateway=workspace_volume_gateway,
+        workspace_file_service=workspace_file_service,
+        daytona_runtime=None,
+    )
+    return RuntimeInventory(
+        route_services=route_services,
+        runner=runner,
         run_cleanup_supervisor=cleanup,
         run_preparation=preparation,
         run_state_store=run_state,
-        config_policy=ConfigPolicyService.from_settings(settings),
         database=database,
     )
 
@@ -392,12 +400,9 @@ def build_testing_services(
 ) -> RuntimeInventory:
     """Build credential-free deterministic adapters for a test lifespan."""
     from fleet_rlm.attachments import WorkspaceAttachmentPathPolicy
-    from fleet_rlm.workspace.paths import volume_paths_from_settings
-    from fleet_rlm.workspace.storage import HostVolumeMirror, OfflineHostVolumeGateway
-    from fleet_rlm.workspace.workspace import (
-        HostWorkspaceAccessGateway,
-        WorkspaceFileService,
-    )
+    from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.workspace import WorkspaceFileService
+    from tests.support.workspace_storage import HostVolumeMirror, HostWorkspaceAccessGateway, OfflineHostVolumeGateway
 
     upload_root, _artifact_root = host_roots(settings)
     database = database or RuntimeDatabaseLifecycle()
@@ -414,6 +419,15 @@ def build_testing_services(
         sql_attachment_paths=WorkspaceAttachmentPathPolicy(mirror.volume_paths),
         sql_artifact_blobs=volume_gateway,
     )
+    workspace_file_service = WorkspaceFileService(
+        cast(
+            Any,
+            HostWorkspaceAccessGateway(
+                Path(settings.data_root) / "workspace-files",
+                max_file_bytes=settings.max_upload_bytes,
+            ),
+        )
+    )
     local_inventory = build_local_inventory(
         settings,
         database=database,
@@ -428,23 +442,10 @@ def build_testing_services(
             max_artifact_bytes=settings.max_artifact_bytes,
         ),
         program_builder=build_testing_rlm,
-    )
-    # Overlay only the host volume adapters; keep the shared local inventory
-    # members so new RuntimeInventory fields cannot silently drop here.
-    inventory = replace(
-        local_inventory,
         workspace_volume_gateway=volume_gateway,
-        workspace_file_service=WorkspaceFileService(
-            cast(
-                Any,
-                HostWorkspaceAccessGateway(
-                    Path(settings.data_root) / "workspace-files",
-                    max_file_bytes=settings.max_upload_bytes,
-                ),
-            )
-        ),
+        workspace_file_service=workspace_file_service,
     )
-    return inventory
+    return local_inventory
 
 
 @asynccontextmanager
