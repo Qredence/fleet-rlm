@@ -1,73 +1,37 @@
-# Documentation Home
+# Fleet RLM documentation
 
-Fleet RLM has one Python backend under `src/fleet_rlm/` and one maintained
-development client under `tools/fleet-tui/`. It exposes a compact Session-first
-FastAPI/SSE contract backed by DSPy, Daytona, and SQLAlchemy/Alembic.
+Fleet has one FastAPI/SSE backend in `src/fleet_rlm/` and one maintained
+terminal client in `tools/fleet-tui/`. DSPy owns the RLM loop; Daytona executes
+generated Python in Sandboxes. Authorized host tools and native semantic calls
+cross the authenticated broker boundary. The configured default profile is
+`daytona-native`; full child RLMs are opt-in through `daytona-recursive`.
 
-Fleet uses native DSPy RLM with a fresh program per Run. Sequential Turns may
-reuse a healthy Root Sandbox, which receives submitted Python source and
-serializable values. A Sandbox-local broker dispatches authorized Fleet and
-DSPy semantic tools to the host over Daytona's authenticated preview connection,
-so host callables and preview credentials stay on the host. Native Daytona
-interpreter cutover is not selected.
+## Find the right guide
 
-## Start here
+| Task | Guide |
+| --- | --- |
+| Understand owners and trust boundaries | [Architecture](../ARCHITECTURE.md) and [source layout](reference/source-layout.md) |
+| Set up and change the project | [README](../README.md) and [contributing guide](../CONTRIBUTING.md) |
+| Configure a runtime profile | [Configuration](reference/configuration.md) and [generated profile matrix](reference/profile-matrix.md) |
+| Use the backend or terminal | [HTTP API](reference/http-api.md), [CLI](reference/cli.md), and [terminal UI](how-to-guides/terminal-tui.md) |
+| Understand DSPy and Daytona execution | [Integration guide](how-to-guides/dspy-integration.md) and [Daytona Snapshot guide](how-to-guides/daytona-snapshot.md) |
+| Validate a change | [Testing strategy](how-to-guides/testing-strategy.md) |
+| Evaluate or optimize behavior | [Evaluation and monitoring](how-to-guides/evaluation-optimization.md) |
 
-1. [Architecture](../ARCHITECTURE.md)
-2. [Configuration](reference/configuration.md)
-3. [Runtime profile matrix](reference/profile-matrix.md)
-4. [Backend API](reference/http-api.md)
-5. [CLI](reference/cli.md)
-6. [Terminal UI](how-to-guides/terminal-tui.md)
-7. [Testing strategy](how-to-guides/testing-strategy.md)
-8. [Structural reduction plan](testing/structural-reduction-plan.md)
-9. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
-10. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
-11. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
+Browse the [complete table of contents](SUMMARY.md) or the
+[reference index](reference/index.md) for the remaining guides, decisions, and
+historical baselines.
 
-## Current runtime and active migration
+## Sources of truth
 
-The supported runtime boundary and ownership map are maintained in
-[ARCHITECTURE.md](../ARCHITECTURE.md). Validation lanes and evidence limits are
-defined by the [testing strategy](how-to-guides/testing-strategy.md).
+Current behavior comes from the backend, TUI, `config/fleet.toml`, tests, and
+generated contracts. The [architecture](../ARCHITECTURE.md) describes durable
+ownership; the [testing strategy](how-to-guides/testing-strategy.md) states
+the limits of local and live validation. Dated plans, measurements, and
+receipts retain their original evidence scope and do not set current runtime
+policy or certify a later revision.
 
-The configured Daytona path reuses a healthy Root Sandbox for submitted source
-and serializable bindings, resetting the execution namespace and invocation
-credential between Turns. Authorized Fleet tools and DSPy's native semantic
-tools reach the host through the same broker path. Live recursive execution and
-trace retrieval are verified by the maintained recursive-batch canary; this does
-not certify recursive value. Phase 3 complete-MVP and Phase 5–6 operational
-certification are open.
-
-## Historical baselines and evidence
-
-- [Maintainability freeze](how-to-guides/maintainability-freeze.md)
-- [P41 behavior freeze](reference/behavior-freeze.md)
-
-## Reference
-
-- [Complete table of contents](SUMMARY.md)
-- [Reference index](reference/index.md)
-- [Source layout](reference/source-layout.md)
-- [Database](reference/database.md)
-- [Workspace Agent filesystem operation audit](reference/workspace-agent-operation-audit.md)
-
-## Source of truth
-
-Repository-wide Markdown includes root contributor/governance documents, these
-guides and records, script/migration/TUI READMEs, GitHub templates, and bundled
-runtime Skills. Preserve release history and dated evidence; correct current
-guidance against its owning implementation. Generated Markdown, including the
-profile matrix, must be regenerated from its source rather than edited by hand.
-
-- backend: `src/fleet_rlm/`
-- terminal: `tools/fleet-tui/`
-- HTTP contract: `openapi.yaml`
-- generated TUI HTTP types: `tools/fleet-tui/src/generated/openapi.ts`
-- schema: `migrations/`
-- validation: `Makefile`, `tests/`, and TUI tests
-
-The maintained architecture, testing strategy, and performance budget track
-current implementation ownership, validation scope, and dated measurements.
-Historical baselines preserve their original evidence scope and do not override
-current code, policy, or generated contracts.
+Regenerate `openapi.yaml` and the TUI HTTP types with `make api-sync`, stream
+fixtures with `make stream-sync`, and the profile matrix with
+`make profile-matrix`. The [agent guide](../AGENTS.md) lists the matching
+verification commands.

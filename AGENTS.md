@@ -14,6 +14,9 @@ feature roadmap or a substitute for executable behavior.
   [CONTRIBUTING.md](CONTRIBUTING.md) for setup, [docs/index.md](docs/index.md)
   for task guidance, and [tools/fleet-tui/AGENTS.md](tools/fleet-tui/AGENTS.md)
   for terminal-client work.
+- Use [docs/reference/source-layout.md](docs/reference/source-layout.md) for the
+  literal package map; architecture guidance describes ownership, not a target
+  directory tree.
 - Use [scripts/README.md](scripts/README.md) as the inventory of retained script
   commands, support modules, and data; `make check-docs` runs the unified
   repository-hygiene checks for that inventory and active repository guidance.
@@ -46,10 +49,11 @@ feature roadmap or a substitute for executable behavior.
   conversation, task progress, files, and memory belong to their existing
   owners; Python variables are not durable state. A child finding is a
   candidate for Root verification, not a committed conclusion.
-- `DaytonaRuntime` owns provider resources and cleanup. The Turn coordinator
-  owns claim, preparation, execution, settlement, and commit. Late work cannot
-  mutate settled state, and unresolved containment cannot become successful
-  settlement.
+- `DaytonaRuntime` owns provider resources and cleanup. `TurnRuntime` in
+  `turns.py` coordinates claim, preparation, execution, settlement, and
+  cleanup; `turn_settlement.py` and persistence own the commit boundary. Late
+  work cannot mutate settled state, and unresolved containment cannot become
+  successful settlement.
 - Keep Runtime Events transport-neutral until API projection. MLflow is
   optional observation and evaluation, never execution authority. Skills add
   strategy and manifested resources, never tools, permissions, or budgets.
