@@ -1425,7 +1425,12 @@ class ExecutionTraceAssembler:
 
         def adapter_summary(name: str) -> Mapping[str, Any]:
             summarize = getattr(adapter, name, None)
-            summary = summarize() if callable(summarize) else {}
+            if not callable(summarize):
+                return {}
+            try:
+                summary = summarize()
+            except Exception:
+                return {}
             return summary if isinstance(summary, Mapping) else {}
 
         with (

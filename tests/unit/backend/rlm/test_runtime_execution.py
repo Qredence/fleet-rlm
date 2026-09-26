@@ -709,6 +709,78 @@ def _context(
 
 
 @pytest.mark.asyncio
+async def test_runner_ignores_adapter_summary_failure_after_success() -> None:
+    class SummaryFailureError(RuntimeError):
+        pass
+
+    class Adapter:
+        def wrap_up_summary(self) -> dict[str, object]:
+            return {}
+
+        def repair_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("optional repair diagnostics failed")
+
+    session_id, workspace_id = uuid4(), uuid4()
+    runner = RLMRunner(program_builder=_Factory().create, _adapter_factory=lambda _context: Adapter())
+    stream = runner.stream(
+        _context(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            interpreter=_Interpreter(),
+            request="answer",
+            history=dspy.History(messages=[]),
+        )
+    )
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_execution_error_when_adapter_summaries_fail(caplog) -> None:
+    class OriginalFailureError(RuntimeError):
+        pass
+
+    class SummaryFailureError(RuntimeError):
+        pass
+
+    original = OriginalFailureError("RLM invocation failed")
+
+    class Adapter:
+        def wrap_up_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("wrap-up summary failed")
+
+        def repair_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("repair summary failed")
+
+    class Program:
+        async def acall(self, **_kwargs: object) -> dspy.Prediction:
+            raise original
+
+    class Factory:
+        def create(self, **_kwargs: object) -> Program:
+            return Program()
+
+    runner = RLMRunner(program_builder=Factory().create, _adapter_factory=lambda _context: Adapter())
+    stream = runner.stream(
+        _context(
+            session_id=uuid4(),
+            workspace_id=uuid4(),
+            run_id=uuid4(),
+            interpreter=_Interpreter(),
+            request="answer",
+            history=dspy.History(messages=[]),
+        )
+    )
+    _ = [event async for event in stream]
+
+    failures = [record for record in caplog.records if record.exc_info is not None]
+    assert stream.outcome is not None and stream.outcome.terminal_status == "failed"
+    assert any(record.exc_info[1] is original for record in failures)
+
+
+@pytest.mark.asyncio
 async def test_sequential_runs_use_fresh_programs_and_committed_history() -> None:
     session_id, workspace_id = uuid4(), uuid4()
     interpreter = _Interpreter()

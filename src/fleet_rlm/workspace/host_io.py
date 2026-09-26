@@ -337,7 +337,7 @@ class DaytonaRunStorage:
         value = (
             await self._files.read_bytes(location, max_bytes=max_bytes + 1)
             if self._is_scratch(location)
-            else await self.host_io.volume_fs.aread_bytes(location, max_bytes=max_bytes)
+            else await self.host_io.volume_fs.aread_bytes(location, max_bytes=max_bytes + 1)
         )
         if len(value) > max_bytes:
             raise ValueError("value exceeds read bound")
