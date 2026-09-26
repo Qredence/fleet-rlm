@@ -83,7 +83,7 @@ environment variables are ignored.
 | Fleet surface | Fleet value | DSPy 3.3.x surface |
 |---|---|---|
 | Fleet iteration budget | `max_iters` | `max_iters` |
-| Native construction | `build_native_rlm(..., interpreter_factory=...)` with a caller-owned factory | `dspy.RLM(..., interpreter_factory=...)` |
+| Native construction | `build_native_rlm(...)` without an interpreter | `dspy.RLM(..., interpreter_factory=...)` |
 | Native async execution | Existing caller-owned interpreter | `await rlm.acall(interpreter, **named_inputs)` |
 | Native streaming | Existing caller-owned interpreter | `stream_program(interpreter, **named_inputs)` |
 | Shutdown | Fleet or the child lease | DSPy does not shut down caller-owned interpreters |
