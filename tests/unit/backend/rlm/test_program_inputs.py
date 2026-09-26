@@ -1,15 +1,29 @@
-"""Behavior contracts for program inputs."""
+"""Prepared native-RLM program inputs, selected Artifacts, and bounded Session context.
+
+* ``test_program_inputs.py``: behavior contracts for program inputs.
+* ``test_selected_artifact_input.py``: selected Artifact reads use the prepared Turn owner.
+* ``test_session_context.py``: bounded Session context at the prepared native-RLM input seam.
+"""
 
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
+from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
 
 import dspy
 import pytest
 from pydantic import ValidationError
 
+from fleet_rlm.artifacts.errors import ArtifactNotFoundError
+from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
+from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+from fleet_rlm.chat.preparation import prepare_host_capabilities
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -19,11 +33,22 @@ from fleet_rlm.rlm.program import (
     SkillCardInput,
     build_rlm_input_kwargs,
 )
+from fleet_rlm.rlm.recursion import RecursiveRLMOptions, SubproblemCapsule
 from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.sessions.context import SessionContextManifest
+from fleet_rlm.sessions.models import SessionHistory, TurnInput
+from fleet_rlm.sessions.run_state import (
+    ClaimedRun,
+    _RunClaimToken,
+)
+from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
+from tests.unit.backend.rlm.fakes import EmptyCapabilities
+from tests.unit.backend.rlm.test_recursion_policy_surface import _context, _RecordingFactory
 
 
+# --- from test_program_inputs.py --------------------------------------
 def test_default_input_payload_contains_only_bounded_metadata() -> None:
     payload = _payload()
 
@@ -674,3 +699,281 @@ def test_dspy_rlm_validates_end_to_end_payload_with_history() -> None:
     # The contract pinned by this test: the production payload with a real
     # ``dspy.History`` instance satisfies the native RLM input validator.
     dspy.RLM(FleetRLMSignature)._validate_inputs(kwargs)
+
+
+# --- from test_selected_artifact_input.py -----------------------------
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["valid", "revoked", "missing", "invalid_uri"])
+async def test_prepared_artifact_is_read_on_application_loop_with_turn_scope_and_exact_allowance(
+    case: str,
+) -> None:
+    artifact_id = uuid4()
+    if case == "invalid_uri":
+        with pytest.raises(ValueError, match="UUID"):
+            SubproblemCapsule(task="Read selected evidence", authorized_references=("artifact://not-a-uuid",))
+        return
+    locator = f"artifact://{artifact_id}"
+    capsule = SubproblemCapsule(task="Read selected evidence", authorized_references=(locator,))
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "delegate", "code": f"outcome = rlm_query(capsule={capsule.model_dump(mode='json')!r})"},
+            {"reasoning": "read", "code": "text = read_selected_input(evidence_id='reference-1')"},
+            {"reasoning": "child submit", "code": "SUBMIT(answer=text + ' [reference-1]')"},
+            {
+                "reasoning": "root submit",
+                "code": "assert outcome['source_references'] == ['reference-1']; SUBMIT(answer=outcome['answer'])",
+            },
+        ],
+        adapter=dspy.JSONAdapter(),
+    )
+    factory = _RecordingFactory()
+    context, runner = _context(
+        root=root,
+        sub=dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
+        factory=factory,
+        recursive_options=RecursiveRLMOptions(enabled=True),
+    )
+    data = "selected évidence".encode()
+    ref = ArtifactRef(artifact_id, uuid4(), uuid4(), "text", None, "text/plain", len(data), sha256(data).hexdigest())
+    loop = asyncio.get_running_loop()
+    reads: list[object] = []
+
+    class Catalog:
+        async def get(self, *, access, artifact_id):
+            assert asyncio.get_running_loop() is loop
+            assert access == ArtifactAccess(context.identity.access.user_id, context.identity.access.workspace_id)
+            assert artifact_id == ref.id
+            reads.append("authorized")
+            if case == "missing":
+                raise ArtifactNotFoundError("Artifact not found")
+            return StoredArtifact(ref, "private/committed-content")
+
+    class Blobs:
+        async def read_bytes(self, workspace_id, logical_path):
+            assert workspace_id == context.identity.access.workspace_id
+            assert logical_path == "private/committed-content"
+            reads.append("content")
+            if case == "revoked":
+                context.identity.authority.revoke()
+                await asyncio.sleep(0)
+            return data
+
+    class RecordingReader(ArtifactReader):
+        async def content(self, access, artifact_id, *, max_bytes=None):
+            assert max_bytes == capsule.allocation_bytes - capsule.serialized_bytes
+            return await super().content(access, artifact_id, max_bytes=max_bytes)
+
+    async def not_cancelled():
+        return False
+
+    turn = ClaimedRun(
+        context.identity.run_id,
+        context.identity.session_id,
+        context.identity.access,
+        TurnInput("delegate"),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    spec, _, _ = await prepare_host_capabilities(
+        turn=turn,
+        skill_catalog=build_bundled_skill_catalog(),
+        base_tools=(),
+        base_event_views={},
+        workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
+        artifact_reader=RecordingReader(catalog=Catalog(), blobs=Blobs()),
+        deadline=context.execution.deadline,
+    )
+    context = replace(context, capabilities=EmptyCapabilities(spec=spec))
+    stream = runner.stream(context)
+    _ = [event async for event in stream]
+    assert stream.outcome is not None
+    assert stream.outcome.succeeded is (case == "valid")
+    if case == "valid":
+        assert stream.outcome.prediction.display_text == "selected évidence [reference-1]"
+    expected_reads = {
+        "valid": ["authorized", "content"],
+        "revoked": ["authorized", "content"],
+        "missing": ["authorized"],
+        "invalid_uri": [],
+    }
+    assert reads == expected_reads[case]
+    assert factory.close_counts == {1: 1}
+
+
+# --- from test_session_context.py -------------------------------------
+@pytest.mark.asyncio
+async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
+    from fleet_rlm.attachments import PreparedAttachments
+    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
+    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        _RunClaimToken,
+    )
+
+    session_id = uuid4()
+    messages = tuple(
+        HistoryMessage(
+            "user" if index % 2 == 0 else "assistant",
+            f"message-{index + 1:03d}:" + chr(65 + index % 26) * 9_988,
+        )
+        for index in range(100)
+    )
+
+    class Sink:
+        async def read(self, location, *, max_bytes):
+            del location, max_bytes
+            return b""
+
+        async def write(self, location, data):
+            del location, data
+            return None
+
+        async def remove(self, location):
+            del location
+            return None
+
+        async def write_private(self, location, data):
+            del location, data
+            return None
+
+        async def remove_private(self, location):
+            del location
+            return None
+
+    class Attachments:
+        async def prepare_run(self, access, ids, run, sink):
+            del access, ids, run, sink
+            return PreparedAttachments((), ())
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self):
+            return ()
+
+        def drain_artifact_candidates(self):
+            return ()
+
+        def drain_memory_candidates(self):
+            return ()
+
+        async def aclose(self):
+            return None
+
+    class CapabilityFactory:
+        async def prepare(self, turn, environment, attachments, *, deadline):
+            del turn, environment, attachments
+            assert deadline > 0
+            return Capabilities()
+
+    sink = Sink()
+
+    class Environments:
+        async def acquire(self, turn, *, deadline):
+            del turn, deadline
+
+            async def release():
+                return None
+
+            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        uuid4(),
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("continue"),
+        SessionHistory(messages),
+        not_cancelled,
+        _RunClaimToken(uuid4(), 7),
+    )
+    prepared = await DefaultRunPreparer(
+        models=RLMModelBundle(object(), object()),
+        options=RLMOptions(),
+        attachments=Attachments(),
+        environments=Environments(),
+        capabilities=CapabilityFactory(),
+    ).prepare(turn, deadline=float("inf"))
+
+    class Factory:
+        kwargs: dict[str, object] | None = None
+
+        def create(self, **_kwargs):
+            factory = self
+
+            class Program:
+                async def acall(self, **kwargs):
+                    factory.kwargs = kwargs
+                    return dspy.Prediction(answer="done")
+
+            return Program()
+
+    factory = Factory()
+    stream = RLMRunner(factory=factory).stream(prepared.execution)
+    _ = [event async for event in stream]
+
+    assert factory.kwargs is not None
+    # P44.3 production wiring: ``history`` is now a first-class RLM input
+    # alongside the existing common fields. The set assertion still names
+    # every input the Runner forwards; the new ``history`` key carries the
+    # canonical committed Session conversation as a ``dspy.History``.
+    assert set(factory.kwargs) == {
+        "request",
+        "session_context",
+        "skill_cards",
+        "attachments",
+        "history",
+    }
+    manifest = factory.kwargs["session_context"]
+    assert manifest == {
+        "session_id": str(session_id),
+        "checkpoint_version": 7,
+        "message_count": 100,
+        "recent": [
+            {
+                "ordinal": index + 1,
+                "role": messages[index].role,
+                "preview": messages[index].content[:320],
+            }
+            for index in range(94, 100)
+        ],
+        "workspace": {
+            "available": False,
+            "root": ".",
+            "instructions": (
+                "Session Workspace is unavailable. REPL variables and sandbox-local files are "
+                "temporary to the Run; no durable Workspace or Turn Commit artifact workflow is available."
+            ),
+        },
+    }
+    assert all(len(item["preview"]) <= 320 for item in manifest["recent"])
+    # The bounded payload surface (``session_context``) still does not
+    # embed the full message bodies. The full bodies now live behind the
+    # ``history`` key as a ``dspy.History`` instance, which is the
+    # P44.1 first-class durable conversation and is expected to contain
+    # them by design.
+    bounded_subset = {key: factory.kwargs[key] for key in ("session_context", "skill_cards", "attachments")}
+    encoded = json.dumps(bounded_subset, default=str)
+    assert messages[0].content not in encoded
+    assert messages[-1].content not in encoded
+    # The canonical committed Session conversation IS the full bodies.
+    history = factory.kwargs["history"]
+    assert type(history) is dspy.History
+    history_messages = list(history.messages)
+    assert history_messages[0]["request"] == messages[0].content
+    # The last paired record is the final user request and its assistant answer.
+    # The test's 100 messages alternate user/assistant; only user→assistant
+    # pairs enter the canonical conversation, so the last request corresponds
+    # to the second-to-last message and the last answer to the last message.
+    assert history_messages[-1]["request"] == messages[-2].content
+    assert history_messages[-1]["answer"] == messages[-1].content
+    assert prepared.execution.session.session_context.message_count == 100
+    assert not hasattr(prepared.execution, "history")
+
+    await prepared.aclose()

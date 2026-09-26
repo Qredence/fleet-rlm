@@ -136,10 +136,10 @@ async def _full_capacity_restored(admission: DaytonaAdmission, *, capacity: int)
 
 
 @pytest.mark.asyncio
-async def test_val_rec_027_broker_shutdown_failure_fails_close_but_remaining_steps_still_run(
+async def test_broker_shutdown_failure_fails_close_but_remaining_steps_still_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-027: a failed strict broker cleanup fails the close as a typed
+    """A failed strict broker cleanup fails the close as a typed
     cleanup failure while scope purge, provider deletion, absence confirmation,
     and permit restoration are still attempted."""
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
@@ -179,10 +179,10 @@ async def test_val_rec_027_broker_shutdown_failure_fails_close_but_remaining_ste
 
 
 @pytest.mark.asyncio
-async def test_val_rec_027_blocked_broker_shutdown_is_quarantined_and_still_settles(
+async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-027: a blocking shutdown fails the close within its bound while
+    """A blocking shutdown fails the close within its bound while
     quarantine ownership retains the cleanup until deletion and admission
     restoration settle."""
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
@@ -236,10 +236,10 @@ async def test_val_rec_027_blocked_broker_shutdown_is_quarantined_and_still_sett
 
 
 @pytest.mark.asyncio
-async def test_val_rec_028_provider_delete_failure_still_confirms_absence_and_restores_admission(
+async def test_provider_delete_failure_still_confirms_absence_and_restores_admission(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-028: a delete request error still probes for confirmed absence
+    """A delete request error still probes for confirmed absence
     and restores admission; acceptance alone is never cleanup proof."""
     child = _Sandbox("child-sandbox", _Fs(set()))
     platform = _RecordingPlatform(child)
@@ -263,11 +263,11 @@ async def test_val_rec_028_provider_delete_failure_still_confirms_absence_and_re
     "path",
     ["success", "interpreter_failure", "admission_timeout", "authorization_revoked", "create_failure"],
 )
-async def test_val_rec_029_admission_restored_exactly_once_on_every_path(
+async def test_admission_restored_exactly_once_on_every_path(
     path: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-029: after the owned close join settles, the full configured
+    """After the owned close join settles, the full configured
     capacity is reacquirable on every cleanup path (no leak, no over-release)."""
     capacity = 1 if path == "admission_timeout" else 2
     child = _Sandbox("child-sandbox", _Fs(set()))
@@ -332,10 +332,10 @@ async def test_val_rec_029_admission_restored_exactly_once_on_every_path(
 
 
 @pytest.mark.asyncio
-async def test_val_rec_029_concurrent_idempotent_close_never_over_releases_capacity(
+async def test_concurrent_idempotent_close_never_over_releases_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-029: concurrent and repeated close run cleanup once and never
+    """Concurrent and repeated close run cleanup once and never
     raise capacity above the configured maximum."""
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
     platform = _RecordingPlatform(child)
@@ -370,8 +370,8 @@ async def test_val_rec_029_concurrent_idempotent_close_never_over_releases_capac
     permit.release()
 
 
-def test_val_rec_030_failed_close_stores_and_re_surfaces_without_rerunning_cleanup() -> None:
-    """VAL-REC-030: a failed close lands the lease in FAILED, re-surfaces the
+def test_failed_close_stores_and_re_surfaces_without_rerunning_cleanup() -> None:
+    """A failed close lands the lease in FAILED, re-surfaces the
     same stored failure on every later observation, and never reruns cleanup."""
     runs = 0
     original = ChildRuntimeCleanupError("recursive child cleanup failed")
@@ -392,10 +392,10 @@ def test_val_rec_030_failed_close_stores_and_re_surfaces_without_rerunning_clean
 
 
 @pytest.mark.asyncio
-async def test_val_rec_030_cleanup_failure_after_valid_child_result_fails_factory_observation(
+async def test_cleanup_failure_after_valid_child_result_fails_factory_observation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-030: a syntactically valid child answer cannot override an
+    """A syntactically valid child answer cannot override an
     unresolved cleanup failure; the factory observation re-surfaces it."""
     child = _Sandbox("child-sandbox", _Fs(set()))
     platform = _RecordingPlatform(child)
@@ -417,8 +417,8 @@ async def test_val_rec_030_cleanup_failure_after_valid_child_result_fails_factor
     assert lease.state is ChildRuntimeLeaseState.FAILED
 
 
-def test_val_rec_031_barrier_race_joins_one_cleanup_execution() -> None:
-    """VAL-REC-031: two threads racing into close join one cleanup execution;
+def test_barrier_race_joins_one_cleanup_execution() -> None:
+    """Two threads racing into close join one cleanup execution;
     the second caller blocks until settlement and observes the same result."""
     entered = threading.Event()
     release = threading.Event()
@@ -457,8 +457,8 @@ def test_val_rec_031_barrier_race_joins_one_cleanup_execution() -> None:
     assert calls == 1
 
 
-def test_val_rec_031_barrier_race_on_failure_re_surfaces_stored_error() -> None:
-    """VAL-REC-031: a racing close failure stores one stable cleanup error that
+def test_barrier_race_on_failure_re_surfaces_stored_error() -> None:
+    """A racing close failure stores one stable cleanup error that
     every later observer re-surfaces without a second cleanup execution."""
     original = RuntimeError("broker cleanup failed")
     calls = 0
@@ -502,8 +502,8 @@ def test_val_rec_031_barrier_race_on_failure_re_surfaces_stored_error() -> None:
     assert calls == 1
 
 
-def test_val_rec_031_reentrant_close_from_closing_thread_fails_closed() -> None:
-    """VAL-REC-031: the closing thread cannot recursively close the lease."""
+def test_reentrant_close_from_closing_thread_fails_closed() -> None:
+    """The closing thread cannot recursively close the lease."""
 
     def close() -> None:
         lease.close()
@@ -515,8 +515,8 @@ def test_val_rec_031_reentrant_close_from_closing_thread_fails_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_val_rec_032_cleanup_survives_owner_loop_loss_with_full_provider_settlement() -> None:
-    """VAL-REC-032: with the owner loop closed, cleanup uses the disposable-loop
+async def test_cleanup_survives_owner_loop_loss_with_full_provider_settlement() -> None:
+    """With the owner loop closed, cleanup uses the disposable-loop
     fallback and still completes strict shutdown, purge, deletion, confirmed
     absence, and permit restoration."""
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
@@ -547,10 +547,10 @@ async def test_val_rec_032_cleanup_survives_owner_loop_loss_with_full_provider_s
 
 
 @pytest.mark.asyncio
-async def test_val_rec_032_dispatch_failure_surfaces_and_quarantine_falls_back(
+async def test_dispatch_failure_surfaces_and_quarantine_falls_back(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """VAL-REC-032: when the quarantine thread cannot start, the bounded
+    """When the quarantine thread cannot start, the bounded
     fallback executor still performs the cleanup and the failure surfaces
     through ownership observation instead of being silently ignored."""
     child = _Sandbox("child-sandbox", _Fs({f"{_MOUNT}/child.txt"}))
@@ -610,8 +610,8 @@ async def test_val_rec_032_dispatch_failure_surfaces_and_quarantine_falls_back(
     assert await _full_capacity_restored(admission, capacity=1)
 
 
-def test_val_rec_032_late_cleanup_dispatch_failure_is_re_observable() -> None:
-    """VAL-REC-032: when every dispatch lane fails, the dispatch failure itself
+def test_late_cleanup_dispatch_failure_is_re_observable() -> None:
+    """When every dispatch lane fails, the dispatch failure itself
     is recorded and surfaces through the ownership join."""
 
     class _FailingThread:

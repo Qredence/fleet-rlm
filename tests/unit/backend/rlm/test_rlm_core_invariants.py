@@ -1,6 +1,6 @@
-"""Dedicated invariant tests for Phase 2: Native DSPy 3.3.1 RLM Core.
+"""Invariant contracts for the native DSPy RLM core.
 
-Locks down Requirement R2 invariants:
+Locks down the core invariants:
 1. Native dspy.RLM constructor and sub_lm tools (llm_query, llm_query_batched)
 2. AttachmentContextCapsule SandboxSerializable context staging (rlm_preview, to_sandbox)
 3. Depth-1 recursion isolation (child RLM receives only leaf tools, never rlm_query)

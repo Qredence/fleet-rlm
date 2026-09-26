@@ -1,6 +1,5 @@
-"""Empirical stress tests and adversarial edge cases for Direct Daytona SDK integration.
+"""Stress and adversarial edge cases for direct Daytona SDK integration.
 
-Authored by Challenger 2 for Phase 1 verification.
 Stress-tests:
 1. Sync/async bridge concurrency, timeouts, cancellations, closed/stopped loops.
 2. SUBMIT() payload parsing with unicode, special chars, deep nesting, and malformed markers.
