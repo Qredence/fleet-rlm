@@ -25,6 +25,7 @@ from fleet_rlm.sessions.bindings import (
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from tests.support.session_manager import make_daytona_runtime
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -148,7 +149,7 @@ class _FakePlatform:
 def _manager() -> tuple[DaytonaRuntime, _FakePlatform, InMemoryBindingStore]:
     plat = _FakePlatform()
     store = InMemoryBindingStore()
-    mgr = DaytonaRuntime(
+    mgr = make_daytona_runtime(
         platform=plat,
         volume_client=_FakeVolumeClient(),
         volume_config=VolumeConfig(),

@@ -23,6 +23,7 @@ from fleet_rlm.daytona.runtime import (
     ChildRuntimeLeaseState,
     DaytonaAdmission,
 )
+from tests.support.session_manager import make_daytona_child_factory
 
 MOUNT = "/workspace"
 
@@ -137,7 +138,7 @@ def _factory(
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    return recursive_child_runtime.DaytonaRuntime().build_child_factory(
+    return make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,

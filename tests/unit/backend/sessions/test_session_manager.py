@@ -20,6 +20,7 @@ from fleet_rlm.daytona.runtime import (
     DaytonaRuntime,
     LeaseRequest,
     RootSessionSpec,
+    SessionCleanupState,
 )
 from fleet_rlm.sessions.bindings import SandboxBinding
 from tests.support.session_manager import (
@@ -720,10 +721,10 @@ async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
         )
     )
 
-    await mgr.release(owner.lease)
+    await mgr.release(owner)
     await asyncio.sleep(0.05)
 
-    assert plat.sandboxes[owner.lease.sandbox_id].state == "running"
+    assert plat.sandboxes[owner.sandbox_id].state == "running"
     binding = await store.get(req.session_id)
     assert binding is not None
     assert binding.provider_state == "running"
@@ -1175,16 +1176,11 @@ async def test_runtime_shutdown_waits_for_active_invocation_release() -> None:
     release = await runtime.begin_root_invocation(
         request.workspace_id,
         request.session_id,
-        request.run_id,
         deadline=asyncio.get_running_loop().time() + 1,
     )
-    record = runtime.session_record(request.workspace_id, request.session_id)
-    assert record is not None
-    assert record.active_invocation_id == str(request.run_id)
     assert not await runtime.aclose(drain_seconds=0.01)
     release()
     release()
-    assert record.active_invocation_id is None
     assert await runtime.aclose()
 
 
@@ -1208,7 +1204,7 @@ async def test_retained_root_rechecks_durable_generation_before_reuse() -> None:
     assert first.closed
     assert second is not first
     assert second.sandbox_id == first.sandbox_id
-    assert second.lease.binding_generation == binding.generation + 1
+    assert second.binding_generation == binding.generation + 1
     assert await runtime.aclose()
 
 
@@ -1284,7 +1280,9 @@ async def test_replace_retains_root_and_binding_when_root_close_fails(
         )
 
     assert runtime.roots == (retained,)
-    assert retained.failed
+    record = runtime.session_record(request.workspace_id, request.session_id)
+    assert record is not None
+    assert record.cleanup_state is SessionCleanupState.UNRESOLVED
     assert retained.sandbox_id not in platform.deleted
     assert await store.get(request.session_id) == current
     assert mgr.active_leases.holder(request.session_id, workspace_id=request.workspace_id) is not None
