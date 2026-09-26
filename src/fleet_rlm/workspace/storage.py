@@ -984,6 +984,9 @@ class DaytonaSandboxWorkspaceStorage:
             try:
                 item_posix = PurePosixPath(item_path)
                 relative = str(item_posix.relative_to(self._root))
+            except ValueError as exc:
+                raise UnsafePathError("workspace listing escapes trusted root") from exc
+            try:
                 child = str(item_posix.relative_to(PurePosixPath(full_path)))
             except ValueError as exc:
                 raise UnsafePathError("workspace listing escapes requested path") from exc
