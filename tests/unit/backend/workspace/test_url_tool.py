@@ -11,6 +11,7 @@ import pytest
 from fleet_rlm.rlm.events import ToolCompleted, ToolStarted, observe_tool
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.workspace.url import (
+    URL_INLINE_CONTENT_MAX_BYTES,
     InMemoryUrlSourceStore,
     UrlFetchResult,
     UrllibPublicTextFetcher,
@@ -198,7 +199,9 @@ def test_workspace_url_store_stops_growing_when_entry_bound_is_reached() -> None
 
     assert first(url="https://example.com/first")["cache_hit"] is False
     assert second(url="https://example.com/second")["cache_hit"] is False
-    assert second(url="https://example.com/second")["cache_hit"] is False
+    uncached = second(url="https://example.com/second")
+    assert uncached["cache_hit"] is False
+    assert uncached["content"] == "needle: 42"
     assert fetcher.calls == ["https://example.com/first", "https://example.com/second", "https://example.com/second"]
 
 
@@ -238,9 +241,10 @@ def test_url_tool_returns_content_to_repl_but_projects_metadata_only() -> None:
 def test_url_tool_returns_a_workspace_reference_for_large_content() -> None:
     session_id = uuid4()
     content = "x" * (1_024 * 1_024 + 1)
+    store = WorkspaceUrlSourceStore(_FakeWorkspace())
     host = UrlToolHost(
         session_id=session_id,
-        store=WorkspaceUrlSourceStore(_FakeWorkspace()),
+        store=store,
         max_bytes=len(content.encode("utf-8")) + 1,
         fetcher=_FakeFetcher([], text=content),
     )
@@ -252,6 +256,71 @@ def test_url_tool_returns_a_workspace_reference_for_large_content() -> None:
     assert result["content_available"] is True
     assert result["content_preview"] == content[:4_000]
     assert result["workspace_path"].startswith("sources/urls/")
+    assert store.read(session_id, result["workspace_path"], max_bytes=len(content) + 1) == content
+
+
+@pytest.mark.parametrize(
+    ("max_entries_total", "max_bytes_total", "seed_existing"),
+    [(1, URL_INLINE_CONTENT_MAX_BYTES * 2, True), (2, URL_INLINE_CONTENT_MAX_BYTES, False)],
+)
+def test_workspace_url_tool_rejects_large_result_when_cache_capacity_is_full(
+    max_entries_total: int,
+    max_bytes_total: int,
+    seed_existing: bool,
+) -> None:
+    session_id = uuid4()
+    workspace = _FakeWorkspace()
+    store = WorkspaceUrlSourceStore(
+        workspace,
+        max_entries_total=max_entries_total,
+        max_bytes_total=max_bytes_total,
+    )
+    if seed_existing:
+        seed_tool = UrlToolHost(
+            session_id=session_id,
+            store=store,
+            max_bytes=1_024,
+            fetcher=_FakeFetcher([], text="cached"),
+        ).as_tools()[0]
+        assert seed_tool(url="https://example.com/cached")["ok"] is True
+
+    content = "x" * (URL_INLINE_CONTENT_MAX_BYTES + 1)
+    large_tool = UrlToolHost(
+        session_id=session_id,
+        store=store,
+        max_bytes=len(content) + 1,
+        fetcher=_FakeFetcher([], text=content),
+    ).as_tools()[0]
+
+    result = large_tool(url="https://example.com/large")
+
+    assert result == {
+        "ok": False,
+        "error": "cache_unavailable",
+        "message": "URL content could not be persisted",
+    }
+    assert len(workspace.values) == (1 if seed_existing else 0)
+
+
+def test_in_memory_url_tool_does_not_evict_cached_content_for_unstorable_large_result() -> None:
+    session_id = uuid4()
+    store = InMemoryUrlSourceStore(max_bytes_total=128)
+    assert store.write(session_id, "sources/urls/keep.txt", "keep", max_bytes=128)
+    content = "x" * (URL_INLINE_CONTENT_MAX_BYTES + 1)
+    tool = UrlToolHost(
+        session_id=session_id,
+        store=store,
+        max_bytes=len(content) + 1,
+        fetcher=_FakeFetcher([], text=content),
+    ).as_tools()[0]
+
+    result = tool(url="https://example.com/large")
+
+    assert result["ok"] is False
+    assert result["error"] == "cache_unavailable"
+    assert "content_available" not in result
+    assert "workspace_path" not in result
+    assert store.read(session_id, "sources/urls/keep.txt", max_bytes=128) == "keep"
 
 
 def test_workspace_url_store_reuses_content_across_tool_hosts() -> None:
