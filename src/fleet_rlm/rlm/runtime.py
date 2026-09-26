@@ -12,7 +12,7 @@ import contextlib
 import contextvars
 import logging
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
@@ -35,6 +35,7 @@ from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
 from fleet_rlm.rlm.compat_3_3_1 import (
     CodeInterpreter,
     bind_native_rlm_observer,
+    daytona_provider_contract,
     is_native_rlm,
 )
 from fleet_rlm.rlm.events import (
@@ -57,11 +58,10 @@ from fleet_rlm.rlm.events import (
     reconcile_trajectory,
     recursive_summary,
 )
-from fleet_rlm.rlm.output_contract import bind_output_contract
+from fleet_rlm.rlm.output_contract import FleetOutputContract, bind_output_contract
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     FleetRLMSignature,
-    RLMFactory,
     RLMModelBundle,
     RLMOptions,
     build_lm,
@@ -557,25 +557,15 @@ async def invoke_native_rlm(
     kwargs: Mapping[str, Any],
 ) -> Any:
     """
-    Invoke the RLM operation using the caller-owned interpreter when required.
+    Invoke the RLM operation using its invocation-scoped interpreter factory.
 
-    Parameters:
-        rlm (Any): RLM object to invoke.
-        context (RLMExecutionContext): Execution context containing the caller-owned interpreter.
-        kwargs (Mapping[str, Any]): Keyword arguments passed to the RLM operation.
-
-    Returns:
-        Any: Result produced by the RLM operation.
-
-    Raises:
-        RLMConfigError: If an exact native `dspy.RLM` instance is invoked without a caller-owned interpreter.
+    Native DSPy creates, binds, and shuts down a fresh interpreter for this
+    invocation. The retained session adapter is only the factory template; it
+    continues to own the Sandbox lease and is never passed to ``acall``.
+    Deterministic substitute RLMs retain their ordinary keyword-only call.
     """
-    native_call_args: tuple[Any, ...] = ()
-    if is_native_rlm(rlm):
-        if context.execution.interpreter is None:
-            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        native_call_args = (context.execution.interpreter,)
-    return await rlm.acall(*native_call_args, **dict(kwargs))
+    del context
+    return await rlm.acall(**dict(kwargs))
 
 
 def start_rlm_worker(
@@ -633,19 +623,7 @@ def _run_private_event_loop(
 # ---------------------------------------------------------------------------
 
 
-class RLMFactoryLike(Protocol):
-    def create(
-        self,
-        *,
-        models: Any,
-        options: Any,
-        tools: Sequence[dspy.Tool] | None = None,
-        signature: Any = None,
-        verbose: bool = True,
-        host_tool_dispatch: bool = True,
-    ) -> Any:
-        """Construct an RLM with the specified models, options, tools, and signature."""
-        ...
+ProgramBuilder = Callable[..., Any]
 
 
 class RunEventStream:
@@ -822,9 +800,11 @@ class RLMRunner:
     def __init__(
         self,
         *,
-        factory: RLMFactoryLike | None = None,
+        program_builder: ProgramBuilder = build_native_rlm,
+        verbose: bool = True,
     ) -> None:
-        self._factory = factory or RLMFactory()
+        self._program_builder = program_builder
+        self._verbose = verbose
         self._close_lock = asyncio.Lock()
         self._close_task: asyncio.Task[None] | None = None
         self._closed = False
@@ -1284,39 +1264,80 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
-            rlm = self._factory.create(
-                models=state_context.execution.models,
+            fresh_interpreter = getattr(state_context.execution.interpreter, "new_invocation", None)
+            if not callable(fresh_interpreter) and self._program_builder is build_native_rlm:
+                # Serving path: a real native RLM requires the
+                # invocation-scoped factory. The rejecting contract is never
+                # a serving fallback; tests injecting a fake program builder
+                # keep the explicit in-process/test boundary below.
+                raise RLMConfigError("native RLM execution requires an invocation-scoped interpreter factory")
+            invocation_factory = fresh_interpreter
+            supports_invocation_bindings = bool(
+                getattr(state_context.execution.interpreter, "invocation_scoped_bindings", False)
+            )
+            if callable(fresh_interpreter) and supports_invocation_bindings:
+                # The retained Daytona adapter is a resource template only.
+                # Capture every Run-local binding in DSPy's zero-argument
+                # invocation factory rather than rebinding that template.
+                output_contract = FleetOutputContract.from_signature(spec.signature)
+
+                def invocation_factory() -> Any:
+                    return fresh_interpreter(
+                        observer=observations.publish,
+                        observation_max_chars=state_context.execution.options.max_output_chars,
+                        turn_budget=getattr(state_context.execution.models, "budget", None),
+                        turn_request=state_context.session.request,
+                        async_bridge=getattr(state_context.execution, "async_bridge", None),
+                        tool_settled=(
+                            lambda name, arguments, result: (
+                                guards.integrity.completed(name, arguments, result)
+                                if broker_acknowledges_tools
+                                else None
+                            )
+                        ),
+                        tool_failed=guards.integrity.failed if broker_acknowledges_tools else None,
+                        context_capsule=state_context.session.attachment_context,
+                        output_contract=output_contract,
+                    )
+
+            rlm = self._program_builder(
+                signature=spec.signature,
                 options=state_context.execution.options,
                 tools=(all_tools or None) if fleet_dispatch else None,
-                signature=spec.signature,
+                sub_lm=state_context.execution.models.sub_lm,
                 host_tool_dispatch=fleet_dispatch,
+                interpreter_factory=invocation_factory if callable(invocation_factory) else daytona_provider_contract,
+                verbose=self._verbose,
             )
-            bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
-            if callable(bind_budget):
-                bind_budget(getattr(state_context.execution.models, "budget", None))
-            bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
-            if callable(bind_request):
-                bind_request(state_context.session.request)
-            bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
-            if callable(bind_async_bridge):
-                bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
-            bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
-            if broker_acknowledges_tools and callable(bind_tool_outcomes):
-                bind_tool_outcomes(
-                    tool_settled=lambda name, arguments, result: guards.integrity.completed(name, arguments, result),
-                    tool_failed=guards.integrity.failed,
+            if not supports_invocation_bindings:
+                bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
+                if callable(bind_budget):
+                    bind_budget(getattr(state_context.execution.models, "budget", None))
+                bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
+                if callable(bind_request):
+                    bind_request(state_context.session.request)
+                bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
+                if callable(bind_async_bridge):
+                    bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
+                bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
+                if broker_acknowledges_tools and callable(bind_tool_outcomes):
+                    bind_tool_outcomes(
+                        tool_settled=lambda name, arguments, result: guards.integrity.completed(
+                            name, arguments, result
+                        ),
+                        tool_failed=guards.integrity.failed,
+                    )
+                self._bind_observer(
+                    state_context.execution.interpreter,
+                    observations.publish,
+                    state_context.execution.options.max_output_chars,
+                    deadline=state_context.execution.deadline,
                 )
-            self._bind_observer(
-                state_context.execution.interpreter,
-                observations.publish,
-                state_context.execution.options.max_output_chars,
-                deadline=state_context.execution.deadline,
-            )
-            self._bind_context_capsule(state_context)
-            bind_output_contract(
-                state_context.execution.interpreter,
-                getattr(rlm, "signature", None),
-            )
+                self._bind_context_capsule(state_context)
+                bind_output_contract(
+                    state_context.execution.interpreter,
+                    getattr(rlm, "signature", None),
+                )
             self._bind_observer(
                 rlm,
                 observations.publish,
@@ -1612,9 +1633,9 @@ __all__ = [
     "PreparationNotice",
     "PreparedCapabilities",
     "ProbeInterpreterFactory",
+    "ProgramBuilder",
     "RLMExecutionContext",
     "RLMExecutionSpec",
-    "RLMFactoryLike",
     "RLMInterpreter",
     "RLMProviderContractError",
     "RLMProviderProbeResult",

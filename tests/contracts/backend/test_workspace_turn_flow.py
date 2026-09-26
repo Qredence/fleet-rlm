@@ -331,7 +331,7 @@ async def _run(
         ),
         capabilities=Capabilities(workspace),
     )
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     observed = [event async for event in stream]
     if events is not None:
         events.extend(observed)

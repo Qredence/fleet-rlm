@@ -915,8 +915,9 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             return Program()
 
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(prepared.execution)
-    _ = [event async for event in stream]
+    stream = RLMRunner(program_builder=factory.create).stream(prepared.execution)
+    async for _ in stream:
+        pass
 
     assert factory.kwargs is not None
     # P44.3 production wiring: ``history`` is now a first-class RLM input

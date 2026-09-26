@@ -42,6 +42,35 @@ def test_execute_returns_string_and_preserves_state() -> None:
     assert result == "41"
 
 
+def test_factory_created_adapter_is_invocation_scoped_and_does_not_close_retained_backend() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    retained_backend = InProcessInterpreterBackend()
+    retained = DaytonaCodeInterpreter(backend=retained_backend)
+
+    fresh = retained.new_invocation()
+    fresh.shutdown()
+
+    assert fresh is not retained
+    assert retained_backend.closed is False
+    assert retained.execute("value = 1") == ""
+
+
+def test_factory_created_adapter_keeps_run_bindings_off_retained_template() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    observed: list[object] = []
+    observer = observed.append
+
+    fresh = retained.new_invocation(observer=observer, turn_request="one isolated turn")
+
+    assert fresh._observer is observer
+    assert fresh._turn_request == "one isolated turn"
+    assert retained._observer is None
+    assert retained._turn_request is None
+
+
 def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
     from dspy.primitives.code_interpreter import CodeExecutionError
 
@@ -140,7 +169,7 @@ def test_sanitize_provider_message_strips_secrets_and_paths() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
-    from fleet_rlm.daytona.sync_bridge import sync_sandbox
+    from fleet_rlm.daytona.interpreter import sync_sandbox
 
     class AsyncFilesystem:
         async def download_file(self, path: str) -> bytes:
@@ -156,7 +185,7 @@ async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
-    from fleet_rlm.daytona.sync_bridge import sync_sandbox
+    from fleet_rlm.daytona.interpreter import sync_sandbox
 
     class Service:
         async def create_context(self, **kwargs):
@@ -226,7 +255,7 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
 @pytest.mark.asyncio
 async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.sync_bridge import sync_sandbox
+    from fleet_rlm.daytona.interpreter import sync_sandbox
 
     class Fs:
         async def download_file(self, path: str) -> bytes:
@@ -259,7 +288,7 @@ async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
 
 @pytest.mark.asyncio
 async def test_sync_sandbox_bridges_workspace_metadata_operations() -> None:
-    from fleet_rlm.daytona.sync_bridge import sync_sandbox
+    from fleet_rlm.daytona.interpreter import sync_sandbox
 
     class Fs:
         async def get_file_info(self, path: str):

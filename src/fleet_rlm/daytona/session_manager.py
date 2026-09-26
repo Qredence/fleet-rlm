@@ -31,6 +31,7 @@ from fleet_rlm.daytona.interpreter import (
     DEFAULT_EXECUTION_OUTPUT_CHARS,
     DEFAULT_EXECUTION_TIMEOUT_S,
     DaytonaCodeInterpreter,
+    SyncBridgeDispatcher,
     sandbox_backend,
 )
 from fleet_rlm.daytona.platform import sandbox_state
@@ -61,7 +62,6 @@ from fleet_rlm.daytona.sandbox import (
     schedule_owned_close,
     wait_lease_ownership,
 )
-from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
 from fleet_rlm.runtime.bindings import (
     BindingGenerationAuthority,
     SandboxBinding,
@@ -1682,7 +1682,12 @@ class DaytonaSessionManager:
         volume_id = binding.volume_id or await self._resolve_volume_id(deadline=deadline)
         expected = self._expected_mount(volume_id=volume_id, workspace_id=resolved_workspace)
         if binding.sandbox_id:
+            runtime = self._runtime_ref() if self._runtime_ref is not None else None
+            discard_root = getattr(runtime, "discard_stale_root_session", None)
+            if callable(discard_root):
+                await discard_root(resolved_workspace, binding.session_id, deadline=deadline)
             retirement = self._sandbox_retirement_lease(binding.sandbox_id)
+            retirement_attempted = True
             try:
                 receipt = await retirement.aclose(deadline=deadline)
             except TimeoutError as exc:
@@ -1704,6 +1709,8 @@ class DaytonaSessionManager:
                     message="sandbox retirement was not confirmed",
                     cause_type="SandboxRetirementUnconfirmed",
                 )
+        else:
+            retirement_attempted = False
         request = LeaseRequest(
             session_id=binding.session_id,
             user_id=user_id,
@@ -1740,8 +1747,9 @@ class DaytonaSessionManager:
             if sandbox is not None:
                 with contextlib.suppress(BaseException):
                     await self._sandbox_retirement_lease(_sandbox_id(sandbox)).aclose()
-            with contextlib.suppress(BaseException):
-                await self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=None))
+            if retirement_attempted:
+                with contextlib.suppress(BaseException):
+                    await self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=None))
             raise
 
     async def _ensure_running(

@@ -231,3 +231,61 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
     assert first_result == ["first"]
     assert interpreter.execute("_out = 'after-settlement'") == "after-settlement"
     interpreter.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_native_build_without_invocation_factory() -> None:
+    """P2.3: the serving path never falls back to the rejecting contract.
+
+    With the default native program builder, an interpreter that cannot
+    supply ``new_invocation`` fails closed instead of receiving the
+    metadata-only ``daytona_provider_contract`` factory.
+    """
+    import asyncio as _asyncio
+    from types import SimpleNamespace
+    from uuid import uuid4 as _uuid4
+
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.runtime import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class LegacyInterpreter:
+        fleet_host_tool_dispatch_available = False
+
+        def bind_observer(self, _observer, *, max_chars):
+            del max_chars
+            return None
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=_uuid4(), session_id=_uuid4(), access=TurnAccess(_uuid4(), _uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(_uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=_asyncio.get_running_loop().time() + 10,
+            interpreter=LegacyInterpreter(),
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner().stream(context)
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None
+    assert not stream.outcome.succeeded

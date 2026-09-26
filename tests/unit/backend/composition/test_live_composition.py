@@ -118,7 +118,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
 async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytest.MonkeyPatch) -> None:
     """Cancellation from composition build must not leave bridge loop authority."""
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 
     seen: list[SyncBridgeDispatcher] = []
 
@@ -516,7 +516,7 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
 async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -> None:
     """Unsettled preparation must keep the bridge fenced for deferred disposal."""
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 
     class Preparation:
         async def aclose(self) -> bool:
@@ -610,7 +610,7 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     was removed in P33.
     """
     import fleet_rlm.composition.live as composition
-    from fleet_rlm.daytona.sync_bridge import SyncBridgeDispatcher
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
         turn_runtime=object(),

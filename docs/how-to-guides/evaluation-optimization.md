@@ -150,7 +150,8 @@ The maintained static dataset is the five `QUALITY_RECORDS` in
 only: neither `prepare-evaluation` nor static dataset ingestion loads it.
 Its presence does not establish a runnable Phase 6 campaign. Corpus integration,
 per-case recursion classifications, and matched quality/cost evidence remain
-distinct work in the [ADR 006 ledger](../decisions/006-implementation-status.md).
+distinct work with its own evaluation receipts and validation gates. See the
+[testing strategy](testing-strategy.md) for the current evidence boundaries.
 
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
@@ -410,5 +411,5 @@ The 2026-09-10 execution is retained at
 `.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
 `incomplete`.
 
-This historical description does not supersede the
-[ADR 006 status ledger](../decisions/006-implementation-status.md).
+This historical description does not supersede the current
+[architecture](../../ARCHITECTURE.md) or [testing strategy](testing-strategy.md).

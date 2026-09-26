@@ -60,7 +60,7 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
         ),
         capabilities=EmptyCapabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
 
     assert stream.outcome is not None
@@ -125,7 +125,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
         ),
         capabilities=EmptyCapabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
 
     assert stream.outcome is not None
@@ -189,7 +189,7 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
         ),
         capabilities=Capabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
 
     assert [event.kind for event in events] == [
@@ -260,7 +260,7 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
         ),
         capabilities=Capabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
 
     assert [event.kind for event in events][:4] == [
@@ -324,7 +324,7 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
         ),
         capabilities=EmptyCapabilities(),
     )
-    stream = RLMRunner(factory=Factory()).stream(context)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
     await stream.aclose()
 
     # Closing before any iteration must not raise IndexError: synthesize a

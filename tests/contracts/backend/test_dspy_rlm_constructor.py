@@ -1,4 +1,4 @@
-"""Contract: installed dspy.RLM constructor surface used by RLMFactory."""
+"""Contract: installed dspy.RLM constructor surface used by Fleet."""
 
 from __future__ import annotations
 

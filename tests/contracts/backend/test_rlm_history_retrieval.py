@@ -9,13 +9,21 @@ from uuid import uuid4
 import dspy
 import pytest
 
+from fleet_rlm.rlm.program import build_native_rlm
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
+
+
+def _build_native(**kwargs: object):
+    models = kwargs.pop("models", None)
+    if models is not None:
+        kwargs["sub_lm"] = models.sub_lm
+    return build_native_rlm(**kwargs)
 
 
 @pytest.mark.asyncio
 async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.program import RLMFactory, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -72,7 +80,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
             self.actions = Actions()
 
         def create(self, **kwargs):
-            rlm = RLMFactory().create(**kwargs)
+            rlm = _build_native(**kwargs)
             rlm.generate_action = self.actions
             return rlm
 
@@ -94,7 +102,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
         capabilities=Capabilities(),
     )
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     _events = [event async for event in stream]
 
     assert factory.actions.calls == 1
@@ -107,7 +115,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
 @pytest.mark.asyncio
 async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.program import RLMFactory, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.rlm.runtime import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -170,7 +178,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
             self.actions = Actions()
 
         def create(self, **kwargs):
-            rlm = RLMFactory().create(**kwargs)
+            rlm = _build_native(**kwargs)
             rlm.generate_action = self.actions
             return rlm
 
@@ -192,7 +200,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
         capabilities=Capabilities(),
     )
     factory = Factory()
-    stream = RLMRunner(factory=factory).stream(context)
+    stream = RLMRunner(program_builder=factory.create).stream(context)
     _events = [event async for event in stream]
 
     assert factory.actions.calls == 1

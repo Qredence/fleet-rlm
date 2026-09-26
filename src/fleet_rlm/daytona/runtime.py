@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+from weakref import WeakValueDictionary
 
 from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_OUTPUT_CHARS
 from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile, execution_timeout_s_from_settings
@@ -216,6 +217,66 @@ async def _close_child_lease(lease: Any) -> Any:
     return result
 
 
+@contextlib.asynccontextmanager
+async def _admitted(capacity: asyncio.Semaphore, deadline: float | None):
+    """Hold one bounded capacity slot only around a provider operation."""
+    if deadline is None:
+        await capacity.acquire()
+    else:
+        remaining = max(0.0, deadline - asyncio.get_running_loop().time())
+        await asyncio.wait_for(capacity.acquire(), timeout=remaining)
+    try:
+        yield
+    finally:
+        capacity.release()
+
+
+class SessionCleanupState(StrEnum):
+    """Durable cleanup position of one runtime-owned session record."""
+
+    ACTIVE = "ACTIVE"
+    RELEASING = "RELEASING"
+    RETIRED = "RETIRED"
+    UNRESOLVED = "UNRESOLVED"
+
+
+@dataclass(slots=True)
+class DaytonaSessionRecord:
+    """Runtime-owned resource record for one reusable session Sandbox.
+
+    This is the Phase 2 preservation seam: workspace/session identity,
+    Sandbox/Volume handles, binding generation, the active invocation, and
+    cleanup state. It carries no prompts, tools, or durable turn state.
+    """
+
+    workspace_id: str
+    session_id: str
+    sandbox_id: str | None = None
+    volume_id: str | None = None
+    mount_path: str | None = None
+    volume_subpath: str | None = None
+    binding_generation: int = 0
+    active_invocation_id: str | None = None
+    cleanup_state: SessionCleanupState = SessionCleanupState.ACTIVE
+
+    @property
+    def key(self) -> tuple[str, str]:
+        """Return the stable root registry key."""
+        return (self.workspace_id, self.session_id)
+
+    def begin_invocation(self, invocation_id: str) -> None:
+        """Mark one invocation active; the Sandbox stays owned across it."""
+        if self.active_invocation_id is not None:
+            raise RuntimeError("session already has an active invocation")
+        self.active_invocation_id = invocation_id
+
+    def end_invocation(self, invocation_id: str) -> None:
+        """Release the invocation marker without retiring the Sandbox."""
+        if self.active_invocation_id != invocation_id:
+            raise RuntimeError("invocation marker does not match the active invocation")
+        self.active_invocation_id = None
+
+
 class ChildEnvironment:
     """Async context-managed view over one strictly disposable child lease."""
 
@@ -336,8 +397,18 @@ class DaytonaRuntime:
         self._roots: dict[tuple[str, str], RootSessionLease] = {}
         self._tainted: set[tuple[str, str]] = set()
         self._children: set[ChildEnvironment] = set()
+        self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
+        # Locks exist only while an acquisition/retirement is using a key.
+        # Callers keep a strong local reference through acquisition, while
+        # idle keys can be collected from this weak registry.
+        self._key_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         self._state = DaytonaRuntimeState.OPEN
+        # Bounded provider-capacity admission owned by the runtime. The
+        # semaphore is only held around provider operations, never across a
+        # network call for an unrelated session (the registry lock is
+        # released before the provider call in acquire_root_session).
+        self._capacity = asyncio.Semaphore(8)
 
         if self._resources is not None:
             if self._root_acquirer is None:
@@ -389,31 +460,47 @@ class DaytonaRuntime:
             raise RuntimeError("Daytona runtime is not accepting root Sessions")
 
         key = spec.key
-        async with self._lock:
-            if self._state is not DaytonaRuntimeState.OPEN:
-                raise RuntimeError("Daytona runtime is not accepting root Sessions")
+        key_lock = await self._root_key_lock(key)
+        # One session's provider wait never blocks registry access for an
+        # unrelated session: only this key is serialized, and the global
+        # registry lock is held solely for short state checks and installs.
+        async with key_lock:
+            async with self._lock:
+                if self._state is not DaytonaRuntimeState.OPEN:
+                    raise RuntimeError("Daytona runtime is not accepting root Sessions")
+                current = self._roots.get(key)
+                must_replace = current is not None and (
+                    current.state is not LeaseState.OPEN
+                    or key in self._tainted
+                    or spec.force_new
+                    or _lease_fingerprint(current) != spec.context_fingerprint
+                )
+                if current is None and key in self._tainted:
+                    must_replace = True
+                if current is not None and not must_replace:
+                    return current
+                stale = current if must_replace else None
 
-            current = self._roots.get(key)
-            must_replace = current is not None and (
-                current.state is not LeaseState.OPEN
-                or key in self._tainted
-                or spec.force_new
-                or _lease_fingerprint(current) != spec.context_fingerprint
-            )
-            if current is None and key in self._tainted:
-                must_replace = True
-
-            if current is not None and not must_replace:
-                return current
-
-            if current is not None:
-                await current.close(notify=False, deadline=spec.deadline)
-                self._roots.pop(key, None)
+            if stale is not None:
+                await stale.close(notify=False, deadline=spec.deadline)
+                async with self._lock:
+                    if self._roots.get(key) is stale:
+                        self._roots.pop(key, None)
+                        self._records.pop(key, None)
 
             raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
             owner = self._coerce_root(spec, raw)
-            self._roots[key] = owner
-            self._tainted.discard(key)
+            async with self._lock:
+                if self._state is not DaytonaRuntimeState.OPEN:
+                    reject_owner = True
+                else:
+                    reject_owner = False
+                    self._roots[key] = owner
+                    self._tainted.discard(key)
+                    self._sync_record(key, owner)
+            if reject_owner:
+                await owner.close(notify=False, deadline=spec.deadline)
+                raise RuntimeError("Daytona runtime stopped before root Session acquisition completed")
             return owner
 
     async def discard_stale_root_session(
@@ -423,18 +510,77 @@ class DaytonaRuntime:
         *,
         deadline: float | None = None,
     ) -> None:
-        """Drop a resident root after external replacement."""
+        """Close and drop a resident root after external replacement.
+
+        The registry entry remains authoritative until the provider lease has
+        closed successfully.  A replacement must not retire the remote
+        Sandbox while this retained Root still owns its SessionManager lease.
+        """
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
-        async with self._lock:
-            owner = self._roots.pop(key, None)
-        if owner is not None:
-            with contextlib.suppress(Exception):
+        key_lock = await self._root_key_lock(key)
+        async with key_lock:
+            async with self._lock:
+                owner = self._roots.get(key)
+                if owner is None:
+                    return
+                self._mark_record(key, SessionCleanupState.RELEASING)
+            try:
                 await owner.close(notify=False, deadline=deadline)
+            except BaseException:
+                async with self._lock:
+                    self._mark_record(key, SessionCleanupState.UNRESOLVED)
+                raise
+            async with self._lock:
+                if self._roots.get(key) is owner:
+                    self._roots.pop(key, None)
+                self._records.pop(key, None)
 
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
         self._tainted.add(key)
+
+    def session_record(self, workspace_id: UUID | str, session_id: UUID | str) -> DaytonaSessionRecord | None:
+        """Return the runtime-owned resource record for one session, if any."""
+        key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
+        return self._records.get(key)
+
+    @property
+    def has_pending_ownership(self) -> bool:
+        """Whether roots, children, or provider-owned resources remain."""
+        manager = getattr(self._resources, "session_manager", None)
+        return bool(
+            self._roots or self._children or (manager is not None and getattr(manager, "has_pending_ownership", False))
+        )
+
+    async def _root_key_lock(self, key: tuple[str, str]) -> asyncio.Lock:
+        """Return the per-session lock while serializing registry access."""
+        async with self._lock:
+            key_lock = self._key_locks.get(key)
+            if key_lock is None:
+                key_lock = asyncio.Lock()
+                self._key_locks[key] = key_lock
+            return key_lock
+
+    def _sync_record(self, key: tuple[str, str], owner: RootSessionLease) -> None:
+        """Refresh the resource record from the installed root lease."""
+        record = self._records.get(key)
+        if record is None:
+            record = DaytonaSessionRecord(workspace_id=key[0], session_id=key[1])
+            self._records[key] = record
+        record.sandbox_id = str(owner.sandbox_id or "") or None
+        record.volume_id = owner.volume_id
+        record.mount_path = owner.mount_path
+        record.volume_subpath = owner.volume_subpath
+        generation = getattr(getattr(owner, "lease", None), "binding_generation", None)
+        if isinstance(generation, int) and not isinstance(generation, bool):
+            record.binding_generation = generation
+        record.cleanup_state = SessionCleanupState.ACTIVE
+
+    def _mark_record(self, key: tuple[str, str], state: SessionCleanupState) -> None:
+        record = self._records.get(key)
+        if record is not None:
+            record.cleanup_state = state
 
     def open_child(self, spec: ChildEnvironmentSpec) -> _ChildContext:
         """Return a disposable child context."""
@@ -451,10 +597,24 @@ class DaytonaRuntime:
     ) -> None:
         """Close one retained root."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
-        async with self._lock:
-            owner = self._roots.get(key)
-        if owner is not None:
-            await owner.close(deadline=deadline)
+        key_lock = await self._root_key_lock(key)
+        async with key_lock:
+            async with self._lock:
+                owner = self._roots.get(key)
+                if owner is None:
+                    return
+                self._mark_record(key, SessionCleanupState.RELEASING)
+            try:
+                await owner.close(deadline=deadline)
+            except BaseException:
+                async with self._lock:
+                    self._mark_record(key, SessionCleanupState.UNRESOLVED)
+                raise
+            async with self._lock:
+                if owner.closed:
+                    if self._roots.get(key) is owner:
+                        self._roots.pop(key, None)
+                    self._records.pop(key, None)
 
     async def aclose(self, *, deadline: float | None = None) -> bool:
         """Close all retained roots and active children.
@@ -464,7 +624,8 @@ class DaytonaRuntime:
         a later close call must be able to retry the same lease instead of
         losing the only reference to it.
         """
-        self._state = DaytonaRuntimeState.CLOSING
+        async with self._lock:
+            self._state = DaytonaRuntimeState.CLOSING
         errors: list[BaseException] = []
 
         async with self._lock:
@@ -486,14 +647,34 @@ class DaytonaRuntime:
                 await root.close(deadline=deadline)
             except BaseException as exc:
                 errors.append(exc)
+                async with self._lock:
+                    self._mark_record(root.key, SessionCleanupState.UNRESOLVED)
             else:
                 if root.closed:
                     async with self._lock:
                         if self._roots.get(root.key) is root:
                             self._roots.pop(root.key, None)
+                        self._records.pop(root.key, None)
+
+        # The SessionManager owns actual late provider tasks and Sandboxes.
+        # Drain that state directly; a timer witness cannot prove that remote
+        # ownership has settled.
+        manager = getattr(self._resources, "session_manager", None)
+        manager_close = getattr(manager, "aclose", None)
+        manager_settled = True
+        if callable(manager_close):
+            remaining = 30.0 if deadline is None else max(0.0, deadline - asyncio.get_running_loop().time())
+            try:
+                manager_settled = bool(await manager_close(drain_seconds=remaining))
+            except BaseException as exc:
+                errors.append(exc)
+                manager_settled = False
+        manager_pending = bool(manager is not None and getattr(manager, "has_pending_ownership", False))
 
         async with self._lock:
-            retained = bool(self._children or self._roots)
+            retained = bool(self._children or self._roots or not manager_settled or manager_pending)
+            if not retained:
+                self._key_locks.clear()
         self._state = DaytonaRuntimeState.FAILED if errors or retained else DaytonaRuntimeState.CLOSED
         return not errors and not retained
 
@@ -508,17 +689,28 @@ class DaytonaRuntime:
             raise RuntimeError("no root acquirer configured")
 
         async def _call() -> Any:
-            try:
-                sig = inspect.signature(acquirer)
-                res = acquirer(spec, force_new=force_new) if "force_new" in sig.parameters else acquirer(spec)
-            except (TypeError, ValueError):
-                res = acquirer(spec)
-            return await _maybe_await(res)
+            # Capacity is admitted only around this provider operation.
+            # The registry lock is not held here (acquire_root_session
+            # releases it before this call), so one session's network wait
+            # never blocks an unrelated session's registry access.
+            async with _admitted(self._capacity, spec.deadline):
+                try:
+                    sig = inspect.signature(acquirer)
+                    res = acquirer(spec, force_new=force_new) if "force_new" in sig.parameters else acquirer(spec)
+                except (TypeError, ValueError):
+                    res = acquirer(spec)
+                return await _maybe_await(res)
 
-        if spec.deadline is None:
-            return await _call()
-        remaining = max(0.0, spec.deadline - asyncio.get_running_loop().time())
-        return await asyncio.wait_for(_call(), timeout=remaining)
+        try:
+            if spec.deadline is None:
+                return await _call()
+            remaining = max(0.0, spec.deadline - asyncio.get_running_loop().time())
+            return await asyncio.wait_for(_call(), timeout=remaining)
+        except (TimeoutError, asyncio.CancelledError):
+            # The resource-backed SessionManager tracks provider tasks and
+            # late Sandboxes directly. Runtime shutdown checks that ownership
+            # rather than keeping a timer that only approximates settlement.
+            raise
 
     def _coerce_root(self, spec: RootSessionSpec, raw: Any) -> RootSessionLease:
         sandbox: Any | None = None
@@ -580,6 +772,7 @@ class DaytonaRuntime:
         async with self._lock:
             environment._owner.on_closed = self._deregister_child
             self._children.add(environment)
+            self._sync_child_record(environment)
         return environment
 
     def _coerce_child(self, spec: ChildEnvironmentSpec, raw: Any) -> ChildEnvironment:
@@ -590,6 +783,24 @@ class DaytonaRuntime:
         if isinstance(candidate, ChildEnvironment):
             return candidate
         return ChildEnvironment(spec, candidate, sandbox=sandbox)
+
+    def _sync_child_record(self, environment: ChildEnvironment) -> None:
+        """Refresh the runtime-owned record for one disposable child lease."""
+        spec = environment.spec
+        if spec.workspace_id is None or spec.session_id is None:
+            return
+        key = (
+            _identity_text(spec.workspace_id, "workspace_id"),
+            _identity_text(spec.session_id, "session_id"),
+        )
+        record = self._records.get(key)
+        if record is None:
+            record = DaytonaSessionRecord(workspace_id=key[0], session_id=key[1])
+            self._records[key] = record
+        # A child record never replaces root Sandbox/Volume ownership; it only
+        # tracks the disposable lease's cleanup position. Child reasoning
+        # lives in rlm/recursion.py and requests leases here.
+        record.cleanup_state = SessionCleanupState.ACTIVE
 
     async def _deregister_child(self, owner: RootSessionLease) -> None:
         """Forget a child only after its provider cleanup has succeeded."""

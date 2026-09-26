@@ -8,12 +8,14 @@ host tools, observation events, and execution budget capping.
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import contextvars
 import inspect
 import io
 import json
 import logging
+import re
 import shlex
 import time
 from collections.abc import Callable, Mapping
@@ -30,18 +32,6 @@ from fleet_rlm.daytona.errors import (
     DaytonaAdapterError,
     map_provider_error,
     sanitize_provider_message,
-)
-from fleet_rlm.daytona.models import (
-    FINAL_OUTPUT_MARKER,
-    FleetFinalOutputError,
-    build_submit_setup_code,
-    extract_final_payload,
-    final_output_frame,
-    remote_submit_setup_code,
-)
-from fleet_rlm.daytona.sync_bridge import (
-    SyncBridgeDispatcher,
-    sync_sandbox,
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
@@ -757,6 +747,8 @@ def _fleet_load_context_manifest(raw_manifest):
 class DaytonaCodeInterpreter:
     """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation."""
 
+    invocation_scoped_bindings = True
+
     def __init__(
         self,
         *,
@@ -801,6 +793,63 @@ class DaytonaCodeInterpreter:
         self._no_progress_repair_used = False
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
+
+    def new_invocation(
+        self,
+        *,
+        observer: ObservationObserver | None = None,
+        observation_max_chars: int | None = None,
+        turn_budget: TurnBudget | None = None,
+        turn_request: str | None = None,
+        async_bridge: Any | None = None,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
+        context_capsule: Any | None = None,
+        output_contract: FleetOutputContract | None = None,
+    ) -> DaytonaCodeInterpreter:
+        """Create an invocation-scoped adapter without retiring its Sandbox.
+
+        DSPy owns factory-created adapter shutdown.  The returned adapter gets a
+        new backend and broker/context state, while the existing retained root
+        adapter—and therefore its session Sandbox lease—remains owned by Fleet.
+        The optional arguments are invocation-local bindings.  Production
+        callers pass them through the zero-argument factory supplied to DSPy;
+        the retained template never receives per-Run observer, budget,
+        request, bridge, tool-settlement, context, or output-contract state.
+        """
+        backend = self._backend
+        if isinstance(backend, InProcessInterpreterBackend):
+            fresh_backend: InterpreterBackend | None = InProcessInterpreterBackend()
+        elif isinstance(backend, _SandboxProcessBackend):
+            fresh_backend = _SandboxProcessBackend(
+                backend.sandbox,
+                timeout_s=backend.timeout_s,
+                workdir=backend._workdir,
+            )
+        else:
+            raise DaytonaAdapterError(
+                message="interpreter cannot create an invocation-scoped adapter",
+                cause_type="InterpreterConfigurationError",
+            )
+        fresh = DaytonaCodeInterpreter(
+            backend=fresh_backend,
+            tools=dict(self._tools),
+            output_fields=list(self._output_fields) if self._output_fields is not None else None,
+            callbacks=list(self.callbacks),
+            broker_port=self._broker_port,
+            execution_output_cap=self._execution_output_cap,
+            max_code_chars=self._max_code_chars,
+        )
+        fresh.bind_observer(observer, max_chars=observation_max_chars or self._observation_max_chars)
+        fresh.bind_turn_budget(turn_budget)
+        fresh.bind_turn_request(turn_request)
+        fresh.bind_async_bridge(async_bridge)
+        fresh.bind_tool_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
+        if context_capsule is not None:
+            fresh.bind_context_capsule(context_capsule)
+        if output_contract is not None:
+            fresh.bind_output_contract(output_contract)
+        return fresh
 
     def _ensure_binding_mutation_allowed(self) -> None:
         """Reject an overlapping invocation before it can mutate the current namespace."""
@@ -1431,3 +1480,574 @@ def sandbox_backend(
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop, dispatcher)
     return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)
+
+
+# ---------------------------------------------------------------------------
+# Synchronous callback bridge for the Daytona interpreter
+# ---------------------------------------------------------------------------
+
+_BRIDGE_SERVICE_POLL_S = 0.05
+
+
+class SyncBridgeDispatcher:
+    """Composition-owned routing authority for sync-view SDK coroutines.
+
+    Each Daytona composition owns exactly one dispatcher and injects it into
+    every sync view it creates.
+    """
+
+    def __init__(self) -> None:
+        self._service_loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Register the loop servicing sync-view SDK coroutines for this composition."""
+        self._service_loop = loop
+
+    def clear_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
+        """Unregister only when this dispatcher still routes onto ``loop``."""
+        if loop is not None and self._service_loop is not loop:
+            return
+        self._service_loop = None
+
+    def service_loop(self) -> asyncio.AbstractEventLoop | None:
+        """Return the registered composition loop, if any."""
+        return self._service_loop
+
+    def run(
+        self,
+        awaitable: Any,
+        *,
+        deadline: float | None = None,
+        check_authority: Callable[[], None] | None = None,
+    ) -> Any:
+        """Run an awaitable on the composition-owned event loop."""
+        return _SyncBridgeLoop(caller_loop=None, dispatcher=self).run(
+            awaitable, deadline=deadline, check_authority=check_authority
+        )
+
+
+class _SyncBridgeLoop:
+    """Service-loop routing and close state for one synchronous Daytona bridge."""
+
+    def __init__(
+        self,
+        *,
+        caller_loop: asyncio.AbstractEventLoop | None,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> None:
+        self._caller_loop = caller_loop
+        self._dispatcher = dispatcher
+        self._closed = False
+
+    def _bridge_error(self, message: str) -> DaytonaAdapterError:
+        return DaytonaAdapterError(message=message, cause_type="InterpreterBridgeError")
+
+    def close(self) -> None:
+        """Tombstone the bridge; further calls fail fast until start()."""
+        self._closed = True
+
+    def start(self) -> None:
+        """Clear the close tombstone (survives close/reopen)."""
+        self._closed = False
+
+    def service_loop(self) -> asyncio.AbstractEventLoop | None:
+        if self._dispatcher is not None:
+            registered = self._dispatcher.service_loop()
+            if registered is not None:
+                return registered
+        return self._caller_loop
+
+    def run(
+        self,
+        awaitable: Any,
+        *,
+        deadline: float | None = None,
+        check_authority: Callable[[], None] | None = None,
+    ) -> Any:
+        if self._closed:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge is closed")
+        loop = self.service_loop()
+        if loop is None or loop.is_closed():
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable")
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+        if current_loop is loop:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge called from its owning event loop")
+        if deadline is not None and time.monotonic() >= deadline:
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise TimeoutError("async host Tool exceeded its Turn deadline")
+        bridge_awaitable: Any | None = None
+        try:
+            bridge_awaitable = awaitable if inspect.iscoroutine(awaitable) else _await_bridge_value(awaitable)
+            future = asyncio.run_coroutine_threadsafe(bridge_awaitable, loop)
+        except (RuntimeError, TypeError) as exc:
+            if bridge_awaitable is not None:
+                bridge_awaitable.close()
+            if inspect.iscoroutine(awaitable):
+                awaitable.close()
+            raise self._bridge_error("synchronous Daytona bridge service loop is unavailable") from exc
+        while True:
+            try:
+                timeout = _BRIDGE_SERVICE_POLL_S
+                if deadline is not None:
+                    timeout = min(timeout, max(0.0, deadline - time.monotonic()))
+                if check_authority is not None:
+                    check_authority()
+                if deadline is not None and timeout <= 0:
+                    future.cancel()
+                    raise TimeoutError("async host Tool exceeded its Turn deadline")
+                return future.result(timeout=timeout)
+            except TimeoutError:
+                if future.done():
+                    # The awaited Daytona operation itself may have timed out.
+                    return future.result()
+                if check_authority is not None:
+                    check_authority()
+                if deadline is not None and time.monotonic() >= deadline:
+                    future.cancel()
+                    raise TimeoutError("async host Tool exceeded its Turn deadline") from None
+                if loop.is_closed() or not loop.is_running():
+                    future.cancel()
+                    if inspect.iscoroutine(awaitable):
+                        with contextlib.suppress(Exception):
+                            awaitable.close()
+                    raise self._bridge_error("synchronous Daytona bridge service loop stopped") from None
+
+
+async def _await_bridge_value(awaitable: Any) -> Any:
+    return await awaitable
+
+
+def _sync_await(
+    awaitable: Any,
+    owner: _SyncBridgeLoop,
+    guard_loop: asyncio.AbstractEventLoop | None = None,
+) -> Any:
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+    if current_loop is not None and (current_loop is guard_loop or current_loop is owner.service_loop()):
+        if inspect.iscoroutine(awaitable):
+            awaitable.close()
+        raise DaytonaAdapterError(
+            message="synchronous Daytona bridge called from its owning event loop",
+            cause_type="InterpreterThreadError",
+        )
+    if not inspect.isawaitable(awaitable):
+        raise DaytonaAdapterError(
+            message="synchronous Daytona bridge requires an async SDK operation",
+            cause_type="InterpreterBridgeContractError",
+        )
+    return owner.run(awaitable)
+
+
+class _SyncCodeInterpreter:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        self._service = service
+        self._owner = owner
+        self._guard_loop = guard_loop
+
+    def create_context(self, **kwargs: Any) -> Any:
+        return _sync_await(self._service.create_context(**kwargs), self._owner, self._guard_loop)
+
+    def run_code(self, code: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.run_code(code, **kwargs), self._owner, self._guard_loop)
+
+    def delete_context(self, context: Any, **kwargs: Any) -> None:
+        _sync_await(self._service.delete_context(context, **kwargs), self._owner, self._guard_loop)
+
+
+class _SyncProcess:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        self._service = service
+        self._owner = owner
+        self._guard_loop = guard_loop
+
+    def code_run(self, code: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.code_run(code, **kwargs), self._owner, self._guard_loop)
+
+    def exec(self, command: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.exec(command, **kwargs), self._owner, self._guard_loop)
+
+    def create_session(self, session_id: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.create_session(session_id, **kwargs), self._owner, self._guard_loop)
+
+    def execute_session_command(self, session_id: str, request: Any, **kwargs: Any) -> Any:
+        return _sync_await(
+            self._service.execute_session_command(session_id, request, **kwargs), self._owner, self._guard_loop
+        )
+
+    def delete_session(self, session_id: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.delete_session(session_id, **kwargs), self._owner, self._guard_loop)
+
+
+class _SyncFileSystem:
+    def __init__(
+        self,
+        service: Any,
+        owner: _SyncBridgeLoop,
+        guard_loop: asyncio.AbstractEventLoop | None = None,
+    ) -> None:
+        self._service = service
+        self._owner = owner
+        self._guard_loop = guard_loop
+
+    def upload_file(self, content: bytes, path: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.upload_file(content, path, **kwargs), self._owner, self._guard_loop)
+
+    def download_file(self, path: str, **kwargs: Any) -> bytes:
+        return _sync_await(self._service.download_file(path, **kwargs), self._owner, self._guard_loop)
+
+    def delete_file(self, path: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.delete_file(path, **kwargs), self._owner, self._guard_loop)
+
+    def list_files(self, path: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.list_files(path, **kwargs), self._owner, self._guard_loop)
+
+    def get_file_info(self, path: str, **kwargs: Any) -> Any:
+        return _sync_await(self._service.get_file_info(path, **kwargs), self._owner, self._guard_loop)
+
+    def create_folder(self, path: str, mode: str = "755", **kwargs: Any) -> Any:
+        return _sync_await(self._service.create_folder(path, mode, **kwargs), self._owner, self._guard_loop)
+
+
+class _DSPySyncSandboxView:
+    """Explicit synchronous Daytona view used by synchronous execution contexts."""
+
+    def __init__(
+        self,
+        sandbox: Any,
+        loop: asyncio.AbstractEventLoop,
+        dispatcher: SyncBridgeDispatcher | None = None,
+    ) -> None:
+        owner = _SyncBridgeLoop(caller_loop=loop, dispatcher=dispatcher)
+        if hasattr(sandbox, "code_interpreter"):
+            self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
+        if hasattr(sandbox, "process"):
+            self.process = _SyncProcess(sandbox.process, owner, loop)
+        if hasattr(sandbox, "fs"):
+            self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
+        self._sandbox = sandbox
+        self._loop = loop
+        self._owner = owner
+
+    @property
+    def id(self) -> object:
+        return getattr(self._sandbox, "id", None)
+
+    def get_preview_link(self, port: int, **kwargs: Any) -> Any:
+        return _sync_await(self._sandbox.get_preview_link(port, **kwargs), self._owner, self._loop)
+
+    def close(self) -> None:
+        self._owner.close()
+
+    def start(self) -> None:
+        self._owner.start()
+
+
+def sync_sandbox(
+    sandbox: Any,
+    loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
+) -> Any:
+    """Return a synchronous sandbox view."""
+    if isinstance(sandbox, _DSPySyncSandboxView):
+        return sandbox
+    return _DSPySyncSandboxView(sandbox, loop, dispatcher)
+
+
+def tombstone_sync_sandbox(sandbox: Any) -> None:
+    """Tombstone a sync sandbox view so late calls fail fast."""
+    if isinstance(sandbox, _DSPySyncSandboxView):
+        sandbox.close()
+
+
+# ---------------------------------------------------------------------------
+# Interpreter submit frames and execution DTOs
+# ---------------------------------------------------------------------------
+
+FINAL_OUTPUT_MARKER = "__FLEET_FINAL_OUTPUT__"
+
+
+class FleetFinalOutputError(Exception):
+    """Raised inside executed code or tests when final output is submitted."""
+
+    def __init__(self, value: Any) -> None:
+        self.value = value
+        super().__init__("Final output submitted")
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionResult:
+    """Outcome of a code execution in a Daytona sandbox."""
+
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+    final_output: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class DaytonaExecutionBackend(Protocol):
+    """Contract for executing code and managing files in a Daytona sandbox."""
+
+    async def execute_code(
+        self,
+        code: str,
+        *,
+        timeout: float = 60.0,
+        env: dict[str, str] | None = None,
+    ) -> ExecutionResult:
+        """Execute python code in Daytona sandbox and extract stdout, stderr, exit_code, and SUBMIT output."""
+        ...
+
+    async def read_file(self, path: str) -> bytes:
+        """Read a file from the sandbox filesystem."""
+        ...
+
+    async def write_file(self, path: str, data: bytes) -> None:
+        """Write a file to the sandbox filesystem."""
+        ...
+
+    async def delete_sandbox(self) -> None:
+        """Destroy the underlying sandbox."""
+        ...
+
+
+def validate_json_value(value: Any, *, path: str = "value") -> None:
+    """Validate that a value consists only of JSON-serializable types."""
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if not __import__("math").isfinite(value):
+            raise TypeError(f"{path} contains a non-finite number")
+        return
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise TypeError(f"{path} contains non-string dict key: {k!r}")
+            validate_json_value(v, path=f"{path}.{k}")
+        return
+    if isinstance(value, (list, tuple)):
+        for i, item in enumerate(value):
+            validate_json_value(item, path=f"{path}[{i}]")
+        return
+    raise TypeError(f"{path} contains unsupported type: {type(value).__name__}")
+
+
+def final_output_frame(value: Mapping[str, Any], *, marker: str = FINAL_OUTPUT_MARKER) -> str:
+    """Return the exact private stdout frame emitted by ``SUBMIT``."""
+    validate_json_value(value, path="SUBMIT")
+    encoded = base64.b64encode(json.dumps(dict(value), ensure_ascii=False, allow_nan=False).encode("utf-8")).decode(
+        "ascii"
+    )
+    return f"{marker}{encoded}{marker}"
+
+
+def extract_final_payload(stdout: str, *, marker: str = FINAL_OUTPUT_MARKER) -> dict[str, Any] | None:
+    """Extract and parse the SUBMIT JSON payload from stdout, if present."""
+    if not stdout or marker not in stdout:
+        return None
+
+    # First attempt: scan for valid base64-framed markers directly using regex.
+    # Base64 strings only contain [A-Za-z0-9+/=] and no underscores.
+    pattern = rf"{re.escape(marker)}([A-Za-z0-9+/=]+){re.escape(marker)}"
+    matches = re.findall(pattern, stdout)
+    for encoded in reversed(matches):
+        try:
+            payload = base64.b64decode(encoded, validate=True).decode("utf-8")
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+
+    # Fallback attempt: scan adjacent marker pairs in reverse for unencoded or raw JSON payloads.
+    marker_len = len(marker)
+    positions: list[int] = []
+    pos = 0
+    while True:
+        idx = stdout.find(marker, pos)
+        if idx == -1:
+            break
+        positions.append(idx)
+        pos = idx + marker_len
+
+    for i in range(len(positions) - 2, -1, -1):
+        start = positions[i] + marker_len
+        end = positions[i + 1]
+        encoded = stdout[start:end].strip()
+        if not encoded:
+            continue
+        try:
+            try:
+                payload = base64.b64decode(encoded, validate=True).decode("utf-8")
+            except (ValueError, UnicodeError):
+                payload = encoded
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            continue
+
+    return None
+
+
+def _generic_submit_source() -> str:
+    return f"""
+import base64 as _base64
+import json as _json
+
+def SUBMIT(**kwargs):
+    _fleet_validate_json(kwargs)
+    payload = _base64.b64encode(
+        _json.dumps(kwargs, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).decode("ascii")
+    print(f"{FINAL_OUTPUT_MARKER}{{payload}}{FINAL_OUTPUT_MARKER}", flush=True)
+    raise FleetFinalOutputError(kwargs)
+""".strip()
+
+
+def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
+    """Generate source code for a typed SUBMIT function based on configured output fields."""
+    signature_parts: list[str] = []
+    validation_parts: list[str] = []
+    result_parts: list[str] = []
+    default_values: dict[str, str] = {}
+    ordered_fields = [
+        *[output_field for output_field in output_fields if bool(output_field.get("required", True))],
+        *[output_field for output_field in output_fields if not bool(output_field.get("required", True))],
+    ]
+    for output_field in ordered_fields:
+        name = str(output_field.get("name") or "").strip()
+        if not name:
+            continue
+        type_hint = str(output_field.get("type") or "").strip()
+        required = bool(output_field.get("required", True))
+        parameter = f"{name}: {type_hint}" if type_hint else name
+        if not required:
+            parameter += "=_FLEET_MISSING"
+            default_json = output_field.get("default_json")
+            if not isinstance(default_json, str):
+                raise ValueError(f"typed output default for {name} is not JSON-compatible")
+            default_values[name] = default_json
+        signature_parts.append(parameter)
+        if not required:
+            validation_parts.extend(
+                (
+                    f"if {name} is _FLEET_MISSING:",
+                    f"    {name} = _fleet_default({name!r})",
+                )
+            )
+        if type_hint in {"str", "builtins.str"}:
+            message = (
+                f"SUBMIT field {name} must be a string; serialize mappings/lists with "
+                "json.dumps(value, ensure_ascii=False)"
+            )
+            validation_parts.extend(
+                (
+                    f"if not isinstance({name}, str):",
+                    f"    raise TypeError({message!r})",
+                )
+            )
+        result_parts.append(f'"{name}": {name}')
+    signature = ", ".join(signature_parts) or "**kwargs"
+    body_lines = [
+        *validation_parts,
+        f"result = {{{', '.join(result_parts)}}}" if result_parts else "result = dict(kwargs)",
+    ]
+    body = "\n    ".join(body_lines)
+    defaults = repr(default_values)
+    return f"""
+import base64 as _base64
+import json as _json
+
+_FLEET_MISSING = object()
+_FLEET_DEFAULTS = {defaults}
+
+def _fleet_default(name):
+    return _json.loads(_FLEET_DEFAULTS[name])
+
+def SUBMIT({signature}):
+    {body}
+    _fleet_validate_json(result)
+    payload = _base64.b64encode(
+        _json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).decode("ascii")
+    print(f"{FINAL_OUTPUT_MARKER}{{payload}}{FINAL_OUTPUT_MARKER}", flush=True)
+    raise FleetFinalOutputError(result)
+""".strip()
+
+
+def _strict_submit_helpers_source() -> str:
+    """Return private remote helpers for strict JSON submission."""
+    return """
+def _fleet_validate_json(value):
+    if value is None or isinstance(value, (bool, int, str)):
+        return
+    if isinstance(value, float):
+        if not __import__("math").isfinite(value):
+            raise TypeError("SUBMIT contains a non-finite number")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise TypeError("SUBMIT contains a non-string mapping key")
+            _fleet_validate_json(item)
+        return
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            _fleet_validate_json(item)
+        return
+    raise TypeError(f"SUBMIT contains unsupported type: {type(value).__name__}")
+""".strip()
+
+
+def build_submit_setup_code(output_fields: list[dict[str, Any]] | None = None) -> str:
+    """Generate the Python source code defining the SUBMIT function."""
+    body = _typed_submit_source(output_fields) if output_fields else _generic_submit_source()
+    return f"{_strict_submit_helpers_source()}\n\n{body}"
+
+
+def remote_submit_setup_code(output_fields: list[dict[str, Any]] | None = None) -> str:
+    """Generate self-contained setup source for submitting final tool output.
+
+    Unlike :func:`build_submit_setup_code`, this variant defines
+    ``FINAL_OUTPUT_MARKER`` and ``FleetFinalOutputError`` itself, so it is the
+    builder for any caller that executes the preamble as source rather than
+    injecting those names into a host namespace. The live Sandbox interpreter
+    backend depends on it for exactly that reason.
+    """
+    return f"""
+import base64 as _base64
+import json
+_json = json
+FINAL_OUTPUT_MARKER = {FINAL_OUTPUT_MARKER!r}
+
+class FleetFinalOutputError(Exception):
+    def __init__(self, value):
+        self.value = value
+        super().__init__("Final output submitted")
+
+{build_submit_setup_code(output_fields)}
+""".strip()

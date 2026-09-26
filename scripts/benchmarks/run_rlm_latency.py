@@ -41,7 +41,6 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fleet_rlm.daytona.models import _EXECUTION_STAT_KEYS
 from scripts.benchmarks import judges as _judges
 from scripts.benchmarks.campaign import CampaignPreflight, CampaignPreflightError
 from scripts.benchmarks.corpus_chain import (
@@ -74,7 +73,44 @@ EVIDENCE_WORKLOAD_ID = "evidence-conflict-v1"
 WORKLOAD_CHOICES = (EVIDENCE_WORKLOAD_ID, CORPUS_WORKLOAD_ID)
 _TRAJECTORY_ITEM_LIMIT = 64
 _TRAJECTORY_CHAR_LIMIT = 64 * 1024
-_BROKER_METRIC_KEYS = _EXECUTION_STAT_KEYS
+_BROKER_METRIC_KEYS: tuple[str, ...] = (
+    "poll_count",
+    "empty_poll_count",
+    "poll_error_count",
+    "poll_latency_ms",
+    "poll_latency_max_ms",
+    "pending_batch_count",
+    "pending_request_count",
+    "callback_dispatch_count",
+    "callback_dispatch_ms",
+    "callback_dispatch_max_ms",
+    "tool_execution_ms",
+    "tool_execution_max_ms",
+    "result_post_count",
+    "result_post_failures",
+    "result_post_ms",
+    "result_post_max_ms",
+    "pending_wait_requested_ms",
+    "pending_wait_elapsed_ms",
+    "drain_poll_count",
+    "callback_executor_created",
+    "callback_executor_reused",
+    "tool_call_count",
+    "output_poll_count",
+    "output_poll_failures",
+    "output_poll_latency_ms",
+    "output_poll_latency_max_ms",
+    "output_release_count",
+    "output_chars",
+    "output_wait_requested_ms",
+    "output_wait_elapsed_ms",
+    "execution_wall_ms",
+    "run_code_ms",
+    "dedupe_hit_count",
+    "dedupe_wait_count",
+    "dedupe_wait_timeout_count",
+    "dedupe_execution_count",
+)
 _BROKER_METRIC_KEY_SET = frozenset(_BROKER_METRIC_KEYS)
 
 LATENCY_WORKLOAD = """Analyze the following evidence and decide whether the customer can

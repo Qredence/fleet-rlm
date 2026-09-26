@@ -24,7 +24,7 @@ This release follows 0.7.8 with the merged codebase-simplification work,
 dead provider-callback removal, and Phase 6 promotion-gate follow-through
 already on `main`. Package metadata now points documentation at
 `https://docs.qredence.ai/`. Managed provider, database, and production
-certification gates remain explicitly scoped in the ADR 006 ledger.
+certification gates remain explicitly scoped in the repository's validation guidance.
 
 ### Changed
 
@@ -45,7 +45,7 @@ certification gates remain explicitly scoped in the ADR 006 ledger.
 This release carries the Phase 5 operational-certification follow-up from
 `chore/phase5-operational-certification`. It records bounded MLflow and
 warm-pool checks, hardens attachment and Daytona canary handling, reconciles
-snapshot and lease policy, and updates the ADR 006 evidence ledger. Managed
+snapshot and lease policy, and updates the recorded runtime evidence. Managed
 provider, database, and production certification gates remain explicitly
 scoped in the ledger.
 
@@ -70,7 +70,7 @@ simplification, Phase 4 ablation harnessing, live certification receipts, and
 follow-up RLM/Turn fixes. For effective runtime policy, use
 `config/fleet.toml` and the [configuration reference](docs/reference/configuration.md).
 For migration progress, scoped evidence, and certification status, use the
-[ADR 006 ledger](docs/decisions/006-implementation-status.md). Phase 3
+[runtime evidence](docs/reference/performance-budget.md). Phase 3
 complete-MVP remains **uncertified** on the committed Root model.
 
 ### Added
@@ -120,7 +120,7 @@ complete-MVP remains **uncertified** on the committed Root model.
   recursion.
   **Outcome:** The committed default no longer offers recursive children; Phase
   4 arms still exercise them through campaign profiles only.
-- **Change:** Refreshed `ARCHITECTURE.md`, ADR 006 docs/ledger, implementation
+- **Change:** Refreshed `ARCHITECTURE.md`, runtime documentation, implementation
   plan, setup guides, and repository agent instructions for the broker-only
   production path, fresh-per-Run programs, Phase 4 transport boundary, and
   dated live receipts.
@@ -172,7 +172,7 @@ complete-MVP remains **uncertified** on the committed Root model.
   and `scripts/benchmarks/run_native_long_context.py`.
   **Outcome:** Broker-backed execution is the sole maintained code-execution
   implementation; native process containment remains a provider no-go recorded
-  in ADR 006.
+in the corresponding runtime evidence.
 
 ## [0.7.6] - 2026-09-04
 

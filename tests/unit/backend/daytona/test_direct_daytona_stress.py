@@ -22,25 +22,24 @@ import pytest
 
 from fleet_rlm.daytona.admission import DaytonaAdmission
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+from fleet_rlm.daytona.interpreter import (
+    FINAL_OUTPUT_MARKER,
+    DaytonaCodeInterpreter,
+    SyncBridgeDispatcher,
+    _sync_await,
+    extract_final_payload,
+    final_output_frame,
+    sandbox_backend,
+    sync_sandbox,
+    validate_json_value,
+)
 from fleet_rlm.daytona.lifecycle import (
     AbsenceConfirmation,
     AbsenceProbeError,
     AbsenceTimeout,
     confirm_absence,
 )
-from fleet_rlm.daytona.models import (
-    FINAL_OUTPUT_MARKER,
-    extract_final_payload,
-    final_output_frame,
-    validate_json_value,
-)
 from fleet_rlm.daytona.recursive_child_runtime import cleanup_child_runtime_async
-from fleet_rlm.daytona.sync_bridge import (
-    SyncBridgeDispatcher,
-    _sync_await,
-    sync_sandbox,
-)
 from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
@@ -162,6 +161,18 @@ def test_sync_bridge_timeout_cancels_background_task() -> None:
         assert task_cancelled.is_set(), "Background coroutine was not cancelled upon timeout"
 
 
+def test_sync_bridge_propagates_timeout_from_operation() -> None:
+    """A provider TimeoutError is raised once instead of becoming a poll loop."""
+
+    async def failed_operation() -> str:
+        raise TimeoutError("provider request timed out")
+
+    with _registered_bridge() as (_server, dispatcher):
+        deadline = time.monotonic() + 0.5
+        with pytest.raises(TimeoutError, match="provider request timed out"):
+            dispatcher.run(failed_operation(), deadline=deadline)
+
+
 def test_sync_bridge_expired_deadline_fails_fast() -> None:
     """Verify that an already-expired deadline fails fast without scheduling work."""
     task_started = threading.Event()
@@ -265,7 +276,7 @@ def test_sync_bridge_direct_loop_reentrancy_fails_typed() -> None:
 
 def test_sync_bridge_non_awaitable_rejected() -> None:
     """_sync_await rejects non-awaitable values with InterpreterBridgeContractError."""
-    from fleet_rlm.daytona.sync_bridge import _SyncBridgeLoop
+    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
 
     owner = _SyncBridgeLoop(caller_loop=None)
     with pytest.raises(DaytonaAdapterError) as exc_info:

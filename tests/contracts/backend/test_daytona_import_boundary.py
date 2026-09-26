@@ -17,14 +17,12 @@ EXPECTED_DAYTONA_MODULES = {
     "errors.py",
     "interpreter.py",
     "lifecycle.py",
-    "models.py",
     "platform.py",
     "provisioning.py",
     "recursive_child_runtime.py",
     "runtime.py",
     "sandbox.py",
     "session_manager.py",
-    "sync_bridge.py",
 }
 
 
