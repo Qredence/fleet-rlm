@@ -203,7 +203,8 @@ def test_trajectory_reconciliation_reemits_code_when_a_midrun_iteration_has_no_l
     ]
 
 
-def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_step() -> None:
+@pytest.mark.parametrize("preceding_length", [6, 100])
+def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_step(preceding_length: int) -> None:
     """A terminal DSPy record cannot create an SSE step beyond max_iters."""
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep
@@ -231,7 +232,9 @@ def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_st
         (
             TrajectoryStep(1, "reasoning 1", "code 1", "output 1"),
             TrajectoryStep(2, "reasoning 2", "code 2", "output 2"),
-            TrajectoryStep(3, "reasoning 3", "code 3", "output 3"),
+            TrajectoryStep(
+                3, "reasoning 3", "code 3".ljust(preceding_length, "x"), "output 3".ljust(preceding_length, "x")
+            ),
             TrajectoryStep(4, "final reasoning", "SUBMIT(answer='ok')", "FINAL: ok"),
         ),
         max_chars=100,
@@ -243,7 +246,10 @@ def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_st
     assert {item.step for item in code} == {1, 2, 3}
     assert "code 3" in code[-1].code
     assert "SUBMIT(answer='ok')" in code[-1].code
-    assert output[-1].output == "output 3\n\nFINAL submitted"
+    assert "output 3" in output[-1].output
+    assert output[-1].output.endswith("\n\nFINAL submitted")
+    assert len(code[-1].code) <= 100
+    assert len(output[-1].output) <= 100
 
 
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:

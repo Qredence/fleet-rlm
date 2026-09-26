@@ -581,6 +581,41 @@ def test_delete_and_edit_event_views_expose_metadata_without_fragments() -> None
     assert "private fragment" not in str(observed)
 
 
+@pytest.mark.parametrize("directory", [".", "notes", "notes/reports"])
+def test_daytona_workspace_storage_lists_direct_children(directory: str) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    root = "/workspace/sessions/session-a/workspace"
+    prefix = "" if directory == "." else f"{directory}/"
+    full_path = root if directory == "." else f"{root}/{directory}"
+    fs = MagicMock()
+    fs.list_files.return_value = [
+        {"path": f"{full_path}/{name}", "is_dir": is_dir, "size": 7, "mod_time": "2026-09-20T00:00:00Z"}
+        for name, is_dir in [
+            ("z.md", False),
+            ("a", True),
+            ("a/deep.md", False),
+            (".fleet-private", True),
+            (".fleet-private/state", False),
+        ]
+    ] + [{"path": full_path}, {"path": f"{root}/../outside.md"}, {"path": "/elsewhere/file.md"}]
+    storage = DaytonaSandboxWorkspaceStorage(SimpleNamespace(fs=fs), volume_root="/workspace", root=root)
+
+    first = storage.list_entries(directory, limit=1)
+    second = storage.list_entries(directory, limit=1, after=first.next_cursor)
+
+    fs.list_files.assert_called_with(full_path, depth=1)
+    assert [(entry.path, entry.kind) for entry in first.entries] == [(f"{prefix}a", "directory")]
+    assert first.truncated is True
+    assert first.next_cursor == f"{prefix}a"
+    assert [(entry.path, entry.kind) for entry in second.entries] == [(f"{prefix}z.md", "file")]
+    assert second.truncated is False
+    assert second.next_cursor is None
+
+
 def test_daytona_workspace_storage_mutates_only_through_sandbox_filesystem() -> None:
     from types import SimpleNamespace
 

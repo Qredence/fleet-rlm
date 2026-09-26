@@ -414,7 +414,10 @@ class DaytonaHttpToolBroker:
                     elif succeeded:
                         settled = self._tool_settled
                         if settled is not None:
-                            settled(name, arguments, result)
+                            try:
+                                settled(name, arguments, result)
+                            except Exception:
+                                self._record_delivery_failure(request, phase="settlement", category="callback_error")
             except httpx.HTTPError:
                 self._record_delivery_failure(request, phase="result_delivery", category="http_error")
 

@@ -932,9 +932,10 @@ class DaytonaSandboxWorkspaceStorage:
             item_path = str(getattr(item, "path", item.get("path") if isinstance(item, Mapping) else ""))
             try:
                 relative = str(PurePosixPath(item_path).relative_to(self._root))
+                child = str(PurePosixPath(item_path).relative_to(full_path))
             except ValueError:
                 continue
-            if "/" in relative or relative.startswith(".fleet"):
+            if child == "." or "/" in child or child.startswith(".fleet"):
                 continue
             is_dir = getattr(item, "is_dir", item.get("is_dir", False) if isinstance(item, Mapping) else False)
             size = getattr(item, "size", item.get("size") if isinstance(item, Mapping) else None)

@@ -196,6 +196,32 @@ def test_poll_records_rejected_tool_result_delivery() -> None:
     assert broker._delivery_error.cause_type == "BrokerDeliveryError"
 
 
+@pytest.mark.parametrize("error_type", [RuntimeError, httpx.HTTPError])
+def test_poll_continues_after_settlement_callback_failure(error_type, caplog: pytest.LogCaptureFixture) -> None:
+    settled = MagicMock(side_effect=[error_type("private callback error"), None])
+    broker = DaytonaHttpToolBroker(object(), port=1, tool_settled=settled)
+    client = MagicMock()
+    client.get.return_value.json.return_value = {
+        "requests": [
+            {"id": f"call-{index}", "lease": f"lease-{index}", "tool_name": "answer", "kwargs": {"value": index}}
+            for index in (1, 2)
+        ]
+    }
+    client.post.return_value.status_code = 200
+    broker._client = client
+    broker.bind_tools({"answer": lambda value: value})
+
+    broker._poll_once()
+
+    assert [call.kwargs["json"]["result"] for call in client.post.call_args_list] == [1, 2]
+    assert settled.call_count == 2
+    settled.assert_called_with("answer", {"value": 2}, 2)
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+    assert "phase=settlement category=callback_error" in caplog.text
+    assert "private callback error" not in caplog.text
+
+
 def test_poll_delivers_async_host_tool_result_through_application_bridge() -> None:
     class Bridge:
         def run(self, awaitable, **_kwargs):
