@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
+from weakref import WeakValueDictionary
 
 from fleet_rlm.daytona.interpreter import DEFAULT_EXECUTION_OUTPUT_CHARS
 from fleet_rlm.daytona.provisioning import DaytonaEnvironmentProfile, execution_timeout_s_from_settings
@@ -398,12 +399,11 @@ class DaytonaRuntime:
         self._children: set[ChildEnvironment] = set()
         self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
-        self._key_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        # Locks exist only while an acquisition/retirement is using a key.
+        # Callers keep a strong local reference through acquisition, while
+        # idle keys can be collected from this weak registry.
+        self._key_locks: WeakValueDictionary[tuple[str, str], asyncio.Lock] = WeakValueDictionary()
         self._state = DaytonaRuntimeState.OPEN
-        # Late provider acquisitions stay tracked until their resulting
-        # Sandbox is released, stopped, or deleted and the durable binding
-        # is fenced. A timed-out or cancelled create never loses ownership.
-        self._late_tasks: set[asyncio.Task[Any]] = set()
         # Bounded provider-capacity admission owned by the runtime. The
         # semaphore is only held around provider operations, never across a
         # network call for an unrelated session (the registry lock is
@@ -460,11 +460,7 @@ class DaytonaRuntime:
             raise RuntimeError("Daytona runtime is not accepting root Sessions")
 
         key = spec.key
-        async with self._lock:
-            key_lock = self._key_locks.get(key)
-            if key_lock is None:
-                key_lock = asyncio.Lock()
-                self._key_locks[key] = key_lock
+        key_lock = await self._root_key_lock(key)
         # One session's provider wait never blocks registry access for an
         # unrelated session: only this key is serialized, and the global
         # registry lock is held solely for short state checks and installs.
@@ -490,14 +486,22 @@ class DaytonaRuntime:
                 async with self._lock:
                     if self._roots.get(key) is stale:
                         self._roots.pop(key, None)
+                        self._records.pop(key, None)
 
             raw = await self._acquire_root_from_provider(spec, force_new=must_replace or spec.force_new)
             owner = self._coerce_root(spec, raw)
             async with self._lock:
-                self._roots[key] = owner
-                self._tainted.discard(key)
-                self._sync_record(key, owner)
-                return owner
+                if self._state is not DaytonaRuntimeState.OPEN:
+                    reject_owner = True
+                else:
+                    reject_owner = False
+                    self._roots[key] = owner
+                    self._tainted.discard(key)
+                    self._sync_record(key, owner)
+            if reject_owner:
+                await owner.close(notify=False, deadline=spec.deadline)
+                raise RuntimeError("Daytona runtime stopped before root Session acquisition completed")
+            return owner
 
     async def discard_stale_root_session(
         self,
@@ -513,21 +517,23 @@ class DaytonaRuntime:
         Sandbox while this retained Root still owns its SessionManager lease.
         """
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
-        async with self._lock:
-            owner = self._roots.get(key)
-            if owner is None:
-                return
-            self._mark_record(key, SessionCleanupState.RELEASING)
-        try:
-            await owner.close(notify=False, deadline=deadline)
-        except BaseException:
+        key_lock = await self._root_key_lock(key)
+        async with key_lock:
             async with self._lock:
-                self._mark_record(key, SessionCleanupState.UNRESOLVED)
-            raise
-        async with self._lock:
-            if self._roots.get(key) is owner:
-                self._roots.pop(key, None)
-            self._mark_record(key, SessionCleanupState.RETIRED)
+                owner = self._roots.get(key)
+                if owner is None:
+                    return
+                self._mark_record(key, SessionCleanupState.RELEASING)
+            try:
+                await owner.close(notify=False, deadline=deadline)
+            except BaseException:
+                async with self._lock:
+                    self._mark_record(key, SessionCleanupState.UNRESOLVED)
+                raise
+            async with self._lock:
+                if self._roots.get(key) is owner:
+                    self._roots.pop(key, None)
+                self._records.pop(key, None)
 
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""
@@ -541,8 +547,20 @@ class DaytonaRuntime:
 
     @property
     def has_pending_ownership(self) -> bool:
-        """Whether roots, children, or late acquisitions remain unsettled."""
-        return bool(self._roots or self._children or any(not task.done() for task in self._late_tasks))
+        """Whether roots, children, or provider-owned resources remain."""
+        manager = getattr(self._resources, "session_manager", None)
+        return bool(
+            self._roots or self._children or (manager is not None and getattr(manager, "has_pending_ownership", False))
+        )
+
+    async def _root_key_lock(self, key: tuple[str, str]) -> asyncio.Lock:
+        """Return the per-session lock while serializing registry access."""
+        async with self._lock:
+            key_lock = self._key_locks.get(key)
+            if key_lock is None:
+                key_lock = asyncio.Lock()
+                self._key_locks[key] = key_lock
+            return key_lock
 
     def _sync_record(self, key: tuple[str, str], owner: RootSessionLease) -> None:
         """Refresh the resource record from the installed root lease."""
@@ -564,28 +582,6 @@ class DaytonaRuntime:
         if record is not None:
             record.cleanup_state = state
 
-    def _retain_late_witness(self, spec: RootSessionSpec) -> None:
-        """Track a timed-out/cancelled create until its Sandbox settles.
-
-        The underlying session-manager acquisition retains provider ownership
-        through its own late-owner path; this witness keeps the runtime's
-        ownership visible (and shutdown bounded) across the window in which
-        the late Sandbox may land and require fencing.
-        """
-
-        async def _witness() -> None:
-            if spec.deadline is not None:
-                delay = max(0.0, spec.deadline - asyncio.get_running_loop().time())
-                if delay > 0:
-                    await asyncio.sleep(min(delay, 300.0))
-
-        try:
-            task = asyncio.create_task(_witness(), name="fleet-daytona-late-acquisition-witness")
-        except RuntimeError:
-            return
-        self._late_tasks.add(task)
-        task.add_done_callback(self._late_tasks.discard)
-
     def open_child(self, spec: ChildEnvironmentSpec) -> _ChildContext:
         """Return a disposable child context."""
         if not isinstance(spec, ChildEnvironmentSpec):
@@ -601,21 +597,24 @@ class DaytonaRuntime:
     ) -> None:
         """Close one retained root."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
-        async with self._lock:
-            owner = self._roots.get(key)
-        if owner is None:
-            return
-        async with self._lock:
-            self._mark_record(key, SessionCleanupState.RELEASING)
-        try:
-            await owner.close(deadline=deadline)
-        except BaseException:
+        key_lock = await self._root_key_lock(key)
+        async with key_lock:
             async with self._lock:
-                self._mark_record(key, SessionCleanupState.UNRESOLVED)
-            raise
-        async with self._lock:
-            if owner.closed:
-                self._mark_record(key, SessionCleanupState.RETIRED)
+                owner = self._roots.get(key)
+                if owner is None:
+                    return
+                self._mark_record(key, SessionCleanupState.RELEASING)
+            try:
+                await owner.close(deadline=deadline)
+            except BaseException:
+                async with self._lock:
+                    self._mark_record(key, SessionCleanupState.UNRESOLVED)
+                raise
+            async with self._lock:
+                if owner.closed:
+                    if self._roots.get(key) is owner:
+                        self._roots.pop(key, None)
+                    self._records.pop(key, None)
 
     async def aclose(self, *, deadline: float | None = None) -> bool:
         """Close all retained roots and active children.
@@ -625,7 +624,8 @@ class DaytonaRuntime:
         a later close call must be able to retry the same lease instead of
         losing the only reference to it.
         """
-        self._state = DaytonaRuntimeState.CLOSING
+        async with self._lock:
+            self._state = DaytonaRuntimeState.CLOSING
         errors: list[BaseException] = []
 
         async with self._lock:
@@ -654,27 +654,25 @@ class DaytonaRuntime:
                     async with self._lock:
                         if self._roots.get(root.key) is root:
                             self._roots.pop(root.key, None)
-                        self._mark_record(root.key, SessionCleanupState.RETIRED)
+                        self._records.pop(root.key, None)
 
-        # Drain late-acquisition witnesses boundedly: a timed-out create may
-        # still land and require fencing, so shutdown waits for the witness
-        # window instead of dropping the only runtime-side reference.
-        async with self._lock:
-            late = tuple(task for task in self._late_tasks if not task.done())
-        if late:
-            if deadline is None:
-                await asyncio.gather(*(asyncio.shield(task) for task in late), return_exceptions=True)
-            else:
-                remaining = max(0.0, deadline - asyncio.get_running_loop().time())
-                if remaining > 0:
-                    await asyncio.wait(set(late), timeout=remaining)
-            async with self._lock:
-                late_pending = [task for task in self._late_tasks if not task.done()]
-        else:
-            late_pending = []
+        # The SessionManager owns actual late provider tasks and Sandboxes.
+        # Drain that state directly; a timer witness cannot prove that remote
+        # ownership has settled.
+        manager = getattr(self._resources, "session_manager", None)
+        manager_close = getattr(manager, "aclose", None)
+        manager_settled = True
+        if callable(manager_close):
+            remaining = 30.0 if deadline is None else max(0.0, deadline - asyncio.get_running_loop().time())
+            try:
+                manager_settled = bool(await manager_close(drain_seconds=remaining))
+            except BaseException as exc:
+                errors.append(exc)
+                manager_settled = False
+        manager_pending = bool(manager is not None and getattr(manager, "has_pending_ownership", False))
 
         async with self._lock:
-            retained = bool(self._children or self._roots or late_pending)
+            retained = bool(self._children or self._roots or not manager_settled or manager_pending)
             if not retained:
                 self._key_locks.clear()
         self._state = DaytonaRuntimeState.FAILED if errors or retained else DaytonaRuntimeState.CLOSED
@@ -709,13 +707,9 @@ class DaytonaRuntime:
             remaining = max(0.0, spec.deadline - asyncio.get_running_loop().time())
             return await asyncio.wait_for(_call(), timeout=remaining)
         except (TimeoutError, asyncio.CancelledError):
-            # Late-acquisition ownership: a timed-out or cancelled create
-            # remains tracked until its Sandbox is released, stopped, or
-            # deleted and the durable binding is fenced. The underlying
-            # session-manager acquisition retains provider ownership through
-            # its own late-owner path; the runtime keeps a witness task so
-            # shutdown cannot drop the only reference while it settles.
-            self._retain_late_witness(spec)
+            # The resource-backed SessionManager tracks provider tasks and
+            # late Sandboxes directly. Runtime shutdown checks that ownership
+            # rather than keeping a timer that only approximates settlement.
             raise
 
     def _coerce_root(self, spec: RootSessionSpec, raw: Any) -> RootSessionLease:

@@ -161,6 +161,18 @@ def test_sync_bridge_timeout_cancels_background_task() -> None:
         assert task_cancelled.is_set(), "Background coroutine was not cancelled upon timeout"
 
 
+def test_sync_bridge_propagates_timeout_from_operation() -> None:
+    """A provider TimeoutError is raised once instead of becoming a poll loop."""
+
+    async def failed_operation() -> str:
+        raise TimeoutError("provider request timed out")
+
+    with _registered_bridge() as (_server, dispatcher):
+        deadline = time.monotonic() + 0.5
+        with pytest.raises(TimeoutError, match="provider request timed out"):
+            dispatcher.run(failed_operation(), deadline=deadline)
+
+
 def test_sync_bridge_expired_deadline_fails_fast() -> None:
     """Verify that an already-expired deadline fails fast without scheduling work."""
     task_started = threading.Event()

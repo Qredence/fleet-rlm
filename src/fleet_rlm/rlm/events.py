@@ -23,11 +23,10 @@ import dspy
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, turn_phase_span
-from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback, is_native_rlm
+from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile, _RLMTraceCallback
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
-    RLMConfigError,
     RLMUsage,
     RunCancelledError,
     RunNoProgressError,
@@ -1191,13 +1190,9 @@ async def invoke_native_rlm(
     context: RLMExecutionContext,
     kwargs: Mapping[str, Any],
 ) -> Any:
-    """Invoke the RLM operation using the caller-owned interpreter when required."""
-    native_call_args: tuple[Any, ...] = ()
-    if is_native_rlm(rlm):
-        if context.execution.interpreter is None:
-            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        native_call_args = (context.execution.interpreter,)
-    return await rlm.acall(*native_call_args, **dict(kwargs))
+    """Invoke the RLM so native DSPy can create its per-call interpreter."""
+    del context
+    return await rlm.acall(**dict(kwargs))
 
 
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:

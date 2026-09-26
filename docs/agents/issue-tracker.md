@@ -4,8 +4,9 @@ Issues, PRDs, and Wayfinder maps for this repository live as local Markdown unde
 The directory is intentionally gitignored: it is a coordination surface for agents sharing this checkout, not a second canonical roadmap.
 
 The tracked `.scratch/refined-runtime-roadmap.md` is a historical exception.
-The maintained ADR 006 plan and status ledger linked from `docs/index.md` own
-active architecture progress; scratch tickets must not override them.
+Current runtime ownership and validation guidance lives in the architecture
+and testing-strategy pages linked from `docs/index.md`; scratch tickets must
+not override those sources.
 
 ## Conventions
 

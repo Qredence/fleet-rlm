@@ -9,9 +9,10 @@ through private symbol names:
 - The Root native RLM receives exactly the approved recursive
   pair; a child receives no Fleet recursive tools and a batch attempt from a child
   fails without reserving calls or allocating a Sandbox.
-- Root and native child are both exact native ``dspy.RLM``
-  instances invoked with the positional caller-owned interpreter, each
-  starting a fresh REPL history and producing a native Prediction.
+- Root and native child are both exact native ``dspy.RLM`` instances. The Root
+  uses its configured invocation-scoped interpreter factory, while a child
+  uses its private lease interpreter; each starts fresh REPL history and
+  produces a native Prediction.
 """
 
 from __future__ import annotations
@@ -307,15 +308,14 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
 
 
 @pytest.mark.asyncio
-async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter() -> None:
-    """Root and native child are both exact native ``dspy.RLM``
-    instances built through the certified constructor; both are invoked with
-    the positional caller-owned interpreter plus named inputs; both produce
-    native Predictions with trajectory evidence."""
+async def test_root_factory_and_child_lease_drive_exact_native_rlm() -> None:
+    """The Root uses its per-invocation factory and a child uses its private
+    lease; both are exact native RLMs that produce native trajectory evidence."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
     child_invocations: list[tuple[type, object, dict[str, object]]] = []
-    root_invocations: list[tuple[type, object, dict[str, object]]] = []
+    root_invocations: list[tuple[type, dict[str, object]]] = []
+    root_interpreters: list[object] = []
     root_types: list[type] = []
     real_build = recursive_calls.build_native_rlm
 
@@ -331,13 +331,22 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
         return rlm
 
     def root_builder(**kwargs: object) -> object:
+        interpreter_factory = kwargs["interpreter_factory"]
+        assert callable(interpreter_factory)
+
+        def recording_factory() -> object:
+            interpreter = interpreter_factory()
+            root_interpreters.append(interpreter)
+            return interpreter
+
+        kwargs["interpreter_factory"] = recording_factory
         rlm = build_native_rlm(**kwargs)
         root_types.append(type(rlm))
         original_acall = rlm.acall
 
-        async def acall(interpreter: object, /, **input_args: object) -> object:
-            root_invocations.append((type(rlm), interpreter, dict(input_args)))
-            return await original_acall(interpreter, **input_args)
+        async def acall(**input_args: object) -> object:
+            root_invocations.append((type(rlm), dict(input_args)))
+            return await original_acall(**input_args)
 
         rlm.acall = acall
         return rlm
@@ -378,16 +387,16 @@ async def test_root_and_child_are_exact_native_rlm_with_positional_interpreter()
     assert len(child_invocations) == 1
     assert child_invocations[0][0] is dspy.RLM
 
-    # Both invocations pass the caller-owned interpreter positionally with
-    # named inputs only; the child interpreter is the lease's fresh
-    # interpreter and distinct from the Root interpreter.
+    # The Root lets DSPy call its configured factory. The child interpreter is
+    # its lease's fresh interpreter and remains distinct from the Root one.
     assert len(root_invocations) == 1
+    assert len(root_interpreters) == 1
+    assert root_interpreters[0] is not context.execution.interpreter
     assert child_invocations[0][1] is factory.interpreters[0]
-    assert root_invocations[0][1] is not factory.interpreters[0]
     # Capsule children receive only selected input; Root keeps Session state.
     child_inputs = child_invocations[0][2]
     assert set(child_inputs) == {"prompt"}
-    assert "request" in root_invocations[0][2]
+    assert "request" in root_invocations[0][1]
 
     # Native Prediction evidence: the completed Root turn exposes a trajectory
     # and the child's typed SUBMIT settled through the same kernel.

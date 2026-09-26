@@ -36,8 +36,7 @@ credential between Turns. Authorized Fleet tools and DSPy's native semantic
 tools reach the host through the same broker path. Live recursive execution and
 trace retrieval are verified by the maintained recursive-batch canary; this does
 not certify recursive value. Phase 3 complete-MVP and Phase 5–6 operational
-certification are open. Read the status ledger before treating any dated receipt
-as a current guarantee.
+certification are open.
 
 ## Historical baselines and evidence
 

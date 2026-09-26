@@ -1607,6 +1607,9 @@ class _SyncBridgeLoop:
                     raise TimeoutError("async host Tool exceeded its Turn deadline")
                 return future.result(timeout=timeout)
             except TimeoutError:
+                if future.done():
+                    # The awaited Daytona operation itself may have timed out.
+                    return future.result()
                 if check_authority is not None:
                     check_authority()
                 if deadline is not None and time.monotonic() >= deadline:
