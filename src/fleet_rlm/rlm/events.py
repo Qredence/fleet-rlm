@@ -880,14 +880,17 @@ def _public_trajectory_output(output: str) -> str:
     return "FINAL submitted" if output.startswith("FINAL:") else output
 
 
-def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int | None) -> tuple[TrajectoryStep, ...]:
+def _bounded_trajectory(
+    trajectory: Sequence[TrajectoryStep], *, max_steps: int | None, max_chars: int
+) -> tuple[TrajectoryStep, ...]:
     """Assign trajectory details to the bounded executed-iteration sequence.
 
     Native DSPy may retain setup or terminal backfill records with an index past
     the executed REPL budget. Public events use their retained sequence
     position, never those provider-internal indexes. Overflow records fold
     into the final executed step so no public code event can claim an
-    impossible iteration while all diagnostic content remains available.
+    impossible iteration. Reserve room for the final record when bounding
+    folded content so earlier diagnostics cannot hide terminal submission.
     """
     if max_steps is None:
         return tuple(trajectory)
@@ -903,7 +906,15 @@ def _bounded_trajectory(trajectory: Sequence[TrajectoryStep], *, max_steps: int 
         for value in values:
             if value and value not in unique:
                 unique.append(value)
-        return "\n\n".join(unique)
+        combined = "\n\n".join(unique)
+        if len(unique) < 2 or len(combined) <= max_chars:
+            return combined
+        terminal = truncate_public_text(unique[-1], max_len=max_chars)
+        prefix_budget = max_chars - len(terminal) - 2
+        if prefix_budget <= 0:
+            return terminal
+        prefix = truncate_public_text("\n\n".join(unique[:-1]), max_len=prefix_budget)
+        return f"{prefix}\n\n{terminal}"
 
     return tuple(
         TrajectoryStep(
@@ -1144,7 +1155,7 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
-    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps):
+    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps, max_chars=max_chars):
         step = trajectory_step.index
         step_details = trajectory_details(
             (trajectory_step,),
