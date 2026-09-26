@@ -229,6 +229,37 @@ async def test_release_and_quarantine_retains_admission_when_fence_fails() -> No
 
 
 @pytest.mark.asyncio
+async def test_release_failure_is_contained_by_quarantine_ownership() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    request = _request()
+    lease = await _acquire(mgr, request)
+
+    class FlakyInterpreter:
+        calls = 0
+
+        def shutdown(self, *, strict_broker_cleanup: bool) -> None:
+            assert strict_broker_cleanup is True
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("one-shot broker shutdown failure")
+
+    interpreter = FlakyInterpreter()
+    lease.interpreter = interpreter  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="one-shot broker shutdown failure"):
+        await mgr.release(lease)
+
+    assert mgr.has_pending_ownership
+    assert mgr._late_owners
+    assert await mgr.aclose(drain_seconds=5)
+
+    assert interpreter.calls == 1
+    assert lease.closed
+    assert await platform.get(lease.sandbox_id) is None
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
 async def test_acquire_creates_running_sandbox_and_lease() -> None:
     mgr, plat, store, volumes = _manager()
     req = _request()

@@ -202,7 +202,7 @@ def test_tool_enabled_action_never_uses_the_direct_interpreter(monkeypatch: pyte
     calls: list[dict[str, Any]] = []
 
     class _Broker:
-        def __init__(self, _sandbox: Any, *, port: int) -> None:
+        def __init__(self, _sandbox: Any, *, port: int, **_kwargs: Any) -> None:
             assert port > 0
 
         def bind_tools(self, tools: dict[str, Any]) -> None:
@@ -250,6 +250,7 @@ def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> Non
     class _Response:
         def __init__(self, body: dict[str, object]) -> None:
             self._body = body
+            self.status_code = 200
 
         def json(self) -> dict[str, object]:
             return self._body

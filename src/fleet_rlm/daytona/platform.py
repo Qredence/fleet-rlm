@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from typing import Any, Literal
 
-from fleet_rlm.daytona.client import build_daytona_client
 from fleet_rlm.daytona.errors import DaytonaAdapterError, is_sandbox_not_found, map_provider_error
 from fleet_rlm.daytona.provisioning import (
     DaytonaEnvironmentProfile,
@@ -29,11 +28,11 @@ _STOPPED_STATES = frozenset({"stopped", "stop"})
 _PAUSED_STATES = frozenset({"paused", "pause"})
 _ARCHIVED_STATES = frozenset({"archived", "archive"})
 
+
 __all__ = [
     "LiveDaytonaPlatform",
     "LiveDaytonaVolumeClient",
     "ProviderState",
-    "build_daytona_client",
     "normalize_state",
     "sandbox_state",
 ]

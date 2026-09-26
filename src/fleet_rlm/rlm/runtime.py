@@ -1297,6 +1297,11 @@ class RLMRunner:
             for detail in self._drain_capability_details(context):
                 observations.publish(detail)
 
+        # The broker acknowledges remote results after delivery. It completes
+        # the durable integrity ledger there; observed tools remain responsible
+        # for public lifecycle events and no-progress accounting.
+        fleet_dispatch = bool(getattr(context.execution.interpreter, "fleet_host_tool_dispatch_available", False))
+        broker_acknowledges_tools = callable(getattr(context.execution.interpreter, "bind_tool_outcomes", None))
         observed_tools = tuple(
             observe_tool(
                 tool,
@@ -1342,9 +1347,6 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
-            fleet_dispatch = bool(
-                getattr(state_context.execution.interpreter, "fleet_host_tool_dispatch_available", False)
-            )
             rlm = self._factory.create(
                 models=state_context.execution.models,
                 options=state_context.execution.options,
@@ -1361,6 +1363,12 @@ class RLMRunner:
             bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
             if callable(bind_async_bridge):
                 bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
+            bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
+            if broker_acknowledges_tools and callable(bind_tool_outcomes):
+                bind_tool_outcomes(
+                    tool_settled=lambda name, arguments, result: guards.integrity.completed(name, arguments, result),
+                    tool_failed=guards.integrity.failed,
+                )
             self._bind_observer(
                 state_context.execution.interpreter,
                 observations.publish,
@@ -1440,6 +1448,7 @@ class RLMRunner:
             trajectory,
             max_chars=context.execution.options.max_output_chars,
             request=context.session.request,
+            max_steps=context.execution.options.max_iters,
         ):
             # ``reconcile_trajectory`` appends the canonical details to the
             # observation list; emit them without recording them a second time.

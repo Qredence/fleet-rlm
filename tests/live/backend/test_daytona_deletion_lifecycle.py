@@ -44,8 +44,9 @@ def _live_client_and_platform() -> tuple[Any, Any]:
     # unreachable, which makes the name local-but-unbound and raises
     # UnboundLocalError on the first use below.
     from fleet_rlm.config.loader import load_runtime_settings
-    from fleet_rlm.daytona.platform import LiveDaytonaPlatform, build_daytona_client
+    from fleet_rlm.daytona.platform import LiveDaytonaPlatform
     from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+    from fleet_rlm.daytona.runtime import build_daytona_client
 
     settings = load_runtime_settings()
     client = build_daytona_client(settings)

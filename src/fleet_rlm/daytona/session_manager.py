@@ -615,29 +615,32 @@ class DaytonaSessionManager:
         lease = owner.lease
         assert lease is not None
         assert owner.permit is not None
-        release_error: BaseException | None = None
         try:
             release_task = asyncio.create_task(asyncio.to_thread(lease.release))
             await _settle_provider_task(release_task)
-        except BaseException as exc:
-            release_error = exc
+        except BaseException:
+            # Cancellation cannot skip remote sandbox quarantine.
+            logger.warning("Late interpreter lease release failed; continuing sandbox quarantine")
 
         quarantine_error: BaseException | None = None
-        if release_error is None:
-            try:
-                await self._quarantine(
-                    lease,
-                    LeaseRequest(
-                        session_id=owner.request.session_id,
-                        user_id=owner.request.user_id,
-                        workspace_id=UUID(str(lease.workspace_id)) if lease.workspace_id else UUID(int=0),
-                        run_id=owner.run_id,
-                    ),
-                )
-            except BaseException as exc:
-                quarantine_error = exc
+        # A failed interpreter/broker release cannot discard remote ownership.
+        # Fence and retire the sandbox anyway; otherwise a transient local
+        # shutdown error leaves the admission slot and provider resource live.
+        try:
+            await self._quarantine(
+                lease,
+                LeaseRequest(
+                    session_id=owner.request.session_id,
+                    user_id=owner.request.user_id,
+                    workspace_id=UUID(str(lease.workspace_id)) if lease.workspace_id else UUID(int=0),
+                    run_id=owner.run_id,
+                ),
+            )
+        except BaseException as exc:
+            # Keep ownership and admission while failed quarantine is retried.
+            quarantine_error = exc
 
-        if release_error is not None or quarantine_error is not None:
+        if quarantine_error is not None:
             return
 
         owner.permit.release()
@@ -1295,7 +1298,26 @@ class DaytonaSessionManager:
                 ),
             )
             return
-        await self._release_interpreter(lease)
+        try:
+            await self._release_interpreter(lease)
+        except BaseException:
+            if lease.session_id is None or lease.workspace_id is None or lease.run_id is None or lease.user_id is None:
+                raise
+            # A failed broker/interpreter shutdown still owns a live remote
+            # resource.  Retain it behind the existing durable fencing and
+            # quarantine path instead of merely logging a failed task.  Keep
+            # the original failure visible to the active caller; ``aclose``
+            # owns the bounded retry and final provider retirement.
+            self._retain_unpublished_lease(
+                lease,
+                LeaseRequest(
+                    session_id=UUID(lease.session_id),
+                    workspace_id=UUID(lease.workspace_id),
+                    user_id=UUID(lease.user_id),
+                    run_id=UUID(lease.run_id),
+                ),
+            )
+            raise
 
     async def _finish_unpublished_lease(
         self,
@@ -1311,9 +1333,27 @@ class DaytonaSessionManager:
                 return
             lease._defer_owner_release = True
             lease._defer_idle_cleanup = True
-            if not lease._released:
-                await self._release_interpreter(lease)
+            release_error: BaseException | None = None
+            prior_release_failed = any(
+                known is lease and task.done() and not task.cancelled() and task.exception() is not None
+                for task, known in self._release_leases.items()
+            )
+            if not lease._released and not prior_release_failed:
+                try:
+                    await self._release_interpreter(lease)
+                except BaseException as exc:
+                    # Local release cancellation cannot skip provider retirement.
+                    release_error = exc
+            # Provider retirement is still required after a broker shutdown
+            # failure. It is the containment fallback for a lease whose local
+            # release could not be confirmed.
             await self._quarantine(lease, owner.request, deadline=deadline)
+            if release_error is not None or prior_release_failed:
+                # Provider retirement has contained the failed local release.
+                # Mark the lease terminal so future shutdown retries cannot
+                # reopen a broker that no longer has a remote owner.
+                lease._released = True
+                lease._state = LeaseState.CLOSED
 
             callback = lease._on_release
             if not owner.callback_settled:
@@ -1330,6 +1370,11 @@ class DaytonaSessionManager:
             lease._defer_owner_release = False
             lease._defer_idle_cleanup = False
             self._late_owners.pop(id(lease), None)
+            if release_error is not None:
+                logger.info(
+                    "Daytona interpreter release was contained by sandbox retirement",
+                    extra={"sandbox_id": lease.sandbox_id, "error_type": type(release_error).__name__},
+                )
 
     async def release_and_quarantine(
         self,
@@ -1338,6 +1383,11 @@ class DaytonaSessionManager:
         *,
         deadline: float | None = None,
     ) -> None:
+        owner = self._retain_unpublished_lease(lease, request)
+        await self._finish_unpublished_lease(owner, deadline=deadline)
+
+    def _retain_unpublished_lease(self, lease: InterpreterLease, request: LeaseRequest) -> _LateOwner:
+        """Keep failed interpreter release attached to durable cleanup ownership."""
         owner = self._late_owners.get(id(lease))
         if owner is None or not owner.unpublished:
             owner = _LateOwner(
@@ -1349,7 +1399,7 @@ class DaytonaSessionManager:
             self._late_owners[id(lease)] = owner
         else:
             owner.request = request
-        await self._finish_unpublished_lease(owner, deadline=deadline)
+        return owner
 
     async def quarantine(
         self,
@@ -1547,8 +1597,13 @@ class DaytonaSessionManager:
         if pending:
             return False
 
+        unpublished_leases = {
+            id(owner.lease) for owner in self._late_owners.values() if owner.unpublished and owner.lease is not None
+        }
         retry_release = [
-            self._start_release_task(lease) for lease in tuple(self._release_leases.values()) if not lease._released
+            self._start_release_task(lease)
+            for lease in tuple(self._release_leases.values())
+            if not lease._released and id(lease) not in unpublished_leases
         ]
         if retry_release:
             remaining = max(0.0, deadline - asyncio.get_running_loop().time())

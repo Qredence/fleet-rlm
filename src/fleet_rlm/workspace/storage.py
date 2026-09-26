@@ -13,6 +13,7 @@ import errno
 import hashlib
 import inspect
 import os
+import shlex
 from collections.abc import AsyncIterator, Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -815,6 +816,259 @@ class WorkspaceStorage:
             if len(results) >= max_files:
                 break
         return tuple(results)
+
+
+class DaytonaSandboxWorkspaceStorage:
+    """Synchronous Session Workspace backed by the already-authorized Sandbox FS."""
+
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        root: str | Path,
+        volume_root: str | Path | None = None,
+        max_file_bytes: int = MAX_WORKSPACE_FILE_BYTES,
+        allow_volume_root: bool = False,
+    ) -> None:
+        _validate_workspace_roots(volume_root, root, allow_volume_root=allow_volume_root)
+        self._sandbox, self._fs = sandbox, getattr(sandbox, "fs", None)
+        self._fs: Any
+        if self._fs is None:
+            raise TypeError("Daytona Session Workspace requires sandbox.fs")
+        self._root = PurePosixPath(str(root))
+        self._volume_root = PurePosixPath(str(volume_root)) if volume_root is not None else None
+        self._max_file_bytes = max_file_bytes
+
+    @property
+    def root(self) -> Path:
+        return Path(str(self._root))
+
+    @property
+    def last_warnings(self) -> tuple[Mapping[str, object], ...]:
+        return ()
+
+    def warnings(self) -> tuple[Mapping[str, object], ...]:
+        return ()
+
+    def _path(self, path: str, *, allow_root: bool = False) -> tuple[str, str]:
+        normalized = normalize_workspace_path(path, allow_root=allow_root)
+        target = self._root if normalized == "." else self._root / normalized
+        if self._volume_root is not None:
+            try:
+                target.relative_to(self._volume_root)
+            except ValueError as exc:
+                raise UnsafePathError("workspace path escapes trusted volume") from exc
+        return str(target), normalized
+
+    @staticmethod
+    def _is_not_found(exc: BaseException) -> bool:
+        return isinstance(exc, (FileNotFoundError, KeyError)) or any(
+            token in str(exc).lower() for token in ("not found", "status 404", " 404")
+        )
+
+    def _read_optional(self, full_path: str) -> bytes | None:
+        try:
+            value = self._fs.download_file(full_path)
+        except Exception as exc:
+            if self._is_not_found(exc):
+                return None
+            raise
+        return value.encode("utf-8") if isinstance(value, str) else bytes(value)
+
+    def _ensure_parent(self, full_path: str) -> None:
+        execute = getattr(getattr(self._sandbox, "process", None), "exec", None)
+        if not callable(execute):
+            return
+        try:
+            result = execute(f"mkdir -p -- {shlex.quote(str(PurePosixPath(full_path).parent))}")
+        except AttributeError:
+            return
+        if getattr(result, "exit_code", 0) not in (0, None):
+            raise WorkspaceStorageError("unable to prepare Session Workspace directory")
+
+    @staticmethod
+    def _modified_at(info: Any) -> str:
+        value = getattr(info, "mod_time", info.get("mod_time") if isinstance(info, Mapping) else None)
+        return str(value) if value is not None else datetime.now(UTC).isoformat()
+
+    def _entry(self, full_path: str, path: str, *, checksum: bool = False) -> WorkspaceEntry:
+        try:
+            info = self._fs.get_file_info(full_path)
+        except AttributeError:
+            info = None
+        except Exception as exc:
+            if self._is_not_found(exc):
+                raise FileNotFoundError(path) from exc
+            raise
+        data = self._read_optional(full_path) if info is None or checksum else None
+        if info is None and data is None:
+            raise FileNotFoundError(path)
+        is_dir = getattr(info, "is_dir", info.get("is_dir", False) if isinstance(info, Mapping) else False)
+        size = getattr(info, "size", info.get("size") if isinstance(info, Mapping) else len(data or b""))
+        return WorkspaceEntry(
+            path,
+            "directory" if is_dir else "file",
+            None if is_dir else int(size or 0),
+            self._modified_at(info),
+            hashlib.sha256(data).hexdigest() if checksum and data is not None else None,
+        )
+
+    def list_entries(
+        self, path: str = ".", *, limit: int = MAX_STORAGE_LIST_LIMIT, after: str | None = None
+    ) -> WorkspaceListResult:
+        if limit < 1 or limit > MAX_STORAGE_LIST_LIMIT:
+            raise ValueError(f"limit must be in 1..{MAX_STORAGE_LIST_LIMIT}")
+        full_path, normalized = self._path(path, allow_root=True)
+        try:
+            items = self._fs.list_files(full_path, depth=1)
+        except Exception as exc:
+            if normalized == "." and self._is_not_found(exc):
+                return WorkspaceListResult(())
+            if self._is_not_found(exc):
+                raise FileNotFoundError(path) from exc
+            raise
+        entries: list[WorkspaceEntry] = []
+        for item in items or ():
+            item_path = str(getattr(item, "path", item.get("path") if isinstance(item, Mapping) else ""))
+            try:
+                relative = str(PurePosixPath(item_path).relative_to(self._root))
+                child = str(PurePosixPath(item_path).relative_to(full_path))
+            except ValueError:
+                continue
+            if child == "." or "/" in child or child.startswith(".fleet"):
+                continue
+            is_dir = getattr(item, "is_dir", item.get("is_dir", False) if isinstance(item, Mapping) else False)
+            size = getattr(item, "size", item.get("size") if isinstance(item, Mapping) else None)
+            entries.append(
+                WorkspaceEntry(
+                    relative,
+                    "directory" if is_dir else "file",
+                    None if is_dir else int(size or 0),
+                    self._modified_at(item),
+                )
+            )
+        entries.sort(key=lambda entry: entry.path)
+        if after is not None:
+            entries = [entry for entry in entries if entry.path > after]
+        return WorkspaceListResult(
+            tuple(entries[:limit]), len(entries) > limit, entries[limit - 1].path if len(entries) > limit else None
+        )
+
+    def stat_path(self, path: str, *, include_checksum: bool | None = None) -> WorkspaceEntry:
+        full_path, normalized = self._path(path, allow_root=True)
+        return self._entry(full_path, normalized, checksum=bool(include_checksum))
+
+    def stat(self, path: str, *, include_checksum: bool | None = None) -> WorkspaceEntry | None:
+        try:
+            return self.stat_path(path, include_checksum=include_checksum)
+        except FileNotFoundError:
+            return None
+
+    def read_text(
+        self,
+        path: str,
+        *,
+        cursor: str | None = None,
+        max_chars: int = MAX_STORAGE_READ_CHARS,
+        max_bytes: int | None = None,
+    ) -> WorkspaceTextPage:
+        if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
+            raise ValueError(f"max_chars must be in 1..{MAX_STORAGE_READ_CHARS}")
+        full_path, normalized = self._path(path)
+        data = self._read_optional(full_path)
+        if data is None:
+            raise FileNotFoundError(path)
+        bound = self._max_file_bytes if max_bytes is None else min(self._max_file_bytes, max_bytes)
+        if len(data) > bound:
+            raise ValueError(f"read bound exceeded: size {len(data)} exceeds {bound}")
+        data.decode("utf-8")
+        offset = _decode_cursor(cursor, normalized) if cursor is not None else 0
+        content = data[offset:].decode("utf-8")
+        if len(content) > max_chars:
+            content = content[:max_chars]
+            return WorkspaceTextPage(
+                content, _encode_cursor(normalized, offset + len(content.encode("utf-8"))), len(data), False
+            )
+        return WorkspaceTextPage(content, None, len(data), True)
+
+    def read_text_page(
+        self,
+        path: str,
+        *,
+        cursor: str | None = None,
+        max_chars: int = MAX_STORAGE_READ_CHARS,
+        max_bytes: int | None = None,
+    ) -> WorkspaceTextPage:
+        return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
+
+    def write_text(
+        self, path: str, content: str, *, overwrite: bool = True, expected_sha256: str | None = None
+    ) -> WorkspaceEntry:
+        full_path, normalized = self._path(path)
+        data = content.encode("utf-8")
+        if len(data) > self._max_file_bytes:
+            raise WorkspaceStorageError("file content exceeds maximum size")
+        existing = self._read_optional(full_path)
+        if existing is not None and not overwrite:
+            raise FileExistsError(path)
+        if expected_sha256 is not None and hashlib.sha256(existing or b"").hexdigest() != expected_sha256:
+            raise WorkspaceConflictError("checksum mismatch")
+        self._ensure_parent(full_path)
+        self._fs.upload_file(data, full_path)
+        return self._entry(full_path, normalized)
+
+    def append_text(self, path: str, content: str, *, expected_sha256: str | None = None) -> WorkspaceEntry:
+        full_path, normalized = self._path(path)
+        existing = self._read_optional(full_path) or b""
+        if expected_sha256 is not None and hashlib.sha256(existing).hexdigest() != expected_sha256:
+            raise WorkspaceConflictError("checksum mismatch")
+        data = existing + content.encode("utf-8")
+        if len(data) > self._max_file_bytes:
+            raise WorkspaceStorageError("file content exceeds maximum size")
+        self._ensure_parent(full_path)
+        self._fs.upload_file(data, full_path)
+        return self._entry(full_path, normalized)
+
+    def patch_text(self, path: str, old: str, new: str, *, expected_sha256: str | None = None) -> WorkspaceEntry:
+        full_path, normalized = self._path(path)
+        existing = self._read_optional(full_path)
+        if existing is None:
+            raise FileNotFoundError(path)
+        text = existing.decode("utf-8")
+        if expected_sha256 is not None and hashlib.sha256(existing).hexdigest() != expected_sha256:
+            raise WorkspaceConflictError("checksum mismatch")
+        if text.count(old) == 0:
+            raise WorkspaceConflictError("target text not found", detail="missing")
+        if text.count(old) > 1:
+            raise WorkspaceConflictError("target text occurs more than once", detail="ambiguous")
+        return self.write_text(normalized, text.replace(old, new, 1), overwrite=True)
+
+    def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
+        if type(byte_budget) is not int or byte_budget < 1:
+            raise ValueError("byte_budget must be positive")
+        full_path, _ = self._path(path)
+        data = self._read_optional(full_path)
+        if data is None:
+            return {"missing": True, "content": "", "sha256": "", "byte_size": 0}
+        start = max(0, len(data) - byte_budget)
+        while start < len(data) and (data[start] & 0xC0) == 0x80:
+            start += 1
+        tail = data[start:]
+        return {
+            "missing": False,
+            "content": tail.decode("utf-8", errors="replace"),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "byte_size": len(data),
+        }
+
+    def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
+        full_path, _ = self._path(path)
+        existing = self._read_optional(full_path)
+        if existing is None:
+            raise FileNotFoundError(path)
+        if expected_sha256 is not None and hashlib.sha256(existing).hexdigest() != expected_sha256:
+            raise WorkspaceConflictError("checksum mismatch on delete", detail="checksum_mismatch")
+        self._fs.delete_file(full_path)
 
 
 class AsyncWorkspaceStorage:

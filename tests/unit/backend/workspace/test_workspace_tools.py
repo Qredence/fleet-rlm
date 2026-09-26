@@ -579,3 +579,86 @@ def test_delete_and_edit_event_views_expose_metadata_without_fragments() -> None
     assert observed[2].input == {"path": "notes/private.md", "checksum_precondition": False}
     assert observed[3].output == {"ok": True, "namespace": "session_workspace", "path": "notes/private.md"}
     assert "private fragment" not in str(observed)
+
+
+@pytest.mark.parametrize("directory", [".", "notes", "notes/reports"])
+def test_daytona_workspace_storage_lists_direct_children(directory: str) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    root = "/workspace/sessions/session-a/workspace"
+    prefix = "" if directory == "." else f"{directory}/"
+    full_path = root if directory == "." else f"{root}/{directory}"
+    fs = MagicMock()
+    fs.list_files.return_value = [
+        {"path": f"{full_path}/{name}", "is_dir": is_dir, "size": 7, "mod_time": "2026-09-20T00:00:00Z"}
+        for name, is_dir in [
+            ("z.md", False),
+            ("a", True),
+            ("a/deep.md", False),
+            (".fleet-private", True),
+            (".fleet-private/state", False),
+        ]
+    ] + [{"path": full_path}, {"path": f"{root}/../outside.md"}, {"path": "/elsewhere/file.md"}]
+    storage = DaytonaSandboxWorkspaceStorage(SimpleNamespace(fs=fs), volume_root="/workspace", root=root)
+
+    first = storage.list_entries(directory, limit=1)
+    second = storage.list_entries(directory, limit=1, after=first.next_cursor)
+
+    fs.list_files.assert_called_with(full_path, depth=1)
+    assert [(entry.path, entry.kind) for entry in first.entries] == [(f"{prefix}a", "directory")]
+    assert first.truncated is True
+    assert first.next_cursor == f"{prefix}a"
+    assert [(entry.path, entry.kind) for entry in second.entries] == [(f"{prefix}z.md", "file")]
+    assert second.truncated is False
+    assert second.next_cursor is None
+
+
+def test_daytona_workspace_storage_mutates_only_through_sandbox_filesystem() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    values: dict[str, bytes] = {}
+
+    class Fs:
+        def download_file(self, path: str) -> bytes:
+            if path not in values:
+                raise FileNotFoundError(path)
+            return values[path]
+
+        def upload_file(self, data: bytes, path: str) -> None:
+            values[path] = data
+
+        def delete_file(self, path: str) -> None:
+            values.pop(path, None)
+
+        def get_file_info(self, path: str):
+            if path not in values:
+                raise FileNotFoundError(path)
+            return SimpleNamespace(path=path, is_dir=False, size=len(values[path]), mod_time="2026-09-20T00:00:00Z")
+
+        def list_files(self, _path: str, *, depth: int):
+            del depth
+            return []
+
+    calls: list[str] = []
+
+    class Process:
+        def exec(self, command: str):
+            calls.append(command)
+            return SimpleNamespace(exit_code=0)
+
+    storage = DaytonaSandboxWorkspaceStorage(
+        SimpleNamespace(fs=Fs(), process=Process()),
+        volume_root="/workspace",
+        root="/workspace/sessions/session-a/workspace",
+    )
+    entry = storage.append_text("notes.md", "durable")
+
+    assert values["/workspace/sessions/session-a/workspace/notes.md"] == b"durable"
+    assert entry.byte_size == 7
+    assert storage.read_text_page("notes.md", cursor=None, max_chars=100).content == "durable"
+    assert calls == ["mkdir -p -- /workspace/sessions/session-a/workspace"]

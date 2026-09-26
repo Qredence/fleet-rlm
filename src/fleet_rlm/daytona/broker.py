@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import logging
 import secrets
 import threading
 import time
@@ -23,6 +24,8 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_mess
 from fleet_rlm.json_types import validate_json_value
 from fleet_rlm.rlm.events import _resolve_awaitable_result
 
+logger = logging.getLogger(__name__)
+
 _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_OUTPUT_CHARS = 64 * 1024
@@ -30,7 +33,7 @@ _DEFAULT_TOOL_TIMEOUT_S = 120
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, threading, time, uuid
+import contextlib, hmac, io, json, sys, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -38,6 +41,13 @@ _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
 _lock, _execution_lock = threading.Lock(), threading.Lock()
 _active_deadline = None
+
+# Keep a bounded, useful conversion ceiling for legitimate high-precision
+# computations.  The default CPython limit makes the Pi canary fail before it
+# can submit a result, despite the sandbox output budget already bounding what
+# returns to the host.
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(200_000)
 
 class _BoundedWriter(io.StringIO):
     def __init__(self, limit):
@@ -179,7 +189,15 @@ Server(("0.0.0.0", __PORT__), Handler).serve_forever()
 class DaytonaHttpToolBroker:
     """Run a local sandbox broker and fulfil its JSON-only tool requests."""
 
-    def __init__(self, sandbox: Any, *, port: int, async_bridge: Any | None = None) -> None:
+    def __init__(
+        self,
+        sandbox: Any,
+        *,
+        port: int,
+        async_bridge: Any | None = None,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
+    ) -> None:
         self._sandbox = sandbox
         self._port = port
         self._secret = secrets.token_urlsafe(32)
@@ -188,7 +206,10 @@ class DaytonaHttpToolBroker:
         self._client: httpx.Client | None = None
         self._tools: dict[str, Callable[..., Any]] = {}
         self._async_bridge = async_bridge
+        self._tool_settled = tool_settled
+        self._tool_failed = tool_failed
         self._stopped = False
+        self._delivery_error: DaytonaAdapterError | None = None
 
     def bind_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         if self._url is not None:
@@ -207,6 +228,7 @@ class DaytonaHttpToolBroker:
             raise DaytonaAdapterError(message="broker invocation is still active", cause_type="BrokerBindingError")
         self._secret = secret
         self._client.headers["X-Broker-Secret"] = secret
+        self._delivery_error = None
 
     def rebind_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
         """Refresh the host registry between executions on a live broker."""
@@ -228,6 +250,18 @@ class DaytonaHttpToolBroker:
             raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
         self._async_bridge = async_bridge
 
+    def rebind_tool_outcomes(
+        self,
+        *,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
+    ) -> None:
+        """Refresh per-invocation host-tool settlement ownership."""
+        if self._stopped:
+            raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
+        self._tool_settled = tool_settled
+        self._tool_failed = tool_failed
+
     def setup_source(self, submit_source: str) -> str:
         return (
             "class _FleetToolCallError(RuntimeError):\n"
@@ -246,6 +280,7 @@ class DaytonaHttpToolBroker:
     def execute(self, code: str, variables: Mapping[str, Any], *, timeout_s: int) -> Any:
         self._ensure_started()
         assert self._client is not None
+        self._delivery_error = None
         client = self._client
         outcome: list[httpx.Response | BaseException] = []
 
@@ -268,6 +303,13 @@ class DaytonaHttpToolBroker:
                 break
             self._poll_once()
             worker.join(0.05)
+        # The remote /execute request owns every outstanding /tool_call.  Do
+        # not return (or tear down its broker) until that request has settled,
+        # even after a rejected result delivery.  The typed delivery failure is
+        # raised only once remote execution has contained its waiting call.
+        delivery_error = self._delivery_error
+        if delivery_error is not None:
+            raise delivery_error
         if not outcome or isinstance(outcome[0], BaseException):
             raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
         response = outcome[0]
@@ -337,15 +379,23 @@ class DaytonaHttpToolBroker:
             return
         for request in requests:
             name = str(request.get("tool_name") or "")
+            arguments = dict(request.get("kwargs") or {})
+            result: Any = None
+            succeeded = False
             try:
                 tool = self._tools[name]
                 result = _resolve_awaitable_result(
-                    tool(*list(request.get("args") or []), **dict(request.get("kwargs") or {})),
+                    tool(*list(request.get("args") or []), **arguments),
                     async_bridge=self._async_bridge,
                 )
                 validate_json_value(result, path=f"Tool {name} result")
                 body = {"id": request["id"], "lease": request["lease"], "result": result}
+                succeeded = True
             except Exception as exc:
+                failed = self._tool_failed
+                if failed is not None:
+                    with contextlib.suppress(Exception):
+                        failed(name, arguments)
                 body = {
                     "id": request.get("id"),
                     "lease": request.get("lease"),
@@ -355,9 +405,38 @@ class DaytonaHttpToolBroker:
                         "call_id": str(request.get("id") or ""),
                     },
                 }
-            with contextlib.suppress(httpx.HTTPError):
+            try:
                 if not self._stopped and self._client is client:
-                    client.post("/result", json=body)
+                    response = client.post("/result", json=body)
+                    if response.status_code != 200:
+                        self._record_delivery_failure(
+                            request, phase="result_delivery", category=f"http_{response.status_code}"
+                        )
+                    elif succeeded:
+                        settled = self._tool_settled
+                        if settled is not None:
+                            try:
+                                settled(name, arguments, result)
+                            except Exception:
+                                self._record_delivery_failure(request, phase="settlement", category="callback_error")
+            except httpx.HTTPError:
+                self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+
+    def _record_delivery_failure(self, request: Mapping[str, Any], *, phase: str, category: str) -> None:
+        """Retain a sanitized failed delivery outcome until remote execution settles."""
+        call_id = str(request.get("id") or "")[:128]
+        tool_name = str(request.get("tool_name") or "")[:80]
+        logger.warning(
+            "sandbox tool result delivery failed call_id=%s tool_name=%s phase=%s category=%s",
+            call_id,
+            tool_name,
+            phase,
+            category,
+        )
+        self._delivery_error = DaytonaAdapterError(
+            message="sandbox tool result delivery failed",
+            cause_type="BrokerDeliveryError",
+        )
 
     def _wrapper_source(self, name: str, tool: Callable[..., Any]) -> str:
         if not name.isidentifier():

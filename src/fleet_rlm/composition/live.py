@@ -635,7 +635,7 @@ async def build_daytona_composition(
         async def open_memory(workspace_id: UUID):
             """Open provider-neutral Memory over one bounded Workspace Agent root."""
             from fleet_rlm.workspace.memory import build_workspace_memory_store
-            from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+            from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
 
             memory_view: Any | None = None
             async with mounted_workspace_gateway.open_sandbox(
@@ -648,7 +648,7 @@ async def build_daytona_composition(
                         asyncio.get_running_loop(),
                         dispatcher,
                     )
-                    memory_session = AgentStorageSession(
+                    memory_session = DaytonaSandboxWorkspaceStorage(
                         memory_view,
                         volume_root=str(volume_paths.mount_path),
                         root=str(volume_paths.mount_path),

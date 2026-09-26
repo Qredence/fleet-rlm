@@ -823,6 +823,58 @@ def observe_tool(
 _StreamDetail = RLMReasoning | RLMCode | RLMOutput
 
 
+def _public_trajectory_output(output: str) -> str:
+    """Return the bounded public form of one native trajectory output."""
+    return "FINAL submitted" if output.startswith("FINAL:") else output
+
+
+def _bounded_trajectory(
+    trajectory: Sequence[TrajectoryStep], *, max_steps: int | None, max_chars: int
+) -> tuple[TrajectoryStep, ...]:
+    """Assign trajectory details to the bounded executed-iteration sequence.
+
+    Native DSPy may retain setup or terminal backfill records with an index past
+    the executed REPL budget. Public events use their retained sequence
+    position, never those provider-internal indexes. Overflow records fold
+    into the final executed step so no public code event can claim an
+    impossible iteration. Reserve room for the final record when bounding
+    folded content so earlier diagnostics cannot hide terminal submission.
+    """
+    if max_steps is None:
+        return tuple(trajectory)
+    if max_steps < 1:
+        raise ValueError("max_steps must be positive when bounding a trajectory")
+
+    grouped: list[list[TrajectoryStep]] = [[] for _ in range(min(len(trajectory), max_steps))]
+    for position, item in enumerate(trajectory, start=1):
+        grouped[min(position, max_steps) - 1].append(item)
+
+    def combine(values: Sequence[str]) -> str:
+        unique: list[str] = []
+        for value in values:
+            if value and value not in unique:
+                unique.append(value)
+        combined = "\n\n".join(unique)
+        if len(unique) < 2 or len(combined) <= max_chars:
+            return combined
+        terminal = truncate_public_text(unique[-1], max_len=max_chars)
+        prefix_budget = max_chars - len(terminal) - 2
+        if prefix_budget <= 0:
+            return terminal
+        prefix = truncate_public_text("\n\n".join(unique[:-1]), max_len=prefix_budget)
+        return f"{prefix}\n\n{terminal}"
+
+    return tuple(
+        TrajectoryStep(
+            index=index,
+            reasoning=combine(tuple(item.reasoning for item in items)),
+            code=combine(tuple(item.code for item in items)),
+            output=combine(tuple(_public_trajectory_output(item.output) for item in items)),
+        )
+        for index, items in enumerate(grouped, start=1)
+    )
+
+
 def trajectory_details(
     steps: Sequence[TrajectoryStep],
     *,
@@ -831,9 +883,7 @@ def trajectory_details(
     """Project strictly normalized DSPy trajectory steps into public details."""
     details: list[ObservationDetail] = []
     for step in steps:
-        output = step.output
-        if output.startswith("FINAL:"):
-            output = "FINAL submitted"
+        output = _public_trajectory_output(step.output)
         code = step.code
         details.extend(
             (
@@ -1012,6 +1062,7 @@ def reconcile_trajectory(
     *,
     max_chars: int,
     request: str | None = None,
+    max_steps: int | None = None,
 ) -> list[ObservationDetail]:
     """Reconcile completed DSPy trajectory details with live observations.
 
@@ -1052,7 +1103,7 @@ def reconcile_trajectory(
 
     emissions: list[ObservationDetail] = []
     aligned_positions: set[int] = set()
-    for trajectory_step in trajectory:
+    for trajectory_step in _bounded_trajectory(trajectory, max_steps=max_steps, max_chars=max_chars):
         step = trajectory_step.index
         step_details = trajectory_details(
             (trajectory_step,),
@@ -1622,6 +1673,16 @@ class ObservationSession:
         """Record a stream envelope without treating it as execution detail."""
         return self._recorder.record(detail)
 
+    @staticmethod
+    def _bound_step(detail: RuntimeEventDetail, *, max_steps: int) -> RuntimeEventDetail:
+        """Project interpreter setup/backfill onto an executed public step."""
+        if max_steps < 1:
+            return detail
+        step = getattr(detail, "step", None)
+        if isinstance(step, int) and step > max_steps:
+            return replace(detail, step=max_steps)
+        return detail
+
     def _order_live_detail(self, detail: RuntimeEventDetail) -> tuple[RuntimeEventDetail, ...]:
         """Hold step output until its parsed reasoning is ready for publication.
 
@@ -1665,10 +1726,14 @@ class ObservationSession:
     ) -> AsyncIterator[RuntimeEvent]:
         """Yield live worker observations, final drain details, and overflow warning."""
         monitor = WorkerMonitor(worker, self._relay, context, drain_capabilities)
+        options = getattr(context.execution, "options", None)
+        max_steps = getattr(options, "max_iters", 0)
         async for detail in monitor.stream():
+            detail = self._bound_step(detail, max_steps=max_steps)
             for ordered in self._order_live_detail(detail):
                 yield self.record(ordered)
         for detail in (*drain_capabilities(), *self._relay.drain()):
+            detail = self._bound_step(detail, max_steps=max_steps)
             for ordered in self._order_live_detail(detail):
                 yield self.record(ordered)
         for detail in self._flush_pending_step_details():
