@@ -264,7 +264,7 @@ def test_repair_text_is_bounded_and_safe_for_native_context() -> None:
 
 def test_provider_failure_trace_keeps_category_but_not_private_message(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     start_span = turn_tracing.start_turn_span
 
