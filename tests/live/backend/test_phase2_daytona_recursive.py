@@ -403,7 +403,7 @@ def _write_receipt(payload: dict[str, object]) -> None:
 
 async def _delete_sandboxes_on_canary_volume(resources: Any, volume_name: str) -> bool:
     """Delete provider-visible sandboxes mounting this canary's unique volume."""
-    daytona = resources._client
+    daytona = resources.runtime._client
     try:
         volume = await daytona.volume.get(volume_name, create=False)
     except DaytonaNotFoundError:
@@ -494,7 +494,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     app = create_app(settings=settings)
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
+        resources = inventory.run_environment_resources
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
