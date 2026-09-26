@@ -6,9 +6,9 @@ import json
 
 from fastapi.testclient import TestClient
 
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.mlflow import MLflowRuntimeState
+from tests.support.testing_app import create_testing_app
 
 
 def _post_canned_turn(client: TestClient) -> None:

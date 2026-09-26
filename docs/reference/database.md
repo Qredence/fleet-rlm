@@ -8,7 +8,8 @@ committed profiles and their provider environment names are listed in the
 
 | Profile | Code execution | LLM calls | Durable volume | Auth/scope |
 | --- | --- | --- | --- | --- |
-| `daytona-recursive` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable scope |
+| `daytona-native` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable; child recursion disabled |
+| `daytona-recursive` (opt-in) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable; bounded child recursion enabled |
 | `daytona-managed` | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | TLS Lakebase `fleet_app` |
 
 Daytona is the full Fleet solution with Workspace Volume Scope and Turn Commit

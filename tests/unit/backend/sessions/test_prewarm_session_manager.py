@@ -1,4 +1,4 @@
-"""DaytonaSessionManager.prewarm_session contracts.
+"""DaytonaRuntime.prewarm_session contracts.
 
 Pre-warm acquires a lease through the normal admission path (creating the
 Sandbox, canonical layout, and persisted binding), then releases the
@@ -17,8 +17,8 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest
-from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.daytona.runtime import PREWARM_RUN_ID, LeaseRequest
+from fleet_rlm.sessions.bindings import SandboxBinding
 from tests.support.session_manager import _manager
 
 
@@ -190,7 +190,7 @@ async def test_prewarm_yields_when_real_turn_acquires_concurrently() -> None:
     mgr, _platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
 
-    from fleet_rlm.daytona.session_manager import PREWARM_RUN_ID, LeaseRequest
+    from fleet_rlm.daytona.runtime import PREWARM_RUN_ID, LeaseRequest
 
     prewarm_entered = asyncio.Event()
     release_prewarm = asyncio.Event()
@@ -239,7 +239,7 @@ async def test_real_turn_waits_out_inflight_prewarm_claim() -> None:
     complete its own acquisition — never surface ActiveLeaseConflictError
     from a pre-warm's claim.
     """
-    from fleet_rlm.daytona.session_manager import LeaseRequest
+    from fleet_rlm.daytona.runtime import LeaseRequest
 
     mgr, platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
@@ -287,17 +287,17 @@ async def test_real_turn_waits_out_inflight_prewarm_claim() -> None:
 @pytest.mark.asyncio
 async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
     """A PREWARM claim cannot consume a real Turn's longer deadline."""
-    from fleet_rlm.daytona import session_manager
+    from fleet_rlm.daytona import runtime
 
     mgr, _platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
     registry = mgr.active_leases
-    registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
-    monkeypatch.setattr(session_manager, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
+    registry.acquire(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
+    monkeypatch.setattr(runtime, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
     loop = asyncio.get_running_loop()
     started = loop.time()
     try:
-        with pytest.raises(session_manager.DaytonaLeaseAcquisitionTimeoutError):
+        with pytest.raises(runtime.DaytonaLeaseAcquisitionTimeoutError):
             await mgr.acquire(
                 LeaseRequest(
                     session_id=session_id,
@@ -308,7 +308,7 @@ async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.Monke
                 deadline=started + 10.0,
             )
     finally:
-        registry.release(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+        registry.release(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
 
     assert 0.04 <= loop.time() - started < 1.0
 
@@ -316,16 +316,16 @@ async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
     """An already-expired caller deadline still times out immediately."""
-    from fleet_rlm.daytona import session_manager
+    from fleet_rlm.daytona import runtime
 
     mgr, _platform, _store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
     registry = mgr.active_leases
-    registry.acquire(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+    registry.acquire(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
     loop = asyncio.get_running_loop()
     started = loop.time()
     try:
-        with pytest.raises(session_manager.DaytonaLeaseAcquisitionTimeoutError):
+        with pytest.raises(runtime.DaytonaLeaseAcquisitionTimeoutError):
             await mgr.acquire(
                 LeaseRequest(
                     session_id=session_id,
@@ -336,7 +336,7 @@ async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
                 deadline=started - 1.0,
             )
     finally:
-        registry.release(session_id, session_manager.PREWARM_RUN_ID, workspace_id=workspace_id)
+        registry.release(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
 
     assert loop.time() - started < 0.1
 

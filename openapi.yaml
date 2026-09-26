@@ -371,6 +371,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /api/sessions/{session_id}/task:
+    get:
+      tags:
+      - sessions
+      summary: Get Session Task
+      operationId: get_session_task
+      parameters:
+      - name: session_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Session Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionTaskResponse'
+        '404':
+          description: Session or task checkpoint not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Task checkpoint unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/attachments:
     post:
       tags:
@@ -1331,6 +1370,25 @@ components:
       required:
       - data
       title: DataAttachmentUIMessagePart
+    DataChildProgressUIMessagePart:
+      properties:
+        data:
+          $ref: '#/components/schemas/JsonValue'
+        id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Id
+        type:
+          type: string
+          const: data-child-progress
+          title: Type
+          default: data-child-progress
+      additionalProperties: false
+      type: object
+      required:
+      - data
+      title: DataChildProgressUIMessagePart
     DataRLMCodeUIMessagePart:
       properties:
         data:
@@ -1672,6 +1730,50 @@ components:
       - status
       - checkpoint_version
       title: SessionSummaryResponse
+    SessionTaskResponse:
+      properties:
+        revision:
+          type: integer
+          title: Revision
+        goal:
+          type: string
+          title: Goal
+        decisions:
+          items:
+            type: string
+          type: array
+          title: Decisions
+        relevant_paths:
+          items:
+            type: string
+          type: array
+          title: Relevant Paths
+        source_revisions:
+          additionalProperties:
+            type: string
+          type: object
+          title: Source Revisions
+        completed_work:
+          items:
+            type: string
+          type: array
+          title: Completed Work
+        pending_work:
+          items:
+            type: string
+          type: array
+          title: Pending Work
+      type: object
+      required:
+      - revision
+      - goal
+      - decisions
+      - relevant_paths
+      - source_revisions
+      - completed_work
+      - pending_work
+      title: SessionTaskResponse
+      description: Authorized read-only projection of the existing Session checkpoint.
     SessionTurnPageResponse:
       properties:
         items:
@@ -2121,6 +2223,7 @@ components:
             - $ref: '#/components/schemas/DynamicToolUIMessagePart'
             - $ref: '#/components/schemas/StepStartUIMessagePart'
             - $ref: '#/components/schemas/DataStatusUIMessagePart'
+            - $ref: '#/components/schemas/DataChildProgressUIMessagePart'
             - $ref: '#/components/schemas/DataStepUIMessagePart'
             - $ref: '#/components/schemas/DataRLMCodeUIMessagePart'
             - $ref: '#/components/schemas/DataRLMOutputUIMessagePart'
@@ -2135,6 +2238,7 @@ components:
               mapping:
                 data-artifact: '#/components/schemas/DataArtifactUIMessagePart'
                 data-attachment: '#/components/schemas/DataAttachmentUIMessagePart'
+                data-child-progress: '#/components/schemas/DataChildProgressUIMessagePart'
                 data-rlm-code: '#/components/schemas/DataRLMCodeUIMessagePart'
                 data-rlm-output: '#/components/schemas/DataRLMOutputUIMessagePart'
                 data-skill: '#/components/schemas/DataSkillUIMessagePart'
@@ -2521,6 +2625,110 @@ components:
         - type
         - data
         title: DataStatusChunk
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: data-child-progress
+            title: Type
+            type: string
+          id:
+            type: string
+            title: Id
+          data:
+            additionalProperties: false
+            properties:
+              child_id:
+                maxLength: 128
+                minLength: 1
+                title: Child Id
+                type: string
+              task_label:
+                maxLength: 240
+                minLength: 1
+                title: Task Label
+                type: string
+              state:
+                enum:
+                - not_started
+                - running
+                - completed
+                - failed
+                - cancelled
+                - timed_out
+                title: State
+                type: string
+              elapsed_ms:
+                minimum: 0
+                title: Elapsed Ms
+                type: integer
+              outcome:
+                anyOf:
+                - maxLength: 500
+                  type: string
+                - type: 'null'
+                title: Outcome
+              evidence:
+                items:
+                  type: string
+                maxItems: 8
+                title: Evidence
+                type: array
+              gaps:
+                items:
+                  type: string
+                maxItems: 8
+                title: Gaps
+                type: array
+              result_file_count:
+                maximum: 16
+                minimum: 0
+                title: Result File Count
+                type: integer
+              code_excerpt:
+                anyOf:
+                - maxLength: 800
+                  type: string
+                - type: 'null'
+                title: Code Excerpt
+              output_excerpt:
+                anyOf:
+                - maxLength: 800
+                  type: string
+                - type: 'null'
+                title: Output Excerpt
+              cleanup_state:
+                enum:
+                - pending
+                - complete
+                - failed
+                - not_required
+                title: Cleanup State
+                type: string
+              parent_run_id:
+                anyOf:
+                - maxLength: 128
+                  minLength: 1
+                  type: string
+                - type: 'null'
+                title: Parent Run Id
+            required:
+            - child_id
+            - task_label
+            - state
+            - elapsed_ms
+            - cleanup_state
+            title: ChildProgressData
+            type: object
+          transient:
+            anyOf:
+            - type: boolean
+            - type: 'null'
+            title: Transient
+        required:
+        - type
+        - data
+        title: DataChildProgressChunk
         type: object
       - additionalProperties: false
         properties:

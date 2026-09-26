@@ -9,6 +9,36 @@ import { terminalSafeText } from "../terminal-text.js";
 describe("renderMessage", () => {
   beforeEach(() => setTerminalColorScheme("dark"));
 
+  it("shows bounded child evidence and gaps only when expanded", () => {
+    const child: Message = {
+      id: "child-run-1-child-1",
+      kind: "child_progress",
+      runId: "run-1",
+      childId: "child-1",
+      taskLabel: "Inspect source",
+      state: "completed",
+      elapsedMs: 42,
+      outcome: "Found one path",
+      evidence: ["src/api.py:42"],
+      gaps: ["Caller not checked"],
+      resultFileCount: 2,
+      codeExcerpt: "print('selected row')",
+      outputExcerpt: "selected row",
+      cleanupState: "complete",
+      collapsed: true,
+      ts: 1,
+    };
+    expect(renderMessage(child, 70).join("\n")).not.toContain("src/api.py:42");
+    const expanded = renderMessage({ ...child, collapsed: false }, 70).join("\n");
+    expect(expanded).toContain("src/api.py:42");
+    expect(expanded).toContain("Caller not checked");
+    expect(expanded).toContain("saved result files: 2");
+    expect(expanded).toContain("print('selected row')");
+    expect(expanded).toContain("output:");
+    expect(renderMessage(child, 70).join("\n")).not.toContain("saved result files: 2");
+    expect(renderMessage(child, 70).join("\n")).not.toContain("print('selected row')");
+  });
+
   it("uses the pi user surface and leaves assistant prose unboxed", () => {
     const user: Message = {
       id: "user",

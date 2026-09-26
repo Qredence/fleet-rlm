@@ -18,10 +18,10 @@ The tests exercise, in the exact order below:
     loads another Session's committed records (in-memory and SQL stores).
 11. A timed-out Turn persists only its durable terminal status — never a
     Session History tombstone — and stays out of the committed History
-    projection (store → claim → ``claim_history_records``).
+    projection (store → claim → ``claimed_history_records``).
 12. Failed and cancelled Turns are excluded end-to-end through
-    ``claim_history_records``/``build_dspy_history_for_claim``.
-13. ``claim_history_records`` excludes tombstone-bearing checkpoints whose
+    ``claimed_history_records``/``dspy_history_for_claim``.
+13. ``claimed_history_records`` excludes tombstone-bearing checkpoints whose
     assistant messages carry failed/timed-out terminal metadata.
 """
 
@@ -45,6 +45,7 @@ from fleet_rlm.sessions.history import (
     to_dspy_history,
     validate_legacy_records,
 )
+from tests.support.turn_settlement import TestingRunSettlement
 
 _EMPTY_USAGE: dict[str, Any] = {
     "iterations": 0,
@@ -298,10 +299,9 @@ async def test_store_level_cross_session_history_isolation() -> None:
     claim path: both Sessions commit Turns into ONE store, then a fresh claim
     for Session A must carry exactly Session A's checkpoint (P52.1(g)).
     """
-    from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+    from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -310,7 +310,7 @@ async def test_store_level_cross_session_history_isolation() -> None:
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
     access = TurnAccess(uuid4(), uuid4())
     session_a = await catalog.create(user_id=access.user_id, workspace_id=access.workspace_id, title="A")
     session_b = await catalog.create(user_id=access.user_id, workspace_id=access.workspace_id, title="B")
@@ -337,10 +337,10 @@ async def test_store_level_cross_session_history_isolation() -> None:
         ("user", "alpha request"),
         ("assistant", "alpha answer"),
     ]
-    turns_a, requests_a = claim_history_records(probe_a)
+    turns_a, requests_a = claimed_history_records(probe_a)
     assert requests_a == ("alpha request",)
     assert [turn.text for turn in turns_a] == ["alpha answer"]
-    assert list(build_dspy_history_for_claim(probe_a).messages) == [
+    assert list(dspy_history_for_claim(probe_a).messages) == [
         {"request": "alpha request", "answer": "alpha answer"},
     ]
 
@@ -350,7 +350,7 @@ async def test_store_level_cross_session_history_isolation() -> None:
         ("user", "beta request"),
         ("assistant", "beta answer"),
     ]
-    assert list(build_dspy_history_for_claim(probe_b).messages) == [
+    assert list(dspy_history_for_claim(probe_b).messages) == [
         {"request": "beta request", "answer": "beta answer"},
     ]
 
@@ -358,11 +358,11 @@ async def test_store_level_cross_session_history_isolation() -> None:
 @pytest.mark.asyncio
 async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None:
     """The authoritative SQL store scopes claimed checkpoints to the claimed Session."""
-    from fleet_rlm.chat.preparation import build_dspy_history_for_claim
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.history import dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -418,7 +418,7 @@ async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None
             ("user", "alpha request"),
             ("assistant", "alpha answer"),
         ]
-        assert list(build_dspy_history_for_claim(probe_a).messages) == [
+        assert list(dspy_history_for_claim(probe_a).messages) == [
             {"request": "alpha request", "answer": "alpha answer"},
         ]
 
@@ -444,29 +444,24 @@ async def test_timed_out_turn_persists_terminal_status_but_never_enters_committe
     persists no user/assistant rows at all; only the terminal Run status is
     durable, which is observable by an idempotent retry beginning a FRESH Run.
     """
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.preparation import (
-        RunPreparationTimeoutError,
-        build_dspy_history_for_claim,
-        claim_history_records,
-    )
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+    from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         RunClaim,
         RunFailure,
     )
+    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id, workspace_id=access.workspace_id, title="timeout"
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     first = await lifecycle.begin(RunClaim(access, session.id, TurnInput("before"), "key-before", uuid4()))
     assert isinstance(first, ClaimedRun)
@@ -515,10 +510,10 @@ async def test_timed_out_turn_persists_terminal_status_but_never_enters_committe
         ("assistant", "kept"),
     ]
     # ...and neither does the canonical model-facing projection.
-    turns, requests = claim_history_records(nxt)
+    turns, requests = claimed_history_records(nxt)
     assert requests == ("before",)
     assert [turn.text for turn in turns] == ["kept"]
-    assert list(build_dspy_history_for_claim(nxt).messages) == [{"request": "before", "answer": "kept"}]
+    assert list(dspy_history_for_claim(nxt).messages) == [{"request": "before", "answer": "kept"}]
 
 
 @pytest.mark.asyncio
@@ -528,13 +523,12 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     Drives one committed Turn, one cancelled Turn (settle → complete_settling)
     and one failed Turn through the REAL store/lifecycle, then asserts the
     NEXT claim's raw checkpoint retains only the cancelled tombstone pair for
-    audit while ``claim_history_records``/``build_dspy_history_for_claim``
+    audit while ``claimed_history_records``/``dspy_history_for_claim``
     keep exactly the committed conversation (P52.1(c)/(d) end-to-end half).
     """
-    from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
+    from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -547,7 +541,7 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     session = await InMemorySessionCatalog(store).create(
         user_id=access.user_id, workspace_id=access.workspace_id, title="audit"
     )
-    lifecycle = RunLifecycleService(store, max_artifact_bytes=1024)
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
 
     first = await lifecycle.begin(RunClaim(access, session.id, TurnInput("turn one"), "key-1", uuid4()))
     assert isinstance(first, ClaimedRun)
@@ -580,10 +574,10 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     ]
     # ...while the canonical model-facing projection keeps only the committed
     # conversation: the cancelled tombstone AND the failed Turn are absent.
-    turns, requests = claim_history_records(fourth)
+    turns, requests = claimed_history_records(fourth)
     assert requests == ("turn one",)
     assert [turn.text for turn in turns] == ["keep me"]
-    assert list(build_dspy_history_for_claim(fourth).messages) == [
+    assert list(dspy_history_for_claim(fourth).messages) == [
         {"request": "turn one", "answer": "keep me"},
     ]
 
@@ -600,15 +594,15 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     assert records[3].committed.text == "Turn cancelled"
 
 
-def test_claim_history_records_excludes_tombstone_bearing_checkpoints() -> None:
+def test_claimed_history_records_excludes_tombstone_bearing_checkpoints() -> None:
     """A claimed checkpoint MAY carry bounded failure tombstones; the projection drops them.
 
     The durable store only persists cancellation tombstones, so failed and
     timed-out tombstone shapes are injected directly into a claimed
-    ``SessionHistory`` checkpoint (the exact seam ``claim_history_records``
+    ``SessionHistory`` checkpoint (the exact seam ``claimed_history_records``
     defends) with one successful Turn interleaved.
     """
-    from fleet_rlm.chat.preparation import build_dspy_history_for_claim, claim_history_records
+    from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -644,11 +638,11 @@ def test_claim_history_records_excludes_tombstone_bearing_checkpoints() -> None:
         _RunClaimToken(uuid4(), base_checkpoint_version=2),
     )
 
-    turns, requests = claim_history_records(claim)
+    turns, requests = claimed_history_records(claim)
 
     assert requests == ("kept request",)
     assert [turn.text for turn in turns] == ["kept answer"]
-    history = build_dspy_history_for_claim(claim)
+    history = dspy_history_for_claim(claim)
     assert list(history.messages) == [{"request": "kept request", "answer": "kept answer"}]
     # The bounded tombstones never leak into the canonical projection.
     flattened = {value for message in history.messages for value in message.values()}

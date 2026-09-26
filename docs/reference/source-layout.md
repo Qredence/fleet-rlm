@@ -2,39 +2,34 @@
 
 ```text
 src/fleet_rlm/
-├── api/            # HTTP identity, dependencies, schemas, routes, SSE
-├── artifacts/      # candidates, validation, persistent/local stores
-├── chat/           # Turn context, coordination, and claim policy
-├── cli/            # supervised TUI/backend launchers and Daytona doctor
-├── daytona/        # Daytona resources, provider adapters, and transport
-├── attachments/    # Attachment models, lifecycle, storage, and host tools
-├── workspace/      # Workspace, Projects, Memory, URL, and storage domains
-├── observability/  # failure diagnostics, MLflow tracing, DSPy callbacks, and posthog
-├── optimization/   # trusted-host GEPA/evidence lane
-├── persistence/    # SQLAlchemy models and repository adapters
-├── rlm/            # DSPy signature, models, runner, Runtime Events
-├── runtime/        # provider-neutral Sandbox bindings + Daytona assembly
-├── sessions/       # Session/Turn domain and repository interfaces
-├── skills/         # immutable bundled catalog, Signatures, and host tools
-├── app.py          # FastAPI factory and lifespan
-├── composition/    # Daytona, shared, and private testing inventories
-├── config/         # settings schema, TOML loader, and loopback-only policy editor
-├── json_types.py   # closed JsonScalar/JsonValue contract
-├── main.py         # ASGI entrypoint
-├── paths.py        # provider-neutral Volume layout and path identity primitives
-├── result_snapshot.py # private commit-gated typed-result encoding
-└── snapshot_contract.py # immutable Daytona Snapshot name policy
+├── api/                  # HTTP identity, dependencies, schemas, routes, and SSE
+├── artifacts/            # artifact candidates, validation, and stores
+├── attachments/          # Attachment lifecycle, storage, and host tools
+├── cli/                  # maintained TUI/backend entry points and Daytona doctor
+├── config/               # settings, TOML loading, and policy validation
+├── daytona/              # SDK lifecycle, interpreter, broker, diagnostics, errors
+├── observability/        # fail-soft tracing, diagnostics, evaluation, and analytics
+├── optimization/         # isolated GEPA and evidence workflow
+├── persistence/          # SQLAlchemy models and repository adapters
+├── rlm/                  # DSPy program, execution, recursion, and events
+├── sessions/             # Session history, tasks, lifecycle, and projections
+├── skills/               # bundled catalog, resolution, resources, and tools
+├── workspace/            # file, project, memory, path, and storage owners
+├── app.py                # FastAPI construction and lifespan
+├── app_lifecycle.py      # provider resource construction and closure
+├── app_services.py       # composed lifespan service inventory
+├── main.py               # ASGI entry point
+├── paths.py              # provider-neutral Volume layout and path identity
+├── result_snapshot.py    # private commit-gated typed-result encoding
+├── snapshot_contract.py  # immutable Daytona Snapshot name policy
+├── turn_preparation.py   # preparation inputs and orchestration
+├── turn_settlement.py    # claim and settlement lifecycle
+└── turns.py              # Turn coordinator
 ```
 
 See the root [architecture](../../ARCHITECTURE.md) for dependency boundaries.
 
-Start lifecycle investigations in `chat/turn_runtime.py` and
-`chat/run_lifecycle.py`; native invocation and observation live in `rlm/runtime.py`
-and `rlm/events.py`. `rlm/program.py` and `rlm/compat_3_3_1.py` own program
-construction and pinned DSPy adaptation. Each Run gets a fresh DSPy program;
-the broker Root Sandbox may persist across sequential clean Turns. SDK calls
-remain inside `daytona/`; Turn preparation and composition wiring consume
-provider-owned interfaces without a duplicate `runtime/daytona/` package.
+Start lifecycle investigations in `turns.py`, `turn_preparation.py`, and `turn_settlement.py`. Native invocation and observation live in `rlm/execution.py` and `rlm/events.py`; `rlm/program.py` constructs the pinned public DSPy API directly. Daytona interpreter result handling lives beside the interpreter in `daytona/interpreter.py`. Each Run gets a fresh DSPy program; a healthy broker Root Sandbox may persist across sequential clean Turns. SDK calls remain in `daytona/`. `app.py` owns FastAPI lifespan, `app_lifecycle.py` builds and closes provider resources, and `app_services.py` defines the composed service inventory.
 
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.

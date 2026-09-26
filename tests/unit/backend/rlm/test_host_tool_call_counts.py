@@ -12,12 +12,12 @@ import pytest
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
     from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
+    from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
-    from fleet_rlm.workspace.paths import VolumePaths
-    from fleet_rlm.workspace.storage import HostVolumeMirror
+    from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     skill = SkillDefinition(
@@ -178,8 +178,8 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
 
 def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None:
     from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
-    from fleet_rlm.workspace.paths import VolumePaths
-    from fleet_rlm.workspace.storage import HostVolumeMirror
+    from fleet_rlm.paths import VolumePaths
+    from tests.support.workspace_storage import HostVolumeMirror
 
     session_id, run_id = uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
@@ -214,10 +214,10 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
     from fleet_rlm.attachments import AttachmentToolHost
-    from fleet_rlm.composition.daytona_run_preparation import LivePreparedCapabilities
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec
-    from fleet_rlm.workspace.paths import VolumePaths
-    from fleet_rlm.workspace.storage import HostVolumeMirror
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
+    from fleet_rlm.turn_preparation import PreparedHostCapabilities
+    from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")
@@ -238,11 +238,13 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
         def drain_public_events(self) -> list[dict[str, str]]:
             return []
 
-    capabilities = LivePreparedCapabilities(
+    capabilities = PreparedHostCapabilities(
         RLMExecutionSpec(),
         files=AttachmentToolHost(attachments=(), staged_attachments=(), volume_fs=volume),
         artifacts=artifacts,
         skills=Skills(),
+        close_files=True,
+        artifact_candidates=True,
     )
     await capabilities.aclose()
 
@@ -251,8 +253,8 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
 
 def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate(tmp_path) -> None:
     from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.workspace.paths import VolumePaths
-    from fleet_rlm.workspace.storage import HostVolumeMirror
+    from fleet_rlm.paths import VolumePaths
+    from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
     paths = VolumePaths.from_mount("/mnt/fleet")

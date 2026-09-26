@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.chat.preparation import PreparedHostCapabilities
+from fleet_rlm.turn_preparation import PreparedHostCapabilities
 
 
 class _FilesStub:

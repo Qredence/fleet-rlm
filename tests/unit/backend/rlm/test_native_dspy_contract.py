@@ -18,6 +18,20 @@ from fleet_rlm.rlm.events import ToolEventView, observe_tool
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import prediction_result
+from tests.support.native_rlm import build_native_rlm_for_test
+
+
+def _use_context_span_mock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep payload-only callback tests on their existing fake span API."""
+    from fleet_rlm.observability import tracing
+
+    start = tracing.start_turn_span
+
+    def mocked_start(name: str, **kwargs: Any):
+        kwargs.pop("callback_span", None)
+        return start(name, **kwargs)
+
+    monkeypatch.setattr(tracing, "start_turn_span", mocked_start)
 
 
 def test_prediction_result_encodes_every_declared_output_by_annotation() -> None:
@@ -229,7 +243,6 @@ def test_rlm_options_match_the_product_defaults() -> None:
 def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     from fleet_rlm.rlm.program import (
         RLMOptions,
-        build_native_rlm,
     )
 
     class TaskSignature(dspy.Signature):
@@ -244,8 +257,8 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
         "sub_lm": sub_lm,
     }
 
-    first = build_native_rlm(**kwargs)
-    second = build_native_rlm(**kwargs)
+    first = build_native_rlm_for_test(**kwargs)
+    second = build_native_rlm_for_test(**kwargs)
 
     assert type(first) is dspy.RLM
     assert first is not second
@@ -256,26 +269,20 @@ def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
     assert first.max_output_chars == 2048
     assert first.sub_lm is sub_lm
     assert not hasattr(first, "_interpreter")
-    assert first._interpreter_factory.__name__ == "daytona_provider_contract"
+    assert first._interpreter_factory.__name__ == "in_process_interpreter_factory"
     assert set(first.tools) == {"_lookup"}
     assert first.generate_action.callbacks == []
 
 
-def test_build_native_rlm_fails_closed_without_a_caller_owned_interpreter() -> None:
-    from fleet_rlm.rlm.program import (
-        RLMOptions,
-        build_native_rlm,
-    )
-    from fleet_rlm.rlm.result import RLMConfigError
+def test_build_native_rlm_requires_a_caller_owned_interpreter_factory() -> None:
+    from fleet_rlm.rlm.program import RLMOptions
 
-    rlm = build_native_rlm(signature="request -> answer", options=RLMOptions(max_iters=1))
-
-    with pytest.raises(RLMConfigError, match="caller-owned interpreter"):
-        rlm(request="missing interpreter")
+    with pytest.raises(TypeError, match="interpreter_factory"):
+        build_native_rlm(signature="request -> answer", options=RLMOptions(max_iters=1))
 
 
 def test_native_rlm_identity_is_kept_in_the_pinned_compatibility_seam() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import is_native_rlm
+    from fleet_rlm.rlm.events import is_native_rlm
 
     native = dspy.RLM("request -> answer")
 
@@ -298,7 +305,6 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
 
     from fleet_rlm.rlm.program import (
         RLMOptions,
-        build_native_rlm,
     )
 
     adapter = dspy.JSONAdapter(use_native_function_calling=True)
@@ -309,7 +315,7 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
         ],
         adapter=adapter,
     )
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature="request -> answer",
         options=RLMOptions(max_iters=2),
         sub_lm=lm,
@@ -341,11 +347,9 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
 
 @pytest.mark.asyncio
 async def test_native_rlm_callback_observes_completed_action_without_altering_prediction() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import bind_native_rlm_observer
-    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.events import RLMReasoning, bind_native_rlm_observer
     from fleet_rlm.rlm.program import (
         RLMOptions,
-        build_native_rlm,
     )
 
     class TaskSignature(dspy.Signature):
@@ -374,7 +378,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
         def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
             """Execute code with optional variables and return a wrapped result."""
             del code, variables
-            from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
+            from fleet_rlm.daytona.interpreter import wrap_final_output
 
             return wrap_final_output({"answer": "ok"})
 
@@ -383,7 +387,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
 
     observed: list[object] = []
     interpreter = Interpreter()
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=TaskSignature,
         options=RLMOptions(max_iters=1),
     )
@@ -404,7 +408,7 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
 def test_composition_version_guard_accepts_exact_final_3_3_1_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import (
+    from fleet_rlm.rlm.program import (
         CERTIFIED_DSPY_VERSION,
         UncertifiedDSpyVersionError,
         assert_dspy_version,
@@ -438,7 +442,7 @@ def test_composition_version_guard_accepts_exact_final_3_3_1_only(
 def test_composition_version_guard_error_is_bounded_and_typed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import (
+    from fleet_rlm.rlm.program import (
         UncertifiedDSpyVersionError,
         assert_dspy_version,
     )
@@ -516,10 +520,11 @@ def test_observed_usage_never_exposes_call_or_retry_counters(forbidden: str) -> 
 
 
 def test_lm_trace_callback_records_role_and_failure_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[])
 
@@ -602,11 +607,12 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
     must record a bounded, sanitized error kind and status class so the model
     that failed is debuggable without a live gateway.
     """
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.daytona.errors import ProviderRequestError
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     captured = SimpleNamespace(outputs=[])
 
@@ -682,7 +688,7 @@ def test_lm_trace_callback_records_classified_failure_detail(monkeypatch: pytest
 def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     root = SimpleNamespace(model="root-model", history=[])
     callback = _RLMTraceCallback(root_lm=root, sub_lm=SimpleNamespace(model="sub-model"))
@@ -701,10 +707,11 @@ def test_lm_trace_callback_keeps_structural_last_call_summary() -> None:
 
 
 def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     captured = SimpleNamespace(outputs=[])
 
@@ -764,7 +771,7 @@ def test_lm_trace_callback_records_reasoning_tokens_from_usage(monkeypatch: pyte
 
 def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.observability import tracing
-    from fleet_rlm.rlm.compat_3_3_1 import (
+    from fleet_rlm.rlm.events import (
         _lm_input_profile,
         _lm_output_profile,
     )
@@ -786,7 +793,7 @@ def test_lm_trace_profiles_include_bounded_readable_payloads(monkeypatch: pytest
 
 
 def test_lm_trace_previews_keep_system_prompt_text_and_redact_urls() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import _trace_preview
+    from fleet_rlm.rlm.events import _trace_preview
 
     preview = _trace_preview("BEGIN SYSTEM use https://example.invalid/private for context")
 
@@ -794,11 +801,12 @@ def test_lm_trace_previews_keep_system_prompt_text_and_redact_urls() -> None:
     assert "[redacted-url]" in preview
 
 
-def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lm_trace_callback_keeps_diagnostics_without_duplicate_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
 
     calls = SimpleNamespace(outputs=[], attributes=[])
 
@@ -871,14 +879,7 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
     assert calls.inputs["call_index"] == 1
     assert calls.inputs["prompt_chars"] == len("child-prompt-sentinel")
     assert calls.inputs["history_length_before"] == 1
-    assert calls.outputs[-1]["token_usage"] == {
-        "prompt_tokens": 7,
-        "completion_tokens": 3,
-        "total_tokens": 10,
-        "completion_tokens_details": {"reasoning_tokens": 2},
-        "cache_read_input_tokens": 4,
-        "prompt_cache_hit_tokens": 4,
-    }
+    assert "token_usage" not in calls.outputs[-1]
     assert calls.outputs[-1]["response_keys"] == ["code", "content", "reasoning"]
     assert calls.outputs[-1]["wall_time_ms"] == 500.0
     # P38-RLM-006: private provider timing/identity fields are gone.
@@ -899,21 +900,15 @@ def test_lm_trace_callback_records_call_specific_usage_and_standard_attribute(mo
         "history_length_before": 1,
         "recursive_depth": 1,
     }
-    assert calls.attributes[1] == {
-        "mlflow.chat.tokenUsage": {
-            "input_tokens": 7,
-            "output_tokens": 3,
-            "total_tokens": 10,
-            "cache_read_tokens": 4,
-        }
-    }
+    assert len(calls.attributes) == 1
 
 
 def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMReasoningCallback
+    from fleet_rlm.rlm.events import _RLMReasoningCallback
 
     outputs: list[dict[str, object]] = []
 
@@ -990,7 +985,7 @@ def test_malformed_provider_usage_degrades_without_losing_measured_fields(provid
 
 
 def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
+    from fleet_rlm.rlm.events import _lm_output_profile
 
     # Success path: adapter-parsed outputs arrive as a Mapping of signature fields.
     outputs = {"reasoning": "step", "code": "print(1)"}
@@ -1001,7 +996,7 @@ def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
 
 
 def test_lm_output_profile_reads_legacy_list_payloads() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
+    from fleet_rlm.rlm.events import _lm_output_profile
 
     text_only = _lm_output_profile(['{"reasoning": "r", "code": "c"}'])
     assert text_only["response_keys"] == ("content",)
@@ -1020,7 +1015,7 @@ def test_adapter_parse_profile_classifies_empty_and_non_json() -> None:
     import dspy
     from dspy.utils.exceptions import AdapterParseError
 
-    from fleet_rlm.rlm.compat_3_3_1 import _adapter_parse_profile
+    from fleet_rlm.rlm.events import _adapter_parse_profile
 
     class _Sig(dspy.Signature):
         reasoning: str = dspy.OutputField()
@@ -1061,7 +1056,7 @@ def test_adapter_parse_profile_classifies_empty_and_non_json() -> None:
 
 
 def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import _lm_output_profile
+    from fleet_rlm.rlm.events import _lm_output_profile
 
     # P38-RLM-006/011: raw LiteLLM ModelResponse shapes are never delivered by
     # the certified DSPy 3.3.1 legacy contract and are no longer probed.
@@ -1085,7 +1080,7 @@ def test_latest_lm_telemetry_reads_only_the_certified_legacy_history_entry() -> 
     """
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry
+    from fleet_rlm.rlm.events import _latest_lm_telemetry
 
     outputs = ["parsed"]
     lm = SimpleNamespace(
@@ -1118,7 +1113,7 @@ def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
     """
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry
+    from fleet_rlm.rlm.events import _latest_lm_telemetry
 
     outputs = ["ok"]
     recovered = _latest_lm_telemetry(
@@ -1154,20 +1149,16 @@ def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
     )
 
 
-def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Observed per-call usage must reach the span and the delegation metrics.
-
-    Regression coverage for traces where completed RLM.*_lm spans carried no
-    ``mlflow.chat.tokenUsage`` attribute and metrics emitted all-zero
-    ``lm_token_totals`` despite no provider usage ever being reported.
-    """
+def test_lm_trace_callback_avoids_duplicate_mlflow_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fleet metrics retain observed usage while DSPy autolog owns the LLM span."""
+    _use_context_span_mock(monkeypatch)
     from types import SimpleNamespace
 
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+    from fleet_rlm.rlm.events import _RLMTraceCallback
     from fleet_rlm.rlm.recursion import DelegationMetrics
 
-    captured = SimpleNamespace(outputs=[], attributes={})
+    captured = SimpleNamespace(outputs=[], attributes={}, span_types=[])
 
     class Span:
         def set_inputs(self, payload):
@@ -1210,7 +1201,7 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
 
     fake_mlflow = SimpleNamespace(
         get_current_active_span=lambda: Span(),
-        start_span=lambda **_kwargs: SpanContext(),
+        start_span=lambda **kwargs: (captured.span_types.append(kwargs.get("span_type")), SpanContext())[1],
     )
     fake_entities = SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN", LLM="LLM"))
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
@@ -1224,19 +1215,16 @@ def test_lm_trace_callback_emits_token_usage_output_and_mlflow_attribute(monkeyp
     observed_outputs = ["ok"]
     token = turn_tracing._fleet_trace_active.set(True)
     try:
-        # A call whose provider reports usage: attribute + token_usage output.
+        # A call whose provider reports usage is counted once in Fleet metrics.
         callback.on_lm_start("call-observed", root, {"prompt": "p"})
         root.history.append({"outputs": observed_outputs, "usage": {"prompt_tokens": 4, "completion_tokens": 2}})
         callback.on_lm_end("call-observed", observed_outputs)
     finally:
         turn_tracing._fleet_trace_active.reset(token)
 
-    assert captured.outputs[-1]["token_usage"] == {"prompt_tokens": 4, "completion_tokens": 2}
-    assert captured.attributes["mlflow.chat.tokenUsage"] == {
-        "input_tokens": 4,
-        "output_tokens": 2,
-        "total_tokens": 6,
-    }
+    assert "token_usage" not in captured.outputs[-1]
+    assert "mlflow.chat.tokenUsage" not in captured.attributes
+    assert captured.span_types == ["CHAIN"]
     assert metrics.snapshot().lm_token_totals == (("root", 0, 4, 2, 6),)
     assert metrics.snapshot().token_usage_status == "observed"
 
@@ -1283,7 +1271,7 @@ async def test_native_submit_honors_required_defaults_and_nullable_outputs() -> 
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     bind_output_contract(interpreter, Report)
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=Report,
         options=RLMOptions(max_iters=1),
         verbose=False,
@@ -1312,7 +1300,7 @@ async def test_native_submit_preserves_explicit_none_and_rejects_non_nullable_no
         note: str | None = dspy.OutputField(default="default")
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    rlm = build_native_rlm(signature=Report, options=RLMOptions(max_iters=2), verbose=False)
+    rlm = build_native_rlm_for_test(signature=Report, options=RLMOptions(max_iters=2), verbose=False)
     actions = _Actions(
         'SUBMIT(answer="done", count=None, note=None)',
         'SUBMIT(answer="done", count=3, note=None)',
@@ -1338,7 +1326,7 @@ async def test_native_submit_rejects_non_json_values_and_non_finite_numbers() ->
         payload: dict[str, str] = dspy.OutputField()
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    rlm = build_native_rlm(signature=Report, options=RLMOptions(max_iters=2), verbose=False)
+    rlm = build_native_rlm_for_test(signature=Report, options=RLMOptions(max_iters=2), verbose=False)
     actions = _Actions(
         'SUBMIT(answer="done", score=float("nan"), payload={"ok": "no"})',
         'SUBMIT(answer="done", score=1.5, payload={"ok": "yes"})',
@@ -1394,8 +1382,21 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
         await asyncio.sleep(0)
         return {"value": value, "note": note}
 
+    class _Bridge:
+        def run(self, awaitable: Any, **_kwargs: Any) -> Any:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(awaitable)
+            finally:
+                loop.close()
+
     sync_wrapped = observe_tool(dspy.Tool(sync_tool), sync_events.append, ToolEventView.metadata_only())
-    async_wrapped = observe_tool(dspy.Tool(async_tool), async_events.append, ToolEventView.metadata_only())
+    async_wrapped = observe_tool(
+        dspy.Tool(async_tool),
+        async_events.append,
+        ToolEventView.metadata_only(),
+        async_bridge=_Bridge(),
+    )
 
     sync_result = sync_wrapped.func(value=4, note=None)
     # DSPy Tools are synchronous at the interpreter boundary; direct callers
@@ -1419,7 +1420,7 @@ def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None
     sub = SimpleNamespace(copy=lambda **_kwargs: sub)
     bundle = RLMModelBundle(root, sub)
 
-    rlm = build_native_rlm(signature="request -> answer", options=options, sub_lm=sub, verbose=False)
+    rlm = build_native_rlm_for_test(signature="request -> answer", options=options, sub_lm=sub, verbose=False)
 
     assert (rlm.max_iters, rlm.max_llm_calls, rlm.max_output_chars) == (3, 5, 17)
     assert bundle.root_lm is root
@@ -1443,7 +1444,7 @@ def test_native_contract_does_not_construct_or_shutdown_caller_owned_interpreter
             self.shutdown_calls += 1
 
     sentinel = Sentinel()
-    rlm = build_native_rlm(signature="request -> answer: str", options=RLMOptions(max_iters=1), verbose=False)
+    rlm = build_native_rlm_for_test(signature="request -> answer: str", options=RLMOptions(max_iters=1), verbose=False)
 
     assert inspect.signature(rlm._interpreter_factory).parameters == {}
     assert sentinel.shutdown_calls == 0
@@ -1500,7 +1501,7 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     bind_output_contract(interpreter, TaskSignature)
 
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=TaskSignature,
         tools=[lookup_tool],
         options=RLMOptions(max_iters=2),
@@ -1534,7 +1535,7 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
 def test_lm_telemetry_preserves_counts_with_null_optional_usage_details() -> None:
     from types import SimpleNamespace
 
-    from fleet_rlm.rlm.compat_3_3_1 import _latest_lm_telemetry, _mlflow_token_usage
+    from fleet_rlm.rlm.events import _latest_lm_telemetry, _mlflow_token_usage
 
     outputs = ["42"]
     lm = SimpleNamespace(

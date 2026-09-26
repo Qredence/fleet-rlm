@@ -8,14 +8,13 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_settlement import TestingRunSettlement
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("commit_succeeds", [False])
 async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bool) -> None:
 
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -24,6 +23,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -133,7 +133,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
     store = Store()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=Runner(),
     )
@@ -163,15 +163,13 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
 @pytest.mark.asyncio
 async def test_coordinator_cancellation_during_preparation_cancels_late_prepare_and_revokes_authority() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -216,7 +214,7 @@ async def test_coordinator_cancellation_during_preparation_cancels_late_prepare_
                 raise
 
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(Store(), max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(Store(), max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=object(),  # type: ignore[arg-type]
     )
@@ -237,15 +235,13 @@ async def test_coordinator_cancellation_during_preparation_cancels_late_prepare_
 async def test_cancellation_resistant_preparation_completes_settling_after_late_close(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -294,10 +290,10 @@ async def test_cancellation_resistant_preparation_completes_settling_after_late_
                 await release.wait()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_runtime._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
+    monkeypatch.setattr("fleet_rlm.turns._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
     store = Store()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=object(),  # type: ignore[arg-type]
     )
@@ -327,15 +323,13 @@ async def test_late_preparation_close_failure_blocks_settlement_release(
 ) -> None:
     import logging
 
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -385,10 +379,10 @@ async def test_late_preparation_close_failure_blocks_settlement_release(
                 await release.wait()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_runtime._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
+    monkeypatch.setattr("fleet_rlm.turns._PREPARATION_CLEANUP_TIMEOUT_S", 0.01)
     store = Store()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024),
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
         preparation=Preparation(),
         runner=object(),  # type: ignore[arg-type]
     )
@@ -409,7 +403,7 @@ async def test_late_preparation_close_failure_blocks_settlement_release(
         await asyncio.sleep(0.05)
 
     assert closed.is_set()
-    # BeginSettlement runs, but a failed late PreparedRun cleanup must not be
+    # BeginSettlement runs, but a failed late PreparedTurn cleanup must not be
     # followed by complete_settling: the claim stays retained and the error is
     # reported (qredence fail-closed cleanup policy).
     assert store.failures == 1
@@ -424,9 +418,6 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
 ) -> None:
     import logging
 
-    from fleet_rlm.chat.commands import OpenTurnCommand
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -434,6 +425,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
         RunLifecycleUnavailableError,
         _RunClaimToken,
     )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -485,10 +477,12 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
                 return Prepared()
             return Prepared()
 
-    monkeypatch.setattr("fleet_rlm.chat.turn_runtime._PREPARATION_CLEANUP_TIMEOUT_S", 1.0)
+    monkeypatch.setattr("fleet_rlm.turns._PREPARATION_CLEANUP_TIMEOUT_S", 1.0)
     store = Store()
     coordinator = TurnRuntime(
-        lifecycle=RunLifecycleService(store, max_artifact_bytes=1024, heartbeat_seconds=0.01, stale_after_seconds=0.01),
+        lifecycle=TestingRunSettlement(
+            store, max_artifact_bytes=1024, heartbeat_seconds=0.01, stale_after_seconds=0.01
+        ),
         preparation=Preparation(),
         runner=object(),  # type: ignore[arg-type]
     )
@@ -505,7 +499,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
     from fleet_rlm.sessions.run_claim import CompleteSettlement, RevokeClaim
 
     assert closed.is_set()
-    # Claim loss revokes authority, but the failed inline PreparedRun close
+    # Claim loss revokes authority, but the failed inline PreparedTurn close
     # must block the final settlement release instead of silently completing.
     assert any(isinstance(command, RevokeClaim) for command in store.commands)
     assert not any(isinstance(command, CompleteSettlement) for command in store.commands)

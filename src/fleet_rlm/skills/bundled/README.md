@@ -4,11 +4,11 @@ Fleet ships five runtime Skills:
 
 | Skill | Version | Description |
 |---|---:|---|
-| `data-analysis` | 1.0.0 | Compute and verify descriptive statistics, trends, and qualified anomalies. |
-| `dspy-rlm` | 1.0.0 | Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve. |
-| `long-context` | 2.0.1 | Use bounded retrieval to analyze large documents, transcripts, code, or datasets. |
-| `report-builder` | 1.1.0 | Create, save, read back, and verify reports from trusted source data. |
-| `workspace-files` | 1.2.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
+| `data-analysis` | 1.2.0 | Compute and verify descriptive statistics, trends, and qualified anomalies. |
+| `dspy-rlm` | 1.1.0 | Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve. |
+| `long-context` | 2.3.0 | Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python. |
+| `report-builder` | 1.3.0 | Create, save, read back, and verify reports from trusted source data. |
+| `workspace-files` | 1.4.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
 
 The catalog follows three disclosure levels:
 
@@ -31,7 +31,7 @@ Skill manifest/catalog/tool and Turn-selection suites after editing them.
 
 - Every Skill Card advertises bounded `affordances` — the capability families
   the Skill expects (for example `workspace.files`, `artifacts.publish`,
-  `fetch_url`, `llm_query`, `llm_query_batched`). Affordances are guidance only;
+  `sandbox.search`, `llm_query`, `llm_query_batched`). Affordances are guidance only;
   they never gate which host tools exist.
 - While a Turn has Session Workspace capability, loading a Skill (explicit
   selection preload or progressive `load_skill`) installs its resources at

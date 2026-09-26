@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from fleet_rlm.rlm.runtime import RunToolGuards
+from fleet_rlm.rlm.execution import RunToolGuards
 
 
 def test_workspace_failure_requires_a_verified_repair() -> None:

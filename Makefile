@@ -1,5 +1,7 @@
 PYTHON_SOURCES = src tests scripts migrations
 RELEASE_SOURCE_DATE_EPOCH ?= $(shell git -C "$(CURDIR)" show -s --format=%ct HEAD 2>/dev/null || echo 0)
+# Audit exceptions require explicit caller input; the default stays strict.
+PIP_AUDIT_ARGS ?=
 # Release/install matrix tests are intentionally opt-in: they create multiple
 # virtual environments and are covered by the dedicated package gate.
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
@@ -28,7 +30,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	help \
 	install install-dev install-all \
 	dev format format-check lint typecheck \
-	test test-fast test-unit test-contract test-packaging test-db test-daytona-cov \
+	test test-fast test-unit test-contract test-packaging test-db test-coverage test-daytona-cov \
 	check quality-gate check-release check-docs check-instructions check-security check-deps check-codebase-tree check-dependency-boundaries \
 	api-check api-sync tui-check stream-check stream-sync \
 	build build-release release \
@@ -41,9 +43,9 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 
 help:
 	@echo "Setup:"
-	@echo "  make install          - Install runtime dependencies with uv"
-	@echo "  make install-dev      - Install dev dependencies with uv"
-	@echo "  make install-all      - Install all optional extras with uv"
+	@echo "  make install          - Install runtime dependencies only with uv"
+	@echo "  make install-dev      - Install runtime and dev dependencies with uv"
+	@echo "  make install-all      - Install runtime, dev, and all optional extras"
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev              - Start the local app (fleet web)"
@@ -59,7 +61,8 @@ help:
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-db          - Run explicit configured-database tests (db marker)"
-	@echo "  make test-daytona-cov - Run canonical non-live tests with Daytona branch coverage"
+	@echo "  make test-coverage    - Run canonical non-live tests with project coverage"
+	@echo "  make test-daytona-cov - Alias for make test-coverage"
 	@echo "  make benchmark-daytona-lifecycle - Measure full Daytona create-through-first-execution lifecycle"
 	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
 	@echo ""
@@ -68,7 +71,7 @@ help:
 	@echo "  make quality-gate     - Alias for the primary repo quality gate"
 	@echo "  make check-release    - Run release metadata/hygiene and AGENTS.md validation"
 	@echo "  make check-docs       - Run instructions, docs quality, and harness hard gates"
-	@echo "                         (use scripts/check_harness_engineering.py --editorial locally for doc hygiene)"
+	@echo "                         (use scripts/check_repo_hygiene.py --editorial for additional doc hygiene)"
 	@echo "  make check-instructions - Validate agent guides and development-skill references"
 	@echo "  make check-security   - Run pip-audit + bandit"
 	@echo "  make check-deps       - Check Python dependencies with deptry"
@@ -82,7 +85,7 @@ help:
 	@echo "Build & release:"
 	@echo "  make build            - Build Python distributions"
 	@echo "  make build-release    - Build and verify the backend-only distribution"
-	@echo "  make release          - Clean, validate quality/security/metadata, then build artifacts"
+	@echo "  make release          - Validate quality/security/metadata, then build artifacts"
 	@echo ""
 	@echo "Cloud:"
 	@echo "  make cloud-preflight  - Validate the app boots for FastAPI Cloud deploy"
@@ -103,13 +106,13 @@ help:
 	@echo "  make cli              - Show fleet-rlm CLI help"
 
 install:
-	uv sync
+	uv sync --no-dev
 
 install-dev:
-	uv sync --extra dev
+	uv sync --dev
 
 install-all:
-	uv sync --all-extras
+	uv sync --all-extras --dev
 
 dev:
 	uv run fleet web
@@ -143,9 +146,11 @@ test-packaging:
 test-db:
 	$(PYTEST) -q -m "db" -n 0
 
-test-daytona-cov:
+test-coverage:
 	mkdir -p .scratch/coverage
 	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS) --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
+
+test-daytona-cov: test-coverage
 
 benchmark-daytona-lifecycle:
 	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json
@@ -190,7 +195,7 @@ tui-check: api-check stream-check
 	$(TUI_PNPM) run typecheck
 	$(TUI_PNPM) run test
 
-check: lint format-check typecheck test-daytona-cov api-check tui-check check-codebase-tree check-dependency-boundaries check-docs
+check: lint format-check typecheck test-coverage tui-check check-codebase-tree check-dependency-boundaries check-docs
 
 quality-gate: check
 
@@ -199,19 +204,17 @@ check-release: check-instructions
 	uv run python scripts/validate_release.py metadata
 
 check-instructions:
-	uv run python scripts/check_agents_md_freshness.py
+	uv run python scripts/check_repo_hygiene.py
 
 check-docs: check-instructions
 	uv run python scripts/generate_profile_matrix.py check
-	uv run python scripts/check_docs_quality.py
-	uv run python scripts/check_harness_engineering.py
 
 check-security:
-	uvx pip-audit
+	uvx pip-audit $(PIP_AUDIT_ARGS)
 	uvx bandit -q -r src/fleet_rlm -x tests -lll
 
 check-deps:
-	uvx deptry .
+	uvx deptry . --config pyproject.toml
 
 check-codebase-tree:
 	uv run python scripts/check_codebase_tree.py
@@ -243,10 +246,12 @@ build-release: build
 	uvx twine check --strict dist/*
 	uv run python scripts/validate_release.py artifacts
 
-# Keep phases ordered even when the caller enables parallel make.
+# Keep phases ordered even when the caller enables parallel make. Build cleans
+# dist/build only after all validation phases have succeeded.
 release:
-	$(MAKE) clean
-	$(MAKE) check check-security check-release
+	$(MAKE) check
+	$(MAKE) check-security
+	$(MAKE) check-release
 	$(MAKE) build-release
 
 clean:
@@ -254,11 +259,11 @@ clean:
 	@for path in $(PYTHON_SOURCES) $(TUI_DIR)/src; do \
 		if [ -d "$$path" ]; then \
 			find "$$path" -type d \( -name node_modules -o -name .venv -o -name .git \) -prune -o \
-				-type d \( -name .ruff_cache -o -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache \) \
-				-prune -exec rm -rf {} + || exit $$?; \
+				-type d \( -name .ruff_cache -o -name __pycache__ -o -name .pytest_cache -o -name .mypy_cache -o -name .ty \) \
+			-prune -exec rm -rf {} + || exit $$?; \
 		fi; \
 	done
-	rm -rf .ruff_cache .pytest_cache .mypy_cache __pycache__ build dist .coverage .venv-release-smoke
+	rm -rf .ruff_cache .pytest_cache .mypy_cache .ty __pycache__ build dist src/*.egg-info .coverage .scratch/coverage .venv-release-smoke
 	@echo "Cleanup complete"
 
 precommit-install:

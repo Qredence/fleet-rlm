@@ -29,10 +29,10 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
-from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
-from fleet_rlm.workspace.paths import volume_paths_from_settings
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._mvp_support import (
     _SECRET_NAMES,
@@ -66,11 +66,23 @@ class LiveDaytonaMVPResult(dspy.Signature):
     findings: list[dict[str, str]] = dspy.OutputField()
 
 
+class NativeSemanticProofResult(dspy.Signature):
+    """Return a small typed result for the native semantic-call canary."""
+
+    request: str = dspy.InputField()
+    session_context: dict = dspy.InputField()
+    skill_cards: list[dict] = dspy.InputField()
+    attachments: list[dict] = dspy.InputField()
+    answer: str = dspy.OutputField()
+    evidence: str = dspy.OutputField()
+
+
 @dataclass(slots=True)
 class _ProofCapabilityPreparer:
     delegate: Any
     tools: tuple[dspy.Tool, ...]
     event_views: MappingProxyType[str, ToolEventView]
+    signature: Any = LiveDaytonaMVPResult
 
     async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
         prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
@@ -78,7 +90,7 @@ class _ProofCapabilityPreparer:
         # bodies at worker start; live steering rides the Turn request text.
         prepared.spec = replace(
             prepared.spec,
-            signature=LiveDaytonaMVPResult,
+            signature=self.signature,
             output_schema_id=_CONTRACT_ID,
             output_schema_version="1",
             tools=(*prepared.spec.tools, *self.tools),
@@ -324,7 +336,7 @@ def _session_volume_files(sandbox: Any, session_dir: str) -> list[bytes]:
 
 
 async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBinding:
-    return await resources.session_manager.replace(
+    return await resources.replace(
         binding,
         workspace_id=binding.workspace_id,
         user_id=LocalScope().user_id,
@@ -334,11 +346,10 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any) -> UUID:
     starts = [chunk for chunk in chunks if chunk.get("type") == "start"]
     if len(starts) != 1:
-        manager = getattr(resources, "session_manager", None)
         runtime = getattr(resources, "runtime", None)
-        pending_ownership = bool(getattr(manager, "has_pending_ownership", False))
+        pending_ownership = bool(getattr(runtime, "has_pending_ownership", False))
         runtime_roots = len(getattr(runtime, "roots", ())) if runtime is not None else 0
-        tracked_sandboxes = len(getattr(resources, "_sandbox_ids", ()))
+        tracked_sandboxes = len(getattr(runtime, "_tracked_sandbox_ids", ())) if runtime is not None else 0
         pytest.fail(
             f"{label}: expected exactly one start event, got {len(starts)}; "
             f"{_sse_finish_diagnostic(chunks)} "
@@ -360,7 +371,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
     cleanup_failures: tuple[str, ...] = ()
 
     with TestClient(app) as client:
-        resources = app.state.runtime_inventory.run_environment_resources
+        resources = app.state.runtime_inventory.daytona_runtime_owner
         assert resources is not None
         portal = client.portal
         assert portal is not None
@@ -442,7 +453,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert binding is not None
             assert binding.sandbox_id is not None
             sandbox_ids.add(binding.sandbox_id)
-            assert portal.call(resources.platform.get, binding.sandbox_id) is not None
+            assert portal.call(resources._platform.get, binding.sandbox_id) is not None
         finally:
             cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
     assert cleanup_failures == ()
@@ -564,14 +575,14 @@ def test_complete_daytona_mvp_through_fastapi(
         app.add_middleware(_FirstStreamDeltaMiddleware, probe=first_delta_probe)
         with TestClient(app) as client:
             inventory = app.state.runtime_inventory
-            resources = inventory.run_environment_resources
+            resources = inventory.daytona_runtime_owner
             preparation = inventory.run_preparation
             assert resources is not None
             assert preparation is not None
-            preparation._capabilities = _ProofCapabilityPreparer(
-                preparation._capabilities,
-                proof_tools,
-                proof_views,
+            object.__setattr__(
+                preparation,
+                "capabilities",
+                _ProofCapabilityPreparer(preparation.capabilities, proof_tools, proof_views),
             )
             portal = client.portal
             assert portal is not None
@@ -670,7 +681,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
                 sandbox_ids.add(binding.sandbox_id)
-                first_sandbox = sync_sandbox(portal.call(resources.platform.get, binding.sandbox_id), portal_loop)
+                first_sandbox = sync_sandbox(portal.call(resources._platform.get, binding.sandbox_id), portal_loop)
                 assert first_sandbox is not None
                 first_fs = DaytonaSandboxVolumeFs(first_sandbox)
                 paths = volume_paths_from_settings(settings)
@@ -777,7 +788,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert assistants[0] == first_assistant
                 assert _structured_part(assistants[0]) == first_structured
                 replacement_sandbox = sync_sandbox(
-                    portal.call(resources.platform.get, replacement.sandbox_id), portal_loop
+                    portal.call(resources._platform.get, replacement.sandbox_id), portal_loop
                 )
                 assert replacement_sandbox is not None
                 replacement_env_names = _sandbox_environment_names(replacement_sandbox)
@@ -885,6 +896,253 @@ def test_complete_daytona_mvp_through_fastapi(
                     started_at=started_at_text,
                     category="proof_failed",
                     phase=phase,
+                )
+            )
+        raise
+
+
+def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
+    """Verify single and ordered batch semantic calls through the live Daytona broker."""
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            "rlm_max_iters": 6,
+            "rlm_max_llm_calls": 12,
+            "turn_timeout_seconds": 840,
+            "rlm_wrap_up_seconds": 60,
+            "mlflow_tracing_enabled": True,
+        }
+    )
+    started_at = datetime.now(UTC)
+    started_at_text = started_at.isoformat()
+    candidate = _candidate_metadata(settings)
+    models = candidate.pop("models")
+    ledger = _ProofLedger()
+    app = create_app(settings=settings)
+    sandbox_ids: set[str] = set()
+    resources: Any | None = None
+    receipt_written = False
+    scenario_passed = False
+    cleanup_failures: tuple[str, ...] = ()
+    success_receipt: dict[str, object] | None = None
+
+    token_tool = dspy.Tool(
+        ledger.issue_iteration_token,
+        name="issue_iteration_token",
+        desc="Issue the opaque token used to prove state across RLM iterations.",
+    )
+    semantic_tool = dspy.Tool(
+        ledger.verify_semantic_work,
+        name="verify_semantic_work",
+        desc="Verify one native semantic query, its ordered batch, and the persistent accumulator exactly once.",
+        arg_desc={
+            "iteration_token": "Opaque string returned by issue_iteration_token; pass it unchanged.",
+            "single_result": "String returned by the single llm_query call.",
+            "batch_results": "Ordered list returned by llm_query_batched for ALPHA, BETA, GAMMA.",
+            "accumulator": "Existing accumulator with the token, single result, and all batch results.",
+        },
+    )
+    proof_views = MappingProxyType(
+        {
+            "issue_iteration_token": ToolEventView(
+                output_projection=lambda _result: {"issued": True},
+            ),
+            "verify_semantic_work": ToolEventView(
+                input_projection=lambda values: {
+                    "iteration_token_type": type(values.get("iteration_token")).__name__,
+                    "single_result_type": type(values.get("single_result")).__name__,
+                    "batch_count": len(values.get("batch_results", ()))
+                    if isinstance(values.get("batch_results"), (tuple, list))
+                    else 0,
+                    "accumulator_count": len(values.get("accumulator", ()))
+                    if isinstance(values.get("accumulator"), (tuple, list))
+                    else 0,
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "batch_count": int(result.get("batch_count", 0)),
+                    "checksum": str(result.get("checksum", "")),
+                },
+            ),
+        }
+    )
+
+    try:
+        with TestClient(app) as client:
+            inventory = app.state.runtime_inventory
+            resources = inventory.daytona_runtime_owner
+            preparation = inventory.run_preparation
+            assert resources is not None
+            assert preparation is not None
+            object.__setattr__(
+                preparation,
+                "capabilities",
+                _ProofCapabilityPreparer(
+                    preparation.capabilities,
+                    (token_tool, semantic_tool),
+                    proof_views,
+                    NativeSemanticProofResult,
+                ),
+            )
+            portal = client.portal
+            assert portal is not None
+            try:
+                created = client.post("/api/sessions", json={"title": "Native Daytona semantic proof"})
+                assert created.status_code == 201
+                session_id = UUID(created.json()["id"])
+
+                response = client.post(
+                    f"/api/sessions/{session_id}/turns",
+                    json={
+                        "text": (
+                            "Execute the native Daytona semantic-call proof in exactly three iterations. Do not"
+                            " explore, improvise, retry, or write files. 1) The first code cell must call"
+                            " iteration_token = issue_iteration_token(), set accumulator = [iteration_token], and"
+                            " print FIRST_ITERATION_READY. 2) The second code cell must, in this order, call"
+                            ' single_result = llm_query("Return exactly ROOT");'
+                            ' batch_results = llm_query_batched(["Return exactly ALPHA", "Return exactly BETA",'
+                            ' "Return exactly GAMMA"]); accumulator.extend([single_result, *batch_results]);'
+                            " verification = verify_semantic_work(iteration_token=iteration_token,"
+                            " single_result=single_result, batch_results=batch_results, accumulator=accumulator);"
+                            " require verification['ok'] and print SEMANTIC_VERIFICATION_READY. Do not recreate"
+                            " the accumulator. 3) Set a non-empty string summary and evidence, then call exactly"
+                            " SUBMIT(answer=summary, evidence=evidence) with keywords. Do not call"
+                            " rlm_query or rlm_query_batched."
+                        ),
+                    },
+                    headers={"Idempotency-Key": f"native-semantic-{uuid4()}"},
+                )
+                assert response.status_code == 200
+                chunks, done = _sse_chunks(response)
+                assert done == 1
+                _assert_sse_stop(chunks, label="native_semantic_calls")
+                assert sum(chunk.get("type") == "start" for chunk in chunks) == 1
+                assert sum(chunk.get("type") == "finish" for chunk in chunks) == 1
+
+                code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+                generated_code = [str(chunk.get("data", {}).get("code", "")) for chunk in code_chunks]
+                assert any("issue_iteration_token" in code for code in generated_code)
+                assert len(_call_shapes(chunks, "llm_query")) == 1
+                assert len(_call_shapes(chunks, "llm_query_batched")) == 1
+
+                tool_names = [
+                    str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
+                ]
+                assert tool_names.count("issue_iteration_token") == 1
+                assert tool_names.count("verify_semantic_work") == 1
+                assert "rlm_query" not in tool_names
+                assert "rlm_query_batched" not in tool_names
+                assert not any(chunk.get("type") in {"error", "tool-output-error"} for chunk in chunks)
+                assert ledger.token_calls == 1
+                assert len(ledger.semantic_calls) == 1
+
+                usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
+                assert len(usage_chunks) == 1
+                usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
+                assert int(usage["iterations"]) <= settings.rlm_max_iters
+                assert int(usage["recursive_call_count"]) == 0
+                metrics = usage["delegation_metrics"]
+                assert int(metrics["sub_lm_calls_depth_0"]) == 4
+                assert int(metrics["recursive_children_started"]) == 0
+                assert int(metrics["recursive_batch_calls"]) == 0
+
+                submit_shapes = _call_shapes(chunks, "SUBMIT")
+                assert len(submit_shapes) == 1
+                assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
+                structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+                assert len(structured) == 1
+                assert structured[0].get("data", {}).get("schemaId") == _CONTRACT_ID
+
+                trace_ids = {
+                    metadata["traceId"]
+                    for chunk in chunks
+                    for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                    if isinstance(metadata, dict) and isinstance(metadata.get("traceId"), str)
+                }
+                assert len(trace_ids) == 1
+                trace_id = trace_ids.pop()
+                from mlflow import MlflowClient
+
+                trace = MlflowClient(tracking_uri=settings.mlflow_tracking_uri).get_trace(
+                    trace_id, display=False, flush=True
+                )
+                execution_spans = [span for span in trace.data.spans if span.name == "RLM.execute"]
+                assert len(execution_spans) == 1
+                termination_mode = execution_spans[0].outputs["termination_mode"]
+                assert termination_mode == "typed_submit"
+
+                run_id = _run_id_from_sse(chunks, label="native_semantic_calls", resources=resources)
+                binding = portal.call(resources.bindings.get, session_id)
+                assert binding is not None and binding.sandbox_id is not None
+                sandbox_ids.add(binding.sandbox_id)
+                finished_at = datetime.now(UTC)
+                success_receipt = {
+                    "schema": _RECEIPT_SCHEMA,
+                    "candidate": candidate,
+                    "models": models,
+                    "timing": {
+                        "started_at": started_at_text,
+                        "finished_at": finished_at.isoformat(),
+                        "duration_ms": int((finished_at - started_at).total_seconds() * 1000),
+                    },
+                    "resources": {
+                        "session_id": str(session_id),
+                        "run_id": str(run_id),
+                        "sandbox_ids": [binding.sandbox_id],
+                    },
+                    "counts": {
+                        "iterations": int(usage["iterations"]),
+                        "root_lm_calls_depth_0": int(metrics["root_lm_calls_depth_0"]),
+                        "native_sub_lm_calls_depth_0": int(metrics["sub_lm_calls_depth_0"]),
+                        "single_lm_calls": 1,
+                        "batched_lm_prompts": 3,
+                        "recursive_calls": int(usage["recursive_call_count"]),
+                        "sse_done": done,
+                    },
+                    "token_usage_status": metrics["token_usage_status"],
+                    "trace_id": trace_id,
+                    "termination_mode": termination_mode,
+                    "assertions": {
+                        "single_semantic_call_succeeded": True,
+                        "ordered_batch_results_verified": True,
+                        "one_budgeted_sub_lm_call_per_prompt": metrics["sub_lm_calls_depth_0"] == 4,
+                        "typed_submit": True,
+                        "no_full_child_sandbox": usage["recursive_call_count"] == 0,
+                        "cleanup_passed": False,
+                    },
+                    "failure": None,
+                    "passed": False,
+                }
+                scenario_passed = True
+            finally:
+                cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+                if scenario_passed and not cleanup_failures:
+                    assert success_receipt is not None
+                    assertions = success_receipt["assertions"]
+                    assert isinstance(assertions, dict)
+                    assertions["cleanup_passed"] = True
+                    success_receipt["passed"] = True
+                    _write_receipt_if_requested(success_receipt)
+                    receipt_written = True
+                else:
+                    _write_receipt_if_requested(
+                        _failure_receipt(
+                            candidate=candidate,
+                            started_at=started_at_text,
+                            category="cleanup_failed" if cleanup_failures else "proof_failed",
+                            phase="cleanup" if cleanup_failures else "native_semantic_calls",
+                        )
+                    )
+                    receipt_written = True
+                if cleanup_failures:
+                    raise AssertionError("live Daytona semantic cleanup did not settle")
+    except BaseException:
+        if not receipt_written:
+            _write_receipt_if_requested(
+                _failure_receipt(
+                    candidate=candidate,
+                    started_at=started_at_text,
+                    category="proof_failed",
+                    phase="composition",
                 )
             )
         raise

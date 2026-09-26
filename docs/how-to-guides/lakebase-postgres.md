@@ -2,9 +2,10 @@
 
 How to provision a Databricks Lakebase (Postgres Autoscaling) database for Fleet
 RLM and point the TOML-declared `FLEET_DATABASE_URL` at it. The committed
-`daytona-recursive` profile is the safe local/disposable default; select
-`daytona-managed` in `[config] default_profile` for a production deployment.
-Both profiles keep the selected local MLflow server independent from Fleet's
+default is `daytona-native`; `daytona-recursive` is an opt-in for bounded Fleet
+child execution. Select `daytona-managed` in `[config] default_profile` when
+configuring a production Lakebase deployment. The native and recursive
+profiles keep the selected local MLflow server independent from Fleet's
 database. A deliberately different profile may route traces to managed
 Databricks MLflow by setting `mlflow.tracking_uri = "databricks"` and declaring
 the `mlflow.*_env` references in `config/fleet.toml`.

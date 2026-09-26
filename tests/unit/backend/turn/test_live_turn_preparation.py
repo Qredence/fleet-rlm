@@ -13,25 +13,92 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.app_lifecycle import build_run_preparation
 from fleet_rlm.attachments import AttachmentRef
-from fleet_rlm.chat.preparation import RunPreparationUnavailableError
-from fleet_rlm.composition.live import build_run_preparation
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.admission import DaytonaAdmission
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+from fleet_rlm.daytona.runtime import DaytonaAdmission, DaytonaSandboxSpec, InterpreterLease
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     _RunClaimToken,
 )
+from fleet_rlm.turn_preparation import RunPreparationUnavailableError, prepare_turn
+from tests.support.session_manager import make_daytona_runtime
+from tests.support.turn_settlement import TestingRunSettlement
+from tests.support.workspace_storage import InMemoryDaytonaWorkspaceGateway
+
+
+def _daytona_workspace_gateway(mount_path: str) -> InMemoryDaytonaWorkspaceGateway:
+    """Return a test gateway whose file-info records match the Daytona SDK model."""
+    gateway = InMemoryDaytonaWorkspaceGateway(mount_path)
+    get_file_info = gateway.fs.get_file_info
+
+    async def sdk_file_info(path: str) -> SimpleNamespace:
+        return SimpleNamespace(**(await get_file_info(path)))
+
+    gateway.fs.get_file_info = sdk_file_info
+    return gateway
+
+
+def _test_runtime(resources):
+    """Inject the canonical interpreter acquisition contract at the provider boundary."""
+
+    async def acquire(request, *, deadline, force_new=False):
+        lease = await resources.root_provider.acquire(request, deadline=deadline, force_new=force_new)
+        sandbox = await resources.platform.get(lease.sandbox_id)
+        return InterpreterLease(
+            sandbox_id=lease.sandbox_id,
+            interpreter_id=f"interpreter-{lease.sandbox_id}",
+            volume_id=lease.volume_id,
+            mount_path="/workspace",
+            volume_subpath=f"workspaces/{request.workspace_id}/sessions/{request.session_id}/workspace",
+            interpreter=lease.interpreter,
+            sandbox=sandbox,
+            session_id=str(request.session_id),
+            user_id=str(request.user_id),
+            run_id=str(request.run_id or uuid4()),
+            workspace_id=str(request.workspace_id),
+        )
+
+    runtime = make_daytona_runtime(
+        platform=resources.platform,
+        admission=resources.daytona_admission,
+        volume_client=object(),
+        volume_config=resources.volume_config,
+    )
+    runtime.acquire = acquire  # type: ignore[method-assign]
+
+    async def release(lease: InterpreterLease) -> None:
+        await asyncio.to_thread(lease.release)
+        await resources.root_provider.release(lease)
+
+    runtime.release = release  # type: ignore[method-assign]
+    return runtime
+
+
+def _test_dispatcher() -> SyncBridgeDispatcher:
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    return dispatcher
+
+
+def _build_preparation(resources, **kwargs):
+    return build_run_preparation(
+        resources.runtime,
+        volume_paths=resources.volume_paths,
+        sandbox_spec=resources.sandbox_spec,
+        dispatcher=resources.dispatcher,
+        workspace_gateway=resources.workspace_gateway,
+        volume_gateway=resources.volume_gateway,
+        **kwargs,
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_skill_catalog", [False, True])
-async def test_live_preparation_stages_attachment_and_cleans_it(
-    tmp_path,
-    with_skill_catalog: bool,
-) -> None:
+async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_skill_catalog: bool) -> None:
     """
     Verify that live turn preparation stages attachments, configures workspace capabilities,
     persists memory and result snapshots, and cleans up the staged attachment when the prepared
@@ -46,22 +113,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         len(data),
         hashlib.sha256(data).hexdigest(),
     )
-    volume: dict[str, bytes] = {}
-    volume_root = tmp_path / "volume"
-    volume_root.mkdir()
-
-    class SandboxFs:
-        async def create_folder(self, path: str, mode: str | None = None) -> None:
-            del path, mode
-
-        async def download_file(self, path: str) -> bytes:
-            return volume[path]
-
-        async def upload_file(self, value: bytes, path: str) -> None:
-            volume[path] = value
-
-        async def delete_file(self, path: str) -> None:
-            volume.pop(path, None)
+    settings = Settings(run_environment="daytona", volume_mount_path="/workspace")
 
     class SandboxProcess:
         async def code_run(self, code: str, **_kwargs):
@@ -70,9 +122,40 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
                 exec(code, {})
             return SimpleNamespace(exit_code=0, result=output.getvalue().strip())
 
-    class SessionManager:
-        released = False
+    from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    paths = volume_paths_from_settings(settings)
+    workspace_gateway = _daytona_workspace_gateway(str(paths.mount_path))
+    workspace_gateway.sandbox.process = SandboxProcess()
+    volume_gateway = DaytonaWorkspaceVolumeGateway(workspace_gateway, mount_path=str(paths.mount_path))
+    volume = workspace_gateway.fs.files
+
+    class RootProvider:
         sandbox_id = f"sandbox-{tmp_path}"
+
+        def __init__(self) -> None:
+            self.released = False
+            self.interpreters = []
+
+        class RunScratchInterpreter:
+            def __init__(self) -> None:
+                self.bound_runs = []
+                self.cleaned_runs = []
+                self.current_run = None
+
+            def bind_run_scratch(self, run_id) -> None:
+                self.current_run = run_id
+                self.bound_runs.append(run_id)
+
+            def cleanup_run_scratch(self) -> None:
+                if self.current_run is not None:
+                    self.cleaned_runs.append(self.current_run)
+                    scratch_root = f"/tmp/fleet/{self.current_run}/"
+                    for path in tuple(volume):
+                        if path.startswith(scratch_root):
+                            del volume[path]
+                    self.current_run = None
 
         async def acquire(self, _request, *, deadline, force_new=False):
             """
@@ -87,9 +170,11 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             """
             del force_new
             assert deadline > asyncio.get_running_loop().time()
+            interpreter = self.RunScratchInterpreter()
+            self.interpreters.append(interpreter)
             return SimpleNamespace(
                 sandbox_id=self.sandbox_id,
-                interpreter=object(),
+                interpreter=interpreter,
                 volume_id="test-volume",
             )
 
@@ -98,36 +183,28 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
 
     class Attachments:
         async def prepare_run(self, _access, _attachment_ids, _run, sink):
-            logical_path = str(volume_root / "attachments" / "notes.txt")
+            logical_path = f"{sink.scratch_root}/attachments/notes.txt"
             await sink.write_private(logical_path, data)
             from fleet_rlm.attachments import PreparedAttachments, StagedAttachment
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
-    settings = Settings(run_environment="daytona", volume_mount_path=str(volume_root))
-    from fleet_rlm.workspace.paths import volume_paths_from_settings
-
     resources = SimpleNamespace(
         settings=settings,
-        volume_paths=volume_paths_from_settings(settings),
-        session_manager=SessionManager(),
-        platform=SimpleNamespace(
-            get=AsyncMock(
-                return_value=SimpleNamespace(
-                    id=SessionManager.sandbox_id,
-                    fs=SandboxFs(),
-                    process=SandboxProcess(),
-                )
-            )
-        ),
+        volume_paths=paths,
+        dispatcher=_test_dispatcher(),
+        workspace_gateway=workspace_gateway,
+        volume_gateway=volume_gateway,
+        sandbox_spec=DaytonaSandboxSpec(snapshot="test-snapshot-v1"),
+        root_provider=RootProvider(),
+        platform=SimpleNamespace(get=AsyncMock(return_value=workspace_gateway.sandbox)),
         models=RLMModelBundle(object(), object()),
         track_sandbox=lambda _sandbox_id: None,
         daytona_admission=DaytonaAdmission(max_active_leases=2),
-        volume_config=SimpleNamespace(mount_path=str(volume_root)),
+        volume_config=SimpleNamespace(mount_path=str(paths.mount_path)),
     )
-    from fleet_rlm.daytona.runtime import DaytonaRuntime
 
-    resources.runtime = DaytonaRuntime(resources)
+    resources.runtime = _test_runtime(resources)
     if with_skill_catalog:
         from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
@@ -149,15 +226,21 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    prepared = await build_run_preparation(
-        resources,
-        attachment_lifecycle=Attachments(),
-        skill_catalog=skill_catalog,
-        settings=resources.settings,
-        models=RLMModelBundle(object(), object()),
-    ).prepare(turn, deadline=float("inf"))
+    prepared = await prepare_turn(
+        _build_preparation(
+            resources,
+            attachment_lifecycle=Attachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn,
+        deadline=float("inf"),
+    )
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
+    first_interpreter = resources.root_provider.interpreters[-1]
+    assert first_interpreter.bound_runs == [turn.run_id]
     budget = prepared.execution.execution.models.budget
     assert budget is not None
     assert budget.limits.provider_attempts == settings.rlm_max_provider_attempts
@@ -172,7 +255,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "edit_memory",
         "edit_project_text",
         "edit_workspace_text",
-        "fetch_url",
         "forget",
         "list_memories",
         "publish_workspace_artifact",
@@ -222,7 +304,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert "key_learning" not in update_input
     assert "content" not in read_output
     assert learning not in repr((update_input, read_output))
-    canonical_memory = str(volume_root / "memory" / "MEMORIES.md")
+    canonical_memory = str(paths.memory_file)
     canonical_text = volume[canonical_memory].decode("utf-8")
     assert canonical_text.startswith("# Fleet Memory v2\n")
     from fleet_rlm.workspace.models import (
@@ -236,7 +318,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         if not line.header:
             validate_workspace_memory_record(line.raw)
     assert learning + "\n" in canonical_text and memory_id in canonical_text
-    assert not (volume_root / "MEMORIES.md").exists()
+    assert "/workspace/MEMORIES.md" not in volume
 
     # Memory lifecycle over the same fake volume: list/edit/forget round trips.
     listed = await asyncio.to_thread(tools["list_memories"])
@@ -246,50 +328,19 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         memory_id=memory_id,
         key_learning="Prefer very concise release notes.",
     )
-    assert edited["ok"] is True and edited["memory_id"] == memory_id
+    assert edited["ok"] is True and edited["memory_id"] != memory_id
     listed = await asyncio.to_thread(tools["list_memories"], category="Preference")
-    assert [entry["learning"] for entry in listed["entries"]] == ["Prefer very concise release notes."]
+    assert [entry["learning"] for entry in listed["entries"]] == [
+        learning,
+        "Prefer very concise release notes.",
+    ]
+    assert [entry["active"] for entry in listed["entries"]] == [False, True]
     forgotten = await asyncio.to_thread(tools["forget"], memory_id=memory_id)
     assert forgotten == {"ok": True, "namespace": "workspace_memory", "memory_id": memory_id, "removed": True}
     assert (await asyncio.to_thread(tools["list_memories"]))["entries"] == []
+    assert "Prefer concise release notes." not in volume[canonical_memory].decode("utf-8")
+    assert "Prefer very concise release notes." not in volume[canonical_memory].decode("utf-8")
     await asyncio.to_thread(tools["remember"], key_learning=learning, category="Preference")
-
-    # Turn 2 preparation recalls Turn 1's remembered learning through the
-    # injected workspace_memory tail digest without any tool call.
-    class NoAttachments:
-        async def prepare_run(self, _access, _attachment_ids, _run, _sink):
-            from fleet_rlm.attachments import PreparedAttachments
-
-            return PreparedAttachments((), ())
-
-    turn2 = ClaimedRun(
-        uuid4(),
-        turn.session_id,
-        turn.access,
-        TurnInput("follow up", ()),
-        SessionHistory(()),
-        not_cancelled,
-        _RunClaimToken(uuid4()),
-    )
-    prepared2 = await build_run_preparation(
-        resources,
-        attachment_lifecycle=NoAttachments(),
-        skill_catalog=skill_catalog,
-        settings=resources.settings,
-        models=RLMModelBundle(object(), object()),
-    ).prepare(turn2, deadline=float("inf"))
-    digest = prepared2.execution.session.workspace_memory_digest
-    assert f" -->: {learning}\n" in digest
-    assert len(digest.encode("utf-8")) <= 4_096
-    from fleet_rlm.rlm.program import build_rlm_input_kwargs
-
-    kwargs = build_rlm_input_kwargs(
-        request="follow up",
-        session_context=prepared2.execution.session.session_context,
-        workspace_memory_digest=digest,
-    )
-    assert kwargs["session_context"]["workspace_memory"]["tail"] == digest
-    await prepared2.aclose()
 
     # Project deliverables land under the browsable projects/<slug>/ root through
     # the same atomic sandbox agent as the Session Workspace.
@@ -302,7 +353,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     assert written["ok"] is True
     assert written["namespace"] == "project_workspace"
-    assert volume[str(volume_root / "projects" / "fleet-rlm" / "reports" / "review.md")] == b"durable review"
+    assert volume[str(paths.projects_root() / "fleet-rlm" / "reports" / "review.md")] == b"durable review"
     read_back = await asyncio.to_thread(
         tools["read_project_text"], path="fleet-rlm/reports/review.md", max_chars=10_000
     )
@@ -322,7 +373,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
     )
 
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.run_state import CommittedTurnReceipt
 
@@ -344,7 +394,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             )
             raise AssertionError((claimed, failure))
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",
@@ -357,41 +407,127 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     result_path = prepared.result_snapshot_sink.result_path(turn.session_id, turn.run_id)
     assert receipt.committed_turn.text == "done"
     attachment_path = next(path for path, value in volume.items() if value == data)
-    project_path = str(volume_root / "projects" / "fleet-rlm" / "reports" / "review.md")
-    memory_path = str(volume_root / "memory" / "MEMORIES.md")
+    project_path = str(paths.projects_root() / "fleet-rlm" / "reports" / "review.md")
+    memory_path = str(paths.memory_file)
     assert {attachment_path, project_path, memory_path, result_path} <= set(volume)
 
     await prepared.aclose()
+    assert first_interpreter.cleaned_runs == [turn.run_id]
     # Staged attachments are released; remote workspace and project data remain durable.
     assert attachment_path not in volume
     assert {project_path, memory_path, result_path} <= set(volume)
     assert volume[project_path] == b"durable review"
-    assert resources.session_manager.released is True
+
+    # Turn 2 preparation recalls Turn 1's remembered learning through the
+    # injected workspace_memory tail digest without any tool call.
+    class NoAttachments:
+        async def prepare_run(self, _access, _attachment_ids, _run, _sink):
+            from fleet_rlm.attachments import PreparedAttachments
+
+            return PreparedAttachments((), ())
+
+    turn2 = ClaimedRun(
+        uuid4(),
+        turn.session_id,
+        turn.access,
+        TurnInput("follow up", ()),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    prepared2 = await prepare_turn(
+        _build_preparation(
+            resources,
+            attachment_lifecycle=NoAttachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn2,
+        deadline=float("inf"),
+    )
+    second_interpreter = resources.root_provider.interpreters[-1]
+    assert second_interpreter.bound_runs == [turn2.run_id]
+    digest = prepared2.execution.session.workspace_memory_digest
+    assert f" -->: {learning}\n" in digest
+    assert len(digest.encode("utf-8")) <= 4_096
+    from fleet_rlm.rlm.program import build_rlm_input_kwargs
+
+    kwargs = build_rlm_input_kwargs(
+        request="follow up",
+        session_context=prepared2.execution.session.session_context,
+        workspace_memory_digest=digest,
+    )
+    assert kwargs["session_context"]["workspace_memory"]["tail"] == digest
+    await prepared2.aclose()
+    assert second_interpreter.cleaned_runs == [turn2.run_id]
+
+    turn3 = ClaimedRun(
+        uuid4(),
+        turn.session_id,
+        turn.access,
+        TurnInput("another follow up", ()),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    prepared3 = await prepare_turn(
+        _build_preparation(
+            resources,
+            attachment_lifecycle=NoAttachments(),
+            skill_catalog=skill_catalog,
+            settings=resources.settings,
+            models=RLMModelBundle(object(), object()),
+        ),
+        turn3,
+        deadline=float("inf"),
+    )
+    assert len(resources.root_provider.interpreters) == 2
+    assert second_interpreter.bound_runs == [turn2.run_id, turn3.run_id]
+    await prepared3.aclose()
+    assert second_interpreter.cleaned_runs == [turn2.run_id, turn3.run_id]
+    assert resources.root_provider.released is True
 
 
 @pytest.mark.asyncio
 async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
-    from fleet_rlm.daytona.admission import DaytonaAdmissionTimeoutError
+    from fleet_rlm.daytona.runtime import DaytonaAdmissionTimeoutError
 
-    class SessionManager:
+    class RootProvider:
+        async def release(self, _lease) -> None:
+            pass
+
         async def acquire(self, _request, *, deadline, force_new=False):
             del force_new
             assert deadline > asyncio.get_running_loop().time()
             raise DaytonaAdmissionTimeoutError("provider secret should not escape")
 
     settings = Settings(run_environment="daytona")
-    from fleet_rlm.workspace.paths import volume_paths_from_settings
+    from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    volume_paths = volume_paths_from_settings(settings)
+    workspace_gateway = _daytona_workspace_gateway(str(volume_paths.mount_path))
+    volume_gateway = DaytonaWorkspaceVolumeGateway(
+        workspace_gateway,
+        mount_path=str(volume_paths.mount_path),
+    )
 
     resources = SimpleNamespace(
         settings=settings,
-        volume_paths=volume_paths_from_settings(settings),
-        session_manager=SessionManager(),
+        volume_paths=volume_paths,
+        dispatcher=_test_dispatcher(),
+        workspace_gateway=workspace_gateway,
+        volume_gateway=volume_gateway,
+        sandbox_spec=DaytonaSandboxSpec(snapshot="test-snapshot-v1"),
+        root_provider=RootProvider(),
         platform=SimpleNamespace(get=AsyncMock(return_value=object())),
+        daytona_admission=DaytonaAdmission(max_active_leases=2),
+        volume_config=SimpleNamespace(mount_path=settings.volume_mount_path),
         models=RLMModelBundle(object(), object()),
     )
-    from fleet_rlm.daytona.runtime import DaytonaRuntime
 
-    resources.runtime = DaytonaRuntime(resources)
+    resources.runtime = _test_runtime(resources)
 
     class Attachments:
         async def prepare_run(self, *_args):
@@ -413,23 +549,26 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
     )
 
     with pytest.raises(RunPreparationUnavailableError) as caught:
-        await build_run_preparation(
-            resources,
-            attachment_lifecycle=Attachments(),
-            skill_catalog=SkillCatalog(()),
-            settings=resources.settings,
-            models=RLMModelBundle(object(), object()),
-        ).prepare(turn, deadline=float("inf"))
+        await prepare_turn(
+            _build_preparation(
+                resources,
+                attachment_lifecycle=Attachments(),
+                skill_catalog=SkillCatalog(()),
+                settings=resources.settings,
+                models=RLMModelBundle(object(), object()),
+            ),
+            turn,
+            deadline=float("inf"),
+        )
     assert str(caught.value) == "Turn environment is unavailable"
     assert "secret" not in str(caught.value)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
-async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mode: str) -> None:
-    from fleet_rlm.chat.preparation import RunPreparationTimeoutError
-    from fleet_rlm.composition.daytona_run_preparation import _DaytonaEnvironmentProvider
-    from fleet_rlm.daytona.runtime import DaytonaRuntime
+async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None:
+    from fleet_rlm.skills.catalog import SkillCatalog
+    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
 
     entered = threading.Event()
     release_lookup = threading.Event()
@@ -439,30 +578,43 @@ async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mod
         async def get(self, _sandbox_id):
             nonlocal lookups
             lookups += 1
-            if lookups == 1:
-                # Runtime root acquisition lookup settles before preparation.
-                return object()
             entered.set()
             assert await asyncio.to_thread(release_lookup.wait, 5)
             return object()
 
-    class SessionManager:
+    class RootProvider:
         released = 0
 
         async def acquire(self, _request, *, deadline, force_new=False):
             del deadline, force_new
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object())
+            return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
 
         async def release(self, _lease) -> None:
             self.released += 1
 
+    settings = Settings(run_environment="daytona")
     resources = SimpleNamespace(
-        settings=Settings(run_environment="daytona"),
-        session_manager=SessionManager(),
+        settings=settings,
+        volume_paths=None,
+        dispatcher=_test_dispatcher(),
+        workspace_gateway=_daytona_workspace_gateway(settings.volume_mount_path),
+        volume_gateway=None,
+        sandbox_spec=DaytonaSandboxSpec(snapshot="test-snapshot-v1"),
+        root_provider=RootProvider(),
         platform=Platform(),
+        daytona_admission=DaytonaAdmission(max_active_leases=2),
+        volume_config=SimpleNamespace(mount_path=Settings(run_environment="daytona").volume_mount_path),
         track_sandbox=lambda _sandbox_id: None,
     )
-    resources.runtime = DaytonaRuntime(resources)
+    from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    resources.volume_paths = volume_paths_from_settings(resources.settings)
+    resources.volume_gateway = DaytonaWorkspaceVolumeGateway(
+        resources.workspace_gateway,
+        mount_path=str(resources.volume_paths.mount_path),
+    )
+    resources.runtime = _test_runtime(resources)
 
     async def not_cancelled() -> bool:
         return False
@@ -477,8 +629,14 @@ async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mod
         _RunClaimToken(uuid4()),
     )
     deadline = asyncio.get_running_loop().time() + (0.05 if mode == "timeout" else 10)
-    provider = _DaytonaEnvironmentProvider(resources, resources.settings)
-    acquisition = asyncio.create_task(provider.acquire(turn, deadline=deadline))
+    preparation = _build_preparation(
+        resources,
+        attachment_lifecycle=object(),
+        skill_catalog=SkillCatalog(()),
+        settings=resources.settings,
+        models=RLMModelBundle(object(), object()),
+    )
+    acquisition = asyncio.create_task(preparation.acquire_environment(turn, deadline=deadline))
     assert await asyncio.to_thread(entered.wait, 2)
     if mode == "cancel":
         acquisition.cancel()
@@ -491,8 +649,8 @@ async def test_post_acquisition_sandbox_lookup_detaches_before_lease_release(mod
     # The caller returns at its deadline/cancellation boundary, while the
     # provider lookup and root release remain owned until the Sandbox identity
     # can be settled safely.
-    assert resources.session_manager.released == 0
+    assert resources.root_provider.released == 0
     release_lookup.set()
-    while provider._late_lookup_tasks:
-        await asyncio.gather(*tuple(provider._late_lookup_tasks))
-    assert resources.session_manager.released == 1
+    assert await resources.runtime.aclose()
+    assert lookups == 1
+    assert resources.root_provider.released == 1

@@ -11,9 +11,7 @@ import dspy
 import pytest
 
 from fleet_rlm.rlm.events import RuntimeEvent
-from fleet_rlm.rlm.program import RLMOptions
-from fleet_rlm.rlm.result import RunCancelledError
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
@@ -21,6 +19,8 @@ from fleet_rlm.rlm.runtime import (
     RunIdentity,
     SessionView,
 )
+from fleet_rlm.rlm.program import RLMOptions
+from fleet_rlm.rlm.result import RunCancelledError
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.workspace.memory import WorkspaceMemoryToolHost
@@ -354,7 +354,7 @@ async def test_workspace_survives_fresh_turn_context() -> None:
 
     assert written is not None and written.succeeded
     assert read is not None and read.prediction is not None
-    assert read.prediction.display_text == "durable decision"
+    assert read.prediction.answer == "durable decision"
 
 
 @pytest.mark.asyncio
@@ -401,7 +401,7 @@ async def test_workspace_date_roundtrip_allows_repeated_reads_and_overwrite() ->
 
     assert outcome is not None and outcome.succeeded
     assert outcome.prediction is not None
-    assert outcome.prediction.display_text == "verified"
+    assert outcome.prediction.answer == "verified"
 
 
 @pytest.mark.asyncio
@@ -426,7 +426,7 @@ async def test_workspace_memory_is_shared_across_sessions_without_exposing_its_b
     assert first_session.access.workspace_id == second_session.access.workspace_id
     assert written is not None and written.succeeded
     assert recalled is not None and recalled.prediction is not None
-    assert "Keep release notes concise." in recalled.prediction.display_text
+    assert "Keep release notes concise." in recalled.prediction.answer
     memory_details = [
         event.detail
         for event in events
@@ -448,7 +448,7 @@ async def test_workspace_memory_is_isolated_between_workspace_ids() -> None:
     assert first_workspace.access.workspace_id != second_workspace.access.workspace_id
     assert written is not None and written.succeeded
     assert isolated_read is not None and isolated_read.prediction is not None
-    assert isolated_read.prediction.display_text == "NO_MEMORY"
+    assert isolated_read.prediction.answer == "NO_MEMORY"
 
 
 @pytest.mark.asyncio
@@ -485,4 +485,4 @@ async def test_successful_memory_append_survives_failed_or_cancelled_turn(
         for event in events
     )
     assert recalled is not None and recalled.prediction is not None
-    assert learning in recalled.prediction.display_text
+    assert learning in recalled.prediction.answer

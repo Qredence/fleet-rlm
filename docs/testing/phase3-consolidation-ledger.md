@@ -30,7 +30,6 @@ Distinct transport, persistence, concurrency, and live boundaries remain separat
 | `tests/contracts/backend/test_mlflow_lifespan.py` | 3 | observability privacy / lifecycle | Retain |
 | `tests/contracts/backend/test_model_facing_tool_contract.py` | 2 | RLM program / budget / output | Retain |
 | `tests/contracts/backend/test_native_dspy_fastapi_vertical_slice.py` | 1 | API / SSE public contracts | Retain |
-| `tests/contracts/backend/test_native_multi_turn_long_context.py` | 1 | Run lifecycle / settlement | Retain |
 | `tests/contracts/backend/test_native_rlm_tracer.py` | 7 | observability privacy / lifecycle | Retain |
 | `tests/contracts/backend/test_result_snapshot_commit.py` | 5 | Run lifecycle / settlement | Retain |
 | `tests/contracts/backend/test_rlm_history_retrieval.py` | 2 | RLM program / budget / output | Retain |
@@ -69,7 +68,6 @@ Distinct transport, persistence, concurrency, and live boundaries remain separat
 | `tests/live/backend/test_postgres_contention.py` | 6 | live provider certification | Retain |
 | `tests/live/backend/test_postgres_query_plans.py` | 5 | live provider certification | Retain |
 | `tests/live/backend/test_safe_gepa_daytona_policy.py` | 1 | live provider certification | Retain |
-| `tests/live/backend/test_url_cache_durability.py` | 1 | live provider certification | Retain |
 | `tests/live/backend/test_workspace_memory_shared_volume.py` | 2 | live provider certification | Retain |
 | `tests/unit/backend/chat/test_capability_preparation_drain.py` | 1 | Run lifecycle / settlement | Retain |
 | `tests/unit/backend/chat/test_memory_candidate_promotion.py` | 9 | Workspace files / memory | Retain |
@@ -271,7 +269,6 @@ Distinct transport, persistence, concurrency, and live boundaries remain separat
 | `tests/unit/backend/workspace/test_memory_tools.py` | 29 | Workspace files / memory | Retain |
 | `tests/unit/backend/workspace/test_project_paths.py` | 30 | Workspace files / memory | Retain |
 | `tests/unit/backend/workspace/test_project_tools.py` | 24 | Workspace files / memory | Retain |
-| `tests/unit/backend/workspace/test_url_tool.py` | 18 | Workspace files / memory | Retain |
 | `tests/unit/backend/workspace/test_workspace_fs.py` | 52 | Workspace files / memory | Retain |
 | `tests/unit/backend/workspace/test_workspace_paths.py` | 14 | Workspace files / memory | Retain |
 | `tests/unit/backend/workspace/test_workspace_tools.py` | 19 | Workspace files / memory | Retain |

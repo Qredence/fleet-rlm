@@ -4,7 +4,7 @@ import type { FleetTurn } from "../../fleet-api-client.js";
 import type { FleetUIMessageChunk } from "../../sse.js";
 import { projectDurableTurns } from "../durable-projection.js";
 import { LiveTurnProjector } from "../live-projection.js";
-import type { Message, StoreEvent } from "../store.js";
+import { ConversationStore, type Message, type StoreEvent } from "../store.js";
 
 const clock = () => 100;
 
@@ -43,6 +43,193 @@ describe("terminal projection", () => {
         clock,
       ),
     ).toEqual([]);
+
+    expect(
+      live.push({
+        type: "data-status",
+        data: {
+          phase: "recursive",
+          status: "child_completed",
+          message: "call_index=1 duration_ms=3",
+        },
+      }),
+    ).toEqual([{ type: "run/status", phase: "recursive", detail: "call_index=1 duration_ms=3" }]);
+  });
+
+  it("folds child progress updates by stable child id", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({
+      type: "start",
+      messageId: "run-1",
+      messageMetadata: { delivery: "live" },
+    });
+    const update = (state: "running" | "completed", elapsed_ms: number) =>
+      live.push({
+        type: "data-child-progress",
+        id: "run-1:call-1",
+        data: {
+          child_id: "run-1:call-1",
+          parent_run_id: "run-1",
+          task_label: "Inspect the event flow",
+          state,
+          elapsed_ms,
+          cleanup_state: state === "running" ? "pending" : "complete",
+          ...(state === "completed"
+            ? {
+                outcome: "Found the replay path",
+                evidence: ["src/stream.py:42"],
+                gaps: ["Retry not checked"],
+                result_file_count: 2,
+                code_excerpt: "print('selected row')",
+                output_excerpt: "selected row",
+              }
+            : {}),
+        },
+      });
+
+    expect(update("running", 20)[0]).toMatchObject({
+      type: "message/upsert",
+      message: { kind: "child_progress", id: "child-run-1-run-1:call-1", state: "running" },
+    });
+    expect(update("completed", 90)[0]).toMatchObject({
+      type: "message/upsert",
+      message: {
+        kind: "child_progress",
+        id: "child-run-1-run-1:call-1",
+        state: "completed",
+        parentRunId: "run-1",
+        elapsedMs: 90,
+        outcome: "Found the replay path",
+        evidence: ["src/stream.py:42"],
+        gaps: ["Retry not checked"],
+        resultFileCount: 2,
+        codeExcerpt: "print('selected row')",
+        outputExcerpt: "selected row",
+      },
+    });
+  });
+
+  it("shows generic progress when a structured child payload is unsupported", () => {
+    const live = new LiveTurnProjector(clock);
+    expect(
+      live.push({
+        type: "data-child-progress",
+        id: "old-child",
+        data: {
+          child_id: "old-child",
+          task_label: "Older payload",
+          state: "unknown",
+          elapsed_ms: 5,
+          cleanup_state: "pending",
+        },
+      } as unknown as FleetUIMessageChunk),
+    ).toEqual([
+      { type: "run/status", phase: "child", detail: "Child progress details are unavailable." },
+    ]);
+  });
+
+  it("restores terminal child cards from durable assistant parts", () => {
+    const events = projectDurableTurns(
+      [
+        {
+          id: "run-2",
+          role: "assistant",
+          metadata: { runId: "run-2" },
+          parts: [
+            {
+              type: "data-child-progress",
+              id: "child-7",
+              data: {
+                child_id: "child-7",
+                parent_run_id: "run-2",
+                task_label: "Inspect selected files",
+                state: "not_started",
+                elapsed_ms: 0,
+                outcome: "Input allocation exceeded the child budget",
+                result_file_count: 1,
+                code_excerpt: "print('saved')",
+                output_excerpt: "saved",
+                cleanup_state: "not_required",
+              },
+            },
+          ],
+        },
+      ],
+      clock,
+    );
+
+    expect(events).toEqual([
+      {
+        type: "message/upsert",
+        message: {
+          id: "child-run-2-child-7",
+          kind: "child_progress",
+          runId: "run-2",
+          childId: "child-7",
+          parentRunId: "run-2",
+          taskLabel: "Inspect selected files",
+          state: "not_started",
+          elapsedMs: 0,
+          outcome: "Input allocation exceeded the child budget",
+          resultFileCount: 1,
+          codeExcerpt: "print('saved')",
+          outputExcerpt: "saved",
+          cleanupState: "not_required",
+          collapsed: true,
+          ts: 100,
+        },
+      },
+    ]);
+  });
+
+  it("replays interleaved children under their own Runs without duplicate cards", () => {
+    const childPart = (
+      childId: string,
+      state: "running" | "completed",
+      outcome?: string,
+    ): FleetTurn["parts"][number] =>
+      ({
+        type: "data-child-progress",
+        id: childId,
+        data: {
+          child_id: childId,
+          task_label: `Inspect ${childId}`,
+          state,
+          elapsed_ms: state === "running" ? 10 : 40,
+          cleanup_state: state === "running" ? "pending" : "complete",
+          ...(outcome ? { outcome } : {}),
+        },
+      }) as unknown as FleetTurn["parts"][number];
+
+    const turns: FleetTurn[] = (["run-a", "run-b"] as const).map((runId) => ({
+      id: runId,
+      role: "assistant",
+      metadata: { runId },
+      parts: [
+        childPart("child-1", "running"),
+        childPart("child-2", "running"),
+        childPart("child-1", "completed", `${runId} child one done`),
+        childPart("child-2", "completed", `${runId} child two done`),
+      ],
+    }));
+    const store = new ConversationStore();
+
+    for (const event of projectDurableTurns(turns, clock)) store.dispatch(event);
+
+    const cards = store.getState().messages.filter((message) => message.kind === "child_progress");
+    expect(cards).toHaveLength(4);
+    expect(cards.map(({ id, runId, childId, state }) => ({ id, runId, childId, state }))).toEqual([
+      { id: "child-run-a-child-1", runId: "run-a", childId: "child-1", state: "completed" },
+      { id: "child-run-a-child-2", runId: "run-a", childId: "child-2", state: "completed" },
+      { id: "child-run-b-child-1", runId: "run-b", childId: "child-1", state: "completed" },
+      { id: "child-run-b-child-2", runId: "run-b", childId: "child-2", state: "completed" },
+    ]);
+    expect(cards.map((message) => message.kind === "child_progress" && message.outcome)).toEqual([
+      "run-a child one done",
+      "run-a child two done",
+      "run-b child one done",
+      "run-b child two done",
+    ]);
   });
 
   it("projects the existing SSE Run lifecycle into explicit store events", () => {
@@ -804,6 +991,17 @@ function correlations(messages: Message[]): unknown[] {
           runId: message.runId,
           code: message.code,
           message: message.message,
+        };
+      case "child_progress":
+        return {
+          kind: message.kind,
+          runId: message.runId,
+          childId: message.childId,
+          taskLabel: message.taskLabel,
+          state: message.state,
+          elapsedMs: message.elapsedMs,
+          outcome: message.outcome,
+          cleanupState: message.cleanupState,
         };
       case "error":
         return { kind: message.kind, text: message.text };

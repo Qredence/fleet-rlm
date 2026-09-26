@@ -7,21 +7,25 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,
+    require_volume_mount_subpath,
     volume_config_from_settings,
     volume_mount_spec,
 )
-from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
-from fleet_rlm.workspace.paths import (
+from fleet_rlm.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
     UnsafePathError,
     VolumePaths,
     resolve_under_root,
     validate_mount_path,
     validate_path_id,
+)
+from fleet_rlm.sessions.bindings import (
+    require_scoped_volume_subpath,
+    session_workspace_volume_subpath,
 )
 
 
@@ -112,6 +116,20 @@ def test_resolve_under_root_rejects_escape() -> None:
     assert str(ok).startswith("/home/daytona/fleet/sessions/")
 
 
+def test_volume_mount_subpath_accepts_only_canonical_session_workspaces() -> None:
+    workspace_id = uuid4()
+    session_id = uuid4()
+    subpath = session_workspace_volume_subpath(workspace_id, session_id)
+
+    assert require_volume_mount_subpath(subpath) == subpath
+    with pytest.raises(ValueError, match="canonical UUIDs"):
+        require_volume_mount_subpath(f"workspaces/{workspace_id}/sessions/../workspace")
+    with pytest.raises(ValueError, match="supported Fleet namespace"):
+        require_volume_mount_subpath(f"{subpath}/..")
+    with pytest.raises(ValueError, match="non-zero UUID"):
+        require_volume_mount_subpath(f"workspaces/{workspace_id}/sessions/{UUID(int=0)}/workspace")
+
+
 def test_volume_config_and_mount_spec() -> None:
     cfg = VolumeConfig()
     assert cfg.name == DEFAULT_VOLUME_NAME
@@ -154,6 +172,26 @@ async def test_get_or_create_volume_id_uses_injected_client() -> None:
     vid = await get_or_create_volume_id(client, VolumeConfig(name="my-vol"))
     assert vid == "vid-1"
     assert client.calls == [("my-vol", True)]
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_volume_id_recovers_concurrent_create_conflict() -> None:
+    from daytona.common.errors import DaytonaConflictError
+
+    class _Client:
+        def __init__(self) -> None:
+            self.calls: list[bool] = []
+
+        async def get(self, name: str, *, create: bool = False) -> object:
+            assert name == "my-vol"
+            self.calls.append(create)
+            if create:
+                raise DaytonaConflictError("Volume already exists", status_code=409)
+            return type("Volume", (), {"id": "vid-1"})()
+
+    client = _Client()
+    assert await get_or_create_volume_id(client, VolumeConfig(name="my-vol")) == "vid-1"
+    assert client.calls == [True, False]
 
 
 def test_settings_volume_fields() -> None:

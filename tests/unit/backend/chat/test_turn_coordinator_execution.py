@@ -116,8 +116,8 @@ class _CleanupLifecycle:
 
 
 def _driver(lifecycle, runner, cleanup):
-    from fleet_rlm.chat.committed_turn_events import CommittedTurnEventProjector
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.sessions.committed_turn_events import CommittedTurnEventProjector
+    from fleet_rlm.turns import TurnRuntime
 
     return TurnRuntime(
         lifecycle=lifecycle,
@@ -132,10 +132,10 @@ def _driver(lifecycle, runner, cleanup):
 
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
-    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.turns import ClaimHeartbeat
 
     release_finish = asyncio.Event()
     lifecycle = _CleanupLifecycle(
@@ -170,12 +170,12 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
     from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.run_state import CommittedTurnReceipt
+    from fleet_rlm.turns import ClaimHeartbeat
 
     release_finish = asyncio.Event()
     committed_turn = CommittedTurn(
@@ -221,9 +221,9 @@ async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_rac
 
 @pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
-    from fleet_rlm.chat.turn_runtime import ClaimHeartbeat
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.turns import ClaimHeartbeat
 
     order: list[str] = []
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
@@ -263,8 +263,8 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
 
 @pytest.mark.asyncio
 async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanup() -> None:
-    from fleet_rlm.chat.turn_runtime import _ClaimLost
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.turns import _ClaimLost
 
     lifecycle = _CleanupLifecycle(outcome=None)
     driver = _driver(lifecycle, object(), RunCleanupSupervisor())
@@ -291,8 +291,8 @@ async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanu
 
 @pytest.mark.asyncio
 async def test_normal_failure_waits_for_recursive_ownership_before_prepared_close() -> None:
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
     release = asyncio.Event()
@@ -322,8 +322,8 @@ async def test_normal_failure_waits_for_recursive_ownership_before_prepared_clos
 
 @pytest.mark.asyncio
 async def test_cleanup_capacity_fallback_settles_after_owned_stream_drains() -> None:
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
 
     lifecycle = _CleanupLifecycle(outcome=RLMOutcome("timeout", public_error_message="Turn timed out"))
     stream = _Stream(outcome=lifecycle.outcome, blocking=False)
@@ -370,7 +370,7 @@ def test_execution_deadline_reads_the_deep_execution_context() -> None:
     not a fresh fallback window (P25)."""
     from types import SimpleNamespace
 
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.turns import TurnRuntime
 
     driver = TurnRuntime.__new__(TurnRuntime)
     driver._turn_timeout_seconds = 99.0
@@ -389,7 +389,7 @@ def test_trace_request_reads_the_session_view() -> None:
     """B2 regression: MLflow turn traces record the public request text."""
     from types import SimpleNamespace
 
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
+    from fleet_rlm.turns import TurnRuntime
 
     prepared = SimpleNamespace(execution=SimpleNamespace(session=SimpleNamespace(request="show me")))
     assert TurnRuntime._trace_request(prepared) == "show me"
@@ -399,8 +399,8 @@ def test_trace_request_reads_the_session_view() -> None:
 
 # --- from test_open_turn_command.py -----------------------------------
 def test_open_turn_command_contains_only_claimed_canonical_values() -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand
 
     command = OpenTurnCommand(
         access=TurnAccess(user_id=uuid4(), workspace_id=uuid4()),
@@ -420,8 +420,8 @@ def test_open_turn_command_contains_only_claimed_canonical_values() -> None:
     ids=["empty", "whitespace", "newline", "too_long"],
 )
 def test_open_turn_command_rejects_invalid_idempotency_keys(key: str) -> None:
-    from fleet_rlm.chat.commands import OpenTurnCommand
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand
 
     with pytest.raises(ValueError):
         OpenTurnCommand(

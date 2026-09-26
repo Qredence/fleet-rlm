@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from typing import Any
+from uuid import UUID
 
-from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec, VolumeConfig
-from fleet_rlm.daytona.session_manager import DaytonaSessionManager
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+from fleet_rlm.daytona.runtime import (
+    DaytonaAdmission,
+    DaytonaEnvironmentProfile,
+    DaytonaRuntime,
+    DaytonaSandboxSpec,
+    VolumeConfig,
+)
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -185,22 +193,87 @@ class _FakePlatform:
         self.sandboxes[sandbox_id].stop()
 
 
+class _FakeClient:
+    async def close(self) -> None:
+        return None
+
+
+def make_daytona_runtime(
+    *,
+    platform: Any | None = None,
+    volume_client: Any | None = None,
+    volume_config: VolumeConfig | None = None,
+    bindings: Any | None = None,
+    sandbox_spec: DaytonaSandboxSpec | None = None,
+    client: Any | None = None,
+    admission: DaytonaAdmission | None = None,
+    **options: Any,
+) -> DaytonaRuntime:
+    """Build the required runtime contract from test-only provider doubles."""
+    return DaytonaRuntime(
+        platform=platform if platform is not None else _FakePlatform(),
+        volume_client=volume_client if volume_client is not None else _FakeVolumeClient(),
+        volume_config=volume_config if volume_config is not None else VolumeConfig(),
+        bindings=bindings if bindings is not None else InMemoryBindingStore(),
+        sandbox_spec=sandbox_spec if sandbox_spec is not None else _SPEC,
+        client=client if client is not None else _FakeClient(),
+        admission=admission,
+        **options,
+    )
+
+
+def make_daytona_child_factory(
+    *,
+    platform: Any,
+    admission: DaytonaAdmission,
+    volume_id: str | None,
+    mount_path: str | None,
+    workspace_id: UUID,
+    run_id: UUID,
+    deadline: float,
+    execution_timeout_s: int,
+    execution_output_cap: int,
+    loop: asyncio.AbstractEventLoop | None = None,
+    dispatcher: SyncBridgeDispatcher | None = None,
+    session_id: UUID | None = None,
+    is_authorized: Callable[[], bool] | None = None,
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+    semantic_child_available: bool = True,
+) -> Any:
+    """Build a child factory from test-owned provider dependencies."""
+    running_loop = asyncio.get_running_loop()
+    if loop is not None and loop is not running_loop:
+        raise ValueError("test child factory must use the active application loop")
+    runtime = make_daytona_runtime(platform=platform, admission=admission, dispatcher=dispatcher)
+    return runtime.build_child_factory(
+        volume_id=volume_id,
+        mount_path=mount_path,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        run_id=run_id,
+        deadline=deadline,
+        execution_timeout_s=execution_timeout_s,
+        execution_output_cap=execution_output_cap,
+        is_authorized=is_authorized,
+        profile=profile,
+        semantic_child_available=semantic_child_available,
+    )
+
+
 def _manager(
     platform: _FakePlatform | None = None,
     bindings: InMemoryBindingStore | None = None,
     admission: DaytonaAdmission | None = None,
     idle_stop_seconds: float | None = None,
-) -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
+) -> tuple[DaytonaRuntime, _FakePlatform, InMemoryBindingStore, _FakeVolumeClient]:
     plat = platform or _FakePlatform()
     store = bindings or InMemoryBindingStore()
     volumes = _FakeVolumeClient()
-    mgr = DaytonaSessionManager(
+    mgr = make_daytona_runtime(
         platform=plat,
         volume_client=volumes,
-        volume_config=VolumeConfig(),
         bindings=store,
         admission=admission,
-        sandbox_spec=_SPEC,
         idle_stop_seconds=idle_stop_seconds,
     )
     return mgr, plat, store, volumes

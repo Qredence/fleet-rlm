@@ -20,9 +20,10 @@ interpreter cutover is not selected.
 5. [CLI](reference/cli.md)
 6. [Terminal UI](how-to-guides/terminal-tui.md)
 7. [Testing strategy](how-to-guides/testing-strategy.md)
-8. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
-9. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
-10. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
+8. [Structural reduction plan](testing/structural-reduction-plan.md)
+9. [DSPy RLM and Daytona integration](how-to-guides/dspy-integration.md)
+10. [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
+11. [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
 
 ## Current runtime and active migration
 

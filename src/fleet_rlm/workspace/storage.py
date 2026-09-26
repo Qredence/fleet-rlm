@@ -14,7 +14,7 @@ import hashlib
 import inspect
 import os
 import shlex
-from collections.abc import AsyncIterator, Collection, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
@@ -25,10 +25,9 @@ from uuid import UUID
 from fleet_rlm.paths import (
     UnsafePathError,
     VolumePaths,
-    validate_mount_path,
     validate_path_id,
 )
-from fleet_rlm.runtime.errors import WorkspaceConflictError
+from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import (
     WorkspaceEntry,
     WorkspaceListResult,
@@ -65,7 +64,6 @@ class VolumeBlobFs(Protocol):
         logical_path: str,
         *,
         max_bytes: int | None = None,
-        use_cache: bool = True,
     ) -> bytes: ...
 
     def exists(self, logical_path: str) -> bool: ...
@@ -73,44 +71,16 @@ class VolumeBlobFs(Protocol):
     def remove(self, logical_path: str) -> None: ...
 
 
-class VolumeTreeFs(VolumeBlobFs, Protocol):
-    def list_files(
-        self,
-        logical_root: str,
-        *,
-        max_depth: int,
-        max_files: int,
-    ) -> tuple[VolumeFile, ...]: ...
-
-
 class AsyncVolumeStorage(Protocol):
     async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None: ...
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes: ...
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes: ...
 
     async def exists(self, logical_path: str) -> bool: ...
 
     async def remove_bytes(self, logical_path: str) -> None: ...
 
     async def list_files(
-        self,
-        logical_root: str,
-        *,
-        max_depth: int = 10,
-        max_files: int = 1000,
-    ) -> tuple[VolumeFile, ...]: ...
-
-
-class VolumeStorage(Protocol):
-    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None: ...
-
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes: ...
-
-    def exists(self, logical_path: str) -> bool: ...
-
-    def remove_bytes(self, logical_path: str) -> None: ...
-
-    def list_files(
         self,
         logical_root: str,
         *,
@@ -148,6 +118,8 @@ class StorageSession(Protocol):
         max_chars: int = MAX_STORAGE_READ_CHARS,
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage: ...
+
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes: ...
 
     def write_text(
         self,
@@ -229,10 +201,6 @@ class AsyncStorageSession(Protocol):
     def warnings(self) -> tuple[Mapping[str, object], ...]: ...
 
 
-class WorkspaceVolumeSession(AsyncVolumeStorage, Protocol):
-    pass
-
-
 class WorkspaceVolumeGateway(Protocol):
     def open_workspace(
         self, workspace_id: UUID, *, purpose: str | None = None
@@ -265,13 +233,6 @@ class WorkspaceVolumeGateway(Protocol):
         max_depth: int = 10,
         max_files: int = 1000,
     ) -> tuple[VolumeFile, ...]: ...
-
-
-class VolumeFSCacheState:
-    """Lightweight compatibility token for callers expecting cache handles."""
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
 
 
 def _validate_workspace_roots(
@@ -540,6 +501,24 @@ class WorkspaceStorage:
     ) -> WorkspaceTextPage:
         return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
 
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Read one authorized file exactly, refusing rather than truncating at the bound."""
+        if type(max_bytes) is not int or max_bytes < 0:
+            raise ValueError("file read bound must be a non-negative integer")
+        target = self._resolve(path)
+        if not target.exists():
+            raise FileNotFoundError(path)
+        if target.is_dir():
+            raise IsADirectoryError(path)
+        limit = min(max_bytes, self._max_file_bytes)
+        if target.stat().st_size > limit:
+            raise ValueError("file read bound exceeded")
+        with target.open("rb") as handle:
+            data = handle.read(limit + 1)
+        if len(data) > limit:
+            raise ValueError("file read bound exceeded")
+        return data
+
     def _write_bytes_with_fsync(self, path: Path, data: bytes) -> None:
         fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
@@ -767,8 +746,7 @@ class WorkspaceStorage:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
 
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         target = self._resolve(logical_path)
         if not target.is_file():
             raise FileNotFoundError(logical_path)
@@ -858,6 +836,7 @@ class DaytonaSandboxWorkspaceStorage:
                 target.relative_to(self._volume_root)
             except ValueError as exc:
                 raise UnsafePathError("workspace path escapes trusted volume") from exc
+        self._assert_no_symlink(str(target))
         return str(target), normalized
 
     @staticmethod
@@ -875,6 +854,61 @@ class DaytonaSandboxWorkspaceStorage:
             raise
         return value.encode("utf-8") if isinstance(value, str) else bytes(value)
 
+    @staticmethod
+    def _info_value(info: Any, name: str) -> Any:
+        value = getattr(info, name, None)
+        if value is not None:
+            return value
+        if isinstance(info, Mapping):
+            value = info.get(name)
+            if value is not None:
+                return value
+        additional = getattr(info, "additional_properties", None)
+        if isinstance(additional, Mapping):
+            return additional.get(name)
+        return None
+
+    @classmethod
+    def _is_symlink_info(cls, info: Any) -> bool:
+        """Recognize symlink indicators exposed by Daytona file metadata."""
+        if info is None:
+            return False
+        if bool(cls._info_value(info, "is_symlink")) or bool(cls._info_value(info, "symlink")):
+            return True
+        kind = cls._info_value(info, "type")
+        if isinstance(kind, str) and kind.lower() in {"symlink", "symbolic_link", "symbolic link"}:
+            return True
+        mode = cls._info_value(info, "mode")
+        if isinstance(mode, str):
+            try:
+                mode = int(mode.strip(), 0 if mode.strip().startswith("0o") else 8)
+            except ValueError:
+                return False
+        # Daytona's FileInfo represents mode as an octal string. Preserve the
+        # file-type bits when the provider returns a full POSIX st_mode value.
+        return isinstance(mode, int) and mode & 0o170000 == 0o120000
+
+    def _assert_no_symlink(self, full_path: str) -> None:
+        """Check each existing path component with the SDK's metadata API."""
+        get_info = getattr(self._fs, "get_file_info", None)
+        if not callable(get_info):
+            raise WorkspaceStorageError("Daytona filesystem cannot verify workspace path safety")
+        target = PurePosixPath(full_path)
+        parts = target.parts
+        current = PurePosixPath(parts[0]) if target.is_absolute() else PurePosixPath()
+        for part in parts[1:] if target.is_absolute() else parts:
+            current /= part
+            try:
+                info = get_info(str(current))
+            except Exception as exc:
+                if self._is_not_found(exc):
+                    # A missing component cannot be a traversed symlink. The
+                    # eventual operation will report missing or create it.
+                    break
+                raise
+            if self._is_symlink_info(info):
+                raise UnsafePathError("workspace path contains unsafe symlink")
+
     def _ensure_parent(self, full_path: str) -> None:
         execute = getattr(getattr(self._sandbox, "process", None), "exec", None)
         if not callable(execute):
@@ -887,11 +921,12 @@ class DaytonaSandboxWorkspaceStorage:
             raise WorkspaceStorageError("unable to prepare Session Workspace directory")
 
     @staticmethod
-    def _modified_at(info: Any) -> str:
+    def _modified_at(info: Any) -> str | None:
         value = getattr(info, "mod_time", info.get("mod_time") if isinstance(info, Mapping) else None)
-        return str(value) if value is not None else datetime.now(UTC).isoformat()
+        return str(value) if value is not None else None
 
     def _entry(self, full_path: str, path: str, *, checksum: bool = False) -> WorkspaceEntry:
+        self._assert_no_symlink(full_path)
         try:
             info = self._fs.get_file_info(full_path)
         except AttributeError:
@@ -919,6 +954,7 @@ class DaytonaSandboxWorkspaceStorage:
         if limit < 1 or limit > MAX_STORAGE_LIST_LIMIT:
             raise ValueError(f"limit must be in 1..{MAX_STORAGE_LIST_LIMIT}")
         full_path, normalized = self._path(path, allow_root=True)
+        self._assert_no_symlink(full_path)
         try:
             items = self._fs.list_files(full_path, depth=1)
         except Exception as exc:
@@ -930,12 +966,25 @@ class DaytonaSandboxWorkspaceStorage:
         entries: list[WorkspaceEntry] = []
         for item in items or ():
             item_path = str(getattr(item, "path", item.get("path") if isinstance(item, Mapping) else ""))
+            if self._is_symlink_info(item):
+                raise UnsafePathError("workspace listing contains unsafe symlink")
             try:
-                relative = str(PurePosixPath(item_path).relative_to(self._root))
-                child = str(PurePosixPath(item_path).relative_to(full_path))
-            except ValueError:
+                item_posix = PurePosixPath(item_path)
+                relative = str(item_posix.relative_to(self._root))
+            except ValueError as exc:
+                raise UnsafePathError("workspace listing escapes trusted root") from exc
+            try:
+                child = str(item_posix.relative_to(PurePosixPath(full_path)))
+            except ValueError as exc:
+                raise UnsafePathError("workspace listing escapes requested path") from exc
+            if child == ".":
                 continue
-            if child == "." or "/" in child or child.startswith(".fleet"):
+            if relative in {"..", ""} or relative.startswith("../"):
+                raise UnsafePathError("workspace listing escapes trusted root")
+            # Some SDK listing records omit symlink metadata, so verify each
+            # candidate through get_file_info before projecting it.
+            self._assert_no_symlink(str(item_posix))
+            if "/" in child or child.startswith(".fleet"):
                 continue
             is_dir = getattr(item, "is_dir", item.get("is_dir", False) if isinstance(item, Mapping) else False)
             size = getattr(item, "size", item.get("size") if isinstance(item, Mapping) else None)
@@ -1000,6 +1049,34 @@ class DaytonaSandboxWorkspaceStorage:
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
         return self.read_text(path, cursor=cursor, max_chars=max_chars, max_bytes=max_bytes)
+
+    def read_file_bytes(self, path: str, *, max_bytes: int) -> bytes:
+        """Read one authorized file exactly, refusing rather than truncating at the bound."""
+        if type(max_bytes) is not int or max_bytes < 0:
+            raise ValueError("file read bound must be a non-negative integer")
+        full_path, normalized = self._path(path)
+        self._assert_no_symlink(full_path)
+        try:
+            info = self._fs.get_file_info(full_path)
+        except Exception as exc:
+            if self._is_not_found(exc):
+                raise FileNotFoundError(normalized) from exc
+            raise
+        is_dir = getattr(info, "is_dir", info.get("is_dir", False) if isinstance(info, Mapping) else False)
+        if is_dir:
+            raise IsADirectoryError(normalized)
+        size = getattr(info, "size", info.get("size") if isinstance(info, Mapping) else None)
+        if type(size) is not int or size < 0:
+            raise WorkspaceStorageError("Daytona filesystem cannot verify bounded file size")
+        limit = min(max_bytes, self._max_file_bytes)
+        if size > limit:
+            raise ValueError("file read bound exceeded")
+        data = self._read_optional(full_path)
+        if data is None:
+            raise FileNotFoundError(normalized)
+        if len(data) > limit:
+            raise ValueError("file read bound exceeded")
+        return data
 
     def write_text(
         self, path: str, content: str, *, overwrite: bool = True, expected_sha256: str | None = None
@@ -1074,11 +1151,8 @@ class DaytonaSandboxWorkspaceStorage:
 class AsyncWorkspaceStorage:
     """Async wrapper exposing AsyncStorageSession and AsyncVolumeStorage protocols."""
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        if len(args) == 1 and isinstance(args[0], WorkspaceStorage):
-            self._sync = args[0]
-        else:
-            self._sync = WorkspaceStorage(*args, **kwargs)
+    def __init__(self, storage: WorkspaceStorage) -> None:
+        self._sync = storage
 
     @property
     def root(self) -> Path:
@@ -1130,8 +1204,8 @@ class AsyncWorkspaceStorage:
     async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         await asyncio.to_thread(self._sync.delete_path, path, expected_sha256=expected_sha256)
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        return await asyncio.to_thread(self._sync.read_bytes, logical_path, max_bytes=max_bytes, use_cache=use_cache)
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
+        return await asyncio.to_thread(self._sync.read_bytes, logical_path, max_bytes=max_bytes)
 
     async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
         await asyncio.to_thread(self._sync.write_bytes, logical_path, data, max_bytes=max_bytes)
@@ -1149,201 +1223,6 @@ class AsyncWorkspaceStorage:
 
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
         return self._sync.read_tail(path, byte_budget=byte_budget)
-
-
-class HostVolumeMirror:
-    """Map trusted logical mount paths into one isolated host directory."""
-
-    def __init__(self, host_root: Path | str, *, volume_paths: VolumePaths | None = None) -> None:
-        self._paths = volume_paths or VolumePaths.from_mount()
-        self._root = Path(host_root).resolve()
-        self._root.mkdir(parents=True, exist_ok=True)
-
-    @property
-    def host_root(self) -> Path:
-        return self._root
-
-    @property
-    def volume_paths(self) -> VolumePaths:
-        return self._paths
-
-    def host_path_for(self, logical_path: str) -> Path:
-        mount = validate_mount_path(str(self._paths.mount_path))
-        path = PurePosixPath(logical_path)
-        if "\\" in logical_path or "\x00" in logical_path or ".." in path.parts or str(path) != logical_path:
-            raise UnsafePathError("logical path escapes volume mount")
-        try:
-            relative = path.relative_to(mount)
-        except ValueError as exc:
-            raise UnsafePathError("logical path escapes volume mount") from exc
-        if not relative.parts:
-            return self._root
-        return self._root.joinpath(*relative.parts)
-
-    def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
-        del max_bytes
-        destination = self.host_path_for(logical_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(data)
-
-    def read_bytes(
-        self,
-        logical_path: str,
-        *,
-        max_bytes: int | None = None,
-        use_cache: bool = True,
-    ) -> bytes:
-        del use_cache
-        destination = self.host_path_for(logical_path)
-        if not destination.is_file():
-            raise FileNotFoundError(logical_path)
-        data = destination.read_bytes()
-        if max_bytes is not None and len(data) > max_bytes:
-            data = data[:max_bytes]
-        return data
-
-    def exists(self, logical_path: str) -> bool:
-        try:
-            destination = self.host_path_for(logical_path)
-            return destination.is_file()
-        except Exception:
-            return False
-
-    def remove_bytes(self, logical_path: str) -> None:
-        try:
-            destination = self.host_path_for(logical_path)
-            if destination.is_file():
-                destination.unlink()
-        except (FileNotFoundError, OSError):
-            pass
-
-    def remove(self, logical_path: str) -> None:
-        self.remove_bytes(logical_path)
-
-    def list_files(self, logical_root: str, *, max_depth: int = 10, max_files: int = 1000) -> tuple[VolumeFile, ...]:
-        root = self.host_path_for(logical_root)
-        if not root.exists() or not root.is_dir():
-            return ()
-        results: list[VolumeFile] = []
-        base_depth = len(root.parts)
-        for candidate in sorted(root.rglob("*")):
-            if not candidate.is_file():
-                continue
-            if len(candidate.parts) - base_depth > max_depth:
-                continue
-            relative = candidate.relative_to(self._root)
-            results.append(VolumeFile(str(self._paths.mount_path / relative), candidate.stat().st_mtime))
-            if len(results) >= max_files:
-                break
-        return tuple(results)
-
-
-class _HostWorkspaceVolumeSession:
-    """Async compatibility view over one host Volume mirror."""
-
-    def __init__(self, mirror: HostVolumeMirror, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES) -> None:
-        self._mirror = mirror
-        self._max_bytes = max_bytes
-
-    async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
-        await asyncio.to_thread(self._mirror.write_bytes, logical_path, data, max_bytes=max_bytes or self._max_bytes)
-
-    async def read_bytes(
-        self,
-        logical_path: str,
-        *,
-        max_bytes: int | None = None,
-        use_cache: bool = True,
-    ) -> bytes:
-        return await asyncio.to_thread(
-            self._mirror.read_bytes, logical_path, max_bytes=max_bytes or self._max_bytes, use_cache=use_cache
-        )
-
-    async def exists(self, logical_path: str) -> bool:
-        return await asyncio.to_thread(self._mirror.exists, logical_path)
-
-    async def remove_bytes(self, logical_path: str) -> None:
-        await asyncio.to_thread(self._mirror.remove_bytes, logical_path)
-
-    async def list_files(
-        self,
-        logical_root: str,
-        *,
-        max_depth: int = 10,
-        max_files: int = 1000,
-    ) -> tuple[VolumeFile, ...]:
-        return await asyncio.to_thread(self._mirror.list_files, logical_root, max_depth=max_depth, max_files=max_files)
-
-
-class OfflineHostVolumeGateway:
-    """Adapt one isolated host mirror to the async Workspace Volume port."""
-
-    def __init__(self, mirror: HostVolumeMirror | Path | str, *, max_bytes: int = MAX_WORKSPACE_FILE_BYTES) -> None:
-        if isinstance(mirror, HostVolumeMirror):
-            self._mirror = mirror
-        else:
-            self._mirror = HostVolumeMirror(mirror)
-        self._max_bytes = max_bytes
-
-    @contextlib.asynccontextmanager
-    async def open_workspace(
-        self, workspace_id: UUID, *, purpose: str | None = None
-    ) -> AsyncIterator[AsyncVolumeStorage]:
-        del workspace_id, purpose
-        yield _HostWorkspaceVolumeSession(self._mirror, max_bytes=self._max_bytes)
-
-    async def write_bytes(
-        self,
-        workspace_id: UUID,
-        logical_path: str,
-        data: bytes,
-        *,
-        max_bytes: int | None = None,
-    ) -> None:
-        async with self.open_workspace(workspace_id) as volume:
-            await volume.write_bytes(logical_path, data, max_bytes=max_bytes)
-
-    async def read_bytes(
-        self,
-        workspace_id: UUID,
-        logical_path: str,
-        *,
-        max_bytes: int | None = None,
-    ) -> bytes:
-        async with self.open_workspace(workspace_id) as volume:
-            return await volume.read_bytes(logical_path, max_bytes=max_bytes)
-
-    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
-        async with self.open_workspace(workspace_id) as volume:
-            await volume.remove_bytes(logical_path)
-
-    async def list_files(
-        self,
-        workspace_id: UUID,
-        logical_root: str,
-        *,
-        max_depth: int = 10,
-        max_files: int = 1000,
-    ) -> tuple[VolumeFile, ...]:
-        async with self.open_workspace(workspace_id) as volume:
-            return await volume.list_files(logical_root, max_depth=max_depth, max_files=max_files)
-
-
-class HostWorkspaceAccessGateway:
-    """Credential-free public-files gateway over a local isolated root."""
-
-    def __init__(self, root: Path | str, *, max_file_bytes: int = MAX_WORKSPACE_FILE_BYTES) -> None:
-        self._root = Path(root).resolve()
-        self._max_file_bytes = max_file_bytes
-
-    @contextlib.asynccontextmanager
-    async def open_workspace(self, workspace_id: UUID, *, purpose: str = "") -> AsyncIterator[AsyncStorageSession]:
-        del purpose
-        ws_root = self._root / "workspaces" / str(workspace_id) / "files"
-        ws_root.mkdir(parents=True, exist_ok=True)
-        yield AsyncWorkspaceStorage(
-            root=ws_root, max_file_bytes=self._max_file_bytes, allow_volume_root=True, include_checksum_by_default=True
-        )
 
 
 class WorkspaceMemoryStorage:
@@ -1556,8 +1435,7 @@ class DaytonaSandboxVolumeFs:
         self.sandbox = sandbox
         self.fs = getattr(sandbox, "fs", None)
 
-    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         if self.fs is None:
             raise FileNotFoundError(logical_path)
         download = getattr(self.fs, "download_file", None)
@@ -1689,16 +1567,24 @@ class AsyncDaytonaVolumeFS:
             res = await res
         return _convert_to_volume_files(res, max_files=max_files)
 
-    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None, use_cache: bool = True) -> bytes:
-        del use_cache
+    async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
         if self.fs is None:
             raise FileNotFoundError(logical_path)
         download = getattr(self.fs, "download_file", None)
         if not callable(download):
             raise FileNotFoundError(logical_path)
-        res = download(logical_path)
-        if inspect.isawaitable(res):
-            res = await res
+        try:
+            res = download(logical_path)
+            if inspect.isawaitable(res):
+                res = await res
+        except Exception as exc:
+            # The Volume FS exposes the SDK's typed file-absence error here.
+            # A generic 404 can also mean a missing Sandbox or provider route,
+            # and must remain visible to the lifecycle owner.
+            exc_type = type(exc)
+            if exc_type.__module__ == "daytona.common.errors" and exc_type.__name__ == "DaytonaFileNotFoundError":
+                raise FileNotFoundError(logical_path) from exc
+            raise
         if isinstance(res, str):
             res = res.encode("utf-8")
         if max_bytes is not None and len(res) > max_bytes:
@@ -1736,46 +1622,24 @@ class AsyncDaytonaVolumeFS:
                     await res
 
 
-# Compatibility aliases for callers and test mocks
-AgentStorageSession = WorkspaceStorage
-AgentAsyncStorageSession = AsyncWorkspaceStorage
-AgentVolumeStorage = DaytonaSandboxVolumeFs
-AgentAsyncVolumeStorage = AsyncDaytonaVolumeFS
-
-DaytonaSessionWorkspaceFS = WorkspaceStorage
-AsyncDaytonaSessionWorkspaceFS = AsyncWorkspaceStorage
-
 __all__ = [
     "MAX_FILE_BYTES",
     "MAX_STORAGE_LIST_LIMIT",
     "MAX_STORAGE_READ_CHARS",
     "MAX_WORKSPACE_FILE_BYTES",
     "WORKSPACE_MEMORY_BYTE_BUDGET",
-    "AgentAsyncStorageSession",
-    "AgentAsyncVolumeStorage",
-    "AgentStorageSession",
-    "AgentVolumeStorage",
-    "AsyncDaytonaSessionWorkspaceFS",
     "AsyncDaytonaVolumeFS",
     "AsyncStorageSession",
     "AsyncVolumeStorage",
     "AsyncWorkspaceStorage",
     "DaytonaSandboxVolumeFs",
-    "DaytonaSessionWorkspaceFS",
-    "HostVolumeMirror",
-    "HostWorkspaceAccessGateway",
-    "OfflineHostVolumeGateway",
     "OrphanCleanupReport",
     "StorageSession",
     "VolumeBlobFs",
-    "VolumeFSCacheState",
     "VolumeFile",
-    "VolumeStorage",
-    "VolumeTreeFs",
     "WorkspaceMemoryStorage",
     "WorkspaceStorage",
     "WorkspaceStorageError",
     "WorkspaceVolumeGateway",
-    "WorkspaceVolumeSession",
     "cleanup_orphan_bytes",
 ]

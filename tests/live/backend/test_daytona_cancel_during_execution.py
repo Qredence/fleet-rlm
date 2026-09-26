@@ -67,18 +67,15 @@ def _install_cancel_during_first_execute(
     ) -> Any:
         ledger["calls"] = int(ledger.get("calls") or 0) + 1
         if ledger["calls"] == 1:
-            run_id = app.state.runtime_inventory.run_environment_resources.session_manager.active_leases.holder(
-                session_id
-            )
+            run_id = app.state.runtime_inventory.daytona_runtime_owner.active_leases.holder(session_id)
             assert run_id is not None, "cancel canary requires an active Run lease"
             ledger["run_id"] = str(run_id)
             assert client.portal is not None
 
             async def _mark_cancelled() -> str:
                 scope = LocalScope()
-                lifecycle = app.state.runtime_inventory.run_lifecycle
-                assert lifecycle is not None
-                return await lifecycle.request_cancel(
+                turn_runtime = app.state.runtime_inventory.route_services.turn_runtime
+                return await turn_runtime.request_cancel(
                     TurnAccess(scope.user_id, scope.workspace_id),
                     run_id,
                 )
@@ -115,7 +112,7 @@ def test_daytona_cancel_during_execution_through_fastapi(
     app = create_app(settings=settings)
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
-        resources = inventory.run_environment_resources
+        resources = inventory.daytona_runtime_owner
         assert resources is not None
         preparation = inventory.run_preparation
         assert preparation is not None
@@ -156,14 +153,14 @@ def test_daytona_cancel_during_execution_through_fastapi(
             release_deadline = time.perf_counter() + 45
             while time.perf_counter() < release_deadline:
                 if (
-                    resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
-                    and resources.session_manager.active_leases.holder(session_id) is None
+                    resources._admission._semaphore._value == settings.max_active_daytona_leases
+                    and resources.active_leases.holder(session_id) is None
                 ):
                     break
                 time.sleep(0.25)
-            assert resources.daytona_admission._semaphore._value == settings.max_active_daytona_leases
-            assert resources.session_manager.active_leases.holder(session_id) is None
-            sandbox_ids.update(resources._sandbox_ids)
+            assert resources._admission._semaphore._value == settings.max_active_daytona_leases
+            assert resources.active_leases.holder(session_id) is None
+            sandbox_ids.update(resources._tracked_sandbox_ids)
         finally:
             assert client.portal is not None
             cleanup_failures = client.portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)

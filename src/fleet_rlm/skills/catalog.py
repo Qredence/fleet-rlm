@@ -12,7 +12,7 @@ import dspy
 
 from fleet_rlm.skills.errors import SkillNotFoundError
 from fleet_rlm.skills.manifest import SkillManifest, parse_bundled_skill_manifest
-from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
+from fleet_rlm.skills.models import SkillCard, SkillDefinition
 from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
 
 _BUNDLED_SKILL_NAMESPACE = UUID("6f1e0c2a-9b3d-4e5f-8a1b-2c3d4e5f6071")
@@ -101,10 +101,7 @@ def build_bundled_skill_catalog() -> SkillCatalog:
             bool(manifest.resources),
             manifest.affordances,
         )
-        resources = {
-            resource.path: SkillResource(resource.path, resource.media_type, resource.content)
-            for resource in manifest.resources
-        }
+        resources = {resource.path: resource for resource in manifest.resources}
         definitions.append(
             SkillDefinition(
                 card,

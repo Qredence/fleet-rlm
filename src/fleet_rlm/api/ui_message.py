@@ -8,6 +8,7 @@ from fleet_rlm.api.json_util import to_plain_json
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
+    ChildProgressPart,
     CodePart,
     CommittedPart,
     OutputPart,
@@ -78,6 +79,25 @@ def _assistant_part(part: CommittedPart) -> dict[str, Any]:
         return {
             "type": "data-status",
             "data": {"phase": part.phase, "status": part.status, "message": part.message},
+        }
+    if isinstance(part, ChildProgressPart):
+        return {
+            "type": "data-child-progress",
+            "id": part.child_id,
+            "data": {
+                "child_id": part.child_id,
+                "task_label": part.task_label,
+                "state": part.state,
+                "elapsed_ms": part.elapsed_ms,
+                "outcome": part.outcome,
+                "evidence": list(part.evidence),
+                "gaps": list(part.gaps),
+                "result_file_count": part.result_file_count,
+                "code_excerpt": part.code_excerpt,
+                "output_excerpt": part.output_excerpt,
+                "cleanup_state": part.cleanup_state,
+                "parent_run_id": part.parent_run_id,
+            },
         }
     if isinstance(part, ArtifactPart):
         return {

@@ -27,7 +27,7 @@ class LocalProcess:
 
 
 def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = True):
-    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import WorkspaceStorage
 
     volume_root = tmp_path / "volume"
     session_parent = volume_root / "sessions" / "session"
@@ -38,7 +38,7 @@ def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = 
         session_parent.mkdir(parents=True)
     process = LocalProcess()
     sandbox = SimpleNamespace(process=process)
-    workspace = DaytonaSessionWorkspaceFS(
+    workspace = WorkspaceStorage(
         sandbox,
         volume_root=str(volume_root),
         root=str(root),
@@ -48,10 +48,10 @@ def _workspace(tmp_path: Path, *, max_file_bytes: int = 32, root_exists: bool = 
 
 
 def test_rejects_workspace_root_outside_trusted_volume() -> None:
-    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import WorkspaceStorage
 
     with pytest.raises(ValueError, match="trusted volume"):
-        DaytonaSessionWorkspaceFS(
+        WorkspaceStorage(
             SimpleNamespace(),
             volume_root="/home/daytona/fleet",
             root="/home/daytona/other/workspace",
@@ -61,10 +61,10 @@ def test_rejects_workspace_root_outside_trusted_volume() -> None:
 
 @pytest.mark.parametrize("reserved", ["attachments", "artifacts"])
 def test_rejects_workspace_root_aliasing_managed_storage(reserved: str) -> None:
-    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import WorkspaceStorage
 
     with pytest.raises(ValueError, match="attachment or artifact"):
-        DaytonaSessionWorkspaceFS(
+        WorkspaceStorage(
             SimpleNamespace(),
             volume_root="/home/daytona/fleet",
             root=f"/home/daytona/fleet/{reserved}/session-file",
@@ -552,13 +552,27 @@ def test_missing_workspace_root_behaves_as_an_empty_virtual_directory(tmp_path: 
     assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
 
 
+def test_workspace_bounded_binary_read_is_exact_and_enforces_storage_limit(tmp_path: Path) -> None:
+    workspace, _, root, _ = _workspace(tmp_path, max_file_bytes=8)
+    target = root / "large.bin"
+    target.write_bytes(b"12345678")
+
+    assert workspace.read_file_bytes("large.bin", max_bytes=8) == b"12345678"
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        workspace.read_file_bytes("large.bin", max_bytes=7)
+
+    target.write_bytes(b"123456789")
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        workspace.read_file_bytes("large.bin", max_bytes=16)
+
+
 def test_real_guard_allows_a_missing_virtual_workspace_root(tmp_path: Path) -> None:
-    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import WorkspaceStorage
 
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
     root = volume_root / "sessions" / "session" / "workspace"
-    workspace = DaytonaSessionWorkspaceFS(
+    workspace = WorkspaceStorage(
         SimpleNamespace(process=LocalProcess()),
         volume_root=str(volume_root),
         root=str(root),
@@ -627,7 +641,7 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
     tmp_path: Path,
     link_kind: str,
 ) -> None:
-    from fleet_rlm.workspace.storage import DaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import WorkspaceStorage
 
     volume_root = tmp_path / "volume"
     sessions = volume_root / "sessions"
@@ -660,7 +674,7 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
     else:
         (root / "decision.md").symlink_to(target)
         relative = "decision.md"
-    workspace = DaytonaSessionWorkspaceFS(
+    workspace = WorkspaceStorage(
         SimpleNamespace(process=LocalProcess()),
         volume_root=str(volume_root),
         root=str(root),
@@ -736,7 +750,7 @@ def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -
 async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -> None:
     import hashlib
 
-    from fleet_rlm.workspace.storage import AsyncDaytonaSessionWorkspaceFS
+    from fleet_rlm.workspace.storage import AsyncWorkspaceStorage, WorkspaceStorage
 
     volume_root = tmp_path / "volume"
     root = volume_root / "sessions" / "session" / "workspace"
@@ -747,11 +761,13 @@ async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -
             return super().code_run(code)
 
     process = AsyncLocalProcess()
-    workspace = AsyncDaytonaSessionWorkspaceFS(
-        SimpleNamespace(process=process),
-        volume_root=str(volume_root),
-        root=str(root),
-        max_file_bytes=1024,
+    workspace = AsyncWorkspaceStorage(
+        WorkspaceStorage(
+            SimpleNamespace(process=process),
+            volume_root=str(volume_root),
+            root=str(root),
+            max_file_bytes=1024,
+        )
     )
 
     await workspace.write_text("notes/report.txt", "one two one", overwrite=False)

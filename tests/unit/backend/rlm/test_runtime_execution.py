@@ -21,8 +21,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-from fleet_rlm.rlm.runtime import (
+from fleet_rlm.rlm.execution import (
     ExecutionRuntime,
     RLMExecutionContext,
     RLMRunner,
@@ -31,6 +30,7 @@ from fleet_rlm.rlm.runtime import (
     WorkerOwnership,
     start_rlm_worker,
 )
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -61,29 +61,34 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
 
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
-    from fleet_rlm.rlm.events import DetailRelay, RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.events import ChildProgress, DetailRelay, RLMOutput, StepFinished, StepStarted
 
     relay = DetailRelay(maxsize=1)
     relay.publish(RLMOutput("queued", 1))
     relay.publish(StepStarted(1))
+    relay.publish(ChildProgress("child-1", "Inspect references", "running", 1, cleanup_state="pending"))
     relay.publish(RLMOutput("dropped", 1))
     assert await relay.get() == RLMOutput("queued", 1)
     relay.publish(StepFinished(1))
 
-    assert relay.drain() == [StepStarted(1), StepFinished(1)]
+    assert relay.drain() == [
+        StepStarted(1),
+        ChildProgress("child-1", "Inspect references", "running", 1, cleanup_state="pending"),
+        StepFinished(1),
+    ]
     assert relay.overflowed is True
 
 
 @pytest.mark.asyncio
 async def test_runner_uses_native_path_for_plain_greeting() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -148,7 +153,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
     assert factory.host_tool_dispatch is False
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "Hi! How can I help you today?"
+    assert stream.outcome.prediction.answer == "Hi! How can I help you today?"
     assert stream.outcome.usage["iterations"] == 1
 
 
@@ -161,8 +166,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     The outcome includes events, usage metrics, configured tools, and execution tracing.
     """
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
@@ -170,6 +174,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.models import SkillCard
@@ -274,6 +279,12 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         phase_spans.append((name, inputs))
         yield SimpleNamespace(set_outputs=lambda _outputs: None)
 
+    adapter_contexts = []
+
+    def stock_adapter(adapter_context):
+        adapter_contexts.append(adapter_context)
+        return dspy.JSONAdapter()
+
     monkeypatch.setattr(dspy, "context", tracked_context)
     monkeypatch.setattr("fleet_rlm.rlm.events.turn_phase_span", tracked_phase_span)
     context = RLMExecutionContext(
@@ -293,7 +304,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
         ),
         capabilities=capabilities,
     )
-    stream = RLMRunner(program_builder=factory.create).stream(context)
+    stream = RLMRunner(program_builder=factory.create, _adapter_factory=stock_adapter).stream(context)
     capabilities.spec = RLMExecutionSpec(
         skill_cards=(
             SkillCard(
@@ -322,8 +333,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     ]
     assert stream.outcome is not None
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "42"
-    assert stream.outcome.prediction.outputs == {"answer": "42"}
+    assert stream.outcome.prediction.answer == "42"
     assert stream.outcome.succeeded
     assert factory.options is context.execution.options
     assert isinstance(factory.tools[0], dspy.Tool)
@@ -340,7 +350,8 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
     assert contexts[0]["lm"] is context.execution.models.root_lm
     assert contexts[0]["track_usage"] is True
     adapter = contexts[0]["adapter"]
-    assert isinstance(adapter, dspy.JSONAdapter)
+    assert adapter_contexts == [context]
+    assert type(adapter) is dspy.JSONAdapter
     assert adapter.use_native_function_calling is True
     assert dspy.settings.adapter is global_adapter
     assert phase_spans == [
@@ -364,17 +375,17 @@ def test_runner_uses_stock_json_adapter_without_protocol_salvage() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
-    from fleet_rlm.rlm.program import (
-        AttachmentContextCapsule,
-        AttachmentContextEntry,
-        RLMOptions,
-    )
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
+    )
+    from fleet_rlm.rlm.program import (
+        AttachmentContextCapsule,
+        AttachmentContextEntry,
+        RLMOptions,
     )
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
@@ -432,14 +443,14 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_validates_host_metadata_before_provider_execution() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
@@ -495,9 +506,7 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
 
 @pytest.mark.asyncio
 async def test_runner_loads_two_skills_reads_python_resource_and_completes_submit() -> None:
-    from fleet_rlm.chat.preparation import PreparedHostCapabilities
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMExecutionSpec,
@@ -505,11 +514,13 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
+    from fleet_rlm.turn_preparation import PreparedHostCapabilities
 
     user_id, workspace_id = uuid4(), uuid4()
     first = SkillDefinition(
@@ -610,7 +621,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
     assert kinds.count("skill.loaded") == 2
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.display_text == "progressive completion"
+    assert stream.outcome.prediction.answer == "progressive completion"
 
 
 @pytest.mark.asyncio
@@ -703,6 +714,78 @@ def _context(
 
 
 @pytest.mark.asyncio
+async def test_runner_ignores_adapter_summary_failure_after_success() -> None:
+    class SummaryFailureError(RuntimeError):
+        pass
+
+    class Adapter:
+        def wrap_up_summary(self) -> dict[str, object]:
+            return {}
+
+        def repair_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("optional repair diagnostics failed")
+
+    session_id, workspace_id = uuid4(), uuid4()
+    runner = RLMRunner(program_builder=_Factory().create, _adapter_factory=lambda _context: Adapter())
+    stream = runner.stream(
+        _context(
+            session_id=session_id,
+            workspace_id=workspace_id,
+            run_id=uuid4(),
+            interpreter=_Interpreter(),
+            request="answer",
+            history=dspy.History(messages=[]),
+        )
+    )
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+
+
+@pytest.mark.asyncio
+async def test_runner_preserves_execution_error_when_adapter_summaries_fail(caplog) -> None:
+    class OriginalFailureError(RuntimeError):
+        pass
+
+    class SummaryFailureError(RuntimeError):
+        pass
+
+    original = OriginalFailureError("RLM invocation failed")
+
+    class Adapter:
+        def wrap_up_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("wrap-up summary failed")
+
+        def repair_summary(self) -> dict[str, object]:
+            raise SummaryFailureError("repair summary failed")
+
+    class Program:
+        async def acall(self, **_kwargs: object) -> dspy.Prediction:
+            raise original
+
+    class Factory:
+        def create(self, **_kwargs: object) -> Program:
+            return Program()
+
+    runner = RLMRunner(program_builder=Factory().create, _adapter_factory=lambda _context: Adapter())
+    stream = runner.stream(
+        _context(
+            session_id=uuid4(),
+            workspace_id=uuid4(),
+            run_id=uuid4(),
+            interpreter=_Interpreter(),
+            request="answer",
+            history=dspy.History(messages=[]),
+        )
+    )
+    _ = [event async for event in stream]
+
+    failures = [record for record in caplog.records if record.exc_info is not None]
+    assert stream.outcome is not None and stream.outcome.terminal_status == "failed"
+    assert any(record.exc_info[1] is original for record in failures)
+
+
+@pytest.mark.asyncio
 async def test_sequential_runs_use_fresh_programs_and_committed_history() -> None:
     session_id, workspace_id = uuid4(), uuid4()
     interpreter = _Interpreter()
@@ -739,13 +822,13 @@ async def test_sequential_runs_use_fresh_programs_and_committed_history() -> Non
 
 # --- from test_execution_context.py -----------------------------------
 def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() -> None:
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.sessions.models import TurnAccess
 

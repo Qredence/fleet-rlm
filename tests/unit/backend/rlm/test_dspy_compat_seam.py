@@ -12,15 +12,19 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import (
+    DAYTONA_EXECUTION_INSTRUCTIONS,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+)
 from fleet_rlm.rlm.program import (
     RLMOptions,
-    build_native_rlm,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 
 
 def _rlm(*, tools: list[Callable[..., Any]] | None = None, signature: str = "request -> answer: str") -> Any:
-    return build_native_rlm(
+    return build_native_rlm_for_test(
         signature=signature,
         options=RLMOptions(max_iters=3, max_llm_calls=3, max_output_chars=1_000),
         tools=tools,
@@ -39,23 +43,19 @@ class _OneAction:
 
 
 @pytest.mark.asyncio
-async def test_daytona_provider_contract_is_zero_arg_metadata_only() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import DAYTONA_EXECUTION_INSTRUCTIONS
+async def test_explicit_interpreter_factory_owns_lifecycle_and_prompt_metadata() -> None:
+    from tests.support.native_rlm import in_process_interpreter_factory
 
     rlm = _rlm()
     provider = rlm._interpreter_factory
 
     assert inspect.signature(provider).parameters == {}
+    assert provider is in_process_interpreter_factory
     assert provider.execution_instructions == DAYTONA_EXECUTION_INSTRUCTIONS
-    assert provider.execution_instructions == DAYTONA_EXECUTION_INSTRUCTIONS
-
-    with pytest.raises(Exception, match="caller-owned interpreter"):
-        provider()
+    assert isinstance(provider(), DaytonaCodeInterpreter)
 
 
 def test_daytona_action_prompt_contains_each_runtime_fact_once() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import DAYTONA_EXECUTION_INSTRUCTIONS
-
     prompt = str(_rlm().generate_action.signature.instructions)
     facts = (
         "isolated Python",
@@ -235,24 +235,23 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
 
 @pytest.mark.asyncio
 async def test_runner_rejects_native_build_without_invocation_factory() -> None:
-    """P2.3: the serving path never falls back to the rejecting contract.
+    """P2.3: the serving path requires an invocation-scoped interpreter factory.
 
     With the default native program builder, an interpreter that cannot
-    supply ``new_invocation`` fails closed instead of receiving the
-    metadata-only ``daytona_provider_contract`` factory.
+    supply ``new_invocation`` fails closed before the native builder is called.
     """
     import asyncio as _asyncio
     from types import SimpleNamespace
     from uuid import uuid4 as _uuid4
 
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities

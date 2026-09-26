@@ -85,6 +85,10 @@ _LIST_MEMORIES_DEFAULT_LIMIT = 50
 _MEMORY_PATH = "memory/MEMORIES.md"
 _LEGACY_MEMORY_PATH = "MEMORIES.md"
 _HEADER_BYTES = WORKSPACE_MEMORY_HEADER.encode("utf-8")
+# Workspace Memory is coordinated by the single-process host.  Instances may
+# be opened per Session, so their writes must share one lock.
+_WORKSPACE_MEMORY_LOCK = RLock()
+_INJECTION_BYTE_BUDGET = 4_096
 
 
 class MemoryToolError(RuntimeError):
@@ -321,7 +325,7 @@ class WorkspaceMemory:
         self._memory_path = memory_path
         self._legacy_path = legacy_path
         self._max_file_bytes = max_file_bytes
-        self._lock = RLock()
+        self._lock = _WORKSPACE_MEMORY_LOCK
         del kwargs
 
     @classmethod
@@ -528,46 +532,59 @@ class WorkspaceMemory:
         with self._lock:
             content = self._read_content()
             lines = parse_workspace_memory_lines(content)
-            found = False
-            updated_lines: list[str] = []
-            target_record = ""
+            target: WorkspaceMemoryEntry | None = None
             for line in lines:
                 if line.entry is not None and line.entry.memory_id == norm_id:
-                    found = True
-                    cat = normalize_workspace_memory_category(category) if category else line.entry.category
-                    rec = format_workspace_memory_v3_record(
-                        norm_lrn,
-                        cat,
-                        memory_id=norm_id,
-                        created_at=line.entry.timestamp,
-                        updated_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        source=line.entry.source,
-                        supersedes_id=line.entry.supersedes_id,
-                    )
-                    updated_lines.append(rec)
-                    target_record = rec
-                else:
-                    updated_lines.append(line.raw)
-            if not found:
+                    target = line.entry
+                    break
+            if target is None:
                 raise WorkspaceMemoryEntryNotFoundError(norm_id)
-            self._storage.write_text(self._memory_path, "".join(updated_lines), overwrite=True)
-            return target_record
+            if not target.active:
+                raise WorkspaceMemoryConflictError("supersedes_not_active")
+            cat = normalize_workspace_memory_category(category) if category else target.category
+            now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+            new_id = uuid4().hex[:8]
+            record = format_workspace_memory_v3_record(
+                norm_lrn,
+                cat,
+                memory_id=new_id,
+                created_at=now,
+                updated_at=now,
+                source="user_explicit",
+                supersedes_id=norm_id,
+            )
+            self.append_record(record)
+            return record
 
     def delete_entry(self, memory_id: str) -> bool:
         norm_id = normalize_workspace_memory_id(memory_id)
         with self._lock:
             content = self._read_content()
             lines = parse_workspace_memory_lines(content)
-            found = False
-            remaining: list[str] = []
-            for line in lines:
-                if line.entry is not None and line.entry.memory_id == norm_id:
-                    found = True
-                else:
-                    remaining.append(line.raw)
-            if not found:
+            entries = {line.entry.memory_id: line.entry for line in lines if line.entry is not None}
+            if norm_id not in entries:
                 return False
-            self._storage.write_text(self._memory_path, "".join(remaining), overwrite=True)
+            # Forget the whole correction chain. Otherwise deleting a current
+            # correction resurrects old content, and deleting an ancestor
+            # leaves its successor dangling in the on-disk graph.
+            forgotten = {norm_id}
+            while True:
+                linked = {entry.memory_id for entry in entries.values() if entry.supersedes_id in forgotten} | {
+                    entry.supersedes_id
+                    for entry in entries.values()
+                    if entry.memory_id in forgotten and entry.supersedes_id is not None
+                }
+                expanded = forgotten | linked
+                if expanded == forgotten:
+                    break
+                forgotten = expanded
+            remaining = [line.raw for line in lines if line.entry is None or line.entry.memory_id not in forgotten]
+            self._storage.write_text(
+                self._memory_path,
+                "".join(remaining),
+                overwrite=True,
+                expected_sha256=hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            )
             return True
 
     def search(self, query: str, *, category: str | None = None, limit: int = 8) -> tuple[WorkspaceMemoryEntry, ...]:
@@ -579,18 +596,45 @@ class WorkspaceMemory:
         return self.list_entries(limit=limit).entries
 
     def read_injection_digest(self, *, request: str = "") -> str:
-        del request
-        recent = self.read_recent(limit=10)
-        active = [e for e in recent if getattr(e, "active", True)]
-        if not active:
-            return ""
-        lines: list[str] = []
-        for e in active:
-            if getattr(e, "source", None) and e.source != "legacy_unknown":
-                lines.append(f"- ({e.category}) <!-- source:{e.source} -->: {e.learning}\n")
-            else:
-                lines.append(f"- ({e.category}): {e.learning}\n")
-        return "".join(lines)
+        ranked: tuple[_ScoredMemoryEntry, ...] = ()
+        try:
+            normalized = normalize_memory_search_query(request) if request.strip() else ""
+            if normalized:
+                ranked, _ = search_workspace_memory_entries(self, normalized_query=normalized)
+        except (MemoryToolError, WorkspaceMemoryStoreUnavailableError):
+            # An empty or malformed request still gets recent workspace context.
+            ranked = ()
+        with self._lock:
+            lines = parse_workspace_memory_lines(self._read_content())
+            active = [line.entry for line in lines if line.entry is not None and line.entry.active]
+        by_id = {entry.memory_id: entry for entry in active}
+        ordered = [item.entry for item in ranked if item.entry.memory_id in by_id]
+        selected_ids = {entry.memory_id for entry in ordered}
+        recent = sorted(
+            active,
+            key=lambda entry: (entry.updated_at or entry.timestamp, entry.timestamp, entry.memory_id),
+            reverse=True,
+        )
+        ordered.extend(entry for entry in recent if entry.memory_id not in selected_ids)
+
+        rendered: list[str] = []
+        total_bytes = 0
+        for entry in ordered:
+            record = format_workspace_memory_v3_record(
+                entry.learning,
+                entry.category,
+                memory_id=entry.memory_id,
+                created_at=entry.timestamp,
+                updated_at=entry.updated_at or entry.timestamp,
+                source=entry.source,
+                supersedes_id=entry.supersedes_id,
+            )
+            record_bytes = len(record.encode("utf-8"))
+            if total_bytes + record_bytes > _INJECTION_BYTE_BUDGET:
+                continue
+            rendered.append(record)
+            total_bytes += record_bytes
+        return "".join(rendered)
 
 
 def build_workspace_memory(storage: object, **kwargs: Any) -> WorkspaceMemory:
@@ -1209,7 +1253,7 @@ class WorkspaceMemoryToolHost:
             key_learning: str,
             category: str | None = None,
         ) -> dict[str, object]:
-            """Replace one Workspace Memory entry's learning, preserving id and timestamp."""
+            """Append a provenance-aware correction that supersedes one active entry."""
             normalized_id = self._normalize_id(memory_id)
             norm_cat: str | None = None
             if category is not None:
@@ -1225,11 +1269,11 @@ class WorkspaceMemoryToolHost:
                 raise _invalid_entry() from exc
             except Exception as exc:
                 raise _unavailable() from exc
-            entry = parse_workspace_memory_lines(record)[0].entry
+            entry = parse_workspace_memory_lines(record, complete_memory_graph=False)[0].entry
             return {
                 "ok": True,
                 "namespace": WORKSPACE_MEMORY_NAMESPACE,
-                "memory_id": normalized_id,
+                "memory_id": entry.memory_id if entry else normalized_id,
                 "category": entry.category if entry else category,
                 "source": entry.source if entry else "legacy_unknown",
                 "record_version": entry.record_version if entry else 3,
@@ -1643,6 +1687,95 @@ def record_memory_degradation(
     return degradation
 
 
+async def run_deferred_memory_outbox_reconcile(
+    reconciler: MemoryOutboxReconciler,
+    *,
+    interval_seconds: float = 60.0,
+) -> None:
+    """Periodic outbox sweeps; never blocks startup readiness (P23/QRE-166)."""
+    while True:
+        try:
+            receipt = await reconciler.reconcile_once()
+        except Exception as exc:
+            logger.warning(
+                "Memory outbox reconcile sweep failed (%s); next interval retries",
+                type(exc).__name__,
+                exc_info=exc,
+            )
+        else:
+            if receipt.claimed:
+                logger.info(
+                    "Memory outbox reconcile sweep claimed=%d promoted=%d dropped=%d retried=%d "
+                    "dead_lettered=%d workspaces=%d provider_unavailable=%s",
+                    receipt.claimed,
+                    receipt.promoted,
+                    receipt.dropped,
+                    receipt.retried,
+                    receipt.dead_lettered,
+                    receipt.workspaces,
+                    receipt.provider_unavailable,
+                )
+        await asyncio.sleep(interval_seconds)
+
+
+def promote_turn_memory_candidates(
+    store: Any,
+    candidates: tuple[Any, ...],
+    *,
+    allowed_categories: tuple[str, ...],
+) -> Any:
+    """
+    Promote memory candidates through the configured memory store.
+
+    Parameters:
+        candidates (tuple[Any, ...]): Memory candidates to promote.
+        allowed_categories (tuple[str, ...]): Candidate categories eligible for promotion.
+
+    Returns:
+        MemoryCandidatePromotionResult: Counts and reasons describing the promotion outcome.
+    """
+    if store is None:
+        result = MemoryCandidatePromotionResult(
+            proposed_count=len(candidates),
+            reasons=("store_unavailable",) if candidates else (),
+        )
+    else:
+        result = promote_memory_candidates(
+            store=store,
+            candidates=candidates,
+            allowed_categories=allowed_categories,
+        )
+    if candidates and (result.promoted_count or result.duplicate_count or result.dropped_count or result.failure_count):
+        logger.info(
+            "Memory Candidate promotion outcome promoted=%d duplicates=%d dropped=%d failed=%d reasons=%s",
+            result.promoted_count,
+            result.duplicate_count,
+            result.dropped_count,
+            result.failure_count,
+            ",".join(result.reasons) or "-",
+        )
+    return result
+
+
+async def prepare_turn_memory_digest(memory_store: Any, *, request: str) -> str:
+    """Return the per-Run injection digest, degrading fail-soft with diagnostics.
+
+    User-visible behavior is unchanged: ANY preparation failure still degrades
+    to no injection. The failure is classified once into a bounded, sanitized
+    diagnostic so provider outages, corrupt stores, invariant violations, and
+    internal defects no longer look identical to operators.
+    """
+    try:
+        return await asyncio.to_thread(
+            read_workspace_memory_injection_digest,
+            memory_store,
+            request=request,
+        )
+    except Exception as exc:
+        record_memory_degradation(exc, operation="injection_digest", fallback_outcome="no_memory_injection")
+        return ""
+
+
 __all__ = [
     "OUTCOME_DEADLINE_EXCEEDED",
     "OUTCOME_DUPLICATE",
@@ -1686,8 +1819,11 @@ __all__ = [
     "normalize_memory_candidate_categories",
     "normalize_memory_search_query",
     "normalize_workspace_memory_source",
+    "prepare_turn_memory_digest",
     "promote_memory_candidates",
+    "promote_turn_memory_candidates",
     "read_workspace_memory_injection_digest",
     "record_memory_degradation",
+    "run_deferred_memory_outbox_reconcile",
     "search_workspace_memory_entries",
 ]

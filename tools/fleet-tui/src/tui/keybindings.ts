@@ -20,6 +20,6 @@ export const fleetKeybindings = new KeybindingsManager({
   "fleet.suspend": { defaultKeys: "ctrl+z", description: "Suspend Fleet" },
   "fleet.toggleFold": {
     defaultKeys: "ctrl+o",
-    description: "Toggle the latest tool/code/output card",
+    description: "Toggle the latest child, Tool, code, or output card",
   },
 });

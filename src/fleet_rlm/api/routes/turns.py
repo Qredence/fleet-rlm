@@ -14,13 +14,6 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnRuntimeDep
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.chat.preparation import (
-    RunPreparationCancelledError,
-    RunPreparationTimeoutError,
-    RunPreparationUnavailableError,
-)
-from fleet_rlm.chat.turn_runtime import OpenedTurnStream
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.observability.posthog import capture
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -32,6 +25,12 @@ from fleet_rlm.sessions.run_state import (
 )
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
+from fleet_rlm.turn_preparation import (
+    RunPreparationCancelledError,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+)
+from fleet_rlm.turns import OpenedTurnStream, OpenTurnCommand
 
 router = APIRouter(prefix="/api/sessions", tags=["turns"])
 logger = logging.getLogger(__name__)

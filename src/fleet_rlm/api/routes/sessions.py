@@ -12,12 +12,13 @@ from pydantic import BaseModel
 from fleet_rlm.api.dependencies import (
     LocalScopeDep,
     MLflowRuntimeDep,
-    RunLifecycleDep,
     SessionCatalogDep,
     SessionLifecycleDep,
     SessionPrewarmDep,
+    SessionTaskServiceDep,
     SettingsDep,
     TraceFeedbackServiceDep,
+    TurnRuntimeDep,
 )
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.schemas import (
@@ -26,6 +27,7 @@ from fleet_rlm.api.schemas import (
     SessionListResponse,
     SessionPatchRequest,
     SessionSummaryResponse,
+    SessionTaskResponse,
     SessionTurnPageResponse,
     TraceFeedbackRequest,
     TraceFeedbackResponse,
@@ -41,6 +43,7 @@ from fleet_rlm.sessions.catalog import SequenceCursor
 from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
 from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord, TurnAccess
 from fleet_rlm.sessions.run_state import RunNotFoundError
+from fleet_rlm.sessions.task import TaskCheckpointCorruptError, TaskCheckpointMissingError
 
 router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 sessions_router = router
@@ -172,6 +175,41 @@ async def get_session(
     except SessionNotFoundError as exc:
         raise http_error(404, "session_not_found", "Session not found") from exc
     return _to_detail(record)
+
+
+@router.get(
+    "/{session_id}/task",
+    response_model=SessionTaskResponse,
+    operation_id="get_session_task",
+    responses={
+        404: {"description": "Session or task checkpoint not found"},
+        503: {"description": "Task checkpoint unavailable"},
+    },
+)
+async def get_session_task(
+    session_id: UUID,
+    identity: LocalScopeDep,
+    service: SessionTaskServiceDep,
+) -> SessionTaskResponse:
+    try:
+        task = await service.read(
+            session_id,
+            user_id=identity.user_id,
+            workspace_id=identity.workspace_id,
+        )
+    except (SessionNotFoundError, TaskCheckpointMissingError) as exc:
+        raise http_error(404, "task_not_found", "Task checkpoint not found") from exc
+    except TaskCheckpointCorruptError as exc:
+        raise http_error(503, "task_unavailable", "Task checkpoint unavailable") from exc
+    return SessionTaskResponse(
+        revision=task.revision,
+        goal=task.goal,
+        decisions=list(task.decisions),
+        relevant_paths=list(task.relevant_paths),
+        source_revisions=dict(task.source_revisions),
+        completed_work=list(task.completed_work),
+        pending_work=list(task.pending_work),
+    )
 
 
 @router.patch(
@@ -361,11 +399,11 @@ class CancellationResponse(BaseModel):
 async def request_run_cancellation(
     run_id: UUID,
     identity: LocalScopeDep,
-    lifecycle: RunLifecycleDep,
+    coordinator: TurnRuntimeDep,
 ) -> CancellationResponse:
     """Request cancellation for a run."""
     try:
-        status = await lifecycle.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
+        status = await coordinator.request_cancel(TurnAccess(identity.user_id, identity.workspace_id), run_id)
     except RunNotFoundError as exc:
         raise http_error(404, "run_not_found", "Run not found") from exc
     capture(

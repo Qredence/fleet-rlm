@@ -25,10 +25,17 @@ from fleet_rlm.rlm.events import (
     ToolFailed,
     ToolStarted,
 )
+from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
@@ -40,16 +47,9 @@ from fleet_rlm.rlm.result import (
     prediction_result,
     rlm_termination_mode,
 )
-from fleet_rlm.rlm.runtime import (
-    DelegationPolicy,
-    ExecutionRuntime,
-    RLMExecutionContext,
-    RLMRunner,
-    RunIdentity,
-    SessionView,
-)
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
@@ -100,7 +100,10 @@ def test_two_sequential_children_are_distinct_fresh_native_runtimes(
     # it and for any Root-visible name, expecting NameError for both.
     root = _lm(
         [
-            {"reasoning": "child a", "code": "sentinel = 'child-a-global'\nSUBMIT(answer=sentinel)"},
+            {
+                "reasoning": "child a",
+                "code": "sentinel = 'child-a-global'\nSUBMIT(answer=sentinel, evidence=[], gaps=[], result_files=[])",
+            },
             {
                 "reasoning": "child b",
                 "code": (
@@ -111,7 +114,8 @@ def test_two_sequential_children_are_distinct_fresh_native_runtimes(
                     "        leaked.append(name)\n"
                     "    except NameError:\n"
                     "        pass\n"
-                    "SUBMIT(answer='fresh' if not leaked else 'reused:' + ','.join(leaked))"
+                    "SUBMIT(answer='fresh' if not leaked else 'reused:' + ','.join(leaked), "
+                    "evidence=[], gaps=[], result_files=[])"
                 ),
             },
         ]
@@ -120,7 +124,7 @@ def test_two_sequential_children_are_distinct_fresh_native_runtimes(
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(max_calls=2))
 
     # Call 1: a fresh native child produces the sentinel answer.
-    first = executor.tool(capsule={"task": "first slice"})
+    first = executor.tool(task="first slice", inputs=[])
     assert first["answer"] == "child-a-global"
     # The first child was closed exactly once BEFORE its answer returned.
     assert recorder.close_calls == {1: 1}
@@ -128,7 +132,7 @@ def test_two_sequential_children_are_distinct_fresh_native_runtimes(
     assert built_rlms and type(built_rlms[0]).__name__ == "RLM"
 
     # Call 2: a second fresh native child starts from an empty namespace.
-    second = executor.tool(capsule={"task": "second slice"})
+    second = executor.tool(task="second slice", inputs=[])
     assert second["answer"] == "fresh"
 
     # Distinct native RLM instances, one per call.
@@ -174,14 +178,14 @@ def test_sequential_children_report_independent_completion_evidence() -> None:
     events: list[object] = []
     root = _lm(
         [
-            {"reasoning": "child a", "code": "SUBMIT(answer='a-answer')"},
-            {"reasoning": "child b", "code": "SUBMIT(answer='b-answer')"},
+            {"reasoning": "child a", "code": "SUBMIT(answer='a-answer', evidence=[], gaps=[], result_files=[])"},
+            {"reasoning": "child b", "code": "SUBMIT(answer='b-answer', evidence=[], gaps=[], result_files=[])"},
         ]
     )
     sub = _lm([{"answer": "unused"}])
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(max_calls=2), observer=events.append)
 
-    assert executor.tool(capsule={"task": "first slice"})["answer"] == "a-answer"
+    assert executor.tool(task="first slice", inputs=[])["answer"] == "a-answer"
     from fleet_rlm.rlm.events import ToolCompleted
 
     first_completed = [event for event in events if isinstance(event, ToolCompleted)]
@@ -194,7 +198,7 @@ def test_sequential_children_report_independent_completion_evidence() -> None:
         "termination_mode": "typed_submit",
     }
 
-    assert executor.tool(capsule={"task": "second slice"})["answer"] == "b-answer"
+    assert executor.tool(task="second slice", inputs=[])["answer"] == "b-answer"
     second_completed = [event for event in events if isinstance(event, ToolCompleted)]
     assert len(second_completed) == 2
     # The second completion evidence is its own: fresh index, same depth,
@@ -241,11 +245,11 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
     root = RecordingLM(
         [
             # Root action 1: delegate to child 1.
-            {"reasoning": "delegate", "code": "a = rlm_query(capsule={'task': 'child slice'})['answer']"},
+            {"reasoning": "delegate", "code": "a = rlm_query(task='child slice', inputs=[])['answer']"},
             # Child 1 action 1: deeper delegation -> depth-2 fallback.
             {"reasoning": "child semantic", "code": "inner = llm_query('fallback slice')"},
             # Child 1 action 2: submit the fallback answer.
-            {"reasoning": "child submit", "code": "SUBMIT(answer=inner)"},
+            {"reasoning": "child submit", "code": "SUBMIT(answer=inner, evidence=[], gaps=[], result_files=[])"},
             # Root action 2: integrate and submit.
             {"reasoning": "submit", "code": "SUBMIT(answer=a)"},
         ],
@@ -289,7 +293,7 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert "sub-fallback-answer" in stream.outcome.prediction.display_text
+    assert "sub-fallback-answer" in stream.outcome.prediction.answer
 
     snapshot = metrics_context.metrics.snapshot()
     # Role/depth annotations: Root actions at depth 0, the child's
@@ -318,7 +322,7 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
     # Usage accounting stayed truthful: the Root prediction's trajectory
     # carries exactly the two Root actions.
     assert stream.outcome.usage["iterations"] == 2
-    assert "sub-fallback-answer" in stream.outcome.prediction.outputs["answer"]
+    assert "sub-fallback-answer" in stream.outcome.prediction.answer
 
     # One native child, settled exactly once.
     assert recorder.call_indexes == [1]
@@ -334,7 +338,7 @@ def test_child_lm_copies_preserve_callback_ancestry_and_usage_shape() -> None:
     root = _lm(
         [
             {"reasoning": "child action", "code": "x = 1"},
-            {"reasoning": "child submit", "code": "SUBMIT(answer='role-ok')"},
+            {"reasoning": "child submit", "code": "SUBMIT(answer='role-ok', evidence=[], gaps=[], result_files=[])"},
         ]
     )
     sub = _lm([{"answer": "unused"}])
@@ -345,7 +349,7 @@ def test_child_lm_copies_preserve_callback_ancestry_and_usage_shape() -> None:
         deadline=time.monotonic() + 30,
     )
 
-    assert executor.tool(capsule={"task": "role slice"})["answer"] == "role-ok"
+    assert executor.tool(task="role slice", inputs=[])["answer"] == "role-ok"
     summary = executor.summary()
     # The child's two Root-LM-driven actions were recorded at depth 1.
     counts = dict(((role, depth), count) for role, depth, count in summary.delegation_metrics.lm_call_counts)
@@ -375,7 +379,7 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
             # Root action 1: install a Root-only sentinel.
             {"reasoning": "root sentinel", "code": "root_sentinel = 'root-only'"},
             # Root action 2: delegate to child A.
-            {"reasoning": "delegate a", "code": "child_a = rlm_query(capsule={'task': 'a slice'})['answer']"},
+            {"reasoning": "delegate a", "code": "child_a = rlm_query(task='a slice', inputs=[])['answer']"},
             # Child A action: Root sentinel must be absent; install A's own.
             {
                 "reasoning": "probe root",
@@ -386,11 +390,11 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
                     "except NameError:\n"
                     "    probe = 'isolated'\n"
                     "child_a_sentinel = 'a-only'\n"
-                    "SUBMIT(answer=probe)"
+                    "SUBMIT(answer=probe, evidence=[], gaps=[], result_files=[])"
                 ),
             },
             # Root action 3: delegate to child B.
-            {"reasoning": "delegate b", "code": "child_b = rlm_query(capsule={'task': 'b slice'})['answer']"},
+            {"reasoning": "delegate b", "code": "child_b = rlm_query(task='b slice', inputs=[])['answer']"},
             # Child B action: Root AND sibling A sentinels must be absent.
             {
                 "reasoning": "probe root and sibling",
@@ -406,7 +410,8 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
                     "    leaked.append('sibling-a')\n"
                     "except NameError:\n"
                     "    pass\n"
-                    "SUBMIT(answer='isolated' if not leaked else 'reused:' + ','.join(leaked))"
+                    "SUBMIT(answer='isolated' if not leaked else 'reused:' + ','.join(leaked), "
+                    "evidence=[], gaps=[], result_files=[])"
                 ),
             },
             # Root action 4: Root sentinel survives; child sentinels absent.
@@ -455,7 +460,7 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
             pass
         assert stream.outcome is not None and stream.outcome.succeeded
         assert stream.outcome.prediction is not None
-        return stream.outcome.prediction.display_text
+        return stream.outcome.prediction.answer
 
     answer = asyncio.run(drive())
     # Root continuity preserved; Root↔child and sibling↔sibling isolation
@@ -474,19 +479,23 @@ def test_root_and_child_boundaries_classify_identical_output_matrix() -> None:
     categories at the Fleet typed-result boundary."""
     from fleet_rlm.rlm.program import FleetRLMSignature
 
-    # Both boundaries declare exactly one required ``answer: str`` output.
+    # Root declares only its answer; child submissions add evidence and gaps.
     assert set(FleetRLMSignature.output_fields) == {"answer"}
-    assert set(RecursiveSubtaskSignature.output_fields) == {"answer"}
+    assert set(RecursiveSubtaskSignature.output_fields) == {"answer", "evidence", "gaps", "result_files"}
 
     matrix: list[tuple[dict[str, Any], int, str]] = [
-        ({"answer": "valid answer"}, 100, "accepted"),
-        ({"answer": ""}, 100, "invalid"),
-        ({"answer": "   "}, 100, "invalid"),
-        ({"answer": None}, 100, "invalid"),
-        ({"answer": 123}, 100, "invalid"),
-        ({"answer": ["not", "json-text"]}, 100, "invalid"),
-        ({"answer": "x" * 500}, 100, "too-large"),
-        ({"answer": "exact-json-compatible"}, 1000, "accepted"),
+        ({"answer": "valid answer", "evidence": [], "gaps": [], "result_files": []}, 100, "accepted"),
+        ({"answer": "", "evidence": [], "gaps": [], "result_files": []}, 100, "invalid"),
+        ({"answer": "   ", "evidence": [], "gaps": [], "result_files": []}, 100, "invalid"),
+        ({"answer": None, "evidence": [], "gaps": [], "result_files": []}, 100, "invalid"),
+        ({"answer": 123, "evidence": [], "gaps": [], "result_files": []}, 100, "invalid"),
+        ({"answer": ["not", "json-text"], "evidence": [], "gaps": [], "result_files": []}, 100, "invalid"),
+        ({"answer": "x" * 500, "evidence": [], "gaps": [], "result_files": []}, 100, "too-large"),
+        (
+            {"answer": "exact-json-compatible", "evidence": [], "gaps": [], "result_files": []},
+            1000,
+            "accepted",
+        ),
     ]
 
     for values, bound, expected in matrix:
@@ -504,7 +513,7 @@ def test_root_and_child_boundaries_classify_identical_output_matrix() -> None:
                     schema_version="1",
                     max_output_chars=bound,
                 )
-                outcomes[name] = ("accepted", result.display_text)
+                outcomes[name] = ("accepted", result.outputs["answer"])
             except PredictionOutputTooLargeError:
                 outcomes[name] = ("too-large", None)
             except PredictionOutputError:
@@ -524,13 +533,16 @@ def test_child_oversized_submit_fails_at_the_child_boundary() -> None:
     recorder = ChildLeaseRecorder()
     root = _lm(
         [
-            {"reasoning": "child submits oversized", "code": "SUBMIT(answer='x' * 500)"},
+            {
+                "reasoning": "child submits oversized",
+                "code": "SUBMIT(answer='x' * 500, evidence=[], gaps=[], result_files=[])",
+            },
         ]
     )
     sub = _lm([{"answer": "unused"}])
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(child_max_output_chars=100))
 
-    outcome = executor.tool(capsule={"task": "oversized child submit"})
+    outcome = executor.tool(task="oversized child submit", inputs=[])
     assert outcome["status"] == "failed"
     assert outcome["answer"] == ""
 
@@ -579,11 +591,14 @@ async def test_root_oversized_submit_fails_with_the_same_closed_category() -> No
     stream = RLMRunner().stream(context)
     _events = [event async for event in stream]
 
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
     assert stream.outcome is not None
-    assert stream.outcome.terminal_status == "failed"
-    assert stream.outcome.prediction is None
+    projected = project_outcome_prediction(stream.outcome)
+    assert projected.terminal_status == "failed"
+    assert projected.prediction is None
     # Same closed literal as the child boundary's too-large category.
-    assert stream.outcome.public_error_message == "Turn output is too large"
+    assert projected.public_error_message == "Turn output is too large"
 
 
 def test_extraction_fallback_termination_parity_between_root_and_child() -> None:
@@ -596,7 +611,7 @@ def test_extraction_fallback_termination_parity_between_root_and_child() -> None
     root = _lm(
         [
             {"reasoning": "child work", "code": "print('plain work only')"},
-            {"answer": "extracted-child"},
+            {"answer": "extracted-child", "evidence": [], "gaps": [], "result_files": []},
         ]
     )
     sub = _lm([{"answer": "unused"}])
@@ -607,13 +622,13 @@ def test_extraction_fallback_termination_parity_between_root_and_child() -> None
         options=RecursiveRLMOptions(child_max_iters=1, child_max_llm_calls=3),
     )
 
-    assert executor.tool(capsule={"task": "extraction parity"})["answer"] == "extracted-child"
+    assert executor.tool(task="extraction parity", inputs=[])["answer"] == "extracted-child"
     assert executor.summary().termination_modes == ("native_extraction_fallback",)
 
     # Root scope: the same never-submitting behavior yields the same mode.
     async def bare_root() -> Any:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        rlm = build_native_rlm(
+        rlm = build_native_rlm_for_test(
             signature="request -> answer",
             options=RLMOptions(max_iters=1, max_llm_calls=3, max_output_chars=1000),
         )
@@ -776,12 +791,15 @@ async def test_success_child_events_expose_only_approved_metadata() -> None:
     root_actions = [
         {
             "reasoning": "delegate one bounded child",
-            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
+            "code": f"child_answer = rlm_query(task={child_prompt!r}, inputs=[])['answer']",
         },
         {"reasoning": "finish", "code": "SUBMIT(answer='root-done')"},
     ]
     child_answers = [
-        {"reasoning": "answer the child", "code": f"SUBMIT(answer={SENTINEL_ANSWER!r})"},
+        {
+            "reasoning": "answer the child",
+            "code": f"SUBMIT(answer={SENTINEL_ANSWER!r}, evidence=[], gaps=[], result_files=[])",
+        },
     ]
     events, stream = await _run_turn(
         root_actions=root_actions,
@@ -819,8 +837,7 @@ async def test_success_child_events_expose_only_approved_metadata() -> None:
     tool_started = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolStarted)]
     assert len(tool_started) == 1
     started_input = dict(tool_started[0].input or {})
-    assert started_input["selected_input_bytes"] > len(child_prompt.encode("utf-8"))
-    assert set(started_input) == {"selected_input_bytes"}
+    assert started_input == {"input_count": 0}
 
     # The recursive Tool output projection is the bounded completion metadata.
     tool_completed = [detail for detail in _recursive_tool_details(events) if isinstance(detail, ToolCompleted)]
@@ -852,12 +869,15 @@ async def test_failed_child_events_stay_bounded_and_sentinel_free() -> None:
     root_actions = [
         {
             "reasoning": "delegate one child that will oversubmit",
-            "code": f"child_answer = rlm_query(capsule={{'task': {child_prompt!r}}})['answer']",
+            "code": f"child_answer = rlm_query(task={child_prompt!r}, inputs=[])['answer']",
         },
         {"reasoning": "recover and finish", "code": "SUBMIT(answer='recovered')"},
     ]
     child_answers = [
-        {"reasoning": "oversubmit", "code": f"SUBMIT(answer={oversized_answer!r})"},
+        {
+            "reasoning": "oversubmit",
+            "code": f"SUBMIT(answer={oversized_answer!r}, evidence=[], gaps=[], result_files=[])",
+        },
     ]
     events, _stream = await _run_turn(
         root_actions=root_actions,

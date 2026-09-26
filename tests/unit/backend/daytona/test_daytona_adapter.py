@@ -71,6 +71,36 @@ def test_factory_created_adapter_keeps_run_bindings_off_retained_template() -> N
     assert retained._turn_request is None
 
 
+def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
+    from dspy.primitives.code_interpreter import CodeInterpreterError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    async def tool():
+        raise AssertionError("unbridged tool must never run")
+
+    interpreter = DaytonaCodeInterpreter()
+    interpreter._bound_tools = {"tool": tool}
+    with pytest.raises(CodeInterpreterError, match="persistent async bridge"):
+        interpreter.invoke_tool("tool", {})
+
+
+@pytest.mark.asyncio
+async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop
+
+    loop = asyncio.get_running_loop()
+
+    async def tool():
+        assert asyncio.get_running_loop() is loop
+        return "bridged"
+
+    interpreter = DaytonaCodeInterpreter()
+    interpreter._bound_tools = {"tool": tool}
+    interpreter.bind_async_bridge(_SyncBridgeLoop(caller_loop=loop))
+    assert await asyncio.to_thread(interpreter.invoke_tool, "tool", {}) == "bridged"
+
+
 def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
     from dspy.primitives.code_interpreter import CodeExecutionError
 
@@ -118,7 +148,7 @@ def test_strict_shutdown_preserves_broker_error_and_closes_backend() -> None:
 
 def test_lease_release_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-    from fleet_rlm.daytona.session_manager import InterpreterLease
+    from fleet_rlm.daytona.runtime import InterpreterLease
 
     backend = _FakeBackend()
     interp = DaytonaCodeInterpreter(backend=backend)

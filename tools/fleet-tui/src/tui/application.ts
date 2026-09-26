@@ -31,6 +31,7 @@ export type FleetTuiOptions = {
   resumed: boolean;
   initialEvents: StoreEvent[];
   latestTraceId?: string | null;
+  latestTraceRunId?: string | null;
   terminal?: Terminal;
   queryColorScheme?: boolean;
   /** Optional local draft persistence; omitted disables it (tests stay hermetic). */
@@ -87,6 +88,7 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       },
       events: options.initialEvents,
       latestTraceId: options.latestTraceId,
+      latestTraceRunId: options.latestTraceRunId,
     });
     this.screen = new FleetScreen(this.store, this.editor, this.terminal, this.ui);
     this.ui.setLayoutRoot(this.screen);
@@ -213,9 +215,16 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     };
   }
 
-  /** Toggle fold state of the most recent foldable card (tool/code/output). */
+  /** Toggle the latest child card before other foldable Tool/code/output cards. */
   private toggleLatestFold(): void {
     const messages = this.store.getState().messages;
+    const latestChild = [...messages]
+      .reverse()
+      .find((message) => message.kind === "child_progress");
+    if (latestChild) {
+      this.store.dispatch({ type: "message/toggle-fold", id: latestChild.id });
+      return;
+    }
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index];
       if (

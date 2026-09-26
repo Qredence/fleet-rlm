@@ -42,13 +42,29 @@ def test_ai_sdk_projector_emits_typed_ui_message_chunks() -> None:
     assert payloads[-1]["finishReason"] == "stop"
 
 
-def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
+def test_child_progress_projects_structurally_and_preserves_legacy_status() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
+    from fleet_rlm.rlm.events import ChildProgress, EventRecorder, RunStarted, Status
 
-    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    run_id = uuid4()
+    parent_run_id = str(run_id)
+    recorder = EventRecorder(run_id=run_id, session_id=uuid4())
     before = recorder.record(RunStarted("live"))
-    after = recorder.record(
+    child = recorder.record(
+        ChildProgress(
+            "child-1",
+            "Review the API contract",
+            "completed",
+            2,
+            "Found a schema mismatch",
+            "complete",
+            parent_run_id,
+            evidence=("src/api.py:42",),
+            gaps=("Caller not checked",),
+            result_file_count=2,
+        )
+    )
+    legacy_status = recorder.record(
         Status(
             "recursive",
             "child_completed",
@@ -57,8 +73,27 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
     )
 
     assert before.sequence == 1
-    assert after.sequence == 2
-    assert AISDKUIProjector().project(after) == [
+    assert child.sequence == 2
+    assert legacy_status.sequence == 3
+    assert AISDKUIProjector().project(child) == [
+        {
+            "type": "data-child-progress",
+            "id": "child-1",
+            "data": {
+                "child_id": "child-1",
+                "task_label": "Review the API contract",
+                "state": "completed",
+                "elapsed_ms": 2,
+                "outcome": "Found a schema mismatch",
+                "evidence": ["src/api.py:42"],
+                "gaps": ["Caller not checked"],
+                "result_file_count": 2,
+                "cleanup_state": "complete",
+                "parent_run_id": parent_run_id,
+            },
+        }
+    ]
+    assert AISDKUIProjector().project(legacy_status) == [
         {
             "type": "data-status",
             "data": {
@@ -72,7 +107,7 @@ def test_projection_does_not_consume_extra_runtime_event_sequences() -> None:
 
 
 def test_openapi_declares_typed_render_data_payloads() -> None:
-    from fleet_rlm.composition.testing import create_testing_app
+    from tests.support.testing_app import create_testing_app
 
     schema = create_testing_app().openapi()
     variants = schema["components"]["schemas"]["FleetUIMessageChunk"]["oneOf"]

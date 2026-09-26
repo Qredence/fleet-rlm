@@ -6,21 +6,22 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_preparation import TestingRunPreparer
+
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import (
-        DefaultRunPreparer,
-        RunEnvironment,
-        RunPreparationUnavailableError,
-    )
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
+    )
+    from fleet_rlm.turn_preparation import (
+        RunEnvironment,
+        RunPreparationUnavailableError,
     )
 
     class Sink:
@@ -59,11 +60,11 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=Capabilities(),
     )
 
@@ -73,17 +74,16 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_attachment_staging_is_unavailable() -> None:
-    from fleet_rlm.chat.preparation import (
-        DefaultRunPreparer,
-        RunEnvironment,
-        RunPreparationUnavailableError,
-    )
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
+    )
+    from fleet_rlm.turn_preparation import (
+        RunEnvironment,
+        RunPreparationUnavailableError,
     )
 
     class Sink:
@@ -117,11 +117,11 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=object(),
     )
 
@@ -132,17 +132,16 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
 @pytest.mark.asyncio
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import (
-        DefaultRunPreparer,
-        RunEnvironment,
-        RunPreparationUnavailableError,
-    )
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
+    )
+    from fleet_rlm.turn_preparation import (
+        RunEnvironment,
+        RunPreparationUnavailableError,
     )
 
     class Sink:
@@ -192,11 +191,11 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         cancellation_probe,
         _RunClaimToken(uuid4()),
     )
-    preparer = DefaultRunPreparer(
+    preparer = TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=Capabilities(),
     )
 

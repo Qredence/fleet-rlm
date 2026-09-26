@@ -140,7 +140,7 @@ jobs:
           command: make stream-check
       - run:
           name: Python dependency check
-          command: uvx deptry . --config pyproject.toml
+          command: make check-deps
 
   lint-typecheck:
     executor: python

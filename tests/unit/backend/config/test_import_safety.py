@@ -58,7 +58,7 @@ def test_settings_exclude_secrets_from_serialization() -> None:
 
 def test_composition_common_import_does_not_configure_dspy_providers() -> None:
     """Importing composition.live alone must not configure a DSPy provider LM."""
-    script = "import fleet_rlm.composition.live\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
+    script = "import fleet_rlm.app_lifecycle\nimport dspy\nassert dspy.settings.lm is None, repr(dspy.settings.lm)\n"
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
@@ -86,16 +86,21 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
     root = Path("src/fleet_rlm")
     candidates = [
         path
-        for package in ("chat", "artifacts", "runtime", "skills", "workspace", "attachments")
+        for package in ("artifacts", "skills", "workspace", "attachments")
         for path in (root / package).glob("*.py")
     ]
-    candidates.append(root / "composition" / "testing.py")
+    candidates.extend((root / "turns.py", root / "turn_preparation.py", root / "turn_settlement.py"))
 
-    # ``workspace/storage.py`` is the one documented raw Workspace Agent
-    # transport exception; all other provider imports stay below composition.
-    storage = root / "workspace" / "storage.py"
+    # Workspace storage's agent transport and host I/O bridge are the two
+    # narrow provider edges; domain policy stays in Workspace.
+    provider_edges = {
+        root / "workspace" / "storage.py",
+        root / "workspace" / "host_io.py",
+    }
     violations = [
-        str(path) for path in candidates if path != storage and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
+        str(path)
+        for path in candidates
+        if path not in provider_edges and "fleet_rlm.daytona" in path.read_text(encoding="utf-8")
     ]
 
     assert violations == []

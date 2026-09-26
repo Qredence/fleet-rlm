@@ -28,6 +28,7 @@ class FailureDiagnostic:
 _HTTP_STATUS_TEXT = re.compile(r"\b(4\d{2}|5\d{2})\b")
 _HTTP_STATUS_VALUE = re.compile(r"^(4\d{2}|5\d{2})$")
 _PROVIDER_EXCEPTION_TEXT = re.compile(r"(?i)(litellm|dspy|lmunsupported|provider|endpoint|chat[ -]?completion|openai/)")
+_SAFE_CAUSE_CLASS = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
 
 
 def _safe_provider_status_code(exc: object) -> int | None:
@@ -136,8 +137,8 @@ def trace_failure_category(exc: BaseException) -> str:
         str: A failure category such as ``unauthorized``, ``cleanup_failed``, ``wrap_up_rejected``,
             ``timeout``, ``cancelled``, or the normalized diagnostic cause type.
     """
+    from fleet_rlm.daytona.errors import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
     from fleet_rlm.rlm.budget import FinalizationExhausted
-    from fleet_rlm.rlm.recursion import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
 
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
@@ -156,6 +157,18 @@ def trace_failure_category(exc: BaseException) -> str:
     if isinstance(exc, asyncio.CancelledError):
         return "cancelled"
     return normalize_turn_failure(exc).cause_type
+
+
+def trace_failure_details(exc: BaseException) -> dict[str, str]:
+    """Return bounded, message-free failure fields for MLflow spans."""
+    cause = _diagnostic_cause(exc)
+    raw_class = cause.cause_type if isinstance(cause, DaytonaAdapterError) else type(cause).__name__
+    cause_class = raw_class if isinstance(raw_class, str) and _SAFE_CAUSE_CLASS.fullmatch(raw_class) else "Unknown"
+    return {
+        "failure_category": trace_failure_category(exc),
+        "failure_cause_class": cause_class,
+        "provider_status_category": normalize_turn_failure(exc).provider_status_category,
+    }
 
 
 def walk_cause_chain(exc: BaseException) -> Iterator[BaseException]:

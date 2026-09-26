@@ -61,6 +61,7 @@ def _happy_details() -> tuple[Any, ...]:
     from fleet_rlm.rlm.events import (
         ArtifactCreated,
         AttachmentRead,
+        ChildProgress,
         RLMCode,
         RLMOutput,
         RLMReasoning,
@@ -84,6 +85,14 @@ def _happy_details() -> tuple[Any, ...]:
     return (
         RunStarted("live"),
         Status("execution", "running", "preparing skills"),
+        ChildProgress(
+            child_id="child-1",
+            task_label="Inspect selected evidence",
+            state="running",
+            elapsed_ms=12,
+            cleanup_state="pending",
+            parent_run_id=str(_RUN_IDS["happy"]),
+        ),
         SkillActivated("skill-inspect", "inspect", "1.0.0", "system", ("read",)),
         SkillLoaded("skill-exec", "exec", "1.2.0"),
         StepStarted(1),

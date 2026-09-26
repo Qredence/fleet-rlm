@@ -17,16 +17,16 @@ from typing import Any, Literal, cast
 
 import dspy
 
+from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.observability.tracing import dspy_turn_callbacks
-from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
-from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, _RLMTraceCallback
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
 from fleet_rlm.rlm.recursion import (
     RecursiveCallSummary,
     RecursiveRLMExecutor,
     RecursiveRLMOptions,
 )
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 RoutingClass = Literal[
     "python_native",
@@ -128,8 +128,8 @@ CURATED_ROUTING_SCENARIOS: tuple[RoutingScenario, ...] = (
     ),
     RoutingScenario(
         "recursive-native-semantic",
-        "Call rlm_query(capsule={'task': 'Use native llm_query to classify phosphorus as an element; "
-        "return only element or not element'}). Check the typed outcome status and use its answer.",
+        "Call rlm_query(task='Use native llm_query to classify phosphorus as an element; "
+        "return only element or not element', inputs=[]). Check the typed outcome status and use its answer.",
         "recursive_child",
         "element",
     ),
@@ -378,15 +378,21 @@ async def run_routing_scenario(
         )
         signature = root_signature_for_recursion(_RoutingScenarioSignature, recursion_enabled=recursion_enabled)
         tools = (recursive.tool, recursive.batched_tool) if recursion_enabled else None
-        rlm = build_native_rlm(
-            signature=signature,
-            options=RLMOptions(),
-            tools=tools,
-            sub_lm=sub_lm,
-            verbose=False,
-        )
         root_interpreter = await _maybe_await(root_interpreter_factory())
         try:
+
+            def interpreter_factory(interpreter: Any = root_interpreter) -> Any:
+                return interpreter
+
+            interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+            rlm = build_native_rlm(
+                signature=signature,
+                options=RLMOptions(),
+                tools=tools,
+                sub_lm=sub_lm,
+                interpreter_factory=interpreter_factory,
+                verbose=False,
+            )
             bind_observer = getattr(root_interpreter, "bind_observer", None)
             if callable(bind_observer):
                 bind_observer(captured.append, max_chars=2_000)

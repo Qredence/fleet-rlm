@@ -9,24 +9,23 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
+    DaytonaRuntime,
     DaytonaSandboxSpec,
     ExpectedWorkspaceMount,
+    LeaseRequest,
+    LiveDaytonaPlatform,
     VolumeConfig,
     verify_sandbox_workspace_mount,
     volume_mount_spec,
 )
-from fleet_rlm.daytona.session_manager import (
-    DaytonaSessionManager,
-    LeaseRequest,
-)
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
-from fleet_rlm.runtime.bindings import (
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
+from fleet_rlm.sessions.bindings import (
     SandboxBinding,
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from tests.support.session_manager import make_daytona_runtime
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
 
@@ -116,7 +115,10 @@ class _FakePlatform:
         ephemeral: bool = False,
     ) -> _FakeSandbox:
         del ephemeral
-        require_scoped_volume_subpath(volume_subpath)
+        if mount_path == "/workspace":
+            assert volume_subpath.startswith("workspaces/") and volume_subpath.endswith("/workspace")
+        else:
+            require_scoped_volume_subpath(volume_subpath)
         self._n += 1
         sid = f"sb-{self._n}"
         labels = labels or {}
@@ -144,10 +146,10 @@ class _FakePlatform:
         self.sandboxes.pop(sandbox_id, None)
 
 
-def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingStore]:
+def _manager() -> tuple[DaytonaRuntime, _FakePlatform, InMemoryBindingStore]:
     plat = _FakePlatform()
     store = InMemoryBindingStore()
-    mgr = DaytonaSessionManager(
+    mgr = make_daytona_runtime(
         platform=plat,
         volume_client=_FakeVolumeClient(),
         volume_config=VolumeConfig(),
@@ -157,7 +159,7 @@ def _manager() -> tuple[DaytonaSessionManager, _FakePlatform, InMemoryBindingSto
     return mgr, plat, store
 
 
-async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+async def _acquire(mgr: DaytonaRuntime, request: LeaseRequest):
     return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
 
 
@@ -203,7 +205,7 @@ async def test_acquire_persists_binding_workspace_scope_fields() -> None:
     assert binding is not None
     assert binding.workspace_id == req.workspace_id
     assert binding.volume_id == lease.volume_id
-    assert binding.volume_subpath == f"workspaces/{req.workspace_id}"
+    assert binding.volume_subpath == f"workspaces/{req.workspace_id}/sessions/{req.session_id}/workspace"
     assert binding.mount_path == lease.mount_path
     assert plat.created[0]["volume_subpath"] == binding.volume_subpath
     assert plat.created[0]["labels"]["workspace_id"] == str(req.workspace_id)
@@ -214,15 +216,17 @@ async def test_sibling_workspaces_get_distinct_subpaths() -> None:
     mgr, plat, _store = _manager()
     ws_a = uuid4()
     ws_b = uuid4()
-    lease_a = await _acquire(mgr, LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_a))
-    lease_b = await _acquire(mgr, LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=ws_b))
+    session_a = uuid4()
+    session_b = uuid4()
+    lease_a = await _acquire(mgr, LeaseRequest(session_id=session_a, user_id=uuid4(), workspace_id=ws_a))
+    lease_b = await _acquire(mgr, LeaseRequest(session_id=session_b, user_id=uuid4(), workspace_id=ws_b))
     assert lease_a.volume_id == lease_b.volume_id
     assert lease_a.volume_subpath != lease_b.volume_subpath
-    assert lease_a.volume_subpath == f"workspaces/{ws_a}"
-    assert lease_b.volume_subpath == f"workspaces/{ws_b}"
+    assert lease_a.volume_subpath == f"workspaces/{ws_a}/sessions/{session_a}/workspace"
+    assert lease_b.volume_subpath == f"workspaces/{ws_b}/sessions/{session_b}/workspace"
     assert {c["volume_subpath"] for c in plat.created} == {
-        f"workspaces/{ws_a}",
-        f"workspaces/{ws_b}",
+        f"workspaces/{ws_a}/sessions/{session_a}/workspace",
+        f"workspaces/{ws_b}/sessions/{session_b}/workspace",
     }
 
 

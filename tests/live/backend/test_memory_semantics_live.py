@@ -51,11 +51,11 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.skills.catalog import stable_skill_id
 from fleet_rlm.workspace.memory import WorkspaceMemory, WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
 from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
-from fleet_rlm.workspace.paths import volume_paths_from_settings
-from fleet_rlm.workspace.storage import AgentStorageSession, DaytonaSandboxVolumeFs, WorkspaceMemoryStorage
+from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs, WorkspaceMemoryStorage, WorkspaceStorage
 from tests.live.backend._mvp_support import _assert_sse_stop, _live_settings, _sse_chunks, _strict_cleanup
 from tests.live.backend._tool_chunks import _paired_tool_chunks
 
@@ -204,7 +204,7 @@ class _QRE142Runner:
         self.client = TestClient(self.app)
         self.client.__enter__()
         inventory = self.app.state.runtime_inventory
-        self.resources = inventory.run_environment_resources
+        self.resources = inventory.daytona_runtime_owner
         self.preparation = inventory.run_preparation
         assert self.resources is not None and self.preparation is not None
         self.portal = self.client.portal
@@ -252,13 +252,13 @@ class _QRE142Runner:
             assert binding is not None and binding.sandbox_id is not None
             self.sandbox_ids.add(binding.sandbox_id)
             portal_loop = self.portal.call(lambda: asyncio.get_running_loop())
-            sandbox = sync_sandbox(self.portal.call(self.resources.platform.get, binding.sandbox_id), portal_loop)
+            sandbox = sync_sandbox(self.portal.call(self.resources._platform.get, binding.sandbox_id), portal_loop)
             assert sandbox is not None
             self._volume_fs = DaytonaSandboxVolumeFs(sandbox)
             paths = volume_paths_from_settings(self.settings)
             self._store = WorkspaceMemory.from_storage(
                 WorkspaceMemoryStorage(
-                    AgentStorageSession(
+                    WorkspaceStorage(
                         sandbox,
                         volume_root=str(paths.root),
                         root=str(paths.root),

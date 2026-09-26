@@ -109,6 +109,17 @@ class SkillToolHost:
         with self._lock:
             return frozenset(self._loaded_ids)
 
+    def loaded_definitions(self) -> tuple[SkillDefinition, ...]:
+        """Snapshot only Skills already loaded for this Turn, in catalog order."""
+        with self._lock:
+            loaded = frozenset(self._loaded_ids)
+        return tuple(
+            skill
+            for card in self._catalog.cards()
+            if card.id in loaded
+            if (skill := self._catalog.get(card.id)) is not None
+        )
+
     def drain_public_events(self) -> list[dict[str, Any]]:
         with self._lock:
             values = list(self._pending_events)

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from uuid import uuid4
 
 import pytest
+
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 def test_result_snapshot_is_deterministic_strict_utf8_and_closed() -> None:
@@ -80,7 +83,7 @@ def test_result_snapshot_rejects_non_strict_usage() -> None:
 
 
 def test_volume_result_path_is_unique_and_path_safe() -> None:
-    from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths
+    from fleet_rlm.paths import UnsafePathError, VolumePaths
 
     paths = VolumePaths.from_mount()
     session_id, first_run, second_run = uuid4(), uuid4(), uuid4()
@@ -108,8 +111,8 @@ def test_daytona_volume_adapter_removes_exact_file_path() -> None:
 
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
-    from fleet_rlm.chat.run_lifecycle import RunLifecycleService
-    from fleet_rlm.composition.daytona_run_preparation import _DaytonaRunSink
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -117,7 +120,8 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
         FailedRunReceipt,
         _RunClaimToken,
     )
-    from fleet_rlm.workspace.paths import VolumePaths
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+    from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
     values: dict[str, bytes] = {}
     deleted: list[str] = []
@@ -137,12 +141,25 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
             deleted.append(path)
             values.pop(path, None)
 
-    paths = VolumePaths.from_mount()
-    sink = _DaytonaRunSink(
-        type("Sandbox", (), {"fs": Fs()})(),
-        paths=paths,
-    )
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    paths = VolumePaths.from_mount()
+    sandbox = type("Sandbox", (), {"fs": Fs()})()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    host_io = daytona_host_io_for_test_sandbox(
+        sandbox,
+        workspace_id=access.workspace_id,
+        dispatcher=dispatcher,
+        volume_root=str(paths.mount_path),
+        max_file_bytes=1_000_000,
+    )
+    sink = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=paths,
+        host_io=host_io,
+        run_id=run_id,
+    )
 
     async def not_cancelled() -> bool:
         return False
@@ -182,7 +199,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
                 True,
             )
 
-    receipt = await RunLifecycleService(Store(), max_artifact_bytes=1024).finish(
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
         turn,
         RLMOutcome(
             "completed",

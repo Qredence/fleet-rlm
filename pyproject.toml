@@ -59,7 +59,6 @@ dependencies = [
     "httpx>=0.28,<1",
     # Host-side public URL Tools pin validated addresses and stream bounded
     # responses without inheriting ambient proxy configuration.
-    "urllib3>=2.7,<3",
     # MLflow 3 tracing: DSPy autolog + Databricks tracking backend.
     "mlflow==3.16.0",
     "opentelemetry-sdk==1.44.0",

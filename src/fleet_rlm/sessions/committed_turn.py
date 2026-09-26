@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.rlm.result import validate_rlm_usage
-from fleet_rlm.runtime.usage import RLMUsage
+from fleet_rlm.sessions.usage import RLMUsage
 
 
 class CommittedTurnValidationError(ValueError):
@@ -176,6 +176,48 @@ class StatusPart:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildProgressPart:
+    child_id: str
+    task_label: str
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int
+    outcome: str | None = None
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
+    parent_run_id: str | None = None
+    evidence: tuple[str, ...] = ()
+    gaps: tuple[str, ...] = ()
+    result_file_count: int = 0
+    code_excerpt: str | None = None
+    output_excerpt: str | None = None
+    type: Literal["child_progress"] = "child_progress"
+
+    def __post_init__(self) -> None:
+        if not self.child_id.strip() or len(self.child_id) > 128:
+            raise CommittedTurnValidationError("child_id must contain 1 to 128 non-blank characters")
+        if not self.task_label.strip() or len(self.task_label) > 240:
+            raise CommittedTurnValidationError("task_label must contain 1 to 240 non-blank characters")
+        _require_nonnegative(self.elapsed_ms, "elapsed_ms")
+        if (
+            not isinstance(self.result_file_count, int)
+            or isinstance(self.result_file_count, bool)
+            or not 0 <= self.result_file_count <= 16
+        ):
+            raise CommittedTurnValidationError("result_file_count must be between 0 and 16")
+        if self.outcome is not None and len(self.outcome) > 500:
+            raise CommittedTurnValidationError("outcome must not exceed 500 characters")
+        if any(value is not None and len(value) > 800 for value in (self.code_excerpt, self.output_excerpt)):
+            raise CommittedTurnValidationError("child code and output excerpts must not exceed 800 characters")
+        if (
+            len(self.evidence) > 8
+            or len(self.gaps) > 8
+            or any(not isinstance(item, str) or len(item) > 200 for item in (*self.evidence, *self.gaps))
+        ):
+            raise CommittedTurnValidationError("child progress details exceed their bounds")
+        if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
+            raise CommittedTurnValidationError("parent_run_id must contain 1 to 128 non-blank characters")
+
+
+@dataclass(frozen=True, slots=True)
 class ArtifactPart:
     artifact_id: UUID
     kind: Literal["text", "markdown", "json"]
@@ -244,6 +286,7 @@ CommittedPart: TypeAlias = (
     | AttachmentPart
     | WarningPart
     | StatusPart
+    | ChildProgressPart
     | ArtifactPart
     | UsagePart
     | StructuredResultPart
@@ -260,6 +303,7 @@ _EXECUTION_PARTS = (
     AttachmentPart,
     WarningPart,
     StatusPart,
+    ChildProgressPart,
 )
 
 

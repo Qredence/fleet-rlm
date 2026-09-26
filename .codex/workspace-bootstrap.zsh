@@ -14,25 +14,25 @@ fi
 echo "==> fleet-rlm Codex bootstrap"
 echo "repo: $repo_root"
 
-if [[ -f uv.lock ]]; then
-  uv sync --all-extras --dev --frozen
-else
-  uv sync --all-extras --dev
-fi
+uv sync --all-extras --dev --frozen
 
-if ! command -v pnpm >/dev/null 2>&1; then
-  if ! command -v corepack >/dev/null 2>&1; then
-    echo "ERROR: pnpm or corepack is required for the fleet TUI." >&2
-    exit 1
-  fi
-  corepack enable
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm_command=pnpm
+elif command -v corepack >/dev/null 2>&1; then
+  pnpm_command=corepack
+else
+  echo "ERROR: pnpm or corepack is required for the fleet TUI." >&2
+  exit 1
 fi
-# Run pnpm from inside the workspace so corepack resolves the pinned
-# packageManager version (pnpm --dir resolves from the invocation CWD).
-(cd tools/fleet-tui && pnpm install --frozen-lockfile)
+# Run inside the workspace so Corepack resolves its pinned packageManager.
+if [[ "$pnpm_command" == corepack ]]; then
+  (cd tools/fleet-tui && corepack pnpm install --frozen-lockfile)
+else
+  (cd tools/fleet-tui && pnpm install --frozen-lockfile)
+fi
 
 echo "python: $(uv run python --version 2>&1)"
 uv run python scripts/check_harness_engineering.py --skip-script-help
 
 echo "==> Bootstrap complete"
-echo "Use Codex actions for backend, terminal-client, OpenAPI, release, and validation lanes."
+echo "Use Codex actions for common development commands; use the Makefile for the full command set."

@@ -18,6 +18,9 @@ from typing import Any, NoReturn, Self
 
 import dspy
 
+from fleet_rlm.sessions.history import claimed_history_records, to_canonical_history_records
+from fleet_rlm.sessions.run_state import ClaimedRun
+
 _PREVIEW_BUDGET_CHARS = 500
 
 
@@ -128,4 +131,10 @@ def committed_session_history_payload(value: Any) -> Any:
     raise TypeError(f"expected CommittedSessionHistory, got {type(value).__name__}")
 
 
-__all__ = ["CommittedSessionHistory", "committed_session_history_payload"]
+def committed_history_for_claim(claim: ClaimedRun) -> CommittedSessionHistory:
+    """Build the Sandbox-serializable form of a claimed committed history."""
+    committed_turns, user_requests = claimed_history_records(claim)
+    return CommittedSessionHistory(to_canonical_history_records(committed_turns, user_requests=user_requests))
+
+
+__all__ = ["CommittedSessionHistory", "committed_history_for_claim", "committed_session_history_payload"]

@@ -5,18 +5,19 @@ from __future__ import annotations
 import base64
 import json
 
+from dspy import FinalOutput
+
 from fleet_rlm.daytona.interpreter import (
     DaytonaCodeInterpreter,
     InProcessInterpreterBackend,
     extract_final_payload,
     remote_submit_setup_code,
 )
-from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.program import (
     FleetRLMSignature,
     RLMOptions,
-    build_native_rlm,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 
 
 def test_interpreter_declares_rlm_injection_surface() -> None:
@@ -60,7 +61,7 @@ def test_fleet_generation_marks_bindings_dirty_on_native_inject() -> None:
     """Native DSPy injection advances Fleet-owned generation state."""
     interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     initial_generation = interp._binding_generation
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=1),
     )

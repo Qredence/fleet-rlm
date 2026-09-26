@@ -112,6 +112,75 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
         },
       ];
     }
+    case "data-child-progress": {
+      const value = asRecord(chunk.data);
+      const states = [
+        "not_started",
+        "running",
+        "completed",
+        "failed",
+        "cancelled",
+        "timed_out",
+      ] as const;
+      const cleanups = ["pending", "complete", "failed", "not_required"] as const;
+      const state = str(value.state);
+      const cleanupState = str(value.cleanup_state);
+      const childId = str(value.child_id);
+      const taskLabel = str(value.task_label);
+      if (
+        !state ||
+        !states.includes(state as (typeof states)[number]) ||
+        !cleanupState ||
+        !cleanups.includes(cleanupState as (typeof cleanups)[number]) ||
+        !childId ||
+        !taskLabel
+      )
+        return [
+          {
+            type: "turn_status",
+            phase: "child",
+            detail: "Child progress details are unavailable.",
+          },
+        ];
+      const resultFileCount = int(value.result_file_count);
+      return [
+        {
+          type: "child_progress",
+          childId,
+          parentRunId: str(value.parent_run_id) ?? str(value.parentRunId) ?? undefined,
+          taskLabel,
+          state: state as (typeof states)[number],
+          elapsedMs: int(value.elapsed_ms) ?? 0,
+          outcome: str(value.outcome),
+          evidence:
+            Array.isArray(value.evidence) &&
+            value.evidence.length <= 8 &&
+            value.evidence.every((item) => typeof item === "string" && item.length <= 200)
+              ? value.evidence
+              : undefined,
+          gaps:
+            Array.isArray(value.gaps) &&
+            value.gaps.length <= 8 &&
+            value.gaps.every((item) => typeof item === "string" && item.length <= 200)
+              ? value.gaps
+              : undefined,
+          resultFileCount:
+            resultFileCount !== undefined && resultFileCount >= 0 && resultFileCount <= 16
+              ? resultFileCount
+              : undefined,
+          codeExcerpt:
+            typeof value.code_excerpt === "string" && value.code_excerpt.length <= 800
+              ? value.code_excerpt
+              : undefined,
+          outputExcerpt:
+            typeof value.output_excerpt === "string" && value.output_excerpt.length <= 800
+              ? value.output_excerpt
+              : undefined,
+          cleanupState: cleanupState as (typeof cleanups)[number],
+          messageId: chunk.id ?? undefined,
+        },
+      ];
+    }
     case "data-attachment": {
       const value = asRecord(chunk.data);
       return [

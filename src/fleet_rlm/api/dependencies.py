@@ -12,18 +12,18 @@ from fastapi import Depends, HTTPException, Request
 
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
+from fleet_rlm.app_services import RouteServices, RuntimeInventory, get_route_services, get_runtime_inventory
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments import AttachmentLifecycle
-from fleet_rlm.chat.run_lifecycle import RunLifecycle
-from fleet_rlm.chat.turn_runtime import TurnRuntime
-from fleet_rlm.composition.inventory import RuntimeInventory, RuntimeInventoryError, get_runtime_inventory
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
 from fleet_rlm.observability.mlflow import MLflowRuntime
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.skills.catalog import SkillCatalog
+from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 
@@ -56,13 +56,13 @@ def _composition_unavailable() -> HTTPException:
     return http_error(503, "turn_unavailable", "Service unavailable")
 
 
-def get_ready_runtime_inventory(request: Request) -> RuntimeInventory:
+def get_ready_route_services(request: Request) -> RouteServices:
     if not getattr(request.app.state, "composition_ready", False):
         raise _composition_unavailable()
-    inventory = get_runtime_inventory(request.app)
-    if inventory is None:
+    services = get_route_services(request.app)
+    if services is None:
         raise _composition_unavailable()
-    return inventory
+    return services
 
 
 def get_runtime_inventory_if_ready(request: Request) -> RuntimeInventory | None:
@@ -78,57 +78,42 @@ def get_runtime_inventory_if_ready(request: Request) -> RuntimeInventory | None:
 
 
 def get_turn_runtime(request: Request) -> TurnRuntime:
-    try:
-        return get_ready_runtime_inventory(request).require_turn_runtime()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).turn_runtime
 
 
 def get_attachment_lifecycle(request: Request) -> AttachmentLifecycle:
-    try:
-        return get_ready_runtime_inventory(request).require_attachment_lifecycle()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).attachment_lifecycle
 
 
 def get_artifact_reader(request: Request) -> ArtifactReader:
-    try:
-        return get_ready_runtime_inventory(request).require_artifact_reader()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).artifact_reader
 
 
 def get_session_catalog(request: Request) -> SessionCatalog:
-    try:
-        return get_ready_runtime_inventory(request).require_session_catalog()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).session_catalog
 
 
 def get_session_lifecycle(request: Request) -> SessionLifecycle:
-    try:
-        return get_ready_runtime_inventory(request).require_session_lifecycle()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).session_lifecycle
+
+
+def get_session_task_service(request: Request) -> SessionTaskService:
+    service = get_ready_route_services(request).session_task_service
+    if service is None:
+        raise _composition_unavailable()
+    return service
 
 
 def get_session_prewarm(request: Request) -> Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None:
-    """Return the composed Session manager's pre-warm scheduler, if present.
+    """Return the composed Daytona runtime's pre-warm scheduler, if present.
 
-    Scheduling and task retention live in the session manager; this dependency
+    Scheduling and task retention live in the Daytona runtime; this dependency
     only retrieves the callable so routes stay transport-thin.
     """
-    manager = get_ready_runtime_inventory(request).session_manager
-    if manager is None:
+    runtime = get_ready_route_services(request).daytona_runtime
+    if runtime is None:
         return None
-    return manager.schedule_prewarm
-
-
-def get_run_lifecycle(request: Request) -> RunLifecycle:
-    try:
-        return get_ready_runtime_inventory(request).require_run_lifecycle()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return runtime.schedule_prewarm
 
 
 def get_settings(request: Request) -> Settings:
@@ -161,24 +146,15 @@ def get_skill_catalog(request: Request) -> SkillCatalog:
 
 
 def get_config_policy(request: Request) -> ConfigPolicyService:
-    try:
-        return get_ready_runtime_inventory(request).require_config_policy()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).config_policy
 
 
 def get_workspace_file_service(request: Request) -> WorkspaceFileService:
-    try:
-        return get_ready_runtime_inventory(request).require_workspace_file_service()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).workspace_file_service
 
 
 def get_workspace_volume_gateway(request: Request) -> WorkspaceVolumeGateway:
-    try:
-        return get_ready_runtime_inventory(request).require_workspace_volume_gateway()
-    except RuntimeInventoryError:
-        raise _composition_unavailable() from None
+    return get_ready_route_services(request).workspace_volume_gateway
 
 
 TurnRuntimeDep = Annotated[TurnRuntime, Depends(get_turn_runtime)]
@@ -186,8 +162,8 @@ ArtifactReaderDep = Annotated[ArtifactReader, Depends(get_artifact_reader)]
 AttachmentLifecycleDep = Annotated[AttachmentLifecycle, Depends(get_attachment_lifecycle)]
 SessionCatalogDep = Annotated[SessionCatalog, Depends(get_session_catalog)]
 SessionLifecycleDep = Annotated[SessionLifecycle, Depends(get_session_lifecycle)]
+SessionTaskServiceDep = Annotated[SessionTaskService, Depends(get_session_task_service)]
 SessionPrewarmDep = Annotated[Callable[[UUID, UUID, UUID], asyncio.Task[None]] | None, Depends(get_session_prewarm)]
-RunLifecycleDep = Annotated[RunLifecycle, Depends(get_run_lifecycle)]
 RuntimeInventoryIfReadyDep = Annotated[RuntimeInventory | None, Depends(get_runtime_inventory_if_ready)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 TraceFeedbackServiceDep = Annotated[TraceFeedbackService, Depends(get_trace_feedback_service)]
@@ -204,11 +180,11 @@ __all__ = [
     "ConfigPolicyDep",
     "LocalScopeDep",
     "MLflowRuntimeDep",
-    "RunLifecycleDep",
     "RuntimeInventoryIfReadyDep",
     "SessionCatalogDep",
     "SessionLifecycleDep",
     "SessionPrewarmDep",
+    "SessionTaskServiceDep",
     "SettingsDep",
     "SkillCatalogDep",
     "TraceFeedbackServiceDep",

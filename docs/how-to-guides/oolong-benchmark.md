@@ -6,9 +6,8 @@ long-context aggregation benchmark. The adapter loads Hugging Face rows from
 locked Fleet native RLM invoke contract, and scores model answers with the
 official helpers vendored from `src/eval/eval_helpers.py`.
 
-Historical Fleet v0.6.x Oolong scripts (`scripts/oolong_official_eval.py`,
-`scripts/benchmarks/oolong.py`, and Fleet `_synth_score`) are **not** the source
-of truth and are intentionally absent on current tip.
+Historical Fleet v0.6.x Oolong entrypoints are retired. The maintained runner
+and scoring implementation listed below define the current workflow.
 
 ## Source of truth
 
@@ -53,8 +52,8 @@ uv run --with datasets python scripts/benchmarks/run_oolong_predict.py \
 ## Production/live path
 
 Live mode acquires an ephemeral volume-backed Daytona interpreter through
-``fleet_rlm.daytona.provisioning.acquire_ephemeral_interpreter`` (shared
-``SandboxProvisioner`` seam), stages `context_window_text` on the workspace
+``fleet_rlm.daytona.runtime.acquire_ephemeral_interpreter`` (shared
+Daytona runtime path), stages `context_window_text` on the workspace
 volume using `WorkspaceAttachmentPathPolicy` (same layout as Turn
 `AttachmentContextCapsule` staging), constructs `build_native_rlm(...)`, and
 invokes `await rlm.acall(interpreter, **kwargs)` with `FleetJSONAdapter` so

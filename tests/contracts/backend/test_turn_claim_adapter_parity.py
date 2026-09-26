@@ -172,7 +172,6 @@ async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) ->
 @pytest.mark.asyncio
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -> None:
-    from fleet_rlm.chat.turn_detail_policy import commit_success
     from fleet_rlm.rlm.result import (
         PredictionResult,
         RLMOutcome,
@@ -188,6 +187,7 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
         RunAlreadyCompletedError,
         RunStateError,
     )
+    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
     harness = await _build_harness(adapter_kind)

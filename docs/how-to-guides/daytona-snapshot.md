@@ -30,9 +30,10 @@ SemanticChild uses the standard library. Immutable Session
 `fleet-rlm-python313-v10` and SemanticChild `fleet-rlm-python313-child-v5` were
 created and certified on 2026-09-10 (receipt
 `.fleet-evidence/receipts/adr006/p27-reduced-snapshots-20260910-r4.json`).
-Configured `.env` references and code fallbacks remain `fleet-rlm-python313-v7`
-/ `fleet-rlm-python313-child-v2` until an operator promotes the pair atomically
-in Phase 5.
+At the time of that receipt, the configured `.env` references and code
+fallbacks remained `fleet-rlm-python313-v7` / `fleet-rlm-python313-child-v2`.
+The receipt is historical; consult the active [Fleet configuration](../../config/fleet.toml)
+and deployed environment for current snapshot selection.
 
 Snapshot provisioning is an explicit operator action. Application startup does
 not create, overwrite, or delete snapshots, and an existing immutable name is
@@ -88,27 +89,20 @@ that the identity is gone. This is separate from the Fleet doctor: the doctor
 also checks configured Volume/database/LLM readiness and can stop at an earlier
 prerequisite.
 
-## P2.7 reduced-image certification and promotion
+## Historical provider evidence
 
-P2.7 requires one sealed receipt covering both immutable candidates before either
-configured reference changes. The opt-in controller checks the provider image
-contract and disposable import probe for each candidate, then runs the focused
-Session host-tool/RLM stream proof and SemanticChild recursive-RLM scenario with
-verifier-only settings copies. It never changes `.env`, deployment configuration,
-or a snapshot.
+The Phase 5 public-network policy waiver remains an accepted risk in the
+[architecture guidance](../../ARCHITECTURE.md). It does not establish network
+isolation. Historical P2.7 snapshot
+certification evidence remains in its original receipt. The retired Phase 5
+and P2.7 verifier commands are no longer operator entrypoints.
 
-```bash
-FLEET_LIVE=1 uv run python scripts/live_p27_snapshot_verify.py \
-  --session-snapshot fleet-rlm-python313-v10 \
-  --child-snapshot fleet-rlm-python313-child-v5 \
-  --output .fleet-evidence/receipts/adr006/p27-reduced-snapshots-<run-id>.json
-```
-
-After a reviewer accepts the bounded receipt and applicable CI result, an operator
-updates the deployment's two declared snapshot references atomically, restarts by
-the normal deployment procedure, and runs the existing doctor/readiness check.
-Rollback restores the previous pair of references and restarts; do not rebuild,
-rename, or delete immutable snapshots.
+For current checks, `daytona_snapshot.py verify-runtime` verifies an image's
+baked package/import contract in a disposable Sandbox. The
+`live_daytona_verify.py` command covers native semantic FastAPI calls and
+attachment/artifact durability. The separately gated recursive-batch canary is
+documented in the [DSPy integration guide](dspy-integration.md); neither live
+contract is a snapshot promotion, containment, release, or deployment proof.
 
 ## Runtime profiles and rollback
 

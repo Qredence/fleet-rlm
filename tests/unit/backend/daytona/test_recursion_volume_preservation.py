@@ -18,12 +18,14 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.provisioning import recursive_child_volume_subpath
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLeaseState
+from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona.runtime import (
+    ChildRuntimeLeaseState,
+    DaytonaAdmission,
+)
+from tests.support.session_manager import make_daytona_child_factory
 
-MOUNT = "/home/daytona/fleet"
+MOUNT = "/workspace"
 
 
 @dataclass
@@ -44,6 +46,9 @@ class _VolumeFs:
             *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)],
             *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
         ]
+
+    async def create_folder(self, path: str, _mode: str) -> None:
+        self.directories.add(path)
 
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         if recursive:
@@ -94,6 +99,9 @@ class _RecordingInterpreter:
         self._fail_shutdown = fail_shutdown
         self.shutdown_calls: list[bool] = []
 
+    def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+        del call_index
+
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         self.shutdown_calls.append(strict_broker_cleanup)
         if self._fail_shutdown:
@@ -130,13 +138,14 @@ def _factory(
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    return recursive_child_runtime.build_child_runtime_factory(
+    return make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path=MOUNT,
         workspace_id=workspace_id,
+        session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -151,8 +160,8 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = recursive_child_volume_subpath(workspace_id, run_id, 1)
-    b_scope = recursive_child_volume_subpath(workspace_id, run_id, 2)
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(
         files={
@@ -162,12 +171,12 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     )
     child_a_fs = _VolumeFs(
         files={
-            f"{MOUNT}/{a_scope}/a-top.txt": b"child-a-top",
-            f"{MOUNT}/{a_scope}/a-nested/deep/file.txt": b"child-a-deep",
+            f"{a_scope}/a-top.txt": b"child-a-top",
+            f"{a_scope}/a-nested/deep/file.txt": b"child-a-deep",
         },
-        directories={f"{MOUNT}/{a_scope}/a-nested", f"{MOUNT}/{a_scope}/a-nested/deep"},
+        directories={f"{a_scope}/a-nested", f"{a_scope}/a-nested/deep"},
     )
-    child_b_fs = _VolumeFs(files={f"{MOUNT}/{b_scope}/b-marker.txt": b"child-b-bytes"})
+    child_b_fs = _VolumeFs(files={f"{b_scope}/b-marker.txt": b"child-b-bytes"})
 
     child_a = _Sandbox("child-a-sandbox", child_a_fs)
     child_b = _Sandbox("child-b-sandbox", child_b_fs)
@@ -178,11 +187,11 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     lease_a = await asyncio.to_thread(factory, 1)
     lease_b = await asyncio.to_thread(factory, 2)
 
-    # Shared Volume sibling mount: identical volume id and mount path for
-    # both children, distinct validated recursive subpaths.
+    # Both children mount the same Session workspace and use distinct local scratch.
     assert (lease_a.volume_id, lease_b.volume_id) == ("shared-volume", "shared-volume")
-    assert lease_a.volume_subpath == a_scope
-    assert lease_b.volume_subpath == b_scope
+    assert lease_a.volume_subpath == lease_b.volume_subpath
+    assert lease_a.volume_subpath.startswith(f"workspaces/{workspace_id}/sessions/")
+    assert lease_a.volume_subpath.endswith("/workspace")
     for call in platform.create_calls:
         assert call["volume_id"] == "shared-volume"
         assert call["mount_path"] == MOUNT
@@ -192,19 +201,24 @@ async def test_close_child_a_preserves_root_and_sibling_volume_byte_for_byte(
     root_manifest_before = _checksum_manifest(root_fs)
     sibling_manifest_before = _checksum_manifest(child_b_fs)
 
-    # Close child A: cleanup purges only A's mounted recursive scope.
+    # Close child A: cleanup purges only A's local scratch.
     await asyncio.to_thread(lease_a.close)
 
     assert lease_a.state is ChildRuntimeLeaseState.CLOSED
     # A's nested regular files were deleted first, then directories in
     # deepest-first order.
     assert child_a_fs.files == {}
-    assert child_a_fs.directories == set()
+    assert child_a_fs.directories == {
+        "/tmp/fleet",
+        "/tmp/fleet/child-data",
+        f"/tmp/fleet/child-data/{run_id}",
+    }
     assert child_a_fs.deleted == [
-        f"{MOUNT}/{a_scope}/a-nested/deep/file.txt",
-        f"{MOUNT}/{a_scope}/a-top.txt",
-        f"{MOUNT}/{a_scope}/a-nested/deep",
-        f"{MOUNT}/{a_scope}/a-nested",
+        f"{a_scope}/a-nested/deep/file.txt",
+        f"{a_scope}/a-top.txt",
+        f"{a_scope}/a-nested/deep",
+        f"{a_scope}/a-nested",
+        a_scope,
     ]
     # Only A's provider sandbox was deleted; A's interpreter shut down once.
     assert platform.deleted == ["child-a-sandbox"]
@@ -232,15 +246,15 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = recursive_child_volume_subpath(workspace_id, run_id, 1)
-    b_scope = recursive_child_volume_subpath(workspace_id, run_id, 2)
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(files={f"{MOUNT}/workspaces/{workspace_id}/root-marker.txt": b"root-content-fail"})
     child_a_fs = _VolumeFs(
-        files={f"{MOUNT}/{a_scope}/a-top.txt": b"child-a-fail-scope"},
+        files={f"{a_scope}/a-top.txt": b"child-a-fail-scope"},
         directories=set(),
     )
-    child_b_fs = _VolumeFs(files={f"{MOUNT}/{b_scope}/b-marker.txt": b"child-b-fail-bytes"})
+    child_b_fs = _VolumeFs(files={f"{b_scope}/b-marker.txt": b"child-b-fail-bytes"})
 
     platform = _MultiSandboxPlatform([_Sandbox("child-a-sandbox", child_a_fs), _Sandbox("child-b-sandbox", child_b_fs)])
     admission = DaytonaAdmission(max_active_leases=3)
@@ -269,7 +283,7 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
 
     # A's scope was still purged and its sandbox deleted despite the failure.
     assert child_a_fs.files == {}
-    assert child_a_fs.deleted == [f"{MOUNT}/{a_scope}/a-top.txt"]
+    assert child_a_fs.deleted == [f"{a_scope}/a-top.txt", a_scope]
     assert platform.deleted == ["child-a-sandbox"]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     permit.release()
@@ -290,13 +304,13 @@ async def test_cancellation_preserves_volume_state_and_allocates_nothing_further
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
-    a_scope = recursive_child_volume_subpath(workspace_id, run_id, 1)
-    b_scope = recursive_child_volume_subpath(workspace_id, run_id, 2)
+    a_scope = f"/tmp/fleet/child-data/{run_id}/1"
+    b_scope = f"/tmp/fleet/child-data/{run_id}/2"
 
     root_fs = _VolumeFs(files={f"{MOUNT}/workspaces/{workspace_id}/root-marker.txt": b"root-content-cancel"})
-    child_a_fs = _VolumeFs(files={f"{MOUNT}/{a_scope}/a-top.txt": b"child-a-cancel-scope"})
+    child_a_fs = _VolumeFs(files={f"{a_scope}/a-top.txt": b"child-a-cancel-scope"})
     # A sibling scope that is prepared but never allocated after revocation.
-    sibling_fs = _VolumeFs(files={f"{MOUNT}/{b_scope}/b-marker.txt": b"child-b-cancel-bytes"})
+    sibling_fs = _VolumeFs(files={f"{b_scope}/b-marker.txt": b"child-b-cancel-bytes"})
 
     platform = _MultiSandboxPlatform([_Sandbox("child-a-sandbox", child_a_fs), _Sandbox("child-b-sandbox", sibling_fs)])
     admission = DaytonaAdmission(max_active_leases=3)

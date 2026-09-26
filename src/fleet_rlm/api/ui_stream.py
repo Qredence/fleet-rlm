@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 
 from fleet_rlm.api.json_util import to_plain_json
 
@@ -40,6 +40,35 @@ class StatusData(FleetUIDataModel):
     status: str | None = None
     detail: str | None = None
     message: str | None = None
+
+
+class ChildProgressData(FleetUIDataModel):
+    child_id: str = Field(min_length=1, max_length=128)
+    task_label: str = Field(min_length=1, max_length=240)
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int = Field(ge=0)
+    outcome: str | None = Field(default=None, max_length=500)
+    evidence: list[str] = Field(default_factory=list, max_length=8)
+    gaps: list[str] = Field(default_factory=list, max_length=8)
+    result_file_count: int = Field(default=0, ge=0, le=16)
+    code_excerpt: str | None = Field(default=None, max_length=800)
+    output_excerpt: str | None = Field(default=None, max_length=800)
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"]
+    parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("parent_run_id")
+    @classmethod
+    def _nonblank_parent_run_id(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise ValueError("parent_run_id must not be blank")
+        return value
+
+    @field_validator("evidence", "gaps")
+    @classmethod
+    def _bounded_details(cls, value: list[str]) -> list[str]:
+        if any(len(item) > 200 for item in value):
+            raise ValueError("child progress detail exceeds 200 characters")
+        return value
 
 
 class SkillData(FleetUIDataModel):
@@ -203,6 +232,13 @@ class DataStatusChunk(FleetUIChunkModel):
     transient: bool | None = None
 
 
+class DataChildProgressChunk(FleetUIChunkModel):
+    type: Literal["data-child-progress"] = "data-child-progress"
+    id: str | None = None
+    data: ChildProgressData
+    transient: bool | None = None
+
+
 class DataSkillChunk(FleetUIChunkModel):
     type: Literal["data-skill"] = "data-skill"
     id: str | None = None
@@ -267,6 +303,7 @@ FleetUIMessageChunk = Annotated[
     | ReasoningDeltaChunk
     | ReasoningEndChunk
     | DataStatusChunk
+    | DataChildProgressChunk
     | DataSkillChunk
     | DataRLMCodeChunk
     | DataRLMOutputChunk
@@ -314,8 +351,10 @@ __all__ = [
     "AbortChunk",
     "ArtifactData",
     "AttachmentData",
+    "ChildProgressData",
     "DataArtifactChunk",
     "DataAttachmentChunk",
+    "DataChildProgressChunk",
     "DataRLMCodeChunk",
     "DataRLMOutputChunk",
     "DataSkillChunk",

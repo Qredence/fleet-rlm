@@ -3,7 +3,7 @@ name: report-builder
 description: Create, save, read back, and verify reports from trusted source data.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.1.0"
+  version: "1.3.0"
   affordances:
     - workspace.files
     - artifacts.publish
@@ -17,10 +17,14 @@ resources: []
 
 Create the requested report from verified source data.
 
-1. Build the complete report in memory from values already verified by the
-   current Turn. Do not invent missing source data.
+1. Choose the evidence scope: read selected sections for a sparse report,
+   enumerate every required section for an exhaustive report, and verify each
+   prerequisite before drafting a dependent section. Build the report in memory
+   from values already verified by the current Turn. Child findings and
+   intermediate files are candidates: inspect their evidence, coverage, gaps,
+   and source revisions before using them. Do not invent missing source data.
 2. Check that every required section and requested value is present before
-   writing anything.
+   writing anything. Disclose incomplete coverage or unresolved contradictions.
 3. Inspect `session_context["workspace"]["available"]`. If it is false, do
    not attempt Project or Workspace tools, use a Python-local file as a
    substitute, or claim that a durable report was saved.

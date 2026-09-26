@@ -1,17 +1,14 @@
-"""Prepared native-RLM program inputs, selected Artifacts, and bounded Session context.
+"""Prepared native-RLM program inputs, child workspace paths, and bounded Session context.
 
 * ``test_program_inputs.py``: behavior contracts for program inputs.
-* ``test_selected_artifact_input.py``: selected Artifact reads use the prepared Turn owner.
+* Child inputs are selected by relative Workspace path and materialized by the Turn host.
 * ``test_session_context.py``: bounded Session context at the prepared native-RLM input seam.
 """
 
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
-from dataclasses import replace
-from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -20,10 +17,6 @@ import dspy
 import pytest
 from pydantic import ValidationError
 
-from fleet_rlm.artifacts.errors import ArtifactNotFoundError
-from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
-from fleet_rlm.chat.preparation import prepare_host_capabilities
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
@@ -33,19 +26,12 @@ from fleet_rlm.rlm.program import (
     SkillCardInput,
     build_rlm_input_kwargs,
 )
-from fleet_rlm.rlm.recursion import RecursiveRLMOptions, SubproblemCapsule
 from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import SessionHistory, TurnInput
-from fleet_rlm.sessions.run_state import (
-    ClaimedRun,
-    _RunClaimToken,
-)
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
-from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
-from tests.unit.backend.rlm.fakes import EmptyCapabilities
-from tests.unit.backend.rlm.test_recursion_policy_surface import _context, _RecordingFactory
+from tests.support.turn_preparation import TestingRunPreparer
 
 
 # --- from test_program_inputs.py --------------------------------------
@@ -99,7 +85,6 @@ def test_custom_signature_drops_optional_history_input() -> None:
 
 
 def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
-    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     catalog = build_bundled_skill_catalog()
     payload = build_rlm_input_kwargs(
@@ -111,14 +96,13 @@ def test_manifest_skill_affordances_reach_the_model_unchanged() -> None:
 
     by_name = {card["name"]: card for card in payload["skill_cards"]}  # type: ignore[attr-defined]
     assert by_name["dspy-rlm"]["affordances"] == ["interpreter", "llm_query"]
-    assert by_name["long-context"]["affordances"] == ["fetch_url", "llm_query_batched", "workspace.files"]
+    assert by_name["long-context"]["affordances"] == ["sandbox.search", "llm_query_batched", "workspace.files"]
     assert by_name["workspace-files"]["affordances"] == ["workspace.files", "artifacts.publish"]
     assert by_name["data-analysis"]["affordances"] == ["artifacts.publish", "llm_query_batched"]
     assert by_name["report-builder"]["affordances"] == ["workspace.files", "artifacts.publish"]
 
 
 def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() -> None:
-    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     catalog = build_bundled_skill_catalog()
     payload = build_rlm_input_kwargs(
@@ -134,7 +118,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "name": "data-analysis",
             "description": "Compute and verify descriptive statistics, trends, and qualified anomalies.",
             "scope": "system",
-            "version": "1.0.0",
+            "version": "1.2.0",
             "trust": "system",
             "affordances": ["artifacts.publish", "llm_query_batched"],
             "resources_available": False,
@@ -145,7 +129,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "description": "Use when analyzing, explaining, or implementing dspy.RLM "
             "(Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve.",
             "scope": "system",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "trust": "system",
             "affordances": ["interpreter", "llm_query"],
             "resources_available": True,
@@ -153,11 +137,14 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
         {
             "id": "015a133e-7b90-50c7-bb61-4b2772f57c1c",
             "name": "long-context",
-            "description": "Use bounded retrieval to analyze large documents, transcripts, code, or datasets.",
+            "description": (
+                "Discover public sources and analyze large documents, transcripts, code, or datasets "
+                "with sandbox Python."
+            ),
             "scope": "system",
-            "version": "2.0.1",
+            "version": "2.3.0",
             "trust": "system",
-            "affordances": ["fetch_url", "llm_query_batched", "workspace.files"],
+            "affordances": ["sandbox.search", "llm_query_batched", "workspace.files"],
             "resources_available": True,
         },
         {
@@ -165,7 +152,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "name": "report-builder",
             "description": "Create, save, read back, and verify reports from trusted source data.",
             "scope": "system",
-            "version": "1.1.0",
+            "version": "1.3.0",
             "trust": "system",
             "affordances": ["workspace.files", "artifacts.publish"],
             "resources_available": False,
@@ -175,7 +162,7 @@ def test_model_visible_skill_discovery_snapshot_matches_the_bundled_catalog() ->
             "name": "workspace-files",
             "description": "Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.",
             "scope": "system",
-            "version": "1.2.0",
+            "version": "1.4.0",
             "trust": "system",
             "affordances": ["workspace.files", "artifacts.publish"],
             "resources_available": True,
@@ -531,6 +518,7 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
     source_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
     allowed_tool_adapters = {
         "sessions/history_tools.py",
+        "sessions/task_tools.py",
         # P43.7 narrow SandboxSerializable transport for committed Session
         # conversation; the dspy coupling is sanctioned by the plan and
         # required for the Daytona broker, which cannot inject a raw
@@ -544,7 +532,6 @@ def test_dspy_imports_stay_out_of_deterministic_backend_layers() -> None:
         "artifacts/tools.py",
         "workspace/memory.py",
         "workspace/projects.py",
-        "workspace/url.py",
         "workspace/workspace.py",
     }
     offenders: list[str] = []
@@ -701,118 +688,31 @@ def test_dspy_rlm_validates_end_to_end_payload_with_history() -> None:
     dspy.RLM(FleetRLMSignature)._validate_inputs(kwargs)
 
 
-# --- from test_selected_artifact_input.py -----------------------------
-@pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["valid", "revoked", "missing", "invalid_uri"])
-async def test_prepared_artifact_is_read_on_application_loop_with_turn_scope_and_exact_allowance(
-    case: str,
-) -> None:
-    artifact_id = uuid4()
-    if case == "invalid_uri":
-        with pytest.raises(ValueError, match="UUID"):
-            SubproblemCapsule(task="Read selected evidence", authorized_references=("artifact://not-a-uuid",))
-        return
-    locator = f"artifact://{artifact_id}"
-    capsule = SubproblemCapsule(task="Read selected evidence", authorized_references=(locator,))
-    root = dspy.utils.DummyLM(
-        [
-            {"reasoning": "delegate", "code": f"outcome = rlm_query(capsule={capsule.model_dump(mode='json')!r})"},
-            {"reasoning": "read", "code": "text = read_selected_input(evidence_id='reference-1')"},
-            {"reasoning": "child submit", "code": "SUBMIT(answer=text + ' [reference-1]')"},
-            {
-                "reasoning": "root submit",
-                "code": "assert outcome['source_references'] == ['reference-1']; SUBMIT(answer=outcome['answer'])",
-            },
-        ],
-        adapter=dspy.JSONAdapter(),
-    )
-    factory = _RecordingFactory()
-    context, runner = _context(
-        root=root,
-        sub=dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
-        factory=factory,
-        recursive_options=RecursiveRLMOptions(enabled=True),
-    )
-    data = "selected évidence".encode()
-    ref = ArtifactRef(artifact_id, uuid4(), uuid4(), "text", None, "text/plain", len(data), sha256(data).hexdigest())
-    loop = asyncio.get_running_loop()
-    reads: list[object] = []
+# --- child input request validation -----------------------------------
+def test_child_inputs_use_relative_workspace_paths() -> None:
+    from fleet_rlm.rlm.recursion import ChildRequest
 
-    class Catalog:
-        async def get(self, *, access, artifact_id):
-            assert asyncio.get_running_loop() is loop
-            assert access == ArtifactAccess(context.identity.access.user_id, context.identity.access.workspace_id)
-            assert artifact_id == ref.id
-            reads.append("authorized")
-            if case == "missing":
-                raise ArtifactNotFoundError("Artifact not found")
-            return StoredArtifact(ref, "private/committed-content")
+    request = ChildRequest(task="Read selected evidence", inputs=("selected/evidence.txt",), context="Summarize it")
+    assert request.inputs == ("selected/evidence.txt",)
+    assert "selected/evidence.txt" in request.render()
+    assert "Summarize it" in request.render()
 
-    class Blobs:
-        async def read_bytes(self, workspace_id, logical_path):
-            assert workspace_id == context.identity.access.workspace_id
-            assert logical_path == "private/committed-content"
-            reads.append("content")
-            if case == "revoked":
-                context.identity.authority.revoke()
-                await asyncio.sleep(0)
-            return data
-
-    class RecordingReader(ArtifactReader):
-        async def content(self, access, artifact_id, *, max_bytes=None):
-            assert max_bytes == capsule.allocation_bytes - capsule.serialized_bytes
-            return await super().content(access, artifact_id, max_bytes=max_bytes)
-
-    async def not_cancelled():
-        return False
-
-    turn = ClaimedRun(
-        context.identity.run_id,
-        context.identity.session_id,
-        context.identity.access,
-        TurnInput("delegate"),
-        SessionHistory(()),
-        not_cancelled,
-        _RunClaimToken(uuid4()),
-    )
-    spec, _, _ = await prepare_host_capabilities(
-        turn=turn,
-        skill_catalog=build_bundled_skill_catalog(),
-        base_tools=(),
-        base_event_views={},
-        workspace=UNAVAILABLE_WORKSPACE_CAPABILITY,
-        artifact_reader=RecordingReader(catalog=Catalog(), blobs=Blobs()),
-        deadline=context.execution.deadline,
-    )
-    context = replace(context, capabilities=EmptyCapabilities(spec=spec))
-    stream = runner.stream(context)
-    _ = [event async for event in stream]
-    assert stream.outcome is not None
-    assert stream.outcome.succeeded is (case == "valid")
-    if case == "valid":
-        assert stream.outcome.prediction.display_text == "selected évidence [reference-1]"
-    expected_reads = {
-        "valid": ["authorized", "content"],
-        "revoked": ["authorized", "content"],
-        "missing": ["authorized"],
-        "invalid_uri": [],
-    }
-    assert reads == expected_reads[case]
-    assert factory.close_counts == {1: 1}
+    with pytest.raises(ValidationError):
+        ChildRequest(task="Read selected evidence", inputs=("artifact://not-a-uuid",))
 
 
 # --- from test_session_context.py -------------------------------------
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec, RLMRunner
-    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.models import HistoryMessage, TurnAccess
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     session_id = uuid4()
     messages = tuple(
@@ -893,11 +793,11 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         not_cancelled,
         _RunClaimToken(uuid4(), 7),
     )
-    prepared = await DefaultRunPreparer(
+    prepared = await TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=Environments(),
+        acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     ).prepare(turn, deadline=float("inf"))
 

@@ -15,8 +15,8 @@ from pydantic import ValidationError
 
 from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter, fleet_ui_chunk_payload
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
+from tests.support.testing_app import create_testing_app
 
 # --- from test_ui_stream.py -------------------------------------------
 _FIXTURE = (
@@ -68,6 +68,7 @@ def test_openapi_stream_schema_is_derived_as_one_inline_discriminated_contract()
             "reasoning-delta",
             "reasoning-end",
             "data-status",
+            "data-child-progress",
             "data-skill",
             "data-rlm-code",
             "data-rlm-output",

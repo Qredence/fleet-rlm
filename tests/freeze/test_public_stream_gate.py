@@ -13,7 +13,6 @@ import pytest
 
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES, AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import (
     RUNTIME_DETAIL_TYPES,
     EventRecorder,
@@ -36,6 +35,7 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
+from tests.support.testing_app import create_testing_app
 
 _FIXTURE = (
     Path(__file__).resolve().parents[1]
@@ -51,6 +51,7 @@ _FIXTURE = (
 _RUNTIME_TYPES = {
     "run.started",
     "status",
+    "child.progress",
     "step.started",
     "step.finished",
     "rlm.reasoning",
@@ -85,6 +86,7 @@ def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
         "reasoning-delta",
         "reasoning-end",
         "data-status",
+        "data-child-progress",
         "data-skill",
         "data-rlm-code",
         "data-rlm-output",
@@ -114,6 +116,7 @@ def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
         "attachment",
         "warning",
         "status",
+        "child_progress",
         "artifact",
         "usage",
         "structured_result",

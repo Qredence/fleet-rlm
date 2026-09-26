@@ -12,7 +12,8 @@ from fleet_rlm.skills.catalog import (
     load_bundled_skill_manifests,
     stable_skill_id,
 )
-from fleet_rlm.skills.manifest import SkillManifestResource, parse_bundled_skill_manifest, parse_skill_manifest
+from fleet_rlm.skills.manifest import parse_bundled_skill_manifest, parse_skill_manifest
+from fleet_rlm.skills.models import SkillResource
 
 
 def _document(
@@ -67,7 +68,7 @@ def test_every_current_bundled_skill_parses_into_one_validated_manifest() -> Non
         "scripts/rank_chunks.py",
         "references/chunking-strategies.md",
     ]
-    assert by_name["workspace-files"].version == "1.2.0"
+    assert by_name["workspace-files"].version == "1.4.0"
     assert by_name["report-builder"].resources == ()
     assert all(manifest.compatibility.strip() for manifest in manifests)
     assert all(manifest.instructions.startswith("# ") for manifest in manifests)
@@ -83,7 +84,7 @@ def test_manifest_parser_uses_existing_name_version_path_and_body_constraints(tm
 
     manifest = parse_bundled_skill_manifest(bundle)
 
-    assert manifest.resources == (SkillManifestResource("references/guide.md", "text/markdown", "Guide body"),)
+    assert manifest.resources == (SkillResource("references/guide.md", "text/markdown", "Guide body"),)
     assert manifest.allowed_tools == ("read_attachment",)
     assert manifest.resources[0].media_type == "text/markdown"
 
@@ -197,7 +198,7 @@ def test_runtime_catalog_remains_the_source_of_current_selection_truth() -> None
     # QRE-122 is expand-only: parse/parity does not mutate exact pinned
     # selection semantics. The known sketch-level drift remains visible.
     catalog = build_bundled_skill_catalog()
-    assert catalog.require(stable_skill_id("workspace-files")).card.version == "1.2.0"
+    assert catalog.require(stable_skill_id("workspace-files")).card.version == "1.4.0"
 
 
 def test_human_catalog_documentation_matches_current_runtime_cards() -> None:

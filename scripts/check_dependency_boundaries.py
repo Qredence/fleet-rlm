@@ -61,6 +61,10 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
     """Return ``(rule, target-prefix)`` pairs for a source-tree path."""
     scope = relative.parts[0] if relative.parts else ""
     if scope == "daytona":
+        if relative.as_posix() == "daytona/turn_environment.py":
+            # This provider adapter constructs Turn capabilities from Workspace
+            # services; the SDK itself remains below DaytonaRuntime.
+            return (("daytona must not import chat", "fleet_rlm.chat"),)
         return (
             ("daytona must not import chat", "fleet_rlm.chat"),
             ("daytona must not import workspace domain", "fleet_rlm.workspace"),
@@ -81,7 +85,12 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("provider-neutral runtime must not import api", "fleet_rlm.api"),
         )
     if scope == "sessions":
-        return (("sessions must not import chat", "fleet_rlm.chat"),)
+        return (
+            ("sessions must not import chat", "fleet_rlm.chat"),
+            ("sessions must not import turn preparation", "fleet_rlm.turn_preparation"),
+            ("sessions must not import turn settlement", "fleet_rlm.turn_settlement"),
+            ("sessions must not import turn coordination", "fleet_rlm.turns"),
+        )
     if scope == "chat":
         return (
             ("chat must not import api", "fleet_rlm.api"),
@@ -91,6 +100,9 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
         return (
             ("persistence must not import rlm", "fleet_rlm.rlm"),
             ("persistence must not import chat", "fleet_rlm.chat"),
+            ("persistence must not import turn settlement", "fleet_rlm.turn_settlement"),
+            ("persistence must not import turn preparation", "fleet_rlm.turn_preparation"),
+            ("persistence must not import turn coordination", "fleet_rlm.turns"),
             ("persistence must not import api", "fleet_rlm.api"),
             ("persistence must not import FastAPI", "fastapi"),
         )
@@ -99,6 +111,9 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("rlm must not import api", "fleet_rlm.api"),
             ("rlm must not import FastAPI", "fastapi"),
             ("rlm must not import chat", "fleet_rlm.chat"),
+            ("rlm must not import turn preparation", "fleet_rlm.turn_preparation"),
+            ("rlm must not import turn settlement", "fleet_rlm.turn_settlement"),
+            ("rlm must not import turn coordination", "fleet_rlm.turns"),
         )
     if scope in {"artifacts", "attachments", "skills"}:
         return ((f"{scope} must not import Daytona provider modules", "fleet_rlm.daytona"),)
@@ -107,7 +122,9 @@ def _forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
 
 def _is_storage_transport_exception(relative: Path, imported: str) -> bool:
     """Whether a storage import is the one permitted Daytona transport edge."""
-    return relative.as_posix() == "workspace/storage.py" and matches(imported, _ALLOWED_STORAGE_TRANSPORT)
+    if relative.as_posix() == "workspace/storage.py":
+        return matches(imported, _ALLOWED_STORAGE_TRANSPORT)
+    return relative.as_posix() == "workspace/host_io.py" and matches(imported, "fleet_rlm.daytona.interpreter")
 
 
 def _content_violations(path: Path, root: Path) -> Iterable[BoundaryViolation]:
@@ -173,7 +190,7 @@ def check_dependency_boundaries(root: Path = ROOT) -> tuple[BoundaryViolation, .
                                     imported,
                                 )
                             )
-        if relative.parts[:1] == ("daytona",):
+        if relative.parts[:1] == ("daytona",) and relative.as_posix() != "daytona/turn_environment.py":
             try:
                 violations.extend(_content_violations(path, root))
             except OSError as exc:

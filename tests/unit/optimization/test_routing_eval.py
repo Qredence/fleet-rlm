@@ -8,7 +8,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.optimization.routing import (
     CURATED_ROUTING_SCENARIOS,
     RoutingFacts,
@@ -131,7 +131,8 @@ def test_native_child_semantic_call_has_no_second_sandbox() -> None:
     adapter = dspy.JSONAdapter()
     created: list[DaytonaCodeInterpreter] = []
 
-    def factory(call_index: int) -> ChildRuntimeLease:
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         created.append(interpreter)
         return ChildRuntimeLease(
@@ -147,7 +148,10 @@ def test_native_child_semantic_call_has_no_second_sandbox() -> None:
             dspy.utils.DummyLM(
                 [
                     {"reasoning": "semantic judgment", "code": "inner = llm_query('inner slice')"},
-                    {"reasoning": "complete child", "code": "SUBMIT(answer=inner)"},
+                    {
+                        "reasoning": "complete child",
+                        "code": "SUBMIT(answer=inner, evidence=[], gaps=[], result_files=[])",
+                    },
                 ],
                 adapter=adapter,
             ),
@@ -158,8 +162,8 @@ def test_native_child_semantic_call_has_no_second_sandbox() -> None:
         deadline=time.monotonic() + 30,
     )
 
-    outcome = executor.tool(capsule={"task": "outer recursive classification"})
-    assert outcome["status"] == "completed"
+    outcome = executor.tool(task="outer recursive classification", inputs=[])
+    assert outcome["status"] == "completed", outcome.get("error_category")
     assert "fallback element" in outcome["answer"]
     facts = facts_from_recursive_summary(
         executor.summary(),

@@ -24,22 +24,19 @@ separate validation gates.
 - Every Turn receives the complete committed `dspy.History` for its claimed
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
-- `rlm_query(capsule=capsule)` and Root-only `rlm_query_batched(capsules=capsules)`
+- `rlm_query(task=task, inputs=inputs, context="")` and Root-only
+  `rlm_query_batched(tasks=tasks)`
   are recursive primitives exposed when the selected policy enables recursion.
-  Under that enabled policy, Root code keeps large input-specific
-  data in REPL variables and passes only the smallest sufficient slice to a
-  child; the parent retains authority over public output and final `SUBMIT`.
-- A native depth-1 child uses a dedicated, disposable Daytona Sandbox with
-  ordinary Daytona network policy. It mounts the same Volume ID only at the
-  private sibling scope `recursive/<workspace-id>/<run-id>/<call-index>`, never
-  at the Root's `workspaces/<workspace-id>` scope. The child receives no
-  Session/Workspace/Attachment/Artifact/Skill capability, broker, credentials,
-  or mutable Root globals; it receives an immutable committed Session
-  History snapshot, bounded Session metadata, selected capsule input,
-  and DSPy's native semantic Sub-LM tools. Capsule children do not receive
-  Fleet recursive tools. Its scope is purged and its Sandbox
-  deleted before a successful Root Turn can commit. A child's further recursive request is a
-  depth-2 Sub-LM fallback and does not create another Sandbox.
+  Root code selects bounded authorized relative file or directory references;
+  the host copies their checked contents into child-private scratch. The
+  parent retains authority over public output and final `SUBMIT`.
+- A native depth-1 child uses a dedicated, disposable volume-less Daytona
+  Sandbox. It receives a fresh interpreter, only selected files, bounded
+  context, and DSPy's native semantic Sub-LM tools. It cannot access parent
+  Session files, credentials, mutable Root globals, or Fleet recursive tools.
+  Declared result files are checked and persisted into the parent Run before
+  child cleanup; unresolved cleanup blocks successful Root settlement. Full
+  grandchildren are unavailable.
 - A later Turn receives a fresh request/capability binding, output metadata,
   budget, and DSPy `REPLHistory`; it may reuse the same healthy Session
   interpreter and Sandbox after the previous Turn commits.
@@ -170,8 +167,8 @@ pre-3.3 iteration-budget key fail validation. Native RLM construction installs
 a fail-closed interpreter factory so an invocation without a caller-owned
 interpreter becomes a bounded `RLMConfigError` rather than silently creating a
 DSPy interpreter; production execution passes the acquired interpreter to
-`rlm.acall(...)`. Exact-version and FinalOutput adaptation lives in
-`rlm.compat_3_3_1`.
+`rlm.acall(...)`. The exact-version guard lives beside native construction in
+`rlm.program`; Daytona uses DSPy's public `FinalOutput` type directly.
 
 The pinned contract was checked against the official DSPy 3.3.1 sources on
 2026-09-08: [`dspy/predict/rlm.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py),
@@ -232,11 +229,10 @@ the model never to repeat an identical interpreter action.
 
 ## Recursive harness limits
 
-`[defaults.rlm] recursion_enabled = true` in the current operator-selected
-policy, so the shipped `daytona-recursive` profile exposes Fleet child-RLM
-tools by default. Native `llm_query` / `llm_query_batched` remain the semantic
-delegation path. Set `rlm.recursion_enabled = false` on a comparison profile
-(for example `phase4-campaign-a` or `phase4-campaign-b`) to disable the bounded
+The shipped default profile is `daytona-native`, with recursion disabled.
+The opt-in `daytona-recursive` profile enables Fleet child-RLM tools; native
+`llm_query` / `llm_query_batched` remain the semantic delegation path. Set
+`rlm.recursion_enabled = false` on a comparison profile to disable the bounded
 recursive Tool and instruction. When enabled, one native child level is allowed,
 with four reserved child calls per Turn, a 50,000-character delegated prompt
 bound, eight child iterations, twelve child LM calls, 4,000 child output
@@ -268,16 +264,20 @@ inheritance is acceptable for prompt-only judgments because the Root's own
 generated code already executes in the same Sandbox.
 
 The isolation lane is the dedicated child Sandbox exposed as `rlm_query` and
-Root-only `rlm_query_batched` under the committed recursive policy. Each
-native depth-1 delegation provisions its own ephemeral Sandbox running a full
-native RLM, mounted at the sibling Volume scope
-`recursive/<workspace>/<run>/<call-index>` with no ordinary Fleet capabilities,
-credentials, mutable Root state, or Root broker state. Legacy children receive
-an immutable committed Session History snapshot and bounded metadata; strict
-child cleanup gates Root success.
-A depth-2 delegation uses the bounded Sub-LM fallback instead. Child Root/Sub
-DSPy runtimes are copied per sibling to isolate mutable model histories and
-callback bookkeeping.
+Root-only `rlm_query_batched` under the opt-in recursive policy. Each native
+depth-1 delegation provisions an ephemeral, Volume-less SemanticChild Sandbox
+running a full native RLM. It receives only the selected, host-authorized source
+copy and already-loaded Skill resources; it does not receive the Session Volume,
+parent tools, memory, task checkpoints, attachment storage, publication
+capabilities, credentials, mutable Root state, or Root broker state. Source
+size and available modification metadata are rechecked around bounded staging;
+scratch is private, and declared result files are path/symlink/size validated,
+harvested, and persisted in the parent
+Run before child teardown. Strict child cleanup gates Root success. Child
+Root/Sub DSPy runtimes are copied per sibling to isolate mutable model histories
+and callback bookkeeping. The provider network-block request is not evidence of
+enforcement; the Phase 5 waiver remains, and no child network restriction is
+claimed as verified.
 Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3
 provides, so their cost is sandbox provisioning, broker/interpreter startup,
 and the child's own iteration budget — see `scripts/benchmark_daytona_lifecycle.py`
@@ -327,106 +327,80 @@ See the root [architecture](../../ARCHITECTURE.md) for ownership and Turn commit
 
 ## Run the Phase 1 Daytona stream canary
 
-Phase 1 closure uses a deliberately narrow, one-Turn live canary. It selects
-the default `daytona-recursive` policy and proves one small
-text Attachment is materialized through the Volume capsule, native
+The Phase 1 one-Turn live canary is maintained as a pytest test. It checks that
+a small text Attachment is materialized through the Volume capsule, native
 `llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
 reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
-finishes the Turn, and the Turn-owned broker/Sandbox/Volume resources clean
-up.
+finishes the Turn, and Turn-owned broker, Sandbox, and Volume resources clean
+up. This canary explicitly requires the opt-in `daytona-recursive` profile;
+the shipped default remains `daytona-native`.
+
+For the canary, set `[config] default_profile` to `"daytona-recursive"` in
+`config/fleet.toml` and set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
+immutable Daytona snapshot name, then run:
 
 ```bash
-uv run python scripts/live_phase1_stream_verify.py \
-  --output .scratch/fleet-rlm-recursive-runtime/evidence/daytona-dspy-stream-<run-id>.json
+FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
+FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
+uv run pytest -q -n 0 --timeout=900 \
+  tests/live/backend/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
 ```
 
-The command is explicitly invoked and policy-gated by
-`runtime.live_enabled`. It loads `.env` with `override=False`, so operator
-exports retain precedence. It requires a clean tracked non-`main` candidate,
-the default `daytona-recursive` policy, and its configured Root and Sub model
-roles. Its bounded receipt excludes Attachment content, prompts,
-generated code, provider responses, trace IDs, broker addresses, and
-credentials. A passing canary closes Phase 1 only; it does not promote or
-release the candidate.
+The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
+Daytona and model credentials. The evidence-path variable must be exported in
+the process environment before pytest starts. The immutable snapshot variable
+is required to admit the recursive profile for this test. The test loads
+`.env` with `override=False`; operator exports retain precedence. A passing
+canary is evidence for this test only and does not promote or release the
+candidate. Replace the snapshot example with the candidate's immutable Daytona
+snapshot name, which must end in `-v` followed by a positive integer.
 
-## Run the Phase 2 Daytona recursive-child canary
+## Current live Daytona contracts
 
-After Phase 1 has a committed passing receipt and retrospective, the narrow
-Phase 2 canary selects `[profiles.daytona-recursive]`. It proves one native
-DSPy child RLM receives a dedicated Daytona Sandbox with ordinary network
-policy, a sibling private Volume scope, no Root Python marker, and strict
-cleanup before the Root typed `SUBMIT` completes. It does not use a custom
-agent loop or a grandchild Sandbox.
-
-```bash
-uv run python scripts/live_phase2_recursive_verify.py \
-  --output .scratch/fleet-rlm-recursive-runtime/evidence/daytona-dspy-recursive-<run-id>.json
-```
-
-The command requires explicit live authorization, `runtime.live_enabled`, a
-clean tracked non-`main` candidate, the recursive profile, and its configured
-model roles. Its receipt
-contains only candidate/dependency identity, non-secret policy identifiers,
-two bounded durations, and boolean assertions. It excludes prompts, answers,
-code, credentials, URLs, trace IDs, Sandbox IDs, Volume IDs, and broker data.
-
-## Run the complete Daytona proof
-
-`live_daytona_verify.py` remains the broader MVP/release proof; it is not
-repurposed for the Phase 1 canary. The release proof is an explicitly invoked,
-policy-gated command that uses the real FastAPI, DSPy, and Daytona path.
-`runtime.live_enabled` is true by
-default; set it to `false` in `config/fleet.toml` to fail closed. Export
-credentials in the invoking shell or keep them in the repository `.env`; never
-place them in the repository or pass them through Fleet API requests.
+The native verifier runs two current contracts against one committed candidate:
+the native single and ordered batch semantic-call path through FastAPI, and the
+staged Attachment / durable Artifact contract across Sandbox replacement.
+It requires explicit live authorization, `runtime.live_enabled`, the
+`daytona-native` profile, bounded Root and Sub model IDs, configured provider
+credentials, and a clean tracked non-`main` candidate.
 
 ```bash
-# Credentials may come from the process environment or repo `.env`
-# (loaded via python-dotenv; existing exports win).
+export FLEET_LIVE=1
+export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
+export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
 uv run python scripts/live_daytona_verify.py \
-  --output .scratch/release-ready-mvp/assets/daytona-mvp-proof.json
+  --output .scratch/live/native-daytona-run-001.json
 ```
 
-Select the intended provider profile in `[config] default_profile` and restart
-Fleet first. The shipped default is `daytona-recursive`; use the [profile
-matrix](../reference/profile-matrix.md) to provide its environment names.
-Provision the immutable Snapshot named by that profile with the [Daytona
-Snapshot guide](daytona-snapshot.md).
+The output must be a new ignored or out-of-repository path. The command records
+candidate and model identity, contract assertions, bounded counts, resource
+IDs, durability checksums, and cleanup facts. Its `--help` path does not load
+credentials. This proves only the two named contracts; it does not exercise
+recursive child execution or establish containment, promotion, release, or
+deployment.
 
-The verifier requires a clean tracked tree on a non-`main` branch, invokes the
-single live pytest scenario once, and performs no automatic retry. It resolves
-the configured Root and Sub roles from the selected TOML profile; ambient model
-variables are ignored, and swapped or obsolete model
-pairs fail the precondition. Its `--help` path requires no credentials.
+## Current recursive-batch canary
 
-The proof exercises a typed host Signature, state across RLM iterations,
-single and batched recursive calls, a host Tool, a durable workspace write,
-typed submission, result snapshot commit, strict SSE completion, Sandbox
-replacement, fresh interpreter state, Session History reload, and strict
-Sandbox/Volume cleanup.
+The separate recursive canary runs two native DSPy child RLMs from one ordered
+Root batch, verifies observed concurrency and child trace hierarchy, reuses the
+Root on a second Turn, and requires child cleanup and restored admission. It
+selects the opt-in `daytona-recursive` policy through an isolated policy copy;
+the shipped default remains `daytona-native`. It requires `FLEET_LIVE=1`,
+enabled live policy, configured Daytona/model credentials, and a clean tracked
+non-`main` candidate.
 
-The current proof does not establish Workspace Memory across real
-provider-backed Sandbox replacement and separate Sessions. That live
-cross-Sandbox, cross-Session proof remains gated and has not been run.
+```bash
+FLEET_LIVE=1 uv run python scripts/live_recursive_batch_canary.py \
+  --output /tmp/fleet-rlm-recursive-batch-run-001.json
+```
 
-## Evidence and failure policy
+The receipt is a single canary result. It does not certify containment,
+comparative quality, child promotion, release, or deployment. The Phase 5
+network-policy waiver remains recorded in the active ledger and is not network
+isolation evidence.
 
-The schema-versioned JSON receipt contains only the candidate fingerprint,
-versions and model identifiers, timestamps, resource and correlation ids,
-bounded counts, checksums, and pass/fail facts. It never retains prompts,
-generated code or stdout, Tool arguments or results, Session bodies,
-credentials, provider exception text, or stack traces.
-
-Configured credential values and known secret variable names are checked in
-memory against public Runtime Events, committed data, scoped Volume files,
-Sandbox environment names, application logs, and the receipt. Cleanup failure
-invalidates an otherwise successful proof. A failed receipt uses only one of
-the closed categories `precondition_failed`, `proof_failed`, `cleanup_failed`,
-`receipt_invalid`, or `interrupted` plus the bounded failed phase.
-
-The receipt is local release evidence, not deployment authorization. Full
-source-candidate promotion still requires the matching CI, local release-gate,
-and human-review evidence defined by the release process.
+Both commands are operator-run live checks; they are not part of this scripts
+refactor's local validation.
 
 
 ## Routing evaluation

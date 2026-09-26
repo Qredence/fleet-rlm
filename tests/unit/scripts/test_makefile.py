@@ -31,7 +31,16 @@ def test_clean_preserves_local_data_and_dependencies(tmp_path: Path) -> None:
         ".scratch/evidence.json",
         "src/module.py",
     ]
-    removed = ["src/pkg/__pycache__/module.pyc", ".ruff_cache/cache", "build/package", "dist/package.whl", ".coverage"]
+    removed = [
+        "src/pkg/__pycache__/module.pyc",
+        ".ruff_cache/cache",
+        ".ty/cache",
+        "build/package",
+        "dist/package.whl",
+        "src/fleet_rlm.egg-info/PKG-INFO",
+        ".coverage",
+        ".scratch/coverage/daytona.xml",
+    ]
     for name in preserved + removed:
         target = tmp_path / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -63,7 +72,7 @@ if args == ["build"]:
     previous = [json.loads(line) for line in log.read_text().splitlines()]
     assert ["run", "python", "scripts/validate_release.py", "metadata"] in previous
     assert ["pip-audit"] in previous
-    assert ["run", "test"] in previous
+    assert any(command[:3] == ["run", "--no-sync", "pytest"] for command in previous)
     assert not Path("dist/old.whl").exists()
 """
     )
@@ -87,9 +96,37 @@ def test_quality_graph_runs_shared_checks_once(tmp_path: Path) -> None:
     for command in (
         ["run", "python", "scripts/openapi_tools.py", "check"],
         ["run", "python", "scripts/generate_stream_fixture.py", "check"],
-        ["run", "python", "scripts/check_agents_md_freshness.py"],
+        ["run", "python", "scripts/check_repo_hygiene.py"],
     ):
         assert commands.count(command) == 1
+
+
+def test_install_targets_select_dependency_groups(tmp_path: Path) -> None:
+    result, commands = _run_fake_tools(tmp_path, "install", "install-dev", "install-all")
+    assert result.returncode == 0, result.stderr
+    assert ["sync", "--no-dev"] in commands
+    assert ["sync", "--dev"] in commands
+    assert ["sync", "--all-extras", "--dev"] in commands
+
+
+def test_coverage_target_and_legacy_alias_share_the_project_suite(tmp_path: Path) -> None:
+    result, commands = _run_fake_tools(tmp_path, "test-coverage", "test-daytona-cov")
+    assert result.returncode == 0, result.stderr
+    pytest_commands = [command for command in commands if command[:3] == ["run", "--no-sync", "pytest"]]
+    assert len(pytest_commands) == 1
+    assert "--cov" in pytest_commands[0]
+    assert "--cov-report=xml:.scratch/coverage/daytona.xml" in pytest_commands[0]
+
+
+def test_security_audit_arguments_are_overridable(tmp_path: Path) -> None:
+    result, commands = _run_fake_tools(
+        tmp_path,
+        "check-security",
+        "PIP_AUDIT_ARGS=--ignore-vuln GHSA-example",
+    )
+    assert result.returncode == 0, result.stderr
+    assert ["pip-audit", "--ignore-vuln", "GHSA-example"] in commands
+    assert ["bandit", "-q", "-r", "src/fleet_rlm", "-x", "tests", "-lll"] in commands
 
 
 @pytest.mark.parametrize("fail_lint", [False, True])
@@ -98,6 +135,7 @@ def test_release_build_waits_for_successful_checks(tmp_path: Path, fail_lint: bo
     if fail_lint:
         assert result.returncode != 0
         assert ["build"] not in commands
+        assert (tmp_path / "dist/old.whl").exists()
     else:
         assert result.returncode == 0, result.stderr
         assert commands.count(["build"]) == 1

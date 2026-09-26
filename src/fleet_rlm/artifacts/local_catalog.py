@@ -22,7 +22,7 @@ from fleet_rlm.artifacts.safety import (
     sanitize_title,
     validate_content_size,
 )
-from fleet_rlm.workspace.paths import VolumePaths, as_posix
+from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 

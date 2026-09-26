@@ -4,21 +4,25 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona import recursive_child_runtime
-from fleet_rlm.daytona.admission import DaytonaAdmission
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona.runtime import (
+    ChildRuntimeLease,
+    ChildRuntimeLeaseState,
+    DaytonaAdmission,
     DaytonaEnvironmentProfile,
     recursive_child_volume_subpath,
     require_recursive_child_volume_subpath,
 )
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease, ChildRuntimeLeaseState
-from fleet_rlm.runtime.bindings import require_scoped_volume_subpath
+from fleet_rlm.rlm.recursion import ChildRuntimeNotStartedError
+from fleet_rlm.sessions.bindings import require_scoped_volume_subpath
+from tests.support.session_manager import make_daytona_child_factory
 
 
 @dataclass
@@ -26,6 +30,8 @@ class _Fs:
     files: set[str]
     deleted: list[str] = field(default_factory=list)
     directories: set[str] = field(default_factory=set)
+    contents: dict[str, bytes] = field(default_factory=dict)
+    symlinks: set[str] = field(default_factory=set)
 
     async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
         """
@@ -40,9 +46,33 @@ class _Fs:
         """
         assert depth is None
         return [
-            *[SimpleNamespace(path=path, is_dir=False) for path in sorted(self.files)],
-            *[SimpleNamespace(path=path, is_dir=True) for path in sorted(self.directories)],
+            *[
+                SimpleNamespace(path=path, is_dir=False, mode="120777" if path in self.symlinks else "100644")
+                for path in sorted(self.files)
+            ],
+            *[SimpleNamespace(path=path, is_dir=True, mode="040755") for path in sorted(self.directories)],
         ]
+
+    async def get_file_info(self, path: str) -> SimpleNamespace:
+        if path in {"/", "/tmp"}:
+            return SimpleNamespace(path=path, is_dir=True, size=0, mode="040755")
+        if path in self.symlinks:
+            return SimpleNamespace(path=path, is_dir=False, size=0, mode="120777")
+        if path in self.directories:
+            return SimpleNamespace(path=path, is_dir=True, size=0, mode="040755")
+        if path in self.files:
+            return SimpleNamespace(path=path, is_dir=False, size=len(self.contents.get(path, b"")), mode="100644")
+        raise FileNotFoundError(path)
+
+    async def create_folder(self, path: str, _mode: str) -> None:
+        self.directories.add(path)
+
+    async def upload_file(self, data: bytes, path: str) -> None:
+        self.files.add(path)
+        self.contents[path] = data
+
+    async def download_file(self, path: str) -> bytes:
+        return self.contents[path]
 
     async def delete_file(self, path: str, *, recursive: bool = False) -> None:
         """
@@ -145,7 +175,7 @@ def test_child_runtime_lease_concurrent_close_joins_one_cleanup() -> None:
 
 @pytest.mark.asyncio
 async def test_child_scope_purge_removes_nested_files_and_directories() -> None:
-    from fleet_rlm.daytona.recursive_child_runtime import purge_regular_files
+    from fleet_rlm.daytona.runtime import purge_regular_files
 
     root = "/home/daytona/fleet"
     fs = _Fs(
@@ -216,8 +246,10 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
 ) -> None:
     workspace_id = uuid4()
     run_id = uuid4()
+    session_id = uuid4()
     root_fs = _Fs({"/home/daytona/fleet/workspaces-root.txt"})
-    child_fs = _Fs({"/home/daytona/fleet/intermediate.txt"})
+    scratch_file = f"/tmp/fleet/child-data/{run_id}/1/intermediate.txt"
+    child_fs = _Fs({"/workspace/persistent.txt", scratch_file})
     root = _Sandbox("root-sandbox", root_fs)
     child = _Sandbox("child-sandbox", child_fs)
     platform = _Platform(child)
@@ -226,6 +258,9 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
@@ -238,13 +273,14 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=DaytonaAdmission(max_active_leases=2),
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=workspace_id,
+        session_id=session_id,
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -256,12 +292,12 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     assert lease.sandbox_id != root.id
     assert lease.sandbox_id == child.id
     assert lease.volume_id == "shared-volume"
-    assert lease.volume_subpath == recursive_child_volume_subpath(workspace_id, run_id, 1)
+    assert lease.volume_subpath == f"workspaces/{workspace_id}/sessions/{session_id}/workspace"
     assert platform.create_calls == [
         {
             "profile": DaytonaEnvironmentProfile.WORKSPACE_CHILD,
             "volume_id": "shared-volume",
-            "mount_path": "/home/daytona/fleet",
+            "mount_path": "/workspace",
             "volume_subpath": lease.volume_subpath,
             "labels": {"fleet.runtime": "recursive-child"},
             "with_volume": True,
@@ -270,10 +306,9 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
     ]
 
     await asyncio.to_thread(lease.close)
-
     assert shutdown_calls == [True]
-    assert child_fs.files == set()
-    assert child_fs.deleted == ["/home/daytona/fleet/intermediate.txt"]
+    assert child_fs.files == {"/workspace/persistent.txt"}
+    assert child_fs.deleted == [scratch_file, f"/tmp/fleet/child-data/{run_id}/1"]
     assert root_fs.files == {"/home/daytona/fleet/workspaces-root.txt"}
     assert root_fs.deleted == []
     assert platform.deleted == ["child-sandbox"]
@@ -286,24 +321,30 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
     child_fs = _Fs({"/home/daytona/fleet/workspace-file.txt"})
     child = _Sandbox("semantic-child", child_fs)
     platform = _Platform(child)
+    scratch_bindings: list[tuple[object, int | None]] = []
+    run_id = uuid4()
 
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            scratch_bindings.append((_run_id, call_index))
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=DaytonaAdmission(max_active_leases=1),
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
-        run_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
         execution_output_cap=1000,
@@ -313,6 +354,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
 
     assert lease.volume_id == ""
     assert lease.volume_subpath == ""
+    assert scratch_bindings == [(run_id, 1)]
     assert platform.create_calls == [
         {
             "profile": DaytonaEnvironmentProfile.SEMANTIC_CHILD,
@@ -327,23 +369,157 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
     ]
 
     await asyncio.to_thread(lease.close)
-
     assert child_fs.files == {"/home/daytona/fleet/workspace-file.txt"}
     assert child_fs.deleted == []
     assert platform.deleted == ["semantic-child"]
 
 
 @pytest.mark.asyncio
+async def test_child_capacity_refusal_is_bounded_and_does_not_create_a_sandbox(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loop = asyncio.get_running_loop()
+    admission = DaytonaAdmission(max_active_leases=1)
+    occupied = await admission.acquire(deadline=loop.time() + 1)
+    child = _Sandbox("unstarted-child", _Fs(set()))
+    platform = _Platform(child)
+    monkeypatch.setattr(recursive_child_runtime, "_CHILD_ADMISSION_WAIT_SECONDS", 0.01)
+    factory = make_daytona_child_factory(
+        loop=loop,
+        platform=platform,
+        admission=admission,
+        volume_id=None,
+        mount_path=None,
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=loop.time() + 5,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+    )
+
+    try:
+        with pytest.raises(ChildRuntimeNotStartedError, match="capacity is unavailable"):
+            await asyncio.to_thread(factory, 1)
+    finally:
+        occupied.release()
+
+    assert platform.create_calls == []
+
+
+@pytest.mark.asyncio
+async def test_child_lease_stages_and_harvests_files_in_its_private_directory() -> None:
+    child_fs = _Fs(set())
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    run_id = uuid4()
+    factory = make_daytona_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    parent_source = {"src/main.py": b"answer = 42\n"}
+    await asyncio.to_thread(lease.stage_files, parent_source)
+    private_root = lease.data_path
+    assert private_root == f"/tmp/fleet/child-data/{run_id}/1"
+    assert lease.interpreter._backend._run_scratch_path == private_root
+    assert child_fs.contents[f"{private_root}/src/main.py"] == parent_source["src/main.py"]
+    child_fs.contents[f"{private_root}/src/main.py"] = b"child rewrite"
+    assert parent_source["src/main.py"] == b"answer = 42\n"
+    child_fs.contents[f"{private_root}/result.txt"] = b"finding"
+    child_fs.files.add(f"{private_root}/result.txt")
+
+    result = await asyncio.to_thread(lease.read_result_files, ["result.txt"])
+    assert result == {"result.txt": b"finding"}
+
+    child_fs.files.add(f"{private_root}/symlink.txt")
+    child_fs.symlinks.add(f"{private_root}/symlink.txt")
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.read_result_files, ["symlink.txt"])
+
+    child_fs.files.add(f"{private_root}/linked/result.txt")
+    child_fs.symlinks.add(f"{private_root}/linked")
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.read_result_files, ["linked/result.txt"])
+
+    with pytest.raises(ValueError, match="safely relative"):
+        await asyncio.to_thread(lease.read_result_files, ["../outside"])
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
+async def test_child_lease_rejects_symlinked_private_stage_root_before_writing() -> None:
+    child_fs = _Fs(set(), symlinks={"/tmp/fleet": "/outside"})
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    factory = make_daytona_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id=None,
+        mount_path=None,
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+        profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
+    )
+    lease = await asyncio.to_thread(factory, 1)
+
+    with pytest.raises(ValueError, match="symlink"):
+        await asyncio.to_thread(lease.stage_files, {"src/main.py": b"answer = 42\n"})
+    assert child_fs.files == set()
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
+async def test_child_lease_rejects_oversized_or_invalid_staging_before_filesystem_write() -> None:
+    child_fs = _Fs(set())
+    platform = _Platform(_Sandbox("semantic-child", child_fs))
+    factory = make_daytona_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=platform,
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        mount_path="/home/daytona/fleet",
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    with pytest.raises(ValueError, match="safely relative"):
+        await asyncio.to_thread(lease.stage_files, {"../secret": b"x"})
+    with pytest.raises(ValueError, match="size limit"):
+        await asyncio.to_thread(lease.stage_files, {"large.bin": b"x" * (64 * 1024 * 1024 + 1)})
+    assert child_fs.files == set()
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
 async def test_semantic_child_requires_a_configured_snapshot_before_provider_acquisition() -> None:
     platform = _Platform(_Sandbox("semantic-child", _Fs(set())))
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -360,27 +536,30 @@ async def test_semantic_child_requires_a_configured_snapshot_before_provider_acq
 
 
 @pytest.mark.asyncio
-async def test_semantic_child_can_fall_back_to_volume_backed_workspace_child() -> None:
-    platform = _Platform(_Sandbox("workspace-fallback", _Fs(set())))
-    factory = recursive_child_runtime.build_child_runtime_factory(
+async def test_semantic_child_never_falls_back_to_parent_volume() -> None:
+    platform = _Platform(_Sandbox("unexpected-workspace-fallback", _Fs(set())))
+    admission = DaytonaAdmission(max_active_leases=1)
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
-        admission=DaytonaAdmission(max_active_leases=1),
+        admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
         execution_output_cap=1000,
         semantic_child_available=False,
-        semantic_child_fallback=True,
     )
 
-    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
-    assert platform.create_calls[0]["profile"] is DaytonaEnvironmentProfile.WORKSPACE_CHILD
-    assert platform.create_calls[0]["volume_id"] == "shared-volume"
-    await asyncio.to_thread(lease.close)
+    with pytest.raises(ValueError, match="FLEET_DAYTONA_CHILD_SNAPSHOT"):
+        await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+
+    assert platform.create_calls == []
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
 
 
 @pytest.mark.asyncio
@@ -401,20 +580,24 @@ async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -447,21 +630,25 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             release_shutdown.wait(2)
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", HangingInterpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -482,13 +669,13 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_quarantine_thread_start_failure_uses_fallback_executor(
+async def test_ordered_cleanup_never_starts_a_quarantine_thread(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
     release_shutdown = threading.Event()
     platform = _Platform(child)
-    real_thread = recursive_child_runtime.Thread
+    real_thread = threading.Thread
     thread_starts = 0
 
     class FailingQuarantineThread:
@@ -506,22 +693,26 @@ async def test_quarantine_thread_start_failure_uses_fallback_executor(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
             release_shutdown.wait(2)
 
-    monkeypatch.setattr(recursive_child_runtime, "Thread", FailingQuarantineThread)
+    monkeypatch.setattr(recursive_child_runtime, "Thread", FailingQuarantineThread, raising=False)
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", HangingInterpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -534,7 +725,7 @@ async def test_quarantine_thread_start_failure_uses_fallback_executor(
     release_shutdown.set()
     await asyncio.to_thread(factory.wait_owned)
 
-    assert thread_starts == 2
+    assert thread_starts == 0
     assert platform.deleted == ["child-sandbox"]
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     permit.release()
@@ -544,12 +735,19 @@ async def test_quarantine_thread_start_failure_uses_fallback_executor(
 async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interpreter_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
+    run_id = uuid4()
+    child = _Sandbox(
+        "child-sandbox",
+        _Fs({"/workspace/persistent.txt", f"/tmp/fleet/child-data/{run_id}/1/intermediate.txt"}),
+    )
     platform = _Platform(child)
 
     class Interpreter:
         def __init__(self, **_kwargs: object) -> None:
             return None
+
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
 
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             """
@@ -566,14 +764,15 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=DaytonaAdmission(max_active_leases=2),
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
-        run_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
         execution_output_cap=1000,
@@ -583,7 +782,7 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
     with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         await asyncio.to_thread(lease.close)
 
-    assert child.fs.files == set()
+    assert child.fs.files == {"/workspace/persistent.txt"}
     assert platform.deleted == ["child-sandbox"]
 
 
@@ -593,13 +792,14 @@ async def test_child_factory_times_out_when_real_admission_is_saturated() -> Non
     admission = DaytonaAdmission(max_active_leases=1)
     held = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
     loop = asyncio.get_running_loop()
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,
@@ -620,13 +820,14 @@ async def test_child_factory_times_out_when_real_admission_is_saturated() -> Non
 async def test_revocation_before_admission_performs_no_allocation() -> None:
     platform = _Platform(_Sandbox("child-sandbox", _Fs(set())))
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -646,13 +847,14 @@ async def test_revocation_before_admission_performs_no_allocation() -> None:
 async def test_invalid_workspace_child_binding_does_not_consume_admission_permit() -> None:
     platform = _Platform(_Sandbox("child-sandbox", _Fs(set())))
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id=None,
         mount_path=None,
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -683,13 +885,14 @@ async def test_revocation_after_admission_releases_permit_without_sandbox_creati
 
     platform = _Platform(_Sandbox("child-sandbox", _Fs(set())))
     admission = DaytonaAdmission(max_active_leases=1)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -720,13 +923,14 @@ async def test_revocation_after_sandbox_creation_deletes_sandbox_and_releases_pe
     platform = _Platform(child)
     admission = DaytonaAdmission(max_active_leases=1)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -781,13 +985,14 @@ async def test_failed_child_creation_with_failed_cleanup_is_marked_fatal(
             raise RuntimeError("provider cleanup failed")
 
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=Platform(),
         admission=DaytonaAdmission(max_active_leases=2),
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
         execution_timeout_s=30,
@@ -825,19 +1030,23 @@ async def test_child_factory_adopts_provider_acquisition_that_finishes_after_dea
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             shutdown_calls.append(strict_broker_cleanup)
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
     loop = asyncio.get_running_loop()
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,
@@ -852,15 +1061,16 @@ async def test_child_factory_adopts_provider_acquisition_that_finishes_after_dea
     release_provider.set()
     await asyncio.to_thread(factory.wait_owned)
 
-    assert shutdown_calls == [True]
+    # The late Sandbox is retired before an invocation interpreter is built.
+    assert shutdown_calls == []
     assert platform.deleted == ["child-sandbox"]
     permit = await admission.acquire(deadline=loop.time() + 1)
     permit.release()
 
 
 @pytest.mark.asyncio
-async def test_child_cleanup_falls_back_to_disposable_loop_when_owner_loop_closed() -> None:
-    """Provider cleanup and permit release must not depend on the owner loop."""
+async def test_child_cleanup_retains_ownership_when_owner_loop_closed() -> None:
+    """A lost application loop cannot establish cleanup or release admission."""
     child = _Sandbox("child-sandbox", _Fs({"/home/daytona/fleet/intermediate.txt"}))
     platform = _Platform(child)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -868,6 +1078,9 @@ async def test_child_cleanup_falls_back_to_disposable_loop_when_owner_loop_close
     shutdown_calls: list[bool] = []
 
     class Interpreter:
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             shutdown_calls.append(strict_broker_cleanup)
 
@@ -875,20 +1088,25 @@ async def test_child_cleanup_falls_back_to_disposable_loop_when_owner_loop_close
         def call_soon_threadsafe(self, *_args: object, **_kwargs: object):
             raise RuntimeError("Event loop is closed")
 
-    recursive_child_runtime._close_child_runtime_sync(
-        loop=ClosedLoop(),  # type: ignore[arg-type]
-        platform=platform,
-        sandbox=child,
-        sandbox_id="child-sandbox",
-        mount_path="/home/daytona/fleet",
-        interpreter=Interpreter(),  # type: ignore[arg-type]
-        permit=permit,
-    )
+    retained: list[Future[object]] = []
+    with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError):
+        recursive_child_runtime._close_child_runtime_sync(
+            loop=ClosedLoop(),  # type: ignore[arg-type]
+            platform=platform,
+            sandbox=child,
+            sandbox_id="child-sandbox",
+            mount_path="/home/daytona/fleet",
+            interpreter=Interpreter(),  # type: ignore[arg-type]
+            permit=permit,
+            retain_pending_cleanup=retained.append,
+        )
 
-    assert shutdown_calls == [True]
-    assert platform.deleted == ["child-sandbox"]
-    assert child.fs.deleted == ["/home/daytona/fleet/intermediate.txt"]
-    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    assert shutdown_calls == []
+    assert platform.deleted == []
+    assert child.fs.deleted == []
+    assert len(retained) == 1
+    assert retained[0].done()
+    assert isinstance(retained[0].exception(), RuntimeError)
     permit.release()
 
 
@@ -912,22 +1130,26 @@ async def test_factory_wait_owned_bounds_never_completing_provider_acquisition(
         def __init__(self, **_kwargs: object) -> None:
             return None
 
+        def bind_run_scratch(self, _run_id: object, *, call_index: int | None = None) -> None:
+            del call_index
+
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             assert strict_broker_cleanup is True
 
     monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", Interpreter)
     monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "_CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     platform = HangingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()
-    factory = recursive_child_runtime.build_child_runtime_factory(
+    factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
         mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
+        session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
         execution_timeout_s=30,

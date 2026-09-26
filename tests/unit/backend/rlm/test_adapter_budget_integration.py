@@ -17,7 +17,7 @@ from fleet_rlm.rlm.budget import (
     TurnBudget,
     TurnBudgetExhausted,
 )
-from fleet_rlm.rlm.compat_3_3_1 import _RLMTraceCallback
+from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
@@ -389,7 +389,7 @@ def test_concurrent_finalization_admissions_do_not_overdraw():
 
 
 def test_truncated_flag_set_when_output_hits_configured_max() -> None:
-    from fleet_rlm.rlm.compat_3_3_1 import _lm_max_tokens
+    from fleet_rlm.rlm.events import _lm_max_tokens
 
     class FakeLM:
         def __init__(self) -> None:

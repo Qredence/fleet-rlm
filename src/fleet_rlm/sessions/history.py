@@ -30,9 +30,14 @@ from typing import Final
 
 import dspy
 
-from fleet_rlm.sessions.committed_turn import CommittedTurn, StatusPart
+from fleet_rlm.rlm.result import empty_rlm_usage
+from fleet_rlm.sessions.committed_turn import CommittedTurn, StatusPart, TextPart, UsagePart
+from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.sessions.run_state import ClaimedRun
 
 __all__ = [
+    "claimed_history_records",
+    "dspy_history_for_claim",
     "is_committed_conversation_turn",
     "to_canonical_history_records",
     "to_dspy_history",
@@ -144,6 +149,46 @@ def to_dspy_history(
     """
     records = to_canonical_history_records(committed_turns, user_requests=user_requests)
     return dspy.History(messages=records)
+
+
+def claimed_history_records(claim: ClaimedRun) -> tuple[tuple[CommittedTurn, ...], tuple[str, ...]]:
+    """Project the immutable claimed Session checkpoint to canonical history inputs.
+
+    Failure tombstones may remain in the bounded Session audit history. Their
+    ``CommittedTurn`` metadata excludes them from the model conversation,
+    while preserving the user/assistant pairing for successful Turns.
+    """
+    committed_turns: list[CommittedTurn] = []
+    user_requests: list[str] = []
+    pending_user_text: str | None = None
+    for message in claim.history.messages:
+        if not isinstance(message, HistoryMessage):
+            continue
+        if message.role == "user":
+            pending_user_text = message.content
+            continue
+        if message.role != "assistant":
+            continue
+        if message.committed_turn is not None and not is_committed_conversation_turn(message.committed_turn):
+            pending_user_text = None
+            continue
+        if pending_user_text is None:
+            continue
+        committed_turns.append(
+            CommittedTurn(
+                schema_version=1,
+                parts=(UsagePart(value=empty_rlm_usage()), TextPart(text=message.content)),
+            )
+        )
+        user_requests.append(pending_user_text)
+        pending_user_text = None
+    return tuple(committed_turns), tuple(user_requests)
+
+
+def dspy_history_for_claim(claim: ClaimedRun) -> dspy.History:
+    """Materialize the exact DSPy History type from a lifecycle-issued claim."""
+    committed_turns, user_requests = claimed_history_records(claim)
+    return to_dspy_history(committed_turns, user_requests=user_requests)
 
 
 def validate_legacy_records(

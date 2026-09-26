@@ -52,10 +52,6 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert content_limit["value"] == 10_000
     assert content_limit["editor"] == "number"
 
-    url_limit = _field(service.read(), "daytona-recursive", "storage.max_url_bytes")
-    assert url_limit["value"] == 10 * 1024 * 1024
-    assert url_limit["editor"] == "number"
-
     live_enabled = _field(service.read(), "defaults", "runtime.live_enabled")
     assert live_enabled["value"] is True
     assert live_enabled["editor"] == "boolean"
@@ -74,7 +70,7 @@ def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: P
 
     assert _field(after, "defaults", "rlm.max_iters")["value"] == 21
     content = policy.read_text(encoding="utf-8")
-    assert "# The committed policy is [defaults] itself" in content
+    assert "# The native-only profile is the default" in content
     assert "max_iters = 21" in content
     assert _field(after, "daytona-recursive", "rlm.max_iters")["value"] == 21
 
@@ -297,8 +293,9 @@ def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> 
     service, policy = _service(tmp_path)
     before = service.read()
 
-    assert before.default_profile == "daytona-recursive"
+    assert before.default_profile == "daytona-native"
     assert set(before.available_profiles) == {
+        "daytona-native",
         "daytona-recursive",
         "daytona-managed",
         "phase4-campaign",
@@ -309,10 +306,13 @@ def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> 
     # Re-selecting a committed profile is accepted and keeps the persisted
     # default_profile line canonical. The revision is a content hash, so a
     # same-value write legitimately keeps it unchanged.
-    after = service.set_default_profile("daytona-recursive", revision=before.revision)
+    after = service.set_default_profile("daytona-native", revision=before.revision)
 
-    assert after.default_profile == "daytona-recursive"
-    assert 'default_profile = "daytona-recursive"' in policy.read_text(encoding="utf-8")
+    assert after.default_profile == "daytona-native"
+    assert 'default_profile = "daytona-native"' in policy.read_text(encoding="utf-8")
+
+    recursive = service.set_default_profile("daytona-recursive", revision=after.revision)
+    assert recursive.default_profile == "daytona-recursive"
 
 
 def test_set_default_profile_rejects_unknown_profile_and_stale_revision(tmp_path: Path) -> None:

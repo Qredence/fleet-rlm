@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -22,13 +23,14 @@ from fleet_rlm.workspace.memory import (
     WorkspaceMemoryToolHost,
     promote_memory_candidates,
 )
-from fleet_rlm.workspace.storage import AgentStorageSession, WorkspaceMemoryStorage
+from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
 
 
 # --- from test_memory_candidate_wiring.py -----------------------------
 class _GeneratedAgentProcess:
-    def code_run(self, code: str, **_kwargs):
-        completed = subprocess.run(
+    async def code_run(self, code: str, **_kwargs):
+        completed = await asyncio.to_thread(
+            subprocess.run,
             [sys.executable, "-c", code],
             check=False,
             capture_output=True,
@@ -36,6 +38,54 @@ class _GeneratedAgentProcess:
             timeout=10,
         )
         return SimpleNamespace(exit_code=completed.returncode, result=completed.stdout.strip())
+
+
+class _LocalSandboxFs:
+    """Small local implementation of the production Daytona filesystem API."""
+
+    async def get_file_info(self, value: str) -> dict[str, object]:
+        path = Path(value)
+        if not path.exists() and not path.is_symlink():
+            raise FileNotFoundError(value)
+        return {
+            "is_dir": path.is_dir(),
+            "is_symlink": path.is_symlink(),
+            "size": path.stat().st_size if path.is_file() else 0,
+            "mod_time": str(path.stat().st_mtime),
+        }
+
+    async def list_files(self, value: str, *, depth: int) -> list[dict[str, object]]:
+        path = Path(value)
+        if not path.exists():
+            raise FileNotFoundError(value)
+        entries = []
+        for child in path.iterdir():
+            if child.is_dir() and depth > 1:
+                continue
+            entries.append(
+                {
+                    "path": str(child),
+                    "is_dir": child.is_dir(),
+                    "is_symlink": child.is_symlink(),
+                    "size": child.stat().st_size if child.is_file() else 0,
+                    "mod_time": str(child.stat().st_mtime),
+                }
+            )
+        return entries
+
+    async def download_file(self, value: str) -> bytes:
+        return await asyncio.to_thread(Path(value).read_bytes)
+
+    async def upload_file(self, data: bytes, value: str) -> None:
+        def write() -> None:
+            path = Path(value)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+
+        await asyncio.to_thread(write)
+
+    async def delete_file(self, value: str) -> None:
+        await asyncio.to_thread(Path(value).unlink, missing_ok=True)
 
 
 def _turn():
@@ -60,9 +110,14 @@ def _turn():
 
 
 async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
-    from fleet_rlm.chat.preparation import RunEnvironment
-    from fleet_rlm.composition.daytona_run_preparation import _LiveCapabilityPreparer
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import VolumePaths
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer, RunEnvironment
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+    from fleet_rlm.workspace.memory import build_workspace_memory_store
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+    from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
@@ -72,20 +127,70 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         rlm_autonomous_memory_categories=categories,
         max_upload_bytes=262_144,
     )
-    preparer = _LiveCapabilityPreparer(settings=settings, skill_catalog=build_bundled_skill_catalog())
-    sandbox = SimpleNamespace(process=_GeneratedAgentProcess())
+    sandbox = SimpleNamespace(process=_GeneratedAgentProcess(), fs=_LocalSandboxFs())
+    paths = VolumePaths.from_mount(str(volume_root))
+    turn = _turn()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    host_io = daytona_host_io_for_test_sandbox(
+        sandbox,
+        workspace_id=turn.access.workspace_id,
+        dispatcher=dispatcher,
+        volume_root=str(paths.mount_path),
+        max_file_bytes=settings.max_upload_bytes,
+    )
+    sink = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=paths,
+        host_io=host_io,
+        run_id=turn.run_id,
+    )
+    memory_session = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.mount_path),
+        max_file_bytes=settings.max_upload_bytes,
+        allow_volume_root=True,
+    )
+    memory_store = build_workspace_memory_store(
+        WorkspaceMemoryStorage(memory_session),
+        max_upload_bytes=settings.max_upload_bytes,
+    )
+
+    session_workspace = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.session_workspace_dir(turn.session_id)),
+        max_file_bytes=settings.max_upload_bytes,
+    )
+    project_workspace = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.projects_root()),
+        max_file_bytes=settings.max_upload_bytes,
+    )
 
     async def release() -> None:
         return None
 
     environment = RunEnvironment(
         interpreter=None,
-        attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=sandbox)),  # ty: ignore[invalid-argument-type]
-        artifact_sink=SimpleNamespace(),  # ty: ignore[invalid-argument-type]
+        attachment_sink=sink,
+        artifact_sink=sink,
         release=release,
+        workspace_memory_store=memory_store,
+        volume_fs=sink.volume_fs,
+        session_workspace=session_workspace,
+        project_workspace=project_workspace,
+    )
+    preparer = DaytonaCapabilityPreparer(
+        settings=settings,
+        skill_catalog=build_bundled_skill_catalog(),
+        volume_paths=paths,
     )
     return await preparer.prepare(
-        _turn(),
+        turn,
         environment,
         PreparedAttachments(refs=(), staged=()),
         deadline=asyncio.get_running_loop().time() + 30,
@@ -141,7 +246,7 @@ class _GeneratedWorkspaceProcess:
 def _store(tmp_path):
     volume_root = tmp_path / "volume"
     volume_root.mkdir()
-    session = AgentStorageSession(
+    session = WorkspaceStorage(
         SimpleNamespace(process=_GeneratedWorkspaceProcess()),
         volume_root=str(volume_root),
         root=str(volume_root),

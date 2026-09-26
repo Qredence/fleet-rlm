@@ -18,21 +18,19 @@ from uuid import uuid4
 import dspy
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
     AttachmentContextEntry,
     FleetRLMSignature,
     RLMModelBundle,
     RLMOptions,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
-    ChildOutcome,
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
-    SubproblemCapsule,
 )
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
 
@@ -61,7 +59,7 @@ def test_build_native_rlm_binds_sub_lm_and_tools() -> None:
     def custom_leaf_tool(x: str) -> str:
         return f"leaf:{x}"
 
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=5, max_llm_calls=10, max_output_chars=4000),
         tools=[dspy.Tool(custom_leaf_tool, name="custom_leaf")],
@@ -128,10 +126,19 @@ def test_large_context_staging_capsule_lifecycle(tmp_path: Path) -> None:
 def test_child_sandbox_delegation_strictly_depth_one() -> None:
     """Child RLMs receive only leaf tools (never rlm_query or rlm_query_batched)."""
     adapter = dspy.JSONAdapter()
-    root_lm = dspy.utils.DummyLM([{"reasoning": "root", "code": "SUBMIT(answer='done')"}], adapter=adapter)
-    sub_lm = dspy.utils.DummyLM([{"reasoning": "child", "code": "SUBMIT(answer='child-done')"}], adapter=adapter)
+    root_lm = dspy.utils.DummyLM(
+        [{"reasoning": "child", "code": "SUBMIT(answer='child-done', evidence=[], gaps=[], result_files=[])"}],
+        adapter=adapter,
+    )
+    sub_lm = dspy.utils.DummyLM(
+        [
+            {"reasoning": "child", "code": "SUBMIT(answer='child-done', evidence=[], gaps=[], result_files=[])"},
+        ],
+        adapter=adapter,
+    )
 
-    def recording_factory(call_index: int) -> ChildRuntimeLease:
+    def recording_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         return ChildRuntimeLease(
             interpreter,
@@ -152,29 +159,16 @@ def test_child_sandbox_delegation_strictly_depth_one() -> None:
     assert executor.tool.name == "rlm_query"
     assert executor.batched_tool.name == "rlm_query_batched"
 
-    # Execute a child query
-    capsule = SubproblemCapsule(
-        task="Extract row count",
-        fragments=("row count is 42",),
-        allocation_bytes=1024,
-    )
-    outcome = executor.execute_capsule_outcome(capsule)
-    assert isinstance(outcome, ChildOutcome)
-    assert outcome.status == "completed"
+    # Execute a child query through the task/inputs contract.
+    outcome = executor._call_child(task="Extract row count", inputs=[], context="row count is 42")
+    assert outcome["status"] == "completed", outcome
+    assert outcome["answer"] == "child-done"
 
-    def read_input(_evidence_id: str) -> str:
-        return "data"
-
-    # Under RecursiveSubtaskSignature, child only receives read_selected_input
-    # and built-in sub_lm tools. Child CANNOT have rlm_query tool.
-    child_rlm = build_native_rlm(
+    child_rlm = build_native_rlm_for_test(
         signature=RecursiveSubtaskSignature,
         options=RLMOptions(max_iters=4, max_llm_calls=8, max_output_chars=2000),
-        tools=[dspy.Tool(read_input, name="read_selected_input")],
         sub_lm=sub_lm,
         verbose=False,
     )
-
-    assert "read_selected_input" in child_rlm.tools
     assert "rlm_query" not in child_rlm.tools
     assert "rlm_query_batched" not in child_rlm.tools

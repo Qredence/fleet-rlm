@@ -183,6 +183,28 @@ export class TurnEventReducer {
             this.clock,
           ),
         );
+      case "child_progress": {
+        const id = `child-${this.runId}-${event.childId}`;
+        return this.save({
+          id,
+          kind: "child_progress",
+          runId: this.runId,
+          childId: event.childId,
+          parentRunId: event.parentRunId ?? this.runId,
+          taskLabel: event.taskLabel,
+          state: event.state,
+          elapsedMs: event.elapsedMs,
+          outcome: event.outcome,
+          evidence: event.evidence,
+          gaps: event.gaps,
+          resultFileCount: event.resultFileCount,
+          codeExcerpt: event.codeExcerpt,
+          outputExcerpt: event.outputExcerpt,
+          cleanupState: event.cleanupState,
+          collapsed: true,
+          ts: this.clock(),
+        });
+      }
       case "attachment":
         return this.save(
           attachment(

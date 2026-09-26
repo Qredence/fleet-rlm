@@ -6,28 +6,245 @@ behind an injectable dependency seam so unit tests remain credential-free.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import re
+import shlex
 from dataclasses import dataclass
+from enum import StrEnum
+from importlib.resources import files
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import DaytonaAdapterError, classify_provider_error
-from fleet_rlm.daytona.platform import (
-    LiveDaytonaPlatform,
-    LiveDaytonaVolumeClient,
-)
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
+    BASE_IMAGE,
+    DEFAULT_CHILD_SNAPSHOT_NAME,
+    DEFAULT_SNAPSHOT_NAME,
+    SEMANTIC_CHILD_RESOURCES,
+    SESSION_RESOURCES,
+    DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
     ExpectedWorkspaceMount,
+    LiveDaytonaPlatform,
+    LiveDaytonaVolumeClient,
+    build_daytona_client,
     sandbox_spec_from_settings,
-    snapshot_dependency_import_names,
     verify_sandbox_spec,
     verify_sandbox_workspace_mount,
     volume_config_from_settings,
 )
-from fleet_rlm.daytona.runtime import build_daytona_client
 from fleet_rlm.persistence.database import ensure_database_compatible
-from fleet_rlm.runtime.bindings import workspace_volume_subpath
+from fleet_rlm.sessions.bindings import workspace_volume_subpath
+
+_SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
+_IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
+_IMPORT_NAME = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$", re.IGNORECASE)
+
+
+class MissingImportOutcome(StrEnum):
+    """Bounded outcomes for optional image import observations."""
+
+    MISSING = "missing"
+    IMPORT_ERROR = "import-error"
+    VERSION_MISMATCH = "version-mismatch"
+
+
+@dataclass(frozen=True, slots=True)
+class MissingImportObservation:
+    """Content-free evidence that one profile import check failed."""
+
+    module: str
+    profile: DaytonaEnvironmentProfile
+    outcome: MissingImportOutcome
+
+    def as_dict(self) -> dict[str, str]:
+        return {"module": self.module, "profile": self.profile.value, "outcome": self.outcome.value}
+
+
+def normalize_missing_import_observation(
+    module: str,
+    profile: DaytonaEnvironmentProfile | str,
+    outcome: MissingImportOutcome | str = MissingImportOutcome.MISSING,
+) -> MissingImportObservation:
+    """Normalize a bounded module/profile/outcome observation.
+
+    Invalid or overlong provider-derived names are rejected rather than
+    retained, keeping receipts deterministic and free of exception content.
+    """
+    normalized_module = module.strip().lower()
+    if len(normalized_module) > 128 or not _IMPORT_NAME.fullmatch(normalized_module):
+        raise ValueError("missing-import module must be a normalized import name")
+    try:
+        normalized_profile = (
+            profile if isinstance(profile, DaytonaEnvironmentProfile) else DaytonaEnvironmentProfile(profile)
+        )
+        normalized_outcome = outcome if isinstance(outcome, MissingImportOutcome) else MissingImportOutcome(outcome)
+    except ValueError as exc:
+        raise ValueError("missing-import profile or outcome is invalid") from exc
+    return MissingImportObservation(normalized_module, normalized_profile, normalized_outcome)
+
+
+@dataclass(frozen=True, slots=True)
+class DaytonaEnvironmentManifest:
+    """Auditable immutable environment identity, safe to retain in evidence."""
+
+    profile: DaytonaEnvironmentProfile
+    image_kind: str
+    snapshot: str
+    base_image: str
+    python_version: str
+    dependency_sha256: str
+    dependencies: tuple[str, ...]
+    user: str = "daytona"
+    workdir: str = "/home/daytona"
+    volume_allowed: bool = False
+    warm_pool_eligible: bool = False
+    schema_version: str = "fleet.daytona-runtime-manifest/v1"
+    helper_protocol: str = "daytona-native-context/v1"
+
+    def as_dict(self) -> dict[str, object]:
+        """Return the non-secret manifest payload baked into new images."""
+        return {
+            "schema_version": self.schema_version,
+            "profile": self.profile.value,
+            "image_kind": self.image_kind,
+            "snapshot": self.snapshot,
+            "base_image": self.base_image,
+            "python_version": self.python_version,
+            "python_executable": "/usr/local/bin/python",
+            "dependency_sha256": self.dependency_sha256,
+            "dependencies": list(self.dependencies),
+            "helper_protocol": self.helper_protocol,
+            "capabilities": ["python", "git", "ca-certificates"],
+            "resources": {"cpu": self.resources[0], "memory_gib": self.resources[1], "disk_gib": self.resources[2]},
+            "user": self.user,
+            "workdir": self.workdir,
+            "volume_allowed": self.volume_allowed,
+            "warm_pool_eligible": self.warm_pool_eligible,
+        }
+
+    def image_identity(self) -> dict[str, object]:
+        """Return the immutable image payload independent of its execution profile."""
+        identity = self.as_dict()
+        identity.pop("profile")
+        return identity
+
+    @property
+    def compatible_profiles(self) -> tuple[DaytonaEnvironmentProfile, ...]:
+        """Return profiles that may execute against this immutable image."""
+        if self.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+            return (DaytonaEnvironmentProfile.SEMANTIC_CHILD,)
+        return (DaytonaEnvironmentProfile.SESSION, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+
+    @property
+    def resources(self) -> tuple[int, int, int]:
+        """Return the immutable CPU/memory/disk contract for this profile."""
+        return (
+            SESSION_RESOURCES
+            if self.profile is not DaytonaEnvironmentProfile.SEMANTIC_CHILD
+            else SEMANTIC_CHILD_RESOURCES
+        )
+
+    @property
+    def digest(self) -> str:
+        """Return the deterministic digest of the profile-independent image identity."""
+        encoded = json.dumps(self.image_identity(), sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+
+def snapshot_execution_dependencies(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> tuple[str, ...]:
+    """Load the exact generated-code packages baked into the Snapshot."""
+    content = files("fleet_rlm.daytona").joinpath(_SNAPSHOT_REQUIREMENTS).read_text(encoding="utf-8")
+    dependencies = tuple(
+        line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
+    )
+    if not dependencies or any("==" not in dependency or dependency.count("==") != 1 for dependency in dependencies):
+        raise RuntimeError("Snapshot dependencies must use exact non-empty == pins")
+    if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
+        return ()
+    return dependencies
+
+
+def snapshot_dependency_import_names(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> tuple[tuple[str, str, str], ...]:
+    triples = []
+    for dependency in snapshot_execution_dependencies(profile):
+        package, version = dependency.split("==", 1)
+        triples.append((package, _IMPORT_NAME_OVERRIDES.get(package, package.replace("-", "_")), version))
+    return tuple(triples)
+
+
+def snapshot_dependency_sha256(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> str:
+    canonical = "".join(f"{dependency}\n" for dependency in snapshot_execution_dependencies(profile))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def environment_manifest(
+    spec: DaytonaSandboxSpec,
+    profile: DaytonaEnvironmentProfile | None = None,
+) -> DaytonaEnvironmentManifest:
+    profile = spec.profile if profile is None else profile
+    if not isinstance(profile, DaytonaEnvironmentProfile):
+        raise TypeError("profile must be a DaytonaEnvironmentProfile")
+    semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+    dependencies = snapshot_execution_dependencies(profile)
+    digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")
+    return DaytonaEnvironmentManifest(
+        profile=profile,
+        image_kind="lean-child" if semantic else "session-analysis",
+        snapshot=spec.snapshot,
+        base_image=spec.base_image,
+        python_version=spec.python_version,
+        dependency_sha256=hashlib.sha256(digest_source).hexdigest(),
+        dependencies=dependencies,
+        volume_allowed=not semantic,
+        warm_pool_eligible=semantic,
+    )
+
+
+def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
+    from daytona import Image
+
+    manifest_profile = (
+        DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        if spec.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        else DaytonaEnvironmentProfile.SESSION
+    )
+    manifest = environment_manifest(spec, manifest_profile)
+    image_profile = manifest.profile
+    image = Image.base(spec.base_image).run_commands(
+        "apt-get update && apt-get install -y --no-install-recommends "
+        "git ca-certificates && rm -rf /var/lib/apt/lists/*",
+        "groupadd --gid 1000 daytona",
+        "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
+        "chown -R daytona:daytona /home/daytona",
+    )
+    dependencies = snapshot_execution_dependencies(image_profile)
+    if dependencies:
+        image = image.pip_install(list(dependencies))
+    image = image.env(
+        {
+            "PYTHONUNBUFFERED": "1",
+            "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
+        }
+    ).workdir("/home/daytona")
+    if not (spec.snapshot == "fleet-rlm-python313-v5" and image_profile is DaytonaEnvironmentProfile.SESSION):
+        encoded = json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":"))
+        image = image.run_commands(
+            "mkdir -p /opt/fleet && "
+            f"printf '%s' {shlex.quote(encoded)} > /opt/fleet/runtime-manifest.json && "
+            "chmod 0444 /opt/fleet/runtime-manifest.json"
+        ).env({"FLEET_SNAPSHOT_MANIFEST_SHA256": manifest.digest})
+    image = image.dockerfile_commands(["USER daytona"])
+    return image
+
 
 DoctorStepName = Literal[
     "settings",
@@ -382,7 +599,7 @@ class _ProductionDaytonaDoctorDependencies:
         await self._client.close()
 
     async def check_rlm_readiness(self, settings: Settings) -> None:
-        from fleet_rlm.rlm.runtime import probe_configured_root_lm
+        from fleet_rlm.rlm.execution import probe_configured_root_lm
 
         await probe_configured_root_lm(
             settings,
@@ -399,7 +616,7 @@ def _provider_probe_interpreter() -> Any:
 
 def _provider_probe_child_runtime(call_index: int) -> Any:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+    from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
@@ -656,10 +873,26 @@ async def run_daytona_doctor(
 
 
 __all__ = [
+    "BASE_IMAGE",
+    "DEFAULT_CHILD_SNAPSHOT_NAME",
+    "DEFAULT_SNAPSHOT_NAME",
+    "SEMANTIC_CHILD_RESOURCES",
+    "SESSION_RESOURCES",
     "DaytonaDoctorDependencies",
     "DaytonaDoctorResult",
     "DaytonaDoctorStep",
+    "DaytonaEnvironmentManifest",
+    "DaytonaEnvironmentProfile",
+    "DaytonaSandboxSpec",
     "DoctorStepStatus",
+    "MissingImportObservation",
+    "MissingImportOutcome",
+    "build_snapshot_image",
+    "environment_manifest",
+    "normalize_missing_import_observation",
     "profile_readiness_steps",
     "run_daytona_doctor",
+    "snapshot_dependency_import_names",
+    "snapshot_dependency_sha256",
+    "snapshot_execution_dependencies",
 ]

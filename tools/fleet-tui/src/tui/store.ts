@@ -85,6 +85,25 @@ export type Message =
     }
   | {
       id: string;
+      kind: "child_progress";
+      runId: string;
+      childId: string;
+      parentRunId?: string;
+      taskLabel: string;
+      state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
+      elapsedMs: number;
+      outcome?: string;
+      evidence?: string[];
+      gaps?: string[];
+      resultFileCount?: number;
+      codeExcerpt?: string;
+      outputExcerpt?: string;
+      cleanupState: "pending" | "complete" | "failed" | "not_required";
+      collapsed?: boolean;
+      ts: number;
+    }
+  | {
+      id: string;
       kind: "attachment";
       runId: string;
       attachmentId: string;
@@ -166,6 +185,7 @@ export type State = {
   run: Run;
   /** Most recent durable execution trace available for /feedback and /trace. */
   lastTraceId: string | null;
+  lastTraceRunId: string | null;
   pendingSkillSelections: PendingSkillSelection[];
   pendingAttachments: PendingAttachment[];
   /** Last locally submitted prompt, retained for /redo across view resets. */
@@ -203,6 +223,7 @@ function initialState(): State {
       traceId: null,
     },
     lastTraceId: null,
+    lastTraceRunId: null,
     pendingSkillSelections: [],
     pendingAttachments: [],
     lastPrompt: null,
@@ -211,7 +232,13 @@ function initialState(): State {
 
 type Event =
   | { type: "session/init"; session: Session }
-  | { type: "session/hydrate"; session: Session; events: Event[]; latestTraceId?: string | null }
+  | {
+      type: "session/hydrate";
+      session: Session;
+      events: Event[];
+      latestTraceId?: string | null;
+      latestTraceRunId?: string | null;
+    }
   | { type: "user/submit"; text: string }
   | { type: "user/prompt-restore"; text: string }
   | {
@@ -314,6 +341,7 @@ function reduce(state: State, event: Event): State {
         ...initialState(),
         session: event.session,
         lastTraceId: event.latestTraceId ?? null,
+        lastTraceRunId: event.latestTraceRunId ?? null,
         ...(sameSession
           ? {
               pendingSkillSelections: state.pendingSkillSelections,
@@ -403,6 +431,7 @@ function reduce(state: State, event: Event): State {
           traceId: event.traceId ?? state.run.traceId,
         },
         lastTraceId: event.traceId ?? state.run.traceId ?? state.lastTraceId,
+        lastTraceRunId: event.traceId || state.run.traceId ? state.run.id : state.lastTraceRunId,
       };
     case "run/cancelling":
       return { ...state, run: { ...state.run, phase: "cancelling" } };
@@ -445,7 +474,11 @@ function reduce(state: State, event: Event): State {
       }
       if (existing >= 0) {
         const messages = state.messages.slice();
-        messages[existing] = incoming;
+        const previous = messages[existing];
+        messages[existing] =
+          incoming.kind === "child_progress" && previous?.kind === "child_progress"
+            ? { ...incoming, collapsed: previous.collapsed }
+            : incoming;
         return { ...state, messages, run };
       }
       if (incoming.kind === "reasoning") {
@@ -468,7 +501,12 @@ function reduce(state: State, event: Event): State {
       const index = state.messages.findIndex((message) => message.id === event.id);
       const message = state.messages[index];
       if (index < 0 || !message) return state;
-      if (message.kind !== "tool" && message.kind !== "code" && message.kind !== "output") {
+      if (
+        message.kind !== "tool" &&
+        message.kind !== "code" &&
+        message.kind !== "output" &&
+        message.kind !== "child_progress"
+      ) {
         return state;
       }
       const messages = state.messages.slice();

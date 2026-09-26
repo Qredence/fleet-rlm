@@ -21,7 +21,10 @@ import contextlib
 import io
 import json
 import sys
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
 
 _GUARD_REJECTED = 3
 _HARNESS_ERROR = 2
@@ -50,15 +53,15 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
         counts (dict[str, int]): Mutable mapping updated with the number of calls for each label.
     """
     import fleet_rlm.app as app_module
+    import fleet_rlm.app_lifecycle as composition_daytona
     import fleet_rlm.cli as cli_module
-    import fleet_rlm.composition.live as composition_daytona
-    import fleet_rlm.composition.testing as composition_common
-    import fleet_rlm.daytona.platform as daytona_platform
+    import fleet_rlm.daytona.runtime as daytona_runtime
     import fleet_rlm.persistence.database as persistence_database
-    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
+    import fleet_rlm.rlm.program as dspy_program
     import fleet_rlm.rlm.program as program
+    import tests.support.testing_app as composition_common
 
-    real_guard = dspy_compat.assert_dspy_version
+    real_guard = dspy_program.assert_dspy_version
 
     def recording_guard() -> None:
         order.append("guard")
@@ -68,7 +71,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
     # ``composition.testing`` binds the guard at module import time, while
     # ``composition.live``, ``fleet_rlm.app``, and the CLI rebind it lazily
     # at call time; patch both binding styles.
-    dspy_compat.assert_dspy_version = recording_guard
+    dspy_program.assert_dspy_version = recording_guard
     composition_common.assert_dspy_version = recording_guard
     composition_daytona.assert_dspy_version = recording_guard
     app_module.assert_dspy_version = recording_guard
@@ -76,7 +79,7 @@ def _install_ordered_spies(order: list[str], counts: dict[str, int]) -> None:
 
     seam_bindings = (
         (persistence_database, "create_async_engine_from_url", "database"),
-        (daytona_platform, "build_daytona_client", "daytona"),
+        (daytona_runtime, "build_daytona_client", "daytona"),
         (program, "build_model_bundle", "provider"),
     )
     for module, attribute, label in seam_bindings:
@@ -102,11 +105,11 @@ def _stub_daytona_settings_gates() -> None:
     function, so the stub lives on its source module; ``require_daytona_settings``
     is a module-global resolved at call time.
     """
-    import fleet_rlm.composition.live as composition_daytona
-    import fleet_rlm.daytona.provisioning as daytona_provisioning
+    import fleet_rlm.app_lifecycle as composition_daytona
+    import fleet_rlm.daytona.runtime as daytona_runtime
 
     composition_daytona.require_daytona_settings = lambda _settings: None
-    daytona_provisioning.sandbox_spec_from_settings = lambda _settings: object()
+    daytona_runtime.sandbox_spec_from_settings = lambda _settings: object()
 
 
 def _run_create_app(*, payload: dict[str, Any]) -> None:
@@ -120,19 +123,20 @@ def _run_create_app(*, payload: dict[str, Any]) -> None:
 def _run_composition_local(*, payload: dict[str, Any]) -> None:
     from fastapi import FastAPI
 
-    from fleet_rlm.composition.testing import install_testing_composition
     from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
+    from tests.support.testing_app import build_testing_services
 
     app = FastAPI()
     app.state.skill_catalog = build_bundled_skill_catalog()
-    install_testing_composition(app, Settings(run_environment="daytona"))
+    build_testing_services(app, Settings(run_environment="daytona"))
     payload["outcome"] = "accepted"
 
 
 def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
-    from fleet_rlm.composition import live as composition_daytona
+    from fleet_rlm import app_lifecycle as composition_daytona
     from fleet_rlm.config.settings import Settings
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
     _stub_daytona_settings_gates()
@@ -141,6 +145,7 @@ def _run_composition_daytona(*, payload: dict[str, Any]) -> None:
             composition_daytona.build_daytona_composition(
                 Settings(run_environment="daytona"),
                 skill_catalog=build_bundled_skill_catalog(),
+                dispatcher=SyncBridgeDispatcher(),
             )
         )
     except _ResourceTripwireError:
@@ -238,10 +243,10 @@ def main(argv: list[str]) -> int:
 
     dspy.__version__ = reported_version
 
-    import fleet_rlm.rlm.compat_3_3_1 as dspy_compat
+    import fleet_rlm.rlm.program as dspy_program
 
     rejection_error_type = getattr(
-        dspy_compat,
+        dspy_program,
         "UncertifiedDSpyVersionError",
         _UnsettledGuardRejectionError,
     )

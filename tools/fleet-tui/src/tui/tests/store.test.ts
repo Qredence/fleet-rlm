@@ -447,6 +447,40 @@ describe("ConversationStore", () => {
     expect(store.getState().messages[0]).toMatchObject({ id: "error-tool", collapsed: false });
   });
 
+  it("keeps an expanded child card open when its terminal update arrives", () => {
+    const store = makeStore();
+    const child = {
+      id: "child-run-1-child-1",
+      kind: "child_progress" as const,
+      runId: "run-1",
+      childId: "child-1",
+      taskLabel: "Inspect source",
+      state: "running" as const,
+      elapsedMs: 1,
+      cleanupState: "pending" as const,
+      collapsed: true,
+      ts: 1,
+    };
+    store.dispatch({ type: "message/upsert", message: child });
+    store.dispatch({ type: "message/toggle-fold", id: child.id });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        ...child,
+        state: "completed",
+        cleanupState: "complete",
+        codeExcerpt: "print('done')",
+        collapsed: true,
+      },
+    });
+
+    expect(store.getState().messages[0]).toMatchObject({
+      state: "completed",
+      codeExcerpt: "print('done')",
+      collapsed: false,
+    });
+  });
+
   it("retains each operator timeline variant without inferring step metrics", () => {
     const store = makeStore();
     const messages = [

@@ -109,6 +109,67 @@ describe("FleetTuiApplication", () => {
     expect(terminal.progress.at(-1)).toBe(false);
   });
 
+  it("expands the latest child card on demand even when the root output follows it", async () => {
+    const terminal = new FakeTerminal();
+    const app = createFleetTui({
+      terminal,
+      client: new FleetApiClient({ baseUrl: "http://fleet.test" }),
+      session,
+      resumed: true,
+      initialEvents: [
+        {
+          type: "message/upsert",
+          message: {
+            id: "child-run-child-1",
+            kind: "child_progress",
+            runId: "run",
+            childId: "child-1",
+            taskLabel: "Inspect source",
+            state: "completed",
+            elapsedMs: 100,
+            outcome: "Verified child result",
+            evidence: ["source excerpt"],
+            gaps: [],
+            resultFileCount: 0,
+            codeExcerpt: "SUBMIT(answer='verified')",
+            outputExcerpt: "FINAL submitted",
+            cleanupState: "complete",
+            parentRunId: "run",
+            collapsed: true,
+            ts: 1,
+          },
+        },
+        {
+          type: "message/upsert",
+          message: {
+            id: "root-output",
+            kind: "output",
+            runId: "run",
+            step: 1,
+            output: "Root answer remains visible",
+            ts: 2,
+          },
+        },
+      ],
+      queryColorScheme: false,
+    });
+
+    const finished = app.start();
+    try {
+      await vi.waitFor(() => expect(terminal.writes.join("")).toContain("CHILD"));
+      expect(terminal.writes.join("")).not.toContain("source excerpt");
+
+      terminal.send("\x0f");
+
+      await vi.waitFor(() => expect(terminal.writes.join("")).toContain("source excerpt"));
+      expect(terminal.writes.join("")).toContain("SUBMIT(answer='verified')");
+      expect(terminal.writes.join("")).toContain("Root answer remains visible");
+    } finally {
+      await app.stop();
+      await finished;
+    }
+  });
+
   it("clips the transcript to the viewport and follows the end", async () => {
     const terminal = new FakeTerminal();
     const body = Array.from({ length: 10_000 }, (_, index) => `row-${index}`).join("\n");

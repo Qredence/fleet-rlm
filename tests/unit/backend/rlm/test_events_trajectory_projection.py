@@ -335,15 +335,15 @@ def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonica
 @pytest.mark.asyncio
 async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalized_trajectory() -> None:
     from fleet_rlm.rlm.events import RLMReasoning
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.result import truncate_public_text
-    from fleet_rlm.rlm.runtime import (
+    from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
         RLMRunner,
         RunIdentity,
         SessionView,
     )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.rlm.result import truncate_public_text
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess
     from tests.unit.backend.rlm.fakes import EmptyCapabilities

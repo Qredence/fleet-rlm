@@ -17,6 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from dspy import FinalOutput
 from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
@@ -28,13 +29,10 @@ from fleet_rlm.daytona.interpreter import (
     final_output_frame,
     sandbox_backend,
 )
-from fleet_rlm.daytona.platform import LiveDaytonaPlatform
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
-)
-from fleet_rlm.daytona.recursive_child_runtime import acquire_child_runtime
-from fleet_rlm.daytona.runtime import (
+    LiveDaytonaPlatform,
     create_folder,
     delete_file,
     get_file_info,
@@ -42,8 +40,8 @@ from fleet_rlm.daytona.runtime import (
     read_file,
     write_file,
 )
-from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.result import RunNoProgressError
+from tests.support.session_manager import make_daytona_runtime
 
 # ============================================================================
 # Section 1: DaytonaCodeInterpreter.execute() Adversarial Challenge Tests
@@ -616,25 +614,24 @@ class TestSandboxIsolationInvariants:
             )
 
     @pytest.mark.asyncio
-    async def test_child_sandbox_network_block_all_isolation(self) -> None:
-        """EMPIRICAL CHALLENGE: Child sandboxes must execute with network_block_all=True.
+    async def test_semantic_child_requests_network_block_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify the adapter requests network blocking; provider enforcement is unverified."""
+        import fleet_rlm.daytona.runtime as daytona_runtime
 
-        Requirement R1 & Acceptance Criteria:
-        'Manage root sandboxes (session-scoped with /workspace volume mount)
-         and ephemeral child sandboxes (network_block_all=True).'
-        'Child sandboxes execute with network_block_all=True and clean up reliably.'
-        """
         loop = asyncio.get_running_loop()
         mock_platform = MagicMock()
         mock_platform.create = AsyncMock()
         mock_admission = MagicMock()
         mock_admission.acquire = AsyncMock()
         mock_interpreter = MagicMock()
+        monkeypatch.setattr(daytona_runtime, "DaytonaCodeInterpreter", lambda **_kwargs: mock_interpreter)
+        monkeypatch.setattr(daytona_runtime, "sandbox_backend", lambda *_args, **_kwargs: MagicMock())
+        monkeypatch.setattr(daytona_runtime, "_close_child_runtime_sync", MagicMock())
+        monkeypatch.setattr(daytona_runtime, "cleanup_after_failed_acquire", AsyncMock())
+        monkeypatch.setattr(daytona_runtime, "sandbox_id_for", lambda _sandbox: "sb-child-isolation")
 
-        await acquire_child_runtime(
-            loop=loop,
-            platform=mock_platform,
-            admission=mock_admission,
+        runtime = make_daytona_runtime(platform=mock_platform, admission=mock_admission)
+        await runtime._acquire_child_runtime(
             volume_id=None,
             mount_path=None,
             profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
@@ -644,17 +641,10 @@ class TestSandboxIsolationInvariants:
             deadline=loop.time() + 10.0,
             execution_timeout_s=30,
             execution_output_cap=1000,
-            interpreter_factory=lambda **_kwargs: mock_interpreter,
-            sandbox_backend_factory=lambda *_args, **_kwargs: MagicMock(),
-            close_child_runtime=MagicMock(),
-            cleanup_after_failed_acquire=AsyncMock(),
-            sandbox_id_for_fn=lambda _s: "sb-child-isolation",
+            retain_pending_cleanup=lambda _future: None,
         )
 
         mock_platform.create.assert_awaited_once()
         call_kwargs = mock_platform.create.call_args.kwargs
 
-        # EMPIRICAL ASSERTION: Verify that network_block_all=True was passed
-        assert call_kwargs.get("network_block_all") is True, (
-            f"Child sandbox created without network_block_all=True! Received: {call_kwargs.get('network_block_all')}"
-        )
+        assert call_kwargs.get("network_block_all") is True

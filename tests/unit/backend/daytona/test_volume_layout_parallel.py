@@ -16,7 +16,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     ensure_volume_layout,
     required_volume_directories,
 )

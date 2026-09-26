@@ -146,12 +146,41 @@ evaluation on any interpreter.
 
 The maintained static dataset is the five `QUALITY_RECORDS` in
 `scripts/benchmarks/run_rlm_latency.py`. The separate
-`scripts/benchmarks/phase6_cases.json` corpus currently has fixture validation
-only: neither `prepare-evaluation` nor static dataset ingestion loads it.
-Its presence does not establish a runnable Phase 6 campaign. Corpus integration,
-per-case recursion classifications, and matched quality/cost evidence remain
-distinct work with its own evaluation receipts and validation gates. See the
+`scripts/benchmarks/phase6_evaluation_cases.json` manifest freezes six task
+families with hashes for each input and rubric. The existing runner can emit a
+planning receipt or an explicitly unexecuted paired schedule:
+
+```bash
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-plan \
+  --output .scratch/evals/phase6-plan.json
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-dry-run \
+  --output .scratch/evals/phase6-dry-run.json
+```
+
+`phase6-plan` records the proposed A/B/C arms, paired trials, cold/warm labels,
+and required observations. `phase6-dry-run` materializes the schedule with all
+quality, timing, usage, safety, and cleanup observations unknown. Neither
+command calls Fleet, a model provider, Daytona, or MLflow. The runner does not
+execute the A/B/C arms or control isolated Session state or cold/warm cache
+conditions; these receipts are planning artifacts, not campaign results. The
+manifest is not loaded by `prepare-evaluation` or static dataset ingestion, and
+does not justify child promotion. Matched execution, judged quality, observed
+costs, and cleanup evidence remain open. See the
 [testing strategy](testing-strategy.md) for the current evidence boundaries.
+
+Phase 6 keeps `daytona-native` as the default and defers the full A/B/C campaign
+until a child-promotion decision. For the smaller native baseline, the existing
+`benchmark` command now accepts `--native-only` to check the active profile
+before admission and reject observed child work. Pair it with `--fixed-input`
+so every trial submits the same frozen prompt while HTTP idempotency keys remain
+unique. Run fresh-Session samples for
+cold observations; use `--reuse-session` for a separate warm series, whose
+later Turns include prior Session history. Receipts retain bounded per-sample
+condition, quality, usage, lifecycle timing, and cleanup observations without
+answers or code. `--skill-selection UUID@VERSION` supports a matched run with
+one exact Skill version; omit it for the no-Skill arm. Each provider run still
+needs explicit authorization and the existing campaign spend, admission, time,
+and cleanup limits. Unknown usage or spend remains unknown.
 
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
@@ -389,27 +418,9 @@ from the public manifest. These mechanics prevent declared-group leakage; they
 do not certify semantic independence of examples whose provenance omits a shared
 source.
 
-## Phase 4 transport evidence
+## Historical Phase 4 transport evidence
 
-The Phase 4 campaign uses the canonical FastAPI transport. All four arms run as
-isolated FastAPI processes reached through the public attachment, Session,
-Turn, and SSE endpoints: A/B/D from the candidate checkout with their sealed
-arm profiles, C from the frozen-baseline checkout. Arm behavior differs by
-profile only; there is no public arm selector or alternate in-process campaign
-execution path. Live campaign modes require the profile's MLflow tracking
-server before admitting a trial, and every completed trial row links to its
-MLflow root trace identifier.
-
-For a bounded operator smoke of the live transport, the campaign driver
-supervises one disposable API service per arm from the pinned revisions. Its
-`--partial-live` mode sends exactly ten sealed exploratory trials through the
-public API/SSE contract, keeps one Session per trial, and records a partial
-receipt. This is transport evidence only: unknown provider spend remains
-explicit, and the receipt cannot certify recursive value or change the default
-profile.
-The 2026-09-10 execution is retained at
-`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and is marked
-`incomplete`.
-
-This historical description does not supersede the current
-[architecture](../../ARCHITECTURE.md) or [testing strategy](testing-strategy.md).
+The Phase 4 campaign driver and its partial-live command have been retired.
+Historical campaign descriptions and receipts remain evidence only; they are
+not current operator instructions or completed value results. Use the Phase 6
+runner and its current authorization gates described above.

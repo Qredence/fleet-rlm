@@ -27,7 +27,7 @@ Fleet RLM runs [DSPy](https://github.com/stanfordnlp/dspy) `dspy.RLM` behind a c
 - **Dependency baseline** — `pyproject.toml` pins DSPy 3.3.1, Daytona 0.210.0, and MLflow 3.16.0; the optional `optimize` extra pins GEPA 0.1.4. The exact-version guard (`CERTIFIED_DSPY_VERSION`) rejects DSPy drift. Dependency checks and historical receipts do not certify a new source revision.
 - **Runtime boundary** — retained broker execution is the sole supported architecture. The shipped `daytona-recursive` profile enables bounded child RLM tools, while comparison profiles may disable recursion; neither setting is a provider, quality, or capacity certification. See the [architecture](ARCHITECTURE.md) and [testing strategy](docs/how-to-guides/testing-strategy.md).
 - **Turn orchestration** — `TurnCoordinator` is the sole owner of the claim → cleanup path with atomic turn commit; the stream vocabulary is the closed v1 Runtime Event set (freeze suites in `tests/freeze/`).
-- **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/recursive_child_runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
+- **Recursive RLM** — Native DSPy 3.3.1 child RLMs run under one contracted runtime owner (`src/fleet_rlm/daytona/runtime.py`) with a child deadline fence and zero-leak certification lanes in `tests/live/backend/`.
 - **Tools** — Explicit Session Workspace (7 tools) and Project (6 tools) hosts; cross-sandbox Workspace Memory append coordination is unsupported by design.
 - **Optimization** — `src/fleet_rlm/optimization/gepa_runner.py` drives the official `gepa.optimize` API under a `max_metric_calls` budget; no `fleet optimize` CLI exists yet.
 - **Live evidence** — `FLEET_LIVE=1` serial lanes write receipts under `.fleet-evidence/receipts/` (archived sets under `.fleet-evidence/receipts-archive/`); see the [testing strategy](docs/how-to-guides/testing-strategy.md).
@@ -47,7 +47,7 @@ You need **Node 22.19+** and **pnpm** for the terminal client (`fleet cli`). `uv
 
 ### 2. Configure credentials
 
-Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-recursive`), then export the provider and Daytona variables for that profile. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
+Pick a runtime profile in `config/fleet.toml` (`default_profile`; shipped default is `daytona-native`), then export the provider and Daytona variables for that profile. `daytona-recursive` is an opt-in for bounded Fleet child execution. See the [profile matrix](docs/reference/profile-matrix.md) for the exact environment names.
 
 Fleet connects through an OpenAI-compatible Chat Completions base URL. The
 shipped `daytona-recursive` profile uses Alibaba DashScope (MaaS); the
@@ -119,34 +119,10 @@ database, Daytona, or TUI initialization. The existing `default_profile`
 selection remains unchanged when the option is omitted, and explicit profiles
 cannot be combined with `--reload`.
 
-The Phase 4 campaign sends all four arms (A/B/C/D) through supervised
-disposable FastAPI services via the public API/SSE transport, so lifecycle,
-authority, Daytona creation/deletion, and cleanup are measured on the same
-transport Fleet ships. The earlier receipt at
-`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
-incomplete, and superseded; it is not value proof. Live campaign modes
-require the profile's MLflow tracking server to be reachable before they
-admit a trial, and every completed trial links its receipt row to the
-trial's MLflow root trace.
-
-For a bounded live transport sample, run the fixed ten-trial API probe (the
-driver supervises all four arm services; no separately running backend is
-needed):
-
-```bash
-FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
-  --partial-live \
-  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
-```
-
-The probe keeps every arm on the public FastAPI/SSE path and writes a
-content-safe exploratory receipt. It is not the 144-
-trial value campaign and cannot mark Phase 4 complete; unknown spend remains
-explicit in that receipt.
-
-The 2026-09-10 exploratory receipt is retained at
-`.scratch/benchmark-reports/phase4-api-partial-20260910.json` and remains
-`incomplete`.
+The current Phase 6 evaluation runner supports provider-free planning and dry
+runs, as well as separately authorized evaluation workflows. Start with the
+[evaluation guide](docs/how-to-guides/evaluation-optimization.md); its planning
+receipts do not represent completed provider campaigns or child promotion.
 
 ## How a turn works
 

@@ -18,8 +18,8 @@ from uuid import UUID, uuid4
 import dspy
 
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
-from fleet_rlm.workspace.paths import VolumePaths, as_posix
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 # ---------------------------------------------------------------------------
@@ -245,6 +245,27 @@ class WorkspaceAttachmentPathPolicy:
                 filename,
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class DaytonaRunAttachmentPathPolicy:
+    """Keep durable blobs in the Workspace Volume and stage Run copies in scratch."""
+
+    paths: VolumePaths
+
+    def attachment_blob(self, attachment_id: UUID) -> str:
+        if not isinstance(attachment_id, UUID):
+            raise AttachmentValidationError("invalid attachment id")
+        return as_posix(self.paths.attachment_blob_path(attachment_id))
+
+    def run_attachment(self, run: AttachmentRun, attachment_id: UUID, filename: str) -> str:
+        if not isinstance(run.run_id, UUID) or not isinstance(attachment_id, UUID):
+            raise AttachmentValidationError("invalid Run or attachment id")
+        safe_filename = sanitize_filename(filename)
+        path = PurePosixPath("/tmp/fleet") / str(run.run_id) / "attachments" / str(attachment_id) / safe_filename
+        if not path.is_absolute() or ".." in path.parts or "\\" in str(path):
+            raise AttachmentValidationError("invalid Run attachment path")
+        return path.as_posix()
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +572,7 @@ class AttachmentToolHost:
         if ref is None or staged is None:
             return {"ok": False, "error": "not_found"}
         try:
-            data = self._volume_fs.read_bytes(staged.sandbox_path, use_cache=False)
+            data = self._volume_fs.read_bytes(staged.sandbox_path)
             if (
                 not isinstance(ref.checksum_sha256, str)
                 or len(data) != ref.byte_size
@@ -642,6 +663,7 @@ __all__ = [
     "AttachmentToolHost",
     "AttachmentUpload",
     "AttachmentValidationError",
+    "DaytonaRunAttachmentPathPolicy",
     "LocalAttachmentBlobGateway",
     "LocalAttachmentCatalog",
     "LocalAttachmentPathPolicy",

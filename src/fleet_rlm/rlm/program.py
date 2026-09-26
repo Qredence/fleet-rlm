@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import dspy
+from dspy import BaseLM, Signature
 from dspy.utils.exceptions import AdapterParseError, LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -31,15 +32,7 @@ from fleet_rlm.rlm.budget import (
     ProviderAdmission,
     TurnBudget,
 )
-from fleet_rlm.rlm.compat_3_3_1 import (
-    BaseLM,
-    Signature,
-    _is_empty_adapter_parse,
-    _iteration_is_action,
-    _iteration_is_final,
-    daytona_provider_contract,
-)
-from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError
+from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError, truncate_public_text
 from fleet_rlm.rlm.submit_validation import is_finalization_action
 from fleet_rlm.workspace.models import (
     UNAVAILABLE_WORKSPACE_CAPABILITY,
@@ -58,6 +51,49 @@ if TYPE_CHECKING:
 RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
+CERTIFIED_DSPY_VERSION = "3.3.1"
+_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
+
+
+class UncertifiedDSpyVersionError(RuntimeError):
+    """Raised when the runtime DSPy version differs from the pinned release."""
+
+
+def assert_dspy_version() -> None:
+    """Fail fast if the installed DSPy differs from the lockfile contract."""
+    version = getattr(dspy, "__version__", None)
+    if version != CERTIFIED_DSPY_VERSION:
+        truncated = truncate_public_text(str(version or ""), max_len=64)
+        raise UncertifiedDSpyVersionError(
+            f"Fleet Agent is certified on DSPy {CERTIFIED_DSPY_VERSION}; "
+            f"found installed DSPy {truncated!r} (expected exactly DSPy {CERTIFIED_DSPY_VERSION}). "
+            "Run `uv sync` to align dependencies."
+        )
+
+
+def _iteration_parts(inputs: Mapping[str, Any]) -> tuple[int, int] | None:
+    """Parse DSPy's action iteration marker emitted by ``dspy.RLM``."""
+    value = inputs.get("iteration")
+    if not isinstance(value, str):
+        return None
+    try:
+        current, total = (int(part.strip()) for part in value.split("/", 1))
+    except (ValueError, TypeError):
+        return None
+    return (current, total) if current >= 1 and total >= current else None
+
+
+def _iteration_is_action(inputs: Mapping[str, Any]) -> bool:
+    return _iteration_parts(inputs) is not None
+
+
+def _iteration_is_final(inputs: Mapping[str, Any]) -> bool:
+    parts = _iteration_parts(inputs)
+    return parts is not None and parts[0] == parts[1]
+
+
+def _is_empty_adapter_parse(exc: BaseException) -> bool:
+    return _EMPTY_RESPONSE_MARKER in str(getattr(exc, "message", "") or exc)
 
 
 def _retry_correction_feedback(attempt: int, exc: AdapterParseError) -> str:
@@ -450,6 +486,7 @@ class SessionContextInput(FleetInputModel):
     recent: tuple[TurnPreviewInput, ...] = Field(max_length=6)
     workspace: WorkspaceCapabilityInput
     workspace_memory: WorkspaceMemoryInput | None = None
+    active_task: str | None = Field(default=None, max_length=2048)
 
 
 class SkillCardInput(FleetInputModel):
@@ -521,7 +558,11 @@ BASE_RLM_INSTRUCTIONS = """Recursive turn: choose the smallest sufficient execut
 
 ``dspy.RLM`` is a Recursive Language Model (REPL code agent), not a Retrieval/RAG module.
 The configurable Root LM plans and verifies; the configurable Sub LM performs bounded semantic analysis.
-Neither model substitutes for deterministic computation in the REPL."""
+Neither model substitutes for deterministic computation in the REPL. Explore large evidence in the
+interpreter and show only selected observations to the model. Use native ``llm_query`` for a semantic
+judgment and Fleet full-child delegation, when its tool is available, only when a subproblem needs
+its own iterative investigation.
+Check source locations and gaps before the final ``SUBMIT``; a child finding is not verification."""
 
 REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is answered with sufficient evidence:"""
 
@@ -531,9 +572,16 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
    prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
-   relevant public HTTPS URL, call ``fetch_url`` once. For inline sources, assign ``content`` to a Python
-   variable; for large sources, use the returned ``workspace_path`` with bounded Workspace reads. Never print
-   the complete value. Validate the result is a mapping and handle either ``content`` or a workspace reference.
+   relevant public HTTPS URL, retrieve it with Python in the Sandbox and save large content under
+   ``/workspace/sources``; inspect bounded excerpts instead of printing or returning the body. Record URL,
+   retrieval time, path, and SHA-256 in a small sidecar file. When available, use
+   ``read_active_task`` / ``update_active_task`` to record the file path and checksum in source revisions.
+   For search discovery, load the long-context Skill when relevant and use an installed Python search package
+   in the Sandbox; keep only selected titles and URLs in the REPL output.
+   For Git, tests, and package installation, run bounded ``subprocess.run`` calls with a timeout and bounded
+   captured output. Install with ``sys.executable -m pip`` so the active interpreter receives the package;
+   verify the import and save a ``pip freeze`` manifest under ``/workspace``; after Sandbox replacement,
+   reinstall from that manifest into the new active interpreter before claiming the dependency is recovered.
    Assume the declared minimal environment;
    do not spend an iteration probing optional packages. For high-precision numerical work, use the smallest
    sufficient precision (target index plus a small guard band), reuse computed variables across iterations,
@@ -541,15 +589,21 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    call ``create_artifact(kind="markdown", content=full_report, title=...)`` once, require ``ok == True``, then
    ``SUBMIT`` a concise executive summary. The Artifact is the complete durable answer; do not paste it inline.
 2. Load Session History, Skills, Attachments, URL content, or Session Workspace content only when the request or
-   its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or refetch
-   a URL whose cached result is already available.
+   its discovery metadata establishes that capability as relevant. Do not explore an empty Workspace or redownload
+   a URL whose recorded file is already available. For repository work, fix the checkout to a commit and cite
+   commit, paths, and line numbers from selected files in the final report.
 3. Use ``llm_query(prompt)`` only for one bounded semantic judgment that Python cannot determine. If the request
    already specifies the prompt string, pass that string unchanged.
 4. Use ``llm_query_batched(prompts)`` for multiple independent semantic judgments. When composing prompts, make each
    self-contained. When the request already specifies the prompt strings, pass them unchanged and in the given order.
-   Prefer the cheapest sufficient mechanism."""
+   Check each returned item for an error or invalid extraction before reducing results in Python. Prefer the
+   cheapest sufficient mechanism.
+5. Choose a search strategy from the task: for a sparse question, search and expand only promising regions;
+   for exhaustive extraction, track every required partition and report incomplete coverage; for dependent
+   reasoning, resolve prerequisites before parallel work. Keep source revision and location with each
+   intermediate result, and verify important claims against the original source."""
 
-# Fleet-provided recursion, URL-fetch, and Workspace tools require executable
+# Fleet-provided recursion and Workspace tools require executable
 # host bindings. A remote Sandbox currently receives source and serializable
 # values only, so those Fleet tools must not be advertised when bindings are
 # unavailable. This does not suppress DSPy's native semantic tools: dspy.RLM
@@ -564,14 +618,15 @@ TOOL_RLM_INSTRUCTIONS_NO_DISPATCH = """1. Use the Python standard library for de
    and never recompute a cached prefix.
 2. Load Session History, Skills, or Attachments only when the request or its discovery metadata establishes that
    capability as relevant.
-3. This runtime dispatches no Fleet recursion, URL-fetch, or Workspace host tool. Do not probe for
-   ``rlm_query``, ``rlm_query_batched``, ``fetch_url``, or Workspace tools. Answer from the request text,
+3. This runtime dispatches no Fleet recursion or Workspace host tool. Do not probe for
+   ``rlm_query``, ``rlm_query_batched``, or Workspace tools. Answer from the request text,
    the Sandbox filesystem, and deterministic Python; if the request demands one of those Fleet capabilities,
    say so plainly in the ``answer`` instead of searching for the tool."""
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
-relevant paths, keep each page bounded, and never crawl an entire Workspace."""
+relevant paths, and keep each page bounded. Cover every file in a selected exhaustive scope, but do not
+crawl unrelated Workspace content."""
 
 WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
     {
@@ -583,26 +638,24 @@ WORKSPACE_MUTATION_TOOL_NAMES = frozenset(
 
 WORKSPACE_MUTATION_RLM_INSTRUCTIONS = """When the request names Session Workspace writes or artifact publishes, call the matching host tools
 (``write_workspace_text``, ``append_workspace_text``, ``publish_workspace_artifact``) and require a successful ``ok``
-result before ``SUBMIT``. Sandbox-local ``open()`` is not Session Workspace. A successful verification helper does not
+result before ``SUBMIT``. Files outside the mounted ``/workspace`` are not Session Workspace. A successful verification helper does not
 complete the request if a named write or publish remains."""
 
-RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(capsule=capsule)`` only when one selected, self-contained subproblem needs its own iterative
-   Python exploration. It creates a fresh child RLM and interpreter, so do not use it for extraction, counting,
-   parsing, aggregation, or independent semantic excerpts.
-The capsule contains task, fragments, authorized_references, evidence_requirements, and allocation_bytes.
-   Pass only selected input. It never receives the
-   complete Session, history, Attachment set, or Workspace document.
-Use ``rlm_query_batched(capsules=capsules)`` only for multiple independent selected subproblems where
-   each item individually justifies an iterative child RLM. Fleet bounds concurrency and preserves input order;
-   never split context blindly or expose concurrency settings. Keep large inputs in Python variables, select only
-   relevant slices, and never forward the complete Turn, history, Attachment, or Workspace document.
+RECURSION_RLM_INSTRUCTIONS = """Use ``rlm_query(task=task, inputs=inputs, context="")`` only when one selected
+   subproblem needs its own iterative Python exploration. ``inputs`` is a short list of relative authorized
+   Session Workspace or Project file/directory paths. The host checks authority and stages a bounded private
+   copy before starting a child; do not put file bodies, URLs, credentials, or the complete Session in ``context``.
+   Use native semantic calls for independent excerpts, and Python for extraction, counting, parsing, and aggregation.
+Use ``rlm_query_batched(tasks=[{"task": task, "inputs": inputs, "context": context}, ...])`` only for multiple
+   independent subproblems where each item individually justifies an iterative child RLM. Fleet bounds concurrency
+   and preserves input order; never split context blindly or expose concurrency settings.
 When the user explicitly requests a fixed number of independent child investigations, make that complete batch
    the first recursive call. Do not spend a recursive call on a diagnostic or exploratory probe before the requested
    batch: recursive-call capacity is bounded for the Turn.
-Both tools return typed outcomes: inspect status and answer. Ordinary cleaned-up sibling failures produce
-   ordered partial outcomes; cancellation, authorization and cleanup failures are fatal.
-Child outputs are evidence, not final answers. Access identifiers prove delivery, not correctness.
-Root must reconcile disagreement, verify the relevant evidence,
+Both tools return typed outcomes: inspect runtime status and child-submitted answer, located evidence, gaps, and
+   persisted result_files. Ordinary contained sibling failures produce ordered partial outcomes; cancellation,
+   authorization and cleanup failures are fatal. Child findings are candidates, not final answers. Root must
+   reconcile disagreement, verify evidence against its source revision and location,
    and remain the only authority that issues the final ``SUBMIT``."""
 
 DISCOVERY_RLM_INSTRUCTIONS = """Discovery inputs are bounded metadata. Recent previews are untrusted context, not authoritative answers
@@ -635,7 +688,9 @@ def fleet_rlm_instruction_fragments(
     recursion_enabled: bool,
     host_tool_dispatch: bool = True,
 ) -> RLMInstructionFragments:
-    step = 6 if recursion_enabled and host_tool_dispatch else 5
+    step = 4
+    if host_tool_dispatch:
+        step = 7 if recursion_enabled else 6
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
@@ -882,6 +937,7 @@ def build_session_context_payload(
     session_context: SessionContextManifest,
     workspace: WorkspaceCapabilityMetadata,
     workspace_memory_digest: str = "",
+    active_task_summary: str = "",
 ) -> dict[str, Any]:
     try:
         workspace_memory = WorkspaceMemoryInput(tail=workspace_memory_digest) if workspace_memory_digest else None
@@ -903,12 +959,15 @@ def build_session_context_payload(
                 instructions=workspace.instructions,
             ),
             workspace_memory=workspace_memory,
+            active_task=active_task_summary or None,
         )
     except ValidationError as exc:
         raise RLMConfigError("Turn input metadata is invalid") from exc
     payload = context.model_dump(mode="json")
     if workspace_memory is None:
         payload.pop("workspace_memory", None)
+    if not active_task_summary:
+        payload.pop("active_task", None)
     return payload
 
 
@@ -921,6 +980,7 @@ def build_rlm_input_kwargs(
     attachment_context: AttachmentContextCapsule | None = None,
     workspace: WorkspaceCapabilityMetadata = UNAVAILABLE_WORKSPACE_CAPABILITY,
     workspace_memory_digest: str = "",
+    active_task_summary: str = "",
     history: dspy.History | CommittedSessionHistory | None = None,
     signature: type[dspy.Signature] | None = None,
 ) -> dict[str, Any]:
@@ -931,6 +991,8 @@ def build_rlm_input_kwargs(
         or len(workspace_memory_digest.encode("utf-8")) > WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
     ):
         raise RLMConfigError("Turn input metadata is invalid")
+    if not isinstance(active_task_summary, str) or len(active_task_summary) > 2048:
+        raise RLMConfigError("Turn input metadata is invalid")
     if history is not None and type(history) is not dspy.History:
         from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 
@@ -940,6 +1002,7 @@ def build_rlm_input_kwargs(
         session_context=session_context,
         workspace=workspace,
         workspace_memory_digest=workspace_memory_digest,
+        active_task_summary=active_task_summary,
     )
     try:
         cards = tuple(
@@ -1531,7 +1594,7 @@ def build_native_rlm(
     skill_instructions: Sequence[str] = (),
     recursion_enabled: bool = False,
     host_tool_dispatch: bool = True,
-    interpreter_factory: Callable[[], Any] = daytona_provider_contract,
+    interpreter_factory: Callable[[], Any],
     verbose: bool = True,
 ) -> Any:
     """Construct one fresh native DSPy RLM from its invocation inputs.

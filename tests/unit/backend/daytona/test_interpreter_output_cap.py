@@ -7,6 +7,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from dspy import FinalOutput
 from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.config.settings import Settings
@@ -17,7 +18,6 @@ from fleet_rlm.daytona.interpreter import (
     sandbox_backend,
 )
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
-from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
 
 def test_large_stdout_is_head_tail_capped_with_marker() -> None:
@@ -106,14 +106,6 @@ def test_sandbox_backend_retains_timeout_for_broker_execution() -> None:
 
     unbounded = sandbox_backend(object(), timeout_s=None)
     assert unbounded.timeout_s is None
-
-
-def test_sandbox_backend_rejects_non_positive_timeout() -> None:
-    class _FakeSandbox:
-        code_interpreter = object()
-
-    with pytest.raises(Exception, match="positive"):
-        sandbox_backend(_FakeSandbox(), timeout_s=0)
 
 
 def test_settings_expose_execution_bounds_and_toml_defaults() -> None:

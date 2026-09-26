@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 
-from fleet_rlm.runtime.owned_effect import OwnedEffect
+from fleet_rlm.rlm.ownership import OwnedEffect
 
 
 @pytest.mark.asyncio

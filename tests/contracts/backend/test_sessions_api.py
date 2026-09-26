@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.composition.testing import create_testing_app
+from fleet_rlm.app_services import install_runtime_inventory
 from fleet_rlm.rlm.result import RLMOutcome
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -18,12 +18,14 @@ from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     RunClaim,
 )
+from fleet_rlm.sessions.task import TaskCheckpoint, TaskCheckpointMissingError
+from tests.support.testing_app import create_testing_app
 
 
 def test_sessions_route_does_not_discover_provider_retirement() -> None:
     source = Path("src/fleet_rlm/api/routes/sessions.py").read_text(encoding="utf-8")
     assert "close_root_session" not in source
-    assert "run_environment_resources" not in source
+    assert "daytona_runtime_owner" not in source
 
 
 def _headers(user_id=None, workspace_id=None):
@@ -68,6 +70,70 @@ def test_sessions_crud_happy_path() -> None:
         assert archived.json()["status"] == "archived"
 
 
+def test_task_checkpoint_route_uses_the_authorized_existing_service() -> None:
+    class _TaskService:
+        async def read(self, session_id, *, user_id, workspace_id):
+            assert session_id == requested_session
+            assert user_id == LocalScope().user_id
+            assert workspace_id == LocalScope().workspace_id
+            return TaskCheckpoint(
+                revision=2,
+                goal="Review the report",
+                decisions=("Use revision abc",),
+                relevant_paths=("report.md",),
+                source_revisions={"report.md": "abc"},
+                completed_work=("Read sources",),
+                pending_work=("Verify conclusion",),
+            )
+
+    app = create_testing_app()
+    with TestClient(app) as client:
+        requested_session = UUID(client.post("/api/sessions", json={}).json()["id"])
+        inventory = app.state.runtime_inventory
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                route_services=replace(inventory.route_services, session_task_service=_TaskService()),
+            ),
+        )
+        response = client.get(f"/api/sessions/{requested_session}/task")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "revision": 2,
+        "goal": "Review the report",
+        "decisions": ["Use revision abc"],
+        "relevant_paths": ["report.md"],
+        "source_revisions": {"report.md": "abc"},
+        "completed_work": ["Read sources"],
+        "pending_work": ["Verify conclusion"],
+    }
+
+
+def test_missing_task_checkpoint_is_reported_without_creating_one() -> None:
+    class _TaskService:
+        async def read(self, _session_id, *, user_id, workspace_id):
+            del user_id, workspace_id
+            raise TaskCheckpointMissingError("not seeded")
+
+    app = create_testing_app()
+    with TestClient(app) as client:
+        session_id = client.post("/api/sessions", json={}).json()["id"]
+        inventory = app.state.runtime_inventory
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                route_services=replace(inventory.route_services, session_task_service=_TaskService()),
+            ),
+        )
+        response = client.get(f"/api/sessions/{session_id}/task")
+
+    assert response.status_code == 404
+    assert response.json() == {"code": "task_not_found", "message": "Task checkpoint not found"}
+
+
 def test_archive_returns_pending_when_provider_retirement_fails() -> None:
     class _FailingRetirement:
         async def close_root_session(self, workspace_id, session_id, *, deadline=None) -> None:
@@ -79,10 +145,19 @@ def test_archive_returns_pending_when_provider_retirement_fails() -> None:
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
         assert inventory is not None
-        assert inventory.session_catalog is not None
-        app.state.runtime_inventory = replace(
-            inventory,
-            session_lifecycle=SessionLifecycle(inventory.session_catalog, _FailingRetirement()),
+        assert inventory.route_services.session_catalog is not None
+        install_runtime_inventory(
+            app,
+            replace(
+                inventory,
+                route_services=replace(
+                    inventory.route_services,
+                    session_lifecycle=SessionLifecycle(
+                        inventory.route_services.session_catalog,
+                        _FailingRetirement(),
+                    ),
+                ),
+            ),
         )
         created = client.post("/api/sessions", json={"title": "retire-me"})
         assert created.status_code == 201
@@ -126,8 +201,7 @@ async def test_session_turns_are_canonical_ui_messages() -> None:
     headers = {}
     with TestClient(app) as client:
         session_id = UUID(client.post("/api/sessions", json={}, headers=headers).json()["id"])
-        lifecycle = app.state.runtime_inventory.run_lifecycle
-        assert lifecycle is not None
+        lifecycle = app.state.runtime_inventory.route_services.turn_runtime._lifecycle
         started = await lifecycle.begin(RunClaim(access, session_id, TurnInput("question"), "turn-key", uuid4()))
         assert isinstance(started, ClaimedRun)
         await lifecycle.finish(

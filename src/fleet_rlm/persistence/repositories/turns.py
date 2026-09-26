@@ -28,8 +28,6 @@ from fleet_rlm.persistence.models import (
     SessionRow,
     TurnRow,
 )
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.runtime.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import (
     CommittedTurn,
     CommittedTurnCodec,
@@ -67,6 +65,7 @@ from fleet_rlm.sessions.run_state import (
     CommittedTurnReceipt,
     FailedRunReceipt,
     RunAlreadyCompletedError,
+    RunAuthority,
     RunClaim,
     RunFailure,
     RunFailureCode,
@@ -78,6 +77,7 @@ from fleet_rlm.sessions.run_state import (
     RunStateError,
     _RunClaimToken,
 )
+from fleet_rlm.sessions.usage import RLMUsage, empty_rlm_usage
 from fleet_rlm.workspace.memory import MemoryPromotionIntent
 
 # ---------------------------------------------------------------------------

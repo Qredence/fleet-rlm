@@ -6,8 +6,8 @@ from typing import Any
 
 from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
-from fleet_rlm.rlm.runtime import RLMExecutionSpec
+from fleet_rlm.daytona.runtime import ChildRuntimeLease
+from fleet_rlm.rlm.execution import RLMExecutionSpec
 from fleet_rlm.workspace.memory import MemoryCandidate
 
 
@@ -54,7 +54,8 @@ class ChildLeaseRecorder:
         self._sandbox_prefix = sandbox_prefix
         self._volume = volume
 
-    def factory(self, call_index: int) -> ChildRuntimeLease:
+    def factory(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        del profile
         self.call_indexes.append(call_index)
         backend = InProcessInterpreterBackend()
         interpreter = DaytonaCodeInterpreter(backend=backend)

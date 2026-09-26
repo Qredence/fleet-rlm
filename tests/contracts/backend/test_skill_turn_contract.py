@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from hashlib import sha256
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import UUID, uuid4
@@ -14,13 +15,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.dependencies import get_turn_runtime
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
-from fleet_rlm.chat.commands import OpenTurnCommand
-from fleet_rlm.composition.inventory import RuntimeInventory
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -31,6 +32,8 @@ from fleet_rlm.sessions.run_state import (
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
+from fleet_rlm.turns import OpenTurnCommand
+from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
 
 
 class _EmptyOpenedTurn:
@@ -53,7 +56,7 @@ class _Coordinator:
         self.error = error
 
     def open_owned(self, command: OpenTurnCommand):
-        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+        from fleet_rlm.turns import OpenedTurnStream
 
         self.command = command
         if self.error is not None:
@@ -66,11 +69,132 @@ class _Coordinator:
         return OpenedTurnStream(opened.run_id, opened.__aiter__())
 
 
+class _DaytonaFilesystem:
+    """In-memory implementation of the SDK filesystem surface used by storage."""
+
+    def __init__(self) -> None:
+        self.files: dict[str, bytes] = {}
+        self.directories = {"/"}
+
+    @staticmethod
+    def _path(value: str) -> str:
+        return str(PurePosixPath(value))
+
+    async def get_file_info(self, value: str) -> dict[str, object]:
+        path = self._path(value)
+        if path in self.directories:
+            return {"is_dir": True, "is_symlink": False, "size": 0, "mod_time": "0"}
+        if path in self.files:
+            return {"is_dir": False, "is_symlink": False, "size": len(self.files[path]), "mod_time": "0"}
+        raise FileNotFoundError(path)
+
+    async def list_files(self, value: str, *, depth: int) -> list[dict[str, object]]:
+        del depth
+        path = self._path(value)
+        if path not in self.directories:
+            raise FileNotFoundError(path)
+        entries = []
+        for child in self.directories | self.files.keys():
+            candidate = PurePosixPath(child)
+            if candidate.parent != PurePosixPath(path):
+                continue
+            is_dir = child in self.directories
+            entries.append(
+                {
+                    "path": child,
+                    "is_dir": is_dir,
+                    "is_symlink": False,
+                    "size": 0 if is_dir else len(self.files[child]),
+                    "mod_time": "0",
+                }
+            )
+        return entries
+
+    async def download_file(self, value: str) -> bytes:
+        try:
+            return self.files[self._path(value)]
+        except KeyError as exc:
+            raise FileNotFoundError(value) from exc
+
+    async def upload_file(self, data: bytes, value: str) -> None:
+        path = PurePosixPath(self._path(value))
+        parents = tuple(path.parents)
+        self.directories.update(str(parent) for parent in parents)
+        self.files[str(path)] = bytes(data)
+
+    async def delete_file(self, value: str) -> None:
+        self.files.pop(self._path(value), None)
+
+
+def _live_capability_environment(settings: Settings, session_id: UUID):
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+    from fleet_rlm.workspace.memory import build_workspace_memory_store
+    from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
+
+    paths = volume_paths_from_settings(settings)
+    sandbox = SimpleNamespace(fs=_DaytonaFilesystem())
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    host_io = daytona_host_io_for_test_sandbox(
+        sandbox,
+        workspace_id=uuid4(),
+        dispatcher=dispatcher,
+        volume_root=str(paths.mount_path),
+        max_file_bytes=settings.max_upload_bytes,
+    )
+    sink = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=paths,
+        host_io=host_io,
+        run_id=uuid4(),
+    )
+    memory_session = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.mount_path),
+        max_file_bytes=settings.max_upload_bytes,
+        allow_volume_root=True,
+    )
+    memory_store = build_workspace_memory_store(
+        WorkspaceMemoryStorage(memory_session),
+        max_upload_bytes=settings.max_upload_bytes,
+    )
+    session_workspace = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.session_workspace_dir(session_id)),
+        max_file_bytes=settings.max_upload_bytes,
+    )
+    project_workspace = DaytonaSandboxWorkspaceStorage(
+        sink.sandbox,
+        volume_root=str(paths.mount_path),
+        root=str(paths.projects_root()),
+        max_file_bytes=settings.max_upload_bytes,
+    )
+
+    async def release() -> None:
+        return None
+
+    return RunEnvironment(
+        interpreter=None,
+        attachment_sink=sink,
+        artifact_sink=sink,
+        release=release,
+        workspace_memory_store=memory_store,
+        volume_fs=sink.volume_fs,
+        session_workspace=session_workspace,
+        project_workspace=project_workspace,
+    )
+
+
 def _turn_client(coordinator: _Coordinator) -> TestClient:
     app = FastAPI()
     app.state.settings = Settings()
-    app.state.composition_ready = True
-    app.state.runtime_inventory = RuntimeInventory(turn_runtime=coordinator)
+    app.dependency_overrides[get_turn_runtime] = lambda: coordinator
     install_error_handlers(app)
     app.include_router(turns_router)
     return TestClient(app)
@@ -163,13 +287,13 @@ def test_invalid_exact_selection_is_generic_inside_the_stream() -> None:
 @pytest.mark.asyncio
 async def test_private_progressive_tools_preload_exact_selection_and_keep_events_metadata_only() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.composition.testing import TestingCapabilityPreparer, TestingRunEnvironmentProvider
+    from tests.support.testing_app import TestingCapabilityPreparer, testing_run_environment
 
     catalog = _catalog()
     selected = catalog.require(stable_skill_id("long-context"))
     other = catalog.require(stable_skill_id("workspace-files"))
     turn = _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),))
-    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment = await testing_run_environment(turn, deadline=float("inf"))
     prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,
         models=RLMModelBundle(MagicMock(), MagicMock()),
@@ -205,9 +329,9 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
 
 @pytest.mark.asyncio
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
-    from fleet_rlm.composition.daytona_run_preparation import _LiveCapabilityPreparer
     from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.tools import SkillToolHost
+    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer
 
     catalog = _catalog()
     selected = catalog.require(stable_skill_id("long-context"))
@@ -218,9 +342,9 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     assert host.read_skill_resource(str(selected.card.id), resource_path, selected.card.version)["ok"] is True
 
     settings = Settings(run_environment="daytona")
-    environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
     turn = _turn()
-    prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
+    environment = _live_capability_environment(settings, turn.session_id)
+    prepared = await DaytonaCapabilityPreparer(settings, catalog, volume_paths_from_settings(settings)).prepare(
         turn,
         environment,
         PreparedAttachments((), ()),
@@ -252,11 +376,12 @@ async def test_progressive_resource_requires_load_and_daytona_preparation_is_pro
     assert resource["content"] not in serialized
     assert "skill_markdown" not in serialized
     assert "content" not in serialized
+    environment.attachment_sink.sandbox.close()
 
 
 @pytest.mark.asyncio
 async def test_data_analysis_signature_and_report_builder_selection_use_host_tools_only() -> None:
-    from fleet_rlm.composition.testing import TestingCapabilityPreparer, TestingRunEnvironmentProvider
+    from tests.support.testing_app import TestingCapabilityPreparer, testing_run_environment
 
     catalog = _catalog()
     csv = b"value,group\n1,a\n2,a\n"
@@ -272,7 +397,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
             SkillSelectionRef(report_builder.card.id, report_builder.card.version),
         ),
     )
-    environment = await TestingRunEnvironmentProvider().acquire(turn, deadline=float("inf"))
+    environment = await testing_run_environment(turn, deadline=float("inf"))
     environment.attachment_sink.values[staged.sandbox_path] = csv
     prepared = await TestingCapabilityPreparer(
         skill_catalog=catalog,
@@ -285,7 +410,7 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
     tools_by_name = {str(tool.name): tool for tool in prepared.spec.tools}
     assert tools_by_name["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
     assert prepared.spec.output_schema_id == "skill.data-analysis"
-    assert prepared.spec.output_schema_version == "1.0.0"
+    assert prepared.spec.output_schema_version == "1.2.0"
     assert prepared.spec.signature.output_fields["answer"].annotation is str
     assert set(prepared.spec.signature.output_fields) == {"answer", "findings", "metrics", "anomalies"}
     assert {str(tool.name) for tool in prepared.spec.tools} == {
@@ -293,7 +418,6 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
         "read_session_history",
         "load_skill",
         "read_skill_resource",
-        "fetch_url",
     }
     attachment_result = next(tool for tool in prepared.spec.tools if str(tool.name) == "read_attachment")(
         attachment_id=str(attachment_id)
@@ -328,8 +452,8 @@ async def test_data_analysis_signature_and_report_builder_selection_use_host_too
 
 @pytest.mark.asyncio
 async def test_deterministic_composition_runs_data_analysis_signature() -> None:
-    from fleet_rlm.composition.testing import DeterministicTurnPreparation, build_testing_rlm
-    from fleet_rlm.rlm.runtime import RLMRunner
+    from fleet_rlm.rlm.execution import RLMRunner
+    from tests.support.testing_app import DeterministicTurnPreparation, build_testing_rlm
 
     class NoAttachments:
         async def prepare_run(self, access, attachment_ids, run, sink) -> PreparedAttachments:
@@ -350,66 +474,21 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.schema_id == "skill.data-analysis"
-    assert stream.outcome.prediction.schema_version == "1.0.0"
-    assert set(stream.outcome.prediction.outputs) == {"answer", "findings", "metrics", "anomalies"}
+    assert stream.outcome.result_contract is not None
+    from fleet_rlm.rlm.result import validate_prediction
+
+    projected = validate_prediction(stream.outcome.prediction, stream.outcome.result_contract)
+    assert projected.schema_id == "skill.data-analysis"
+    assert projected.schema_version == "1.2.0"
+    assert set(projected.outputs) == {"answer", "findings", "metrics", "anomalies"}
     await prepared.aclose()
 
 
 @pytest.mark.asyncio
-async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned(monkeypatch) -> None:
-    from fleet_rlm.composition.daytona_run_preparation import _LiveCapabilityPreparer
+async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned() -> None:
     from fleet_rlm.config.settings import Settings
-    from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
+    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer
 
-    class FakeWorkspace:
-        last_warnings: tuple[dict[str, object], ...] = ()
-
-        def __init__(self) -> None:
-            self.values: dict[str, str] = {}
-
-        def list_entries(self, path: str, *, limit: int = 100, after: str | None = None) -> WorkspaceListResult:
-            del path
-            del limit
-            del after
-            return WorkspaceListResult(
-                tuple(WorkspaceEntry(name, "file", len(value), None) for name, value in self.values.items()), False
-            )
-
-        def stat(self, path: str) -> WorkspaceEntry | None:
-            value = self.values.get(path)
-            return None if value is None else WorkspaceEntry(path, "file", len(value), None)
-
-        def read_text_page(
-            self,
-            path: str,
-            *,
-            cursor: str | None,
-            max_chars: int,
-            max_bytes: int,
-        ) -> WorkspaceTextPage:
-            value = self.values[path]
-            if len(value.encode()) > max_bytes:
-                raise ValueError("too large")
-            if cursor is not None:
-                raise ValueError("cursor")
-            return WorkspaceTextPage(value[:max_chars], None, len(value.encode()), len(value) <= max_chars)
-
-        def write_text(self, path: str, content: str, *, overwrite: bool) -> WorkspaceEntry:
-            if path in self.values and not overwrite:
-                raise FileExistsError(path)
-            self.values[path] = content
-            return WorkspaceEntry(path, "file", len(content.encode()), None)
-
-        def append_text(self, path: str, content: str) -> WorkspaceEntry:
-            self.values[path] = self.values.get(path, "") + content
-            return WorkspaceEntry(path, "file", len(self.values[path].encode()), None)
-
-    fake_workspace = FakeWorkspace()
-    monkeypatch.setattr(
-        "fleet_rlm.workspace.storage.AgentStorageSession",
-        lambda *_args, **_kwargs: fake_workspace,
-    )
     catalog = _catalog()
     report_builder = catalog.require(stable_skill_id("report-builder"))
     workspace_files = catalog.require(stable_skill_id("workspace-files"))
@@ -420,8 +499,8 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
         )
     )
     settings = Settings(run_environment="daytona")
-    environment = SimpleNamespace(attachment_sink=SimpleNamespace(volume_fs=SimpleNamespace(sandbox=object())))
-    prepared = await _LiveCapabilityPreparer(settings, catalog).prepare(
+    environment = _live_capability_environment(settings, turn.session_id)
+    prepared = await DaytonaCapabilityPreparer(settings, catalog, volume_paths_from_settings(settings)).prepare(
         turn,
         environment,
         PreparedAttachments((), ()),
@@ -435,8 +514,11 @@ async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_o
         "read_skill_resource",
     }
     assert tools["load_skill"](skill_id=str(stable_skill_id("long-context")))["error"] == "skill_not_found"
-    assert tools["write_workspace_text"](path="report.md", content="# Report")["ok"] is True
-    assert tools["read_workspace_text"](path="report.md")["content"] == "# Report"
+    written = await asyncio.to_thread(tools["write_workspace_text"], path="report.md", content="# Report")
+    read = await asyncio.to_thread(tools["read_workspace_text"], path="report.md")
+    assert written["ok"] is True
+    assert read["content"] == "# Report"
+    environment.attachment_sink.sandbox.close()
     assert {detail.name for detail in prepared.drain_public_details() if detail.kind == "skill.activated"} == {
         "report-builder",
         "workspace-files",

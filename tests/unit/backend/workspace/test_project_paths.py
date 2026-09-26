@@ -6,11 +6,7 @@ from pathlib import PurePosixPath
 
 import pytest
 
-from fleet_rlm.workspace.paths import (
-    UnsafePathError,
-    VolumePaths,
-    validate_project_slug,
-)
+from fleet_rlm.paths import UnsafePathError, VolumePaths, validate_project_slug
 
 
 def test_projects_root_is_a_volume_sibling() -> None:

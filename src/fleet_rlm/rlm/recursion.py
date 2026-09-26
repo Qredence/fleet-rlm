@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import inspect
 import json
-import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import FIRST_EXCEPTION, Future, wait
@@ -23,19 +22,30 @@ from hashlib import sha256
 from pathlib import PurePosixPath
 from threading import Event, Lock, RLock
 from typing import Any, Literal, Protocol, TypeAlias
-from urllib.parse import unquote, urlsplit
-from uuid import UUID
 
 import dspy
+from dspy import CodeInterpreter
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.errors import (
+    ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
+    ChildRuntimeNotStartedError,
+)
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import dspy_turn_callbacks, start_turn_span
+from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension
-from fleet_rlm.rlm.compat_3_3_1 import CodeInterpreter, _RLMTraceCallback, is_native_rlm
-from fleet_rlm.rlm.events import Status, ToolEventView, ToolObserver, observe_tool
+from fleet_rlm.rlm.events import (
+    ChildProgress,
+    Status,
+    ToolEventView,
+    ToolObserver,
+    _RLMTraceCallback,
+    is_native_rlm,
+    observe_tool,
+)
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
     FleetJSONAdapter,
@@ -43,19 +53,24 @@ from fleet_rlm.rlm.program import (
     RLMOptions,
     build_native_rlm,
 )
-from fleet_rlm.rlm.result import RLMConfigError, prediction_result, rlm_termination_mode
+from fleet_rlm.rlm.result import (
+    RLMConfigError,
+    normalize_prediction_trajectory,
+    prediction_result,
+    rlm_termination_mode,
+    sanitize_public_text,
+)
+from fleet_rlm.skills.models import SkillDefinition
 
 # ---------------------------------------------------------------------------
 # Provider-neutral child-runtime protocol
 # ---------------------------------------------------------------------------
 
-
-class ChildRuntimeCleanupError(RuntimeError):
-    """A child runtime could not be proved clean before Root commit."""
+_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 
 
-class ChildRuntimeAuthorizationError(RuntimeError):
-    """A child runtime operation was attempted after Run authority was revoked."""
+class ChildInputFailureError(RuntimeError):
+    """A selected child input was unavailable without losing Run authority."""
 
 
 class ChildRuntimeLease(Protocol):
@@ -67,6 +82,13 @@ class ChildRuntimeLease(Protocol):
     sandbox_id: str
     volume_id: str
     volume_subpath: str
+
+    @property
+    def data_path(self) -> str: ...
+
+    def stage_files(self, files: Mapping[str, bytes]) -> None: ...
+
+    def read_result_files(self, paths: Sequence[str]) -> Mapping[str, bytes]: ...
 
     def close(self) -> None: ...
 
@@ -375,128 +397,94 @@ def _future_failures(futures: set[Future[Any]]) -> list[BaseException]:
 # ---------------------------------------------------------------------------
 
 RLM_NATIVE_CHILD_DEPTH = 1
-_MAX_CAPSULE_BYTES = 50_000
-_MAX_CAPSULE_FRAGMENTS = 16
-_MAX_CAPSULE_REFERENCES = 32
+_MAX_CHILD_RESULT_BYTES = 50_000
+_MAX_CHILD_TASK_CHARS = 2_000
+_MAX_CHILD_CONTEXT_CHARS = 2_000
+_MAX_CHILD_PROGRESS_OUTCOME_CHARS = 240
+_MAX_CHILD_INPUTS = 16
+_MAX_CHILD_MANIFEST_BYTES = 64 * 1024
 
 
-class SubproblemCapsule(BaseModel):
-    """Strict selected child input; never a copied Session or Workspace view."""
+class ChildRequest(BaseModel):
+    """Bounded model-authored investigation; source bytes are host resolved."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    task: str = Field(min_length=1, max_length=_MAX_CAPSULE_BYTES)
-    fragments: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_FRAGMENTS)
-    authorized_references: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
-    expected_result_shape: str = Field(default="concise answer", min_length=1, max_length=2_000)
-    evidence_requirements: tuple[str, ...] = Field(default=(), max_length=16)
-    allocation_bytes: int = Field(default=4_000, gt=0, le=_MAX_CAPSULE_BYTES)
-    selected_file_checksums: tuple[tuple[str, str], ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
+    task: str = Field(min_length=1, max_length=_MAX_CHILD_TASK_CHARS)
+    inputs: tuple[str, ...] = Field(default=(), max_length=_MAX_CHILD_INPUTS)
+    context: str = Field(default="", max_length=_MAX_CHILD_CONTEXT_CHARS)
 
-    @field_validator("fragments", "authorized_references", "evidence_requirements", mode="before")
+    @field_validator("inputs", mode="before")
     @classmethod
-    def _normalize_text_collection(cls, value: object) -> tuple[str, ...]:
-        if value is None:
-            return ()
-        if isinstance(value, str) or not isinstance(value, (tuple, list)):
-            raise ValueError("capsule collections must be arrays of text")
+    def _normalize_inputs(cls, value: object) -> tuple[str, ...]:
+        if not isinstance(value, (tuple, list)):
+            raise ValueError("child inputs must be an array of relative paths")
         return tuple(value)
 
-    @field_validator("selected_file_checksums", mode="before")
-    @classmethod
-    def _normalize_checksums(cls, value: object) -> tuple[tuple[str, str], ...]:
-        if value is None:
-            return ()
-        if not isinstance(value, (tuple, list)):
-            raise ValueError("capsule checksums must be an array")
-        normalized: list[tuple[str, str]] = []
-        for item in value:
-            if not isinstance(item, (tuple, list)) or len(item) != 2:
-                raise ValueError("capsule checksum entries must contain path and digest")
-            normalized.append((item[0], item[1]))
-        return tuple(normalized)
-
     @model_validator(mode="after")
-    def _validate_selected_input(self) -> SubproblemCapsule:
-        values = (*self.fragments, *self.authorized_references, *self.evidence_requirements)
-        if not self.task.strip() or not self.expected_result_shape.strip():
-            raise ValueError("capsule fields must contain non-empty text")
-        if any(not isinstance(value, str) or not value.strip() for value in values):
-            raise ValueError("capsule fields must contain non-empty text")
-        for reference in self.authorized_references:
-            _validate_capsule_reference(reference)
-        for path, digest in self.selected_file_checksums:
-            _validate_capsule_path(path)
-            if not isinstance(digest, str) or len(digest) != 64:
-                raise ValueError("capsule file checksum must be a SHA-256 hex digest")
-            try:
-                int(digest, 16)
-            except ValueError:
-                raise ValueError("capsule file checksum must be a SHA-256 hex digest") from None
-        if len(self.render().encode("utf-8")) > min(self.allocation_bytes, _MAX_CAPSULE_BYTES):
-            raise ValueError("capsule serialized bytes exceed its allocation")
+    def _validate_request(self) -> ChildRequest:
+        if not self.task.strip():
+            raise ValueError("child task must contain text")
+        if len(self.inputs) != len(set(self.inputs)):
+            raise ValueError("child inputs must be unique")
+        for reference in self.inputs:
+            if (
+                not isinstance(reference, str)
+                or not reference
+                or len(reference) > 512
+                or reference != reference.strip()
+                or not reference.isprintable()
+            ):
+                raise ValueError("child input path is invalid")
+            _validate_child_path(reference)
         return self
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, object]) -> SubproblemCapsule:
+    def from_mapping(cls, value: Mapping[str, object]) -> ChildRequest:
         if not isinstance(value, Mapping):
-            raise ValueError("capsule must be a JSON object")
+            raise ValueError("child request must be a JSON object")
         return cls.model_validate(value)
+
+    def render(self) -> str:
+        return json.dumps(
+            {"task": self.task.strip(), "inputs": list(self.inputs), "context": self.context.strip()},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     @property
     def serialized_bytes(self) -> int:
         return len(self.render().encode("utf-8"))
 
-    def render(self) -> str:
-        payload = {
-            "task": self.task.strip(),
-            "selected_fragments": list(self.fragments),
-            "authorized_references": list(self.authorized_references),
-            "expected_result_shape": self.expected_result_shape.strip(),
-            "evidence_requirements": list(self.evidence_requirements),
-            "selected_file_checksums": [
-                {"path": path, "sha256": digest.lower()} for path, digest in self.selected_file_checksums
-            ],
-        }
-        return json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
-
-def _validate_capsule_path(value: object) -> None:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value:
-        raise ValueError("capsule reference path is invalid")
+def _validate_child_path(value: object) -> None:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or value != value.strip()
+        or "\x00" in value
+        or "\\" in value
+        or ":" in value
+        or "%" in value
+        or "//" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+    ):
+        raise ValueError("child input path is invalid")
     path = PurePosixPath(value)
     if path.is_absolute() or ".." in path.parts:
-        raise ValueError("capsule reference path escapes its authorized scope")
+        raise ValueError("child input path escapes its authorized scope")
 
 
-def _validate_capsule_reference(value: object) -> None:
-    if not isinstance(value, str) or not value.strip() or "\x00" in value:
-        raise ValueError("capsule reference is invalid")
-    parsed = urlsplit(value)
-    if parsed.scheme:
-        if (
-            parsed.scheme.lower() != "artifact"
-            or not parsed.netloc
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.port is not None
-            or parsed.query
-            or parsed.fragment
-        ):
-            raise ValueError("capsule reference is outside its authorized scope")
-        authority = unquote(parsed.netloc)
-        path = unquote(parsed.path)
-        try:
-            artifact_id = UUID(authority)
-        except ValueError:
-            raise ValueError("capsule Artifact reference must contain a UUID") from None
-        if authority != str(artifact_id) or path:
-            raise ValueError("capsule reference is outside its authorized scope")
-        return
-    _validate_capsule_path(value)
+def _child_progress_outcome(answer: str | None, failure_category: str | None) -> str:
+    if isinstance(answer, str) and answer.strip():
+        excerpt = sanitize_public_text(" ".join(answer.split()), max_len=_MAX_CHILD_PROGRESS_OUTCOME_CHARS)
+        if excerpt.strip():
+            return excerpt
+    return failure_category or "Child answer unavailable"
 
 
-CapsuleStatus: TypeAlias = Literal["completed", "failed", "timed_out", "cancelled"]
+ChildStatus: TypeAlias = Literal["completed", "failed", "timed_out", "cancelled", "not_started"]
 
 
 class ChildUsage(BaseModel):
@@ -512,87 +500,6 @@ class ChildUsage(BaseModel):
     total_tokens: int | None = Field(default=None, ge=0)
 
 
-class SelectedInputAccess:
-    """Child-local read ledger; capsule labels never grant storage authority."""
-
-    def __init__(
-        self,
-        capsule: SubproblemCapsule,
-        *,
-        reader: Callable[[str, int], str] | None,
-        check_authority: Callable[[], None],
-    ) -> None:
-        self._capsule = capsule
-        self._reader = reader
-        self._check_authority = check_authority
-        self._lock = Lock()
-        self._content: dict[str, str] = {}
-        self._read_bytes = 0
-
-    @property
-    def selected_input_bytes(self) -> int:
-        with self._lock:
-            return self._capsule.serialized_bytes + self._read_bytes
-
-    @property
-    def delivered_fragments(self) -> tuple[str, ...]:
-        return tuple(f"fragment-{index}" for index in range(1, len(self._capsule.fragments) + 1))
-
-    @property
-    def accessed_references(self) -> tuple[str, ...]:
-        with self._lock:
-            return tuple(
-                f"reference-{index}"
-                for index, reference in enumerate(self._capsule.authorized_references, 1)
-                if reference in self._content
-            )
-
-    def read(self, evidence_id: str) -> str:
-        self._check_authority()
-        references = {
-            f"reference-{index}": reference for index, reference in enumerate(self._capsule.authorized_references, 1)
-        }
-        reference = references.get(evidence_id)
-        if reference is None or self._reader is None:
-            raise ChildRuntimeAuthorizationError("selected input is unavailable or unauthorized")
-        with self._lock:
-            if reference in self._content:
-                return self._content[reference]
-            remaining = self._capsule.allocation_bytes - self._capsule.serialized_bytes - self._read_bytes
-            if remaining < 1:
-                raise ValueError("selected input exceeds its byte allocation")
-            content = self._reader(reference, remaining)
-            self._check_authority()
-            if not isinstance(content, str):
-                raise ValueError("selected input must be UTF-8 text")
-            raw = content.encode("utf-8")
-            expected = dict(self._capsule.selected_file_checksums).get(reference)
-            if expected is not None and sha256(raw).hexdigest() != expected.lower():
-                raise ValueError("selected input checksum mismatch")
-            if self._read_bytes + len(raw) + self._capsule.serialized_bytes > self._capsule.allocation_bytes:
-                raise ValueError("selected input exceeds its byte allocation")
-            self._content[reference] = content
-            self._read_bytes += len(raw)
-            return content
-
-    def tool(self) -> dspy.Tool:
-        return dspy.Tool(
-            self.read,
-            name="read_selected_input",
-            desc="Read a selected reference by reference-N identifier. Access does not prove the answer is correct.",
-        )
-
-    def validate_citations(self, answer: str) -> tuple[str, ...]:
-        cited = tuple(dict.fromkeys(re.findall(r"\[((?:reference|fragment)-[^\]\s]*)\]", answer)))
-        available = set(self.accessed_references) | set(self.delivered_fragments)
-        if any(identifier not in available for identifier in cited):
-            raise ValueError("child cited evidence that was not delivered or accessed")
-        if self._capsule.evidence_requirements and not cited:
-            raise ValueError("child omitted required evidence citations")
-        return cited
-
-
-_selected_access: ContextVar[SelectedInputAccess | None] = ContextVar("fleet_selected_access", default=None)
 _child_metrics: ContextVar[DelegationMetrics | None] = ContextVar("fleet_child_metrics", default=None)
 
 
@@ -615,44 +522,35 @@ class ChildOutcome(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    status: CapsuleStatus
-    answer: str = Field(default="", max_length=_MAX_CAPSULE_BYTES)
-    source_references: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES)
-    delivered_fragments: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_FRAGMENTS)
-    cited_evidence: tuple[str, ...] = Field(default=(), max_length=_MAX_CAPSULE_REFERENCES + _MAX_CAPSULE_FRAGMENTS)
-    uncertainty: str = Field(default="", max_length=2_000)
+    status: ChildStatus
+    child_id: str | None = Field(default=None, max_length=200)
+    termination: str | None = Field(default=None, max_length=64)
+    answer: str = Field(default="", max_length=_MAX_CHILD_RESULT_BYTES)
+    evidence: tuple[str, ...] = Field(default=(), max_length=32)
+    gaps: tuple[str, ...] = Field(default=(), max_length=32)
+    result_files: tuple[str, ...] = Field(default=(), max_length=16)
+    source_manifest_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     usage: ChildUsage = Field(default_factory=ChildUsage)
     error_category: str | None = Field(default=None, max_length=64)
-    selected_input_bytes: int = Field(default=0, ge=0, le=_MAX_CAPSULE_BYTES)
     result_bytes: int = Field(default=0, ge=0)
-
-    @field_validator("source_references", "delivered_fragments", "cited_evidence")
-    @classmethod
-    def _validate_evidence_ids(cls, values: tuple[str, ...]) -> tuple[str, ...]:
-        if len(values) != len(set(values)):
-            raise ValueError("child evidence identifiers must be unique")
-        for value in values:
-            if not isinstance(value, str) or not re.fullmatch(r"(?:reference|fragment)-[1-9][0-9]*", value):
-                raise ValueError("child evidence identifier is invalid")
-        return values
 
     def as_dict(self) -> dict[str, object]:
         return {
             "status": self.status,
             "answer": self.answer,
-            "source_references": list(self.source_references),
-            "delivered_fragments": list(self.delivered_fragments),
-            "cited_evidence": list(self.cited_evidence),
-            "uncertainty": self.uncertainty,
+            "child_id": self.child_id,
+            "termination": self.termination,
+            "evidence": list(self.evidence),
+            "gaps": list(self.gaps),
+            "result_files": list(self.result_files),
+            "source_manifest_sha256": self.source_manifest_sha256,
             "usage": self.usage.model_dump(mode="json"),
             "error_category": self.error_category,
-            "selected_input_bytes": self.selected_input_bytes,
             "result_bytes": self.result_bytes,
         }
 
 
 _PENDING_BATCH_WAIT_TIMEOUT_S = 60.0
-_CHILD_FENCE_SETTLE_GRACE_S = 5.0
 
 
 class ChildAsyncScheduler:
@@ -750,49 +648,6 @@ class ChildAsyncScheduler:
             self._closed = True
 
 
-def _invoke_async_child(
-    child_acall: Callable[..., Any],
-    interpreter: Any,
-    prompt: str,
-    *,
-    native: bool,
-    deadline: float,
-    retain_pending: Callable[[Future[Any]], None],
-    extra_inputs: Mapping[str, Any] | None = None,
-    scheduler: ChildAsyncScheduler | None = None,
-) -> Any:
-    async def invoke() -> Any:
-        if native:
-            if extra_inputs:
-                return await child_acall(interpreter, prompt=prompt, **extra_inputs)
-            return await child_acall(interpreter, prompt=prompt)
-        return await child_acall(interpreter=interpreter, prompt=prompt)
-
-    remaining = deadline - time.monotonic()
-    if remaining <= 0:
-        raise TimeoutError("recursive child deadline exceeded")
-
-    if scheduler is None:
-        raise RuntimeError("recursive child scheduler is unavailable")
-    future = scheduler.submit(invoke())
-    try:
-        return future.result(timeout=remaining)
-    except TimeoutError:
-        if future.done():
-            child_error = future.exception()
-            if child_error is not None:
-                raise child_error from None
-
-    scheduler.cancel(future)
-    try:
-        future.result(timeout=_CHILD_FENCE_SETTLE_GRACE_S)
-    except TimeoutError:
-        retain_pending(future)
-    except BaseException:
-        pass
-    raise TimeoutError("recursive child deadline exceeded")
-
-
 @dataclass(frozen=True, slots=True)
 class RecursiveRLMOptions:
     """Invocation limits for the custom recursive RLM Tool."""
@@ -888,15 +743,26 @@ class _RecursiveState:
 
 
 class RecursiveSubtaskSignature(dspy.Signature):
-    """Solve one selected-input subproblem and stop promptly."""
+    """Investigate staged local inputs and submit bounded findings.
+
+    The host copies each requested relative input path under
+    ``FLEET_RUN_SCRATCH`` and supplies a source manifest with the SHA-256 of
+    each exact copy. Read inputs with ``open(os.path.join(FLEET_RUN_SCRATCH,
+    path), encoding="utf-8")`` and cite useful locations with their manifest
+    revision. Write declared result files beneath the same scratch directory.
+    Do not assume the root's workspace or sandbox paths exist in this child.
+    """
 
     prompt: str = dspy.InputField(
         desc=(
-            "One bounded subproblem with only the selected information needed to solve it. "
-            "Keep intermediate Python small, do not paste large reports, and submit as soon as the answer is verified."
+            "One bounded subproblem containing task, optional context, and a manifest of staged paths and hashes. "
+            "Use hashes as source revisions; keep intermediate Python small and check evidence before submitting."
         )
     )
-    answer: str = dspy.OutputField(desc="A concise verified answer to the bounded subproblem")
+    answer: str = dspy.OutputField(desc="A concise finding; Root verifies it against evidence")
+    evidence: list[str] = dspy.OutputField(desc="Source locations or revisions supporting the finding")
+    gaps: list[str] = dspy.OutputField(desc="Missing inputs or unresolved questions")
+    result_files: list[str] = dspy.OutputField(desc="Optional relative paths of useful child-local output files")
 
 
 _MAX_PROGRESS_INTEGER = 1_000_000
@@ -907,7 +773,13 @@ def _bounded_progress_integer(value: int) -> int:
     return max(0, min(int(value), _MAX_PROGRESS_INTEGER))
 
 
+def _elapsed_ms(started_at: float) -> int:
+    return min(_MAX_PROGRESS_DURATION_MS, max(0, int((time.monotonic() - started_at) * 1000)))
+
+
 def _recursive_failure_category(exc: BaseException) -> str:
+    if isinstance(exc, ChildRuntimeNotStartedError):
+        return "capacity"
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
     if isinstance(exc, ChildRuntimeCleanupError):
@@ -931,8 +803,16 @@ def _validate_recursive_prompt(prompt: object, *, max_chars: int) -> str:
     if not prompt:
         raise ValueError("rlm_query prompt must not be empty")
     if len(prompt) > max_chars:
-        raise ValueError("rlm_query prompt exceeds the configured character bound")
+        raise ValueError("rlm_query prompt exceeds the recursive prompt bound")
     return prompt
+
+
+def _child_source_manifest(files: Mapping[str, bytes]) -> tuple[list[dict[str, str]], str]:
+    manifest = [{"path": path, "sha256": sha256(content).hexdigest()} for path, content in sorted(files.items())]
+    encoded = json.dumps(manifest, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if len(encoded) > _MAX_CHILD_MANIFEST_BYTES:
+        raise ValueError("selected child source manifest exceeds its metadata bound")
+    return manifest, sha256(encoded).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)
@@ -941,6 +821,7 @@ class _RecursiveCall:
     child_depth: int
     started_at: float
     span: Any
+    task_label: str
 
 
 class RecursiveRLMExecutor:
@@ -957,7 +838,10 @@ class RecursiveRLMExecutor:
         observer: ToolObserver | None = None,
         is_authorized: Callable[[], bool] | None = None,
         scheduler: ChildAsyncScheduler | None = None,
-        selected_input_reader: Callable[[str, int], str] | None = None,
+        input_materializer: Callable[[ChildRequest], Mapping[str, bytes]] | None = None,
+        result_writer: Callable[[int, str, bytes], str] | None = None,
+        parent_run_id: str | None = None,
+        loaded_skills: Callable[[], tuple[SkillDefinition, ...]] | None = None,
     ) -> None:
         self._models = models
         self._options = options
@@ -969,33 +853,36 @@ class RecursiveRLMExecutor:
         self._metrics = self._state.metrics
         self._observer = observer
         self._is_authorized = is_authorized
-        self._selected_input_reader = selected_input_reader
+        self._input_materializer = input_materializer
+        self._result_writer = result_writer
+        self._parent_run_id = parent_run_id
+        self._loaded_skills = loaded_skills or (lambda: ())
         self._owns_scheduler = scheduler is None
         self._last_completion: Mapping[str, JsonValue] | None = None
-        self._last_capsule_outcomes: tuple[ChildOutcome, ...] = ()
+        self._last_child_outcomes: tuple[ChildOutcome, ...] = ()
         raw_tool = dspy.Tool(
-            self._call_selected,
+            self._call_child,
             name="rlm_query",
             desc=(
-                "Solve one bounded iterative subproblem from a capsule containing task, selected fragments, "
-                "authorized references and allocation_bytes. Returns a typed outcome for Root verification."
+                "Investigate one bounded task using staged relative input paths. "
+                "Pass task, inputs, and optional context."
             ),
         )
         if observer is not None or is_authorized is not None:
             self._tool = observe_tool(
                 raw_tool,
                 observer or (lambda _detail: None),
-                ToolEventView(input_projection=self._selected_input, output_projection=self._recursive_output),
+                ToolEventView(input_projection=self._child_input, output_projection=self._recursive_output),
                 is_authorized=is_authorized,
             )
         else:
             self._tool = raw_tool
         raw_batch_tool = dspy.Tool(
-            self._call_capsules_batched,
+            self._call_children_batched,
             name="rlm_query_batched",
             desc=(
                 "Solve multiple independent bounded subproblems with isolated child RLMs. "
-                "Pass capsules; ordered typed outcomes include ordinary cleaned-up failures. "
+                "Pass tasks containing task, inputs, and optional context; results stay in input order. "
                 "Use only when every item needs iterative exploration. Root only."
             ),
         )
@@ -1004,7 +891,7 @@ class RecursiveRLMExecutor:
                 raw_batch_tool,
                 observer or (lambda _detail: None),
                 ToolEventView(
-                    input_projection=self._capsule_batch_input,
+                    input_projection=self._child_batch_input,
                     output_projection=self._recursive_batch_output,
                 ),
                 is_authorized=is_authorized,
@@ -1022,8 +909,8 @@ class RecursiveRLMExecutor:
         return self._batched_tool
 
     @property
-    def last_capsule_outcomes(self) -> tuple[ChildOutcome, ...]:
-        return self._last_capsule_outcomes
+    def last_child_outcomes(self) -> tuple[ChildOutcome, ...]:
+        return self._last_child_outcomes
 
     @property
     def metrics(self) -> DelegationMetrics:
@@ -1040,159 +927,194 @@ class RecursiveRLMExecutor:
                 termination_modes=tuple(self._state.termination_modes),
             )
 
-    def execute_capsule(self, capsule: SubproblemCapsule) -> ChildOutcome:
-        return self._execute_capsule(capsule, classify_failures=False)
+    def _call_child(self, task: str, inputs: list[str], context: str = "") -> dict[str, object]:
+        request = ChildRequest(task=task, inputs=tuple(inputs), context=context)
+        return self._execute_child(request, classify_failures=True).as_dict()
 
-    def _execute_capsule(self, capsule: SubproblemCapsule, *, classify_failures: bool) -> ChildOutcome:
-        if not isinstance(capsule, SubproblemCapsule):
-            raise TypeError("capsule must be a SubproblemCapsule")
-        rendered = capsule.render()
-        if capsule.serialized_bytes > self._options.max_prompt_chars:
-            raise ValueError("capsule exceeds recursive prompt bound")
+    def _execute_child(self, request: ChildRequest, *, classify_failures: bool) -> ChildOutcome:
+        rendered = _validate_recursive_prompt(request.render(), max_chars=self._options.max_prompt_chars)
+        self._ensure_authorized()
+        self._ensure_no_pending_batch_workers()
+        try:
+            reservation = self._begin_call(rendered)
+            staged_files = self._materialize_inputs(request)
+            source_manifest, source_manifest_sha256 = _child_source_manifest(staged_files)
+        except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
+            raise
+        except Exception as exc:
+            self._ensure_authorized()
+            if not classify_failures:
+                raise
+            return ChildOutcome(
+                status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+                error_category=_recursive_failure_category(exc),
+            )
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         local_metrics = DelegationMetrics(parent=self._metrics)
-        access = SelectedInputAccess(
-            capsule, reader=self._selected_input_reader, check_authority=self._ensure_authorized
-        )
         token = _child_metrics.set(local_metrics)
-        access_token = _selected_access.set(access)
         try:
-            answer = self._call_with_profile(rendered, child_profile="semantic-child")
-            if len(answer) > self._options.child_max_output_chars:
-                raise RLMConfigError("capsule result exceeds child result bound")
-            cited = access.validate_citations(answer)
+            future = self._scheduler.submit_blocking(
+                lambda: self._run_reserved_call(
+                    reservation,
+                    request=request,
+                    staged_files=staged_files,
+                    source_manifest=source_manifest,
+                    source_manifest_sha256=source_manifest_sha256,
+                )
+            )
+            try:
+                outcome = future.result(timeout=max(0.0, self._deadline - time.monotonic()))
+            except TimeoutError:
+                if not future.done():
+                    self._scheduler.cancel(future)
+                    self._retain_pending_batch_futures({future})
+                raise TimeoutError("recursive child deadline exceeded") from None
         except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
             raise
         except Exception as exc:
             if not classify_failures:
                 raise
-            self._ensure_no_pending_batch_workers()
-            self.raise_if_cleanup_failed()
-            self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
-            return ChildOutcome(
+            outcome = ChildOutcome(
                 status="timed_out" if isinstance(exc, TimeoutError) else "failed",
-                source_references=access.accessed_references,
-                delivered_fragments=access.delivered_fragments,
-                uncertainty="child execution failed; accesses do not establish a valid answer",
+                source_manifest_sha256=source_manifest_sha256,
                 error_category=_recursive_failure_category(exc),
                 usage=_child_usage(local_metrics),
-                selected_input_bytes=access.selected_input_bytes,
             )
         finally:
             _child_metrics.reset(token)
-            _selected_access.reset(access_token)
-        self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
-        return ChildOutcome(
-            status="completed",
-            answer=answer,
-            source_references=access.accessed_references,
-            delivered_fragments=access.delivered_fragments,
-            cited_evidence=cited,
-            uncertainty="child evidence is untrusted until Root verification",
-            usage=_child_usage(local_metrics),
-            selected_input_bytes=access.selected_input_bytes,
-            result_bytes=len(answer.encode("utf-8")),
+        return outcome.model_copy(update={"usage": _child_usage(local_metrics)})
+
+    def _materialize_inputs(self, request: ChildRequest) -> Mapping[str, bytes]:
+        span = start_turn_span(
+            "RLM.child.resolve_inputs",
+            inputs={"input_count": len(request.inputs)},
         )
-
-    def execute_capsule_outcome(self, capsule: SubproblemCapsule) -> ChildOutcome:
-        return self._execute_capsule(capsule, classify_failures=True)
-
-    def _call_selected(self, capsule: dict[str, Any]) -> dict[str, object]:
-        return self.execute_capsule_outcome(SubproblemCapsule.from_mapping(capsule)).as_dict()
+        started_at = time.monotonic()
+        try:
+            self._ensure_authorized()
+            if self._input_materializer is None:
+                if request.inputs:
+                    raise ChildRuntimeAuthorizationError("selected child inputs are unavailable")
+                normalized: dict[str, bytes] = {}
+            else:
+                files = self._input_materializer(request)
+                if not isinstance(files, Mapping):
+                    raise ValueError("child input materializer returned invalid files")
+                normalized = {}
+                for path, content in files.items():
+                    try:
+                        _validate_child_path(path)
+                    except ValueError as exc:
+                        raise ChildRuntimeAuthorizationError(
+                            "child input materializer returned an unsafe path"
+                        ) from exc
+                    if not isinstance(content, bytes):
+                        raise ValueError("child input materializer must return bytes")
+                    if not any(path == scope or path.startswith(f"{scope.rstrip('/')}/") for scope in request.inputs):
+                        raise ChildRuntimeAuthorizationError("child input materializer exceeded the requested scope")
+                    normalized[path] = content
+        except BaseException as exc:
+            span.finish(
+                phase_status="failed",
+                outputs={
+                    "duration_ms": _elapsed_ms(started_at),
+                    "failure_category": _recursive_failure_category(exc),
+                },
+            )
+            raise
+        span.finish(
+            phase_status="completed",
+            outputs={
+                "duration_ms": _elapsed_ms(started_at),
+                "file_count": len(normalized),
+                "source_bytes": sum(map(len, normalized.values())),
+            },
+        )
+        return normalized
 
     @staticmethod
-    def _selected_input(arguments: Mapping[str, Any]) -> dict[str, int]:
-        capsule = arguments.get("capsule")
-        if not isinstance(capsule, Mapping):
-            return {"selected_input_bytes": 0}
-        try:
-            size = SubproblemCapsule.from_mapping(capsule).serialized_bytes
-        except ValueError:
-            size = 0
-        return {"selected_input_bytes": size}
+    def _child_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        return {"input_count": len(arguments.get("inputs", [])) if isinstance(arguments.get("inputs"), list) else 0}
 
-    def _call_capsules_batched(self, capsules: list[Mapping[str, object]]) -> list[dict[str, object]]:
-        if not isinstance(capsules, list):
-            raise ValueError("rlm_query_batched capsules must be a list")
-        if not capsules:
-            raise ValueError("rlm_query_batched capsules must not be empty")
-        normalized = tuple(SubproblemCapsule.from_mapping(item) for item in capsules)
-        if any(capsule.serialized_bytes > self._options.max_prompt_chars for capsule in normalized):
-            raise ValueError("capsule exceeds recursive prompt bound")
+    def _call_children_batched(self, tasks: list[Mapping[str, object]]) -> list[dict[str, object]]:
+        if not isinstance(tasks, list) or not tasks:
+            raise ValueError("rlm_query_batched tasks must be a non-empty list")
+        normalized = tuple(ChildRequest.from_mapping(item) for item in tasks)
+        rendered = tuple(
+            _validate_recursive_prompt(req.render(), max_chars=self._options.max_prompt_chars) for req in normalized
+        )
+        prepared: list[tuple[Mapping[str, bytes], list[dict[str, str]], str] | ChildOutcome] = []
+        for request in normalized:
+            try:
+                files = self._materialize_inputs(request)
+                manifest, manifest_sha256 = _child_source_manifest(files)
+            except (
+                asyncio.CancelledError,
+                FutureCancelledError,
+                ChildRuntimeAuthorizationError,
+                ChildRuntimeCleanupError,
+            ):
+                raise
+            except Exception as exc:
+                self._ensure_authorized()
+                prepared.append(
+                    ChildOutcome(
+                        status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+                        error_category=_recursive_failure_category(exc),
+                    )
+                )
+            else:
+                prepared.append((files, manifest, manifest_sha256))
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
+        reservations = self._begin_batch(rendered)
         self._metrics.record_recursive_batch()
-        reservations = self._begin_batch(tuple(capsule.render() for capsule in normalized))
 
         def execute(
             reservation: RecursiveCallReservation,
             batch_cancelled: Event,
         ) -> ChildOutcome:
-            capsule = normalized[reservation.call_index - reservations[0].call_index]
+            index = reservation.call_index - reservations[0].call_index
+            item = prepared[index]
+            if isinstance(item, ChildOutcome):
+                return item
+            staged_files, source_manifest, source_manifest_sha256 = item
             local_metrics = DelegationMetrics(parent=self._metrics)
             token = _child_metrics.set(local_metrics)
-            access = SelectedInputAccess(
-                capsule, reader=self._selected_input_reader, check_authority=self._ensure_authorized
-            )
-            access_token = _selected_access.set(access)
             try:
-                answer = self._run_reserved_call(
+                outcome = self._run_reserved_call(
                     reservation,
                     batch_cancelled,
-                    child_profile="semantic-child",
+                    request=normalized[index],
+                    staged_files=staged_files,
+                    source_manifest=source_manifest,
+                    source_manifest_sha256=source_manifest_sha256,
                 )
-                if len(answer) > self._options.child_max_output_chars:
-                    raise RLMConfigError("capsule result exceeds child result bound")
-                cited = access.validate_citations(answer)
             except (asyncio.CancelledError, FutureCancelledError):
                 raise
             except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
                 raise
             except TimeoutError as exc:
                 category = _recursive_failure_category(exc)
-                self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
                 return ChildOutcome(
                     status="timed_out",
-                    source_references=access.accessed_references,
-                    delivered_fragments=access.delivered_fragments,
-                    uncertainty=(
-                        "child finalization was rejected"
-                        if category == "wrap_up_rejected"
-                        else "child did not settle before the shared deadline"
-                    ),
+                    source_manifest_sha256=source_manifest_sha256,
                     error_category=category,
-                    selected_input_bytes=access.selected_input_bytes,
                     usage=_child_usage(local_metrics),
                 )
             except Exception as exc:
-                self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
                 return ChildOutcome(
                     status="failed",
-                    source_references=access.accessed_references,
-                    delivered_fragments=access.delivered_fragments,
-                    uncertainty="child evidence is unavailable",
+                    source_manifest_sha256=source_manifest_sha256,
                     error_category=_recursive_failure_category(exc),
-                    selected_input_bytes=access.selected_input_bytes,
                     usage=_child_usage(local_metrics),
                 )
             finally:
                 _child_metrics.reset(token)
-                _selected_access.reset(access_token)
-            self._metrics.record_delegated_input_bytes(access.selected_input_bytes)
-            return ChildOutcome(
-                status="completed",
-                answer=answer,
-                source_references=access.accessed_references,
-                delivered_fragments=access.delivered_fragments,
-                cited_evidence=cited,
-                uncertainty="child evidence is untrusted until Root verification",
-                usage=_child_usage(local_metrics),
-                selected_input_bytes=access.selected_input_bytes,
-                result_bytes=len(answer.encode("utf-8")),
-            )
+            return outcome.model_copy(update={"usage": _child_usage(local_metrics)})
 
         outcomes = run_reserved_batch(
             reservations,
@@ -1203,7 +1125,7 @@ class RecursiveRLMExecutor:
             scheduler=self._scheduler,
         )
         self._ensure_authorized()
-        self._last_capsule_outcomes = tuple(outcomes)
+        self._last_child_outcomes = tuple(outcomes)
         self.raise_if_cleanup_failed()
         return [outcome.as_dict() for outcome in outcomes]
 
@@ -1269,18 +1191,9 @@ class RecursiveRLMExecutor:
         return dict(self._last_completion)
 
     @staticmethod
-    def _capsule_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
-        capsules = arguments.get("capsules")
-        if not isinstance(capsules, list):
-            return {"capsule_count": 0, "selected_input_bytes": 0}
-        selected_bytes = 0
-        for value in capsules:
-            if isinstance(value, Mapping):
-                try:
-                    selected_bytes += SubproblemCapsule.from_mapping(value).serialized_bytes
-                except ValueError:
-                    continue
-        return {"capsule_count": len(capsules), "selected_input_bytes": selected_bytes}
+    def _child_batch_input(arguments: Mapping[str, Any]) -> dict[str, int]:
+        tasks = arguments.get("tasks")
+        return {"task_count": len(tasks) if isinstance(tasks, list) else 0}
 
     def _recursive_batch_output(self, result: Any) -> JsonValue:
         if isinstance(result, list):
@@ -1320,9 +1233,17 @@ class RecursiveRLMExecutor:
         started_at: float,
         cleanup_status: str | None = None,
         failure_category: str | None = None,
+        task_label: str = "Child investigation",
+        child_answer: str | None = None,
+        child_evidence: tuple[str, ...] = (),
+        child_gaps: tuple[str, ...] = (),
+        child_result_file_count: int = 0,
+        child_code_excerpt: str | None = None,
+        child_output_excerpt: str | None = None,
     ) -> None:
         if self._observer is None:
             return
+        duration_ms = 0
         if status == "child_started":
             message = (
                 f"call_index={_bounded_progress_integer(call_index)} "
@@ -1340,10 +1261,45 @@ class RecursiveRLMExecutor:
             )
             if failure_category is not None:
                 message += f" failure_category={failure_category}"
-        try:
-            self._observer(Status("recursive", status, message))
-        except Exception:
-            return
+        if status == "child_started":
+            state = "running"
+        elif status == "child_not_started":
+            state = "not_started"
+        elif failure_category == "timeout":
+            state = "timed_out"
+        elif status == "child_failed":
+            state = "failed"
+        else:
+            state = "completed"
+        if status == "child_not_started":
+            cleanup_state = "not_required"
+        elif cleanup_status == "completed":
+            cleanup_state = "complete"
+        elif cleanup_status == "failed":
+            cleanup_state = "failed"
+        elif cleanup_status in {"acquired", "pending"} or status == "child_started":
+            cleanup_state = "pending"
+        else:
+            cleanup_state = "not_required"
+        child = ChildProgress(
+            child_id=f"child-{_bounded_progress_integer(call_index)}",
+            task_label=task_label,
+            state=state,
+            elapsed_ms=duration_ms,
+            outcome=_child_progress_outcome(child_answer, failure_category) if status != "child_started" else None,
+            evidence=tuple(sanitize_public_text(item, max_len=200) for item in child_evidence[:8]),
+            gaps=tuple(sanitize_public_text(item, max_len=200) for item in child_gaps[:8]),
+            cleanup_state=cleanup_state,
+            parent_run_id=self._parent_run_id,
+            result_file_count=child_result_file_count,
+            code_excerpt=child_code_excerpt,
+            output_excerpt=child_output_excerpt,
+        )
+        for detail in (Status("recursive", status, message), child):
+            try:
+                self._observer(detail)
+            except Exception:
+                continue
 
     def _begin_call(self, prompt: str) -> RecursiveCallReservation:
         return self._make_reservation(prompt, self._reserve_call_indexes((prompt,))[0])
@@ -1361,7 +1317,6 @@ class RecursiveRLMExecutor:
             turn_budget = self._models.budget
             if turn_budget is not None:
                 turn_budget.reserve(BudgetDimension.TOOL_CALLS, len(prompts))
-                turn_budget.reserve(BudgetDimension.RECURSIVE_CHILDREN, len(prompts))
             start = self._state.reserved_call_count + 1
             self._state.reserved_call_count += len(prompts)
             self._state.delegated_prompt_chars += sum(len(prompt) for prompt in prompts)
@@ -1395,42 +1350,64 @@ class RecursiveRLMExecutor:
                 "RLM.recursive_call",
                 inputs=inputs,
             )
-        return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span)
+        try:
+            payload = json.loads(reservation.prompt)
+            raw_label = payload.get("task") if isinstance(payload, dict) else None
+        except (TypeError, ValueError):
+            raw_label = None
+        task_label = (
+            sanitize_public_text(" ".join(raw_label.split()), max_len=120)
+            if isinstance(raw_label, str) and raw_label.strip()
+            else "Child investigation"
+        )
+        return _RecursiveCall(reservation.call_index, reservation.child_depth, started_at, span, task_label)
 
     def _acquire_child_lease(self, call_index: int, *, profile: str) -> ChildRuntimeLease:
         if self._child_runtime_factory is None:
             raise RuntimeError("recursive child runtime is unavailable")
         self._ensure_authorized()
         factory = self._child_runtime_factory
-        try:
-            signature = inspect.signature(factory)
-        except (TypeError, ValueError):
-            return factory(call_index)
-        parameters = signature.parameters.values()
-        accepts_profile = "profile" in signature.parameters or any(
-            parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters
-        )
-        return factory(call_index, profile=profile) if accepts_profile else factory(call_index)
+        return factory(call_index, profile=profile)
 
     def _run_native_child(
         self,
-        prompt: str,
+        request: ChildRequest,
         call: _RecursiveCall,
         lease: ChildRuntimeLease,
+        skills: tuple[SkillDefinition, ...],
+        staged_files: Mapping[str, bytes],
+        source_manifest: list[dict[str, str]],
+        source_manifest_sha256: str,
         batch_cancelled: Event | None = None,
-    ) -> tuple[str, dict[str, object]]:
+    ) -> tuple[ChildOutcome, dict[str, object], str | None, str | None]:
         self._ensure_call_authorized(batch_cancelled)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
         child_models = self._models.fork_for_child(deadline=self._deadline)
-        bind_budget = getattr(lease.interpreter, "bind_turn_budget", None)
-        if callable(bind_budget):
-            bind_budget(child_models.budget)
-        bind_request = getattr(lease.interpreter, "bind_turn_request", None)
-        if callable(bind_request):
-            bind_request(None)
-        selected_access = _selected_access.get()
-        child_tools = [selected_access.tool()] if selected_access is not None else []
+
+        def invocation_factory() -> CodeInterpreter:
+            new_invocation = getattr(lease.interpreter, "new_invocation", None)
+            if not callable(new_invocation):
+                raise RLMConfigError("recursive child requires an invocation-scoped interpreter factory")
+            interpreter = new_invocation(turn_budget=child_models.budget, turn_request=None)
+            bind_output_contract(interpreter, RecursiveSubtaskSignature)
+            if self._parent_run_id is not None:
+                bind_scratch = getattr(interpreter, "bind_run_scratch", None)
+                if not callable(bind_scratch):
+                    raise RLMConfigError("recursive child cannot bind its private scratch")
+                bind_scratch(self._parent_run_id, call_index=call.call_index)
+            return interpreter
+
+        child_prompt_payload = json.loads(request.render())
+        child_prompt_payload["source_manifest"] = source_manifest
+        child_prompt = json.dumps(
+            child_prompt_payload,
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        if len(child_prompt.encode("utf-8")) > self._options.max_prompt_chars + _MAX_CHILD_MANIFEST_BYTES:
+            raise ValueError("child task and source manifest exceed their independent metadata bounds")
         child = build_native_rlm(
             signature=RecursiveSubtaskSignature,
             options=RLMOptions(
@@ -1438,12 +1415,13 @@ class RecursiveRLMExecutor:
                 max_llm_calls=self._options.child_max_llm_calls,
                 max_output_chars=self._options.child_max_output_chars,
             ),
-            tools=child_tools,
+            tools=[],
             sub_lm=child_models.sub_lm,
+            skill_instructions=tuple(skill.instructions for skill in skills),
+            interpreter_factory=invocation_factory,
             verbose=False,
         )
         self._ensure_call_authorized(batch_cancelled)
-        bind_output_contract(lease.interpreter, getattr(child, "signature", None))
         with dspy.context(
             lm=child_models.root_lm,
             adapter=FleetJSONAdapter(
@@ -1462,21 +1440,39 @@ class RecursiveRLMExecutor:
             ),
             track_usage=True,
         ):
-            child_acall = getattr(child, "acall", None)
-            if is_native_rlm(child):
-                prediction = child(lease.interpreter, prompt=prompt)
-            elif callable(child_acall):
-                prediction = _invoke_async_child(
-                    child_acall,
-                    lease.interpreter,
-                    prompt,
-                    native=is_native_rlm(child),
-                    deadline=self._deadline,
-                    retain_pending=lambda pending: self._retain_pending_batch_futures({pending}),
-                    scheduler=self._scheduler,
+            if not is_native_rlm(child):
+                raise RLMConfigError("recursive child program is not a native DSPy RLM")
+            skill_versions = [f"{skill.card.id}:{skill.card.version}" for skill in skills]
+            invocation_span = start_turn_span(
+                "RLM.child.invoke",
+                span_type="CHAIN",
+                inputs={
+                    "call_index": call.call_index,
+                    "recursive_depth": call.child_depth,
+                    "source_file_count": len(staged_files),
+                    "source_bytes": sum(map(len, staged_files.values())),
+                    "source_manifest_sha256": source_manifest_sha256,
+                    "skill_versions": skill_versions,
+                },
+            )
+            invocation_started_at = time.monotonic()
+            try:
+                with rlm_callback_parent(invocation_span):
+                    prediction = child(prompt=child_prompt)
+            except BaseException as exc:
+                invocation_span.finish(
+                    phase_status="failed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(invocation_started_at),
+                        "failure_category": _recursive_failure_category(exc),
+                    },
                 )
+                raise
             else:
-                prediction = child(lease.interpreter, prompt=prompt)
+                invocation_span.finish(
+                    phase_status="completed",
+                    outputs={"duration_ms": _elapsed_ms(invocation_started_at)},
+                )
         result = prediction_result(
             prediction,
             RecursiveSubtaskSignature,
@@ -1485,11 +1481,119 @@ class RecursiveRLMExecutor:
             max_output_chars=self._options.child_max_output_chars,
         )
         self._ensure_call_authorized(batch_cancelled)
-        trajectory = getattr(prediction, "trajectory", ())
-        child_iterations = len(trajectory) if isinstance(trajectory, list) else 0
+        trajectory = normalize_prediction_trajectory(prediction)
+        child_iterations = len(trajectory)
+        latest_step = trajectory[-1] if trajectory else None
+        code_excerpt = sanitize_public_text(latest_step.code, max_len=800) if latest_step and latest_step.code else None
+        output_excerpt = None
+        if latest_step and latest_step.output:
+            if latest_step.output.startswith("FINAL:"):
+                output_excerpt = "FINAL submitted"
+            else:
+                output_excerpt = sanitize_public_text(latest_step.output, max_len=800)
         mode = rlm_termination_mode(prediction)
         completion_outputs = self._record_completion(call, mode=mode, child_iterations=child_iterations)
-        return result.display_text, completion_outputs
+        answer = result.outputs.get("answer")
+        evidence = result.outputs.get("evidence", [])
+        gaps = result.outputs.get("gaps", [])
+        result_paths = result.outputs.get("result_files", [])
+        if (
+            not isinstance(answer, str)
+            or not isinstance(evidence, (list, tuple))
+            or not isinstance(gaps, (list, tuple))
+        ):
+            raise RLMConfigError("child result contract is invalid")
+        if not isinstance(result_paths, (list, tuple)) or len(result_paths) > 16:
+            raise RLMConfigError("child result files are invalid")
+        if any(not isinstance(item, str) or len(item) > 512 for item in (*evidence, *gaps)):
+            raise RLMConfigError("child evidence contract is invalid")
+        evidence_items = tuple(item for item in evidence if isinstance(item, str))
+        gap_items = tuple(item for item in gaps if isinstance(item, str))
+        paths = tuple(item for item in result_paths if isinstance(item, str))
+        if len(paths) != len(result_paths):
+            raise RLMConfigError("child result files must be text paths")
+        if len(paths) != len(set(paths)):
+            raise RLMConfigError("child result files must be unique")
+        for path in paths:
+            _validate_child_path(path)
+        files: Mapping[str, bytes] = {}
+        harvest_span = start_turn_span(
+            "RLM.child.result_harvest",
+            inputs={"call_index": call.call_index, "declared_file_count": len(paths)},
+        )
+        harvest_started_at = time.monotonic()
+        try:
+            if paths:
+                files = lease.read_result_files(paths)
+                if set(files) != set(paths) or any(not isinstance(data, bytes) for data in files.values()):
+                    raise RLMConfigError("child runtime returned invalid result files")
+            harvest_span.finish(
+                phase_status="completed",
+                outputs={
+                    "duration_ms": _elapsed_ms(harvest_started_at),
+                    "file_count": len(files),
+                    "result_file_bytes": sum(map(len, files.values())),
+                },
+            )
+        except BaseException as exc:
+            harvest_span.finish(
+                phase_status="failed",
+                outputs={
+                    "duration_ms": _elapsed_ms(harvest_started_at),
+                    "failure_category": _recursive_failure_category(exc),
+                },
+            )
+            raise
+        total_result_bytes = len(result.display_text.encode("utf-8")) + sum(map(len, files.values()))
+        if total_result_bytes > _MAX_CHILD_RESULT_BYTES:
+            raise RLMConfigError("child result exceeds configured bound")
+        references: list[str] = []
+        if files:
+            if self._result_writer is None:
+                raise RLMConfigError("parent Run result persistence is unavailable")
+            persist_span = start_turn_span(
+                "RLM.child.result_persist",
+                inputs={"call_index": call.call_index, "file_count": len(paths)},
+            )
+            persist_started_at = time.monotonic()
+            try:
+                for path in paths:
+                    self._ensure_call_authorized(batch_cancelled)
+                    references.append(self._result_writer(call.call_index, path, files[path]))
+                persist_span.finish(
+                    phase_status="completed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(persist_started_at),
+                        "file_count": len(references),
+                        "result_file_bytes": sum(map(len, files.values())),
+                    },
+                )
+            except BaseException as exc:
+                persist_span.finish(
+                    phase_status="failed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(persist_started_at),
+                        "failure_category": _recursive_failure_category(exc),
+                    },
+                )
+                raise
+        return (
+            ChildOutcome(
+                status="completed",
+                child_id=getattr(lease, "sandbox_id", None),
+                termination=mode,
+                answer=answer,
+                evidence=evidence_items,
+                gaps=gap_items,
+                result_files=tuple(references),
+                source_manifest_sha256=source_manifest_sha256,
+                usage=_child_usage(_child_metrics.get() or self._metrics),
+                result_bytes=total_result_bytes,
+            ),
+            completion_outputs,
+            code_excerpt,
+            output_excerpt,
+        )
 
     def _record_completion(
         self,
@@ -1538,18 +1642,41 @@ class RecursiveRLMExecutor:
         primary_failed: bool,
         completion_outputs: dict[str, object] | None,
         failure_category: str | None,
+        child_answer: str | None,
+        child_evidence: tuple[str, ...],
+        child_gaps: tuple[str, ...],
+        child_result_file_count: int,
+        child_code_excerpt: str | None,
+        child_output_excerpt: str | None,
     ) -> None:
         cleanup_error: BaseException | None = None
         if lease is not None:
+            cleanup_span = start_turn_span(
+                "RLM.child.cleanup",
+                inputs={"call_index": call.call_index, "recursive_depth": call.child_depth},
+            )
+            cleanup_started_at = time.monotonic()
             try:
                 lease.close()
                 cleanup_status = "completed"
             except BaseException as exc:
                 cleanup_error = _as_cleanup_error(exc)
                 cleanup_status = "failed"
+                cleanup_span.finish(
+                    phase_status="failed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(cleanup_started_at),
+                        "failure_category": "cleanup_failed",
+                    },
+                )
                 with self._state.lock:
                     if self._state.fatal_cleanup_error is None:
                         self._state.fatal_cleanup_error = cleanup_error
+            else:
+                cleanup_span.finish(
+                    phase_status="completed",
+                    outputs={"duration_ms": _elapsed_ms(cleanup_started_at), "status": "confirmed"},
+                )
         if cleanup_error is not None and not primary_failed:
             failed = True
             failure_category = "cleanup_failed"
@@ -1559,74 +1686,185 @@ class RecursiveRLMExecutor:
             )
         elif not failed and completion_outputs is not None:
             call.span.finish(phase_status="completed", outputs=completion_outputs)
+        if completion_outputs is not None and completion_outputs.get("status") == "not_started":
+            progress_status = "child_not_started"
+        elif failed:
+            progress_status = "child_failed"
+        else:
+            progress_status = "child_completed"
         self._emit_progress(
-            "child_failed" if failed else "child_completed",
+            progress_status,
             call_index=call.call_index,
             recursive_depth=call.child_depth,
             started_at=call.started_at,
             cleanup_status=cleanup_status,
-            failure_category=failure_category if failed else None,
+            failure_category=(failure_category if failed or progress_status == "child_not_started" else None),
+            task_label=call.task_label,
+            child_answer=child_answer,
+            child_evidence=child_evidence if not failed and cleanup_error is None else (),
+            child_gaps=child_gaps if not failed and cleanup_error is None else (),
+            child_result_file_count=(child_result_file_count if not failed and cleanup_error is None else 0),
+            child_code_excerpt=(child_code_excerpt if not failed and cleanup_error is None else None),
+            child_output_excerpt=(child_output_excerpt if not failed and cleanup_error is None else None),
         )
         if cleanup_error is not None and not primary_failed:
             raise cleanup_error
-
-    def _call_with_profile(self, prompt: str, *, child_profile: str) -> str:
-        prompt = _validate_recursive_prompt(prompt, max_chars=self._options.max_prompt_chars)
-        if time.monotonic() >= self._deadline:
-            raise TimeoutError("recursive call deadline exceeded")
-        self._ensure_authorized()
-        self._ensure_no_pending_batch_workers()
-        reservation = self._begin_call(prompt)
-        future = self._scheduler.submit_blocking(
-            lambda: self._run_reserved_call(reservation, child_profile=child_profile)
-        )
-        try:
-            return future.result(timeout=max(0.0, self._deadline - time.monotonic()))
-        except TimeoutError:
-            if future.done():
-                raise
-            self._scheduler.cancel(future)
-            try:
-                future.result(timeout=_CHILD_FENCE_SETTLE_GRACE_S + 0.1)
-            except BaseException:
-                if not future.done():
-                    self._retain_pending_batch_futures({future})
-            raise TimeoutError("recursive child deadline exceeded") from None
 
     def _run_reserved_call(
         self,
         reservation: RecursiveCallReservation,
         batch_cancelled: Event | None = None,
         *,
-        child_profile: str = "workspace-child",
-    ) -> str:
-        prompt = reservation.prompt
+        request: ChildRequest,
+        staged_files: Mapping[str, bytes],
+        source_manifest: list[dict[str, str]],
+        source_manifest_sha256: str,
+    ) -> ChildOutcome:
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
         call = self._start_call(reservation)
-        self._emit_progress(
-            "child_started",
-            call_index=call.call_index,
-            recursive_depth=call.child_depth,
-            started_at=call.started_at,
-        )
         lease: ChildRuntimeLease | None = None
         failed = False
         completion_outputs: dict[str, object] | None = None
         cleanup_status = "not_required"
         failure_category: str | None = None
+        child_answer: str | None = None
+        child_evidence: tuple[str, ...] = ()
+        child_gaps: tuple[str, ...] = ()
+        child_result_file_count = 0
+        child_code_excerpt: str | None = None
+        child_output_excerpt: str | None = None
         primary_failed = False
         child_started = False
+        child_budget_reserved = False
         try:
             self._ensure_call_authorized(batch_cancelled)
-            cleanup_status = "not_acquired"
-            lease = self._acquire_child_lease(call.call_index, profile=child_profile)
+            skills = self._loaded_skills()
+            if len(skills) > 4 or any(not isinstance(skill, SkillDefinition) for skill in skills):
+                raise RLMConfigError("loaded child Skill snapshot is invalid")
+            child_files = dict(staged_files)
+            for skill in skills:
+                for resource in skill.resources.values():
+                    path = f"skills/{skill.card.name}/{resource.path}"
+                    _validate_child_path(path)
+                    if path in child_files:
+                        raise ChildRuntimeAuthorizationError("child Skill resource conflicts with selected input")
+                    child_files[path] = resource.content.encode("utf-8")
+            if sum(len(content) for content in child_files.values()) > _CHILD_STAGE_MAX_BYTES:
+                raise RLMConfigError("selected child inputs exceed the staging limit")
+            source_manifest, source_manifest_sha256 = _child_source_manifest(child_files)
+            call_span_outputs = getattr(call.span, "set_outputs", None)
+            if callable(call_span_outputs):
+                call_span_outputs(
+                    {
+                        "source_file_count": len(child_files),
+                        "source_bytes": sum(map(len, child_files.values())),
+                        "source_manifest_sha256": source_manifest_sha256,
+                        "skill_versions": [f"{skill.card.id}:{skill.card.version}" for skill in skills],
+                    }
+                )
+            if self._models.budget is not None:
+                self._models.budget.reserve(BudgetDimension.RECURSIVE_CHILDREN)
+                child_budget_reserved = True
+            cleanup_status = "pending"
+            acquire_span = start_turn_span(
+                "RLM.child.acquire",
+                inputs={
+                    "call_index": call.call_index,
+                    "recursive_depth": call.child_depth,
+                    "profile": "semantic-child",
+                },
+            )
+            acquire_started_at = time.monotonic()
+            try:
+                lease = self._acquire_child_lease(call.call_index, profile="semantic-child")
+            except BaseException as exc:
+                capacity_refusal = isinstance(exc, ChildRuntimeNotStartedError)
+                acquire_span.finish(
+                    phase_status="completed" if capacity_refusal else "failed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(acquire_started_at),
+                        "status": "not_started" if capacity_refusal else "failed",
+                        "failure_category": _recursive_failure_category(exc),
+                    },
+                )
+                raise
+            else:
+                acquire_span.finish(
+                    phase_status="completed",
+                    outputs={"duration_ms": _elapsed_ms(acquire_started_at), "status": "acquired"},
+                )
             cleanup_status = "acquired"
             self._metrics.child_started()
             child_started = True
+            self._emit_progress(
+                "child_started",
+                call_index=call.call_index,
+                recursive_depth=call.child_depth,
+                started_at=call.started_at,
+                task_label=call.task_label,
+            )
+            stage_span = start_turn_span(
+                "RLM.child.stage_inputs",
+                inputs={
+                    "call_index": call.call_index,
+                    "file_count": len(child_files),
+                    "input_bytes": sum(map(len, child_files.values())),
+                },
+            )
+            stage_started_at = time.monotonic()
+            staged_bytes = sum(map(len, child_files.values()))
+            try:
+                if child_files:
+                    lease.stage_files(child_files)
+            except BaseException as exc:
+                stage_span.finish(
+                    phase_status="failed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(stage_started_at),
+                        "staged_bytes": staged_bytes,
+                        "failure_category": _recursive_failure_category(exc),
+                    },
+                )
+                raise
+            else:
+                stage_span.finish(
+                    phase_status="completed",
+                    outputs={
+                        "duration_ms": _elapsed_ms(stage_started_at),
+                        "staged_bytes": staged_bytes,
+                        "status": "staged" if child_files else "empty",
+                    },
+                )
+            self._metrics.record_delegated_input_bytes(sum(len(data) for data in child_files.values()))
             self._ensure_call_authorized(batch_cancelled)
-            answer, completion_outputs = self._run_native_child(prompt, call, lease, batch_cancelled)
-            return answer
+            outcome, completion_outputs, child_code_excerpt, child_output_excerpt = self._run_native_child(
+                request,
+                call,
+                lease,
+                skills,
+                child_files,
+                source_manifest,
+                source_manifest_sha256,
+                batch_cancelled,
+            )
+            child_answer = outcome.answer
+            child_evidence = outcome.evidence
+            child_gaps = outcome.gaps
+            child_result_file_count = len(outcome.result_files)
+            return outcome
+        except ChildRuntimeNotStartedError:
+            cleanup_status = "not_acquired"
+            if child_budget_reserved and self._models.budget is not None:
+                self._models.budget.release_unstarted_recursive_child()
+            completion_outputs = {"status": "not_started", "error_category": "capacity"}
+            failure_category = "capacity"
+            return ChildOutcome(
+                status="not_started",
+                source_manifest_sha256=source_manifest_sha256,
+                error_category="capacity",
+                usage=_child_usage(_child_metrics.get() or self._metrics, child_calls=0),
+            )
         except BaseException as exc:
             failed = True
             primary_failed = True
@@ -1642,6 +1880,12 @@ class RecursiveRLMExecutor:
                     primary_failed=primary_failed,
                     completion_outputs=completion_outputs,
                     failure_category=failure_category,
+                    child_answer=child_answer,
+                    child_evidence=child_evidence,
+                    child_gaps=child_gaps,
+                    child_result_file_count=child_result_file_count,
+                    child_code_excerpt=child_code_excerpt,
+                    child_output_excerpt=child_output_excerpt,
                 )
             finally:
                 if child_started:
@@ -1650,13 +1894,15 @@ class RecursiveRLMExecutor:
 
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
-    "CapsuleStatus",
     "ChildAsyncScheduler",
+    "ChildInputFailureError",
     "ChildOutcome",
+    "ChildRequest",
     "ChildRuntimeAuthorizationError",
     "ChildRuntimeCleanupError",
     "ChildRuntimeFactory",
     "ChildRuntimeLease",
+    "ChildRuntimeNotStartedError",
     "DelegationMetrics",
     "DelegationMetricsSnapshot",
     "RecursiveBatchError",
@@ -1665,7 +1911,6 @@ __all__ = [
     "RecursiveRLMExecutor",
     "RecursiveRLMOptions",
     "RecursiveSubtaskSignature",
-    "SubproblemCapsule",
     "TokenUsageStatus",
     "normalize_lm_token_usage",
     "run_reserved_batch",

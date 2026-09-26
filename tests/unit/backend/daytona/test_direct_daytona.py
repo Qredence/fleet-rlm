@@ -106,12 +106,12 @@ async def test_fs_list_files_fallback_on_type_error():
     assert result == ["file_fallback.txt"]
 
 
-def test_build_async_daytona_client():
-    """Verify build_async_daytona_client constructs an AsyncDaytona instance with settings."""
+def test_build_daytona_client():
+    """Verify build_daytona_client constructs an AsyncDaytona instance with settings."""
     from types import SimpleNamespace
     from unittest.mock import patch
 
-    from fleet_rlm.daytona.runtime import build_async_daytona_client
+    from fleet_rlm.daytona.runtime import build_daytona_client
 
     mock_settings = SimpleNamespace(
         daytona_api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),
@@ -119,7 +119,7 @@ def test_build_async_daytona_client():
     )
 
     with patch("daytona.AsyncDaytona") as mock_daytona_cls, patch("daytona.DaytonaConfig") as mock_config_cls:
-        client = build_async_daytona_client(mock_settings)
+        client = build_daytona_client(mock_settings)
         mock_config_cls.assert_called_once_with(
             api_url="https://app.daytona.io/api",
             api_key="test-key",
@@ -153,8 +153,9 @@ def test_direct_interpreter_code_execution_stdout():
 
 def test_direct_interpreter_code_execution_submit():
     """Verify DaytonaCodeInterpreter extracts SUBMIT output as FinalOutput."""
+    from dspy import FinalOutput
+
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, final_output_frame, sandbox_backend
-    from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 
     frame = final_output_frame({"answer": "42", "reasoning": "math"})
     mock_code_interpreter = MagicMock()

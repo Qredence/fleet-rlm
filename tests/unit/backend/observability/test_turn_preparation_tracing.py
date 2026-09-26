@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.turn_preparation import TestingRunPreparer
+
 
 @pytest.fixture
 def fleet_trace_active() -> Iterator[None]:
@@ -75,9 +77,9 @@ def _make_turn() -> Any:
 
 def _make_preparer(*, environments: Any = None) -> Any:
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.chat.preparation import DefaultRunPreparer, RunEnvironment
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
-    from fleet_rlm.rlm.runtime import RLMExecutionSpec
+    from fleet_rlm.turn_preparation import RunEnvironment
 
     class Sink:
         async def remove_private(self, location: str) -> None:
@@ -121,11 +123,11 @@ def _make_preparer(*, environments: Any = None) -> Any:
             sink = Sink()
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
-    return DefaultRunPreparer(
+    return TestingRunPreparer(
         models=RLMModelBundle(object(), object()),
         options=RLMOptions(),
         attachments=Attachments(),
-        environments=environments if environments is not None else Environments(),
+        acquire_environment=(environments if environments is not None else Environments()).acquire,
         capabilities=CapabilityFactory(),
     )
 
@@ -159,7 +161,7 @@ async def test_acquire_environment_failure_marks_phase_failed(
     monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
 ) -> None:
     del fleet_trace_active
-    from fleet_rlm.chat.preparation import RunPreparationUnavailableError
+    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
 
     calls = _install_fake_mlflow(monkeypatch)
 

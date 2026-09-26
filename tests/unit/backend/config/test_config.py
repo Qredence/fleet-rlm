@@ -43,7 +43,14 @@ def _clear_process_snapshot_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
     contracts = {contract.name: contract for contract in load_profile_environment_contracts()}
 
-    assert active_profile_contract().name == "daytona-recursive"
+    assert active_profile_contract().name == "daytona-native"
+    assert contracts["daytona-native"].provider == "OpenAI Chat Completion"
+    assert contracts["daytona-native"].provider_environment_names == (
+        "FLEET_DAYTONA_API_KEY",
+        "FLEET_DAYTONA_ORG_ID",
+        "ALIBABA_API_KEY",
+        "FLEET_MAAS_BASE_URL",
+    )
     assert contracts["daytona-recursive"].provider == "OpenAI Chat Completion"
     assert contracts["daytona-recursive"].provider_environment_names == (
         "FLEET_DAYTONA_API_KEY",
@@ -72,6 +79,7 @@ def test_committed_policy_declares_default_maas_model_roles() -> None:
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
     assert set(document["profiles"]) == {
+        "daytona-native",
         "daytona-recursive",
         "daytona-managed",
         "phase4-campaign",
@@ -142,6 +150,7 @@ _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 @pytest.mark.parametrize(
     ("profile", "expected_model", "expected_role"),
     (
+        ("daytona-native", _MAAS_MODEL, _MAAS_ROLE),
         ("daytona-recursive", _MAAS_MODEL, _MAAS_ROLE),
         ("daytona-managed", _DATABRICKS_MODEL, _DATABRICKS_ROLE),
     ),
@@ -168,7 +177,7 @@ def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
     policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona-recursive"].get("mlflow", {}))
+    mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona-native"].get("mlflow", {}))
     assert mlflow["tracing_enabled"] is True
     assert mlflow["tracking_uri"] == "http://127.0.0.1:5001"
     assert mlflow["experiment_name"] == "fleet-rlm"
@@ -206,7 +215,7 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_maas_params(
     monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
     monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
 
-    settings = config.load_runtime_settings()
+    settings = config.load_runtime_settings(profile="daytona-recursive")
 
     assert settings.root_model == "deepseek-v4.1-flash"
     assert settings.sub_model == "deepseek-v4.1-flash"
@@ -226,6 +235,24 @@ def test_selected_recursive_profile_resolves_root_and_sub_with_maas_params(
     assert settings.sub_llm_timeout_seconds == 90
     assert settings.mlflow_tracing_enabled is True
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
+    assert settings.rlm_recursion_enabled is True
+
+
+def test_selected_default_native_profile_resolves_maas_without_recursive_children(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
+    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
+    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
+
+    settings = config.load_runtime_settings()
+
+    assert config.active_profile(settings) == "daytona-native"
+    assert settings.root_model == "deepseek-v4.1-flash"
+    assert settings.sub_model == "deepseek-v4.1-flash"
+    assert settings.rlm_recursion_enabled is False
 
 
 def test_explicit_phase4_profile_overrides_committed_default_without_ambient_selection(
@@ -311,14 +338,14 @@ def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.M
         config.load_runtime_settings()
 
 
-def test_committed_policy_enables_operator_selected_recursion() -> None:
+def test_committed_policy_defaults_to_native_and_keeps_recursion_opt_in() -> None:
     policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert document["defaults"]["rlm"]["recursion_enabled"] is True
-    # The committed default profile is the [defaults] policy itself: the table
-    # stays empty because the schema requires at least one profile.
-    assert document["profiles"]["daytona-recursive"] == {}
+    assert document["config"]["default_profile"] == "daytona-native"
+    assert document["defaults"]["rlm"]["recursion_enabled"] is False
+    assert document["profiles"]["daytona-native"] == {}
+    assert document["profiles"]["daytona-recursive"]["rlm"]["recursion_enabled"] is True
 
 
 def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -397,7 +424,6 @@ verbose = true
 [defaults.storage]
 data_root = ".fleet-test"
 max_upload_bytes = 10
-max_url_bytes = 30
 max_artifact_bytes = 20
 [defaults.daytona]
 volume_name = "fleet-volume"
@@ -437,7 +463,6 @@ def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
     assert settings.run_environment == "daytona"
     assert settings.live_enabled is True
     assert settings.rlm_max_iters == 3
-    assert settings.max_url_bytes == 30
     assert settings.root_lm.model == "openai/root"
     assert settings.sub_lm.temperature == 0.2
     assert settings.lm_roles.root.model == "openai/root"
@@ -758,10 +783,6 @@ def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
     assert Settings(live_enabled=False).live_enabled is False
 
 
-def test_url_source_limit_defaults_to_ten_mebibytes() -> None:
-    assert Settings().max_url_bytes == 10 * 1024 * 1024
-
-
 def test_mlflow_tracing_field_defaults_to_disabled() -> None:
     # The Settings field default is off; the committed [defaults.mlflow] policy
     # enables it. Test the field default here, policy default in test_config.py.
@@ -796,8 +817,8 @@ def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPat
     assert settings.mlflow_tracing_sql_warehouse_id is None
 
 
-@pytest.mark.parametrize("value", [0, -1, 9])
-def test_daytona_admission_must_be_between_one_and_eight(value: int) -> None:
+@pytest.mark.parametrize("value", [0, 1, -1, 9])
+def test_daytona_admission_must_be_between_two_and_eight(value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(max_active_daytona_leases=value)
 

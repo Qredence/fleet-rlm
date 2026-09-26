@@ -19,6 +19,7 @@ from fleet_rlm.rlm.result import RLMUsage
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
+    ChildProgressPart,
     CodePart,
     CommittedPart,
     OutputPart,
@@ -173,6 +174,34 @@ class StatusAssistantPart(AssistantPartModel):
         return _require_nonblank(value, "status semantics")
 
 
+class ChildProgressAssistantPart(AssistantPartModel):
+    type: Literal["child_progress"] = "child_progress"
+    child_id: str = Field(min_length=1, max_length=128)
+    task_label: str = Field(min_length=1, max_length=240)
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int = Field(ge=0)
+    outcome: str | None = Field(default=None, max_length=500)
+    evidence: tuple[str, ...] = Field(default=(), max_length=8)
+    gaps: tuple[str, ...] = Field(default=(), max_length=8)
+    result_file_count: int = Field(default=0, ge=0, le=16)
+    code_excerpt: str | None = Field(default=None, max_length=800)
+    output_excerpt: str | None = Field(default=None, max_length=800)
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
+    parent_run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("parent_run_id")
+    @classmethod
+    def _valid_parent_run_id(cls, value: str | None) -> str | None:
+        return None if value is None else _require_nonblank(value, "parent_run_id")
+
+    @field_validator("evidence", "gaps")
+    @classmethod
+    def _bounded_details(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(len(item) > 200 for item in value):
+            raise ValueError("child progress detail exceeds 200 characters")
+        return value
+
+
 class ArtifactAssistantPart(AssistantPartModel):
     type: Literal["artifact"] = "artifact"
     artifact_id: UUID
@@ -251,6 +280,7 @@ AssistantPart = Annotated[
     | AttachmentAssistantPart
     | WarningAssistantPart
     | StatusAssistantPart
+    | ChildProgressAssistantPart
     | ArtifactAssistantPart
     | UsageAssistantPart
     | StructuredResultAssistantPart
@@ -270,6 +300,7 @@ AssistantPartModelUnion = (
     AttachmentAssistantPart,
     WarningAssistantPart,
     StatusAssistantPart,
+    ChildProgressAssistantPart,
     ArtifactAssistantPart,
     UsageAssistantPart,
     StructuredResultAssistantPart,
@@ -324,6 +355,21 @@ def assistant_part_to_model(part: CommittedPart) -> AssistantPart:
         return WarningAssistantPart(message=part.message, code=part.code)
     if isinstance(part, StatusPart):
         return StatusAssistantPart(phase=part.phase, status=part.status, message=part.message)
+    if isinstance(part, ChildProgressPart):
+        return ChildProgressAssistantPart(
+            child_id=part.child_id,
+            task_label=part.task_label,
+            state=part.state,
+            elapsed_ms=part.elapsed_ms,
+            outcome=part.outcome,
+            evidence=part.evidence,
+            gaps=part.gaps,
+            result_file_count=part.result_file_count,
+            code_excerpt=part.code_excerpt,
+            output_excerpt=part.output_excerpt,
+            cleanup_state=part.cleanup_state,
+            parent_run_id=part.parent_run_id,
+        )
     if isinstance(part, ArtifactPart):
         return ArtifactAssistantPart(
             artifact_id=part.artifact_id,
@@ -388,6 +434,21 @@ def assistant_part_from_model(part: AssistantPart) -> CommittedPart:
         return WarningPart(message=part.message, code=part.code)
     if isinstance(part, StatusAssistantPart):
         return StatusPart(phase=part.phase, status=part.status, message=part.message)
+    if isinstance(part, ChildProgressAssistantPart):
+        return ChildProgressPart(
+            child_id=part.child_id,
+            task_label=part.task_label,
+            state=part.state,
+            elapsed_ms=part.elapsed_ms,
+            outcome=part.outcome,
+            evidence=part.evidence,
+            gaps=part.gaps,
+            result_file_count=part.result_file_count,
+            code_excerpt=part.code_excerpt,
+            output_excerpt=part.output_excerpt,
+            cleanup_state=part.cleanup_state,
+            parent_run_id=part.parent_run_id,
+        )
     if isinstance(part, ArtifactAssistantPart):
         return ArtifactPart(
             artifact_id=part.artifact_id,
@@ -427,6 +488,7 @@ __all__ = [
     "AssistantPartModel",
     "AssistantPartModelUnion",
     "AttachmentAssistantPart",
+    "ChildProgressAssistantPart",
     "CodeAssistantPart",
     "OutputAssistantPart",
     "ReasoningAssistantPart",

@@ -13,13 +13,13 @@ from dspy.utils.callback import BaseCallback
 
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.observability.dspy_callbacks import (
-    CallbackShadowRecorder,
-    compare_callback_records,
-)
 from fleet_rlm.rlm.events import (
     ToolEventView,
     observe_tool,
+)
+from tests.support.dspy_callbacks import (
+    CallbackShadowRecorder,
+    compare_callback_records,
 )
 
 
@@ -217,7 +217,10 @@ def test_shadow_lifecycle_parity_covers_cancellation_and_timeout(
     assert execute.duration_ms >= 0
 
 
-def test_shadow_tool_parity_covers_async_callable() -> None:
+@pytest.mark.asyncio
+async def test_shadow_tool_parity_covers_async_callable() -> None:
+    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
+
     async def helper(value: str) -> str:
         await asyncio.sleep(0)
         return f"async:{value}"
@@ -227,6 +230,7 @@ def test_shadow_tool_parity_covers_async_callable() -> None:
         dspy.Tool(helper, name="helper"),
         manual.append,
         ToolEventView.metadata_only(),
+        async_bridge=_SyncBridgeLoop(caller_loop=asyncio.get_running_loop()),
     )
     recorder = CallbackShadowRecorder()
     interpreter = DaytonaCodeInterpreter(
@@ -235,7 +239,7 @@ def test_shadow_tool_parity_covers_async_callable() -> None:
         callbacks=[recorder],
     )
 
-    result = interpreter.execute("result = helper(value='a')\n_out = result")
+    result = await asyncio.to_thread(interpreter.execute, "result = helper(value='a')\n_out = result")
     interpreter.shutdown()
 
     assert result == "async:a"

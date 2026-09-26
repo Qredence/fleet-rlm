@@ -2,19 +2,60 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 from uuid import UUID
 
 from fleet_rlm.artifacts.models import ArtifactRef
-from fleet_rlm.runtime.authority import RunAuthority
-from fleet_rlm.runtime.usage import RLMUsage
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_claim import ClaimFailure, ClaimFailureCode
+from fleet_rlm.sessions.usage import RLMUsage
 
 RunFailureCode: TypeAlias = ClaimFailureCode
+
+
+class RunAuthority:
+    """Fence host effects after a durable Run claim loses authority."""
+
+    __slots__ = ("_listeners", "_revoked")
+
+    def __init__(self) -> None:
+        self._revoked = False
+        self._listeners: list[Callable[[], None]] = []
+
+    @property
+    def revoked(self) -> bool:
+        return self._revoked
+
+    def is_live(self) -> bool:
+        return not self._revoked
+
+    def add_revoke_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
+        if self._revoked:
+            listener()
+            return lambda: None
+        self._listeners.append(listener)
+
+        def remove() -> None:
+            with contextlib.suppress(ValueError):
+                self._listeners.remove(listener)
+
+        return remove
+
+    def revoke(self) -> None:
+        if self._revoked:
+            return
+        self._revoked = True
+        listeners = tuple(self._listeners)
+        self._listeners.clear()
+        for listener in listeners:
+            try:
+                listener()
+            except BaseException:
+                continue
 
 
 class RunLifecycleError(RuntimeError):

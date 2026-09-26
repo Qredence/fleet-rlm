@@ -17,9 +17,9 @@ from fastapi.routing import APIRoute
 from fastapi.sse import EventSourceResponse
 from fastapi.testclient import TestClient
 
-from fleet_rlm.composition.testing import create_testing_app
 from fleet_rlm.rlm.events import EventRecorder, RLMReasoning, RunCompleted, RunStarted, RuntimeEvent
 from fleet_rlm.sessions.run_state import RunInProgressError
+from tests.support.testing_app import create_testing_app
 
 _END = object()
 
@@ -86,7 +86,7 @@ class _ControlledCoordinator:
         return self._opened
 
     def open_owned(self, command: object):
-        from fleet_rlm.chat.turn_runtime import OpenedTurnStream
+        from fleet_rlm.turns import OpenedTurnStream
 
         return OpenedTurnStream(
             None,

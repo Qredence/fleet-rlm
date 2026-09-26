@@ -55,6 +55,22 @@ def test_load_is_idempotent_and_emits_lifecycle_once() -> None:
     assert host.drain_public_events() == []
 
 
+def test_loaded_definition_snapshot_excludes_unloaded_skills_and_pins_versions() -> None:
+    catalog = build_bundled_skill_catalog()
+    host = SkillToolHost(catalog)
+    preselected = catalog.require(stable_skill_id("long-context"))
+    progressive = catalog.require(stable_skill_id("workspace-files"))
+
+    assert host.loaded_definitions() == ()
+    host.mark_preloaded(preselected)
+    assert host.loaded_definitions() == (preselected,)
+    assert host.load_skill(str(progressive.card.id), progressive.card.version)["ok"] is True
+    loaded = host.loaded_definitions()
+    assert {skill.card.id for skill in loaded} == {preselected.card.id, progressive.card.id}
+    assert {skill.card.version for skill in loaded} == {preselected.card.version, progressive.card.version}
+    assert all(skill is catalog.require(skill.card.id) for skill in loaded)
+
+
 def test_load_rejects_closed_identity_and_capacity_errors() -> None:
     catalog = build_bundled_skill_catalog()
     host = SkillToolHost(catalog)
@@ -216,13 +232,13 @@ def test_no_workspace_means_no_install_surface() -> None:
 async def test_prepare_host_capabilities_installs_preloaded_skill_resources() -> None:
     from uuid import uuid4 as _uuid4
 
-    from fleet_rlm.chat.preparation import prepare_host_capabilities
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         _RunClaimToken,
     )
     from fleet_rlm.skills.models import SkillSelectionRef
+    from fleet_rlm.turn_preparation import prepare_host_capabilities
     from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
     async def not_cancelled() -> bool:

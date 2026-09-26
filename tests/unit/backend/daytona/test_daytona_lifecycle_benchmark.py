@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 
 import scripts.benchmark_daytona_lifecycle as benchmark
-from fleet_rlm.daytona.provisioning import VolumeConfig
+from fleet_rlm.daytona.runtime import VolumeConfig
 from scripts.benchmark_daytona_lifecycle import (
     CREATE_TO_FIRST_EXECUTION_PHASES,
     benchmark_decision,

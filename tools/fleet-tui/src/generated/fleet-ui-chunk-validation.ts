@@ -14,6 +14,7 @@ export const chunkTypes = [
   "reasoning-delta",
   "reasoning-end",
   "data-status",
+  "data-child-progress",
   "data-skill",
   "data-rlm-code",
   "data-rlm-output",
@@ -39,6 +40,20 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
     status: isNullableString,
     detail: isNullableString,
     message: isNullableString,
+  },
+  "data-child-progress": {
+    child_id: isString,
+    task_label: isString,
+    state: (value) => value === "not_started" || value === "running" || value === "completed" || value === "failed" || value === "cancelled" || value === "timed_out",
+    elapsed_ms: isInteger,
+    outcome: isNullableString,
+    evidence: isStringArray,
+    gaps: isStringArray,
+    result_file_count: isInteger,
+    code_excerpt: isNullableString,
+    output_excerpt: isNullableString,
+    cleanup_state: (value) => value === "pending" || value === "complete" || value === "failed" || value === "not_required",
+    parent_run_id: isNullableString,
   },
   "data-skill": {
     skill_id: isString,
@@ -102,6 +117,7 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
 
 export const dataRequiredFields: Record<string, readonly string[]> = {
   "data-status": ["phase"],
+  "data-child-progress": ["child_id", "task_label", "state", "elapsed_ms", "cleanup_state"],
   "data-skill": ["skill_id", "name", "version"],
   "data-rlm-code": ["code"],
   "data-rlm-output": ["output"],

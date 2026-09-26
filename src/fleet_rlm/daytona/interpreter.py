@@ -19,12 +19,14 @@ import re
 import shlex
 import time
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
+from dspy import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.utils.callback import BaseCallback, with_callbacks
 
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
@@ -35,14 +37,6 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
-from fleet_rlm.rlm.compat_3_3_1 import (
-    PUBLIC_FINAL_OUTPUT_LABEL,
-    CodeExecutionError,
-    CodeInterpreterError,
-    is_final_output,
-    needs_binding_refresh,
-    wrap_final_output,
-)
 from fleet_rlm.rlm.events import (
     ObservationObserver,
     RLMCode,
@@ -65,10 +59,36 @@ from fleet_rlm.rlm.result import (
 
 logger = logging.getLogger(__name__)
 
+PUBLIC_FINAL_OUTPUT_LABEL = "FINAL submitted"
+
+
+def copy_output_fields(output_fields: list[dict[str, Any]] | None) -> list[dict[str, Any]] | None:
+    """Copy DSPy signature metadata before adding interpreter-local bindings."""
+    return deepcopy(output_fields) if output_fields is not None else None
+
+
+def needs_binding_refresh(*, desired_generation: int, installed_generation: int, broker_ready: bool) -> bool:
+    """Return whether invocation-local interpreter bindings are stale."""
+    return desired_generation != installed_generation or not broker_ready
+
+
+def wrap_final_output(value: Any) -> FinalOutput:
+    return FinalOutput(value)
+
+
+def is_final_output(value: Any) -> bool:
+    return isinstance(value, FinalOutput)
+
+
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
 DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 DEFAULT_BROKER_PORT = 8765
+DAYTONA_EXECUTION_INSTRUCTIONS = (
+    "Execution runs in isolated Python. The Python namespace persists across actions in one invocation. "
+    "Host Tools are callable Python functions. "
+    "Ordinary stdout is observable. Use the typed keyword `SUBMIT` for final completion."
+)
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
 _UNSET = object()
 _BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.ContextVar(
@@ -488,6 +508,49 @@ class _SandboxProcessBackend:
         self._async_bridge: Any | None = None
         self._tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None
         self._tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None
+        self._run_scratch_path: str | None = None
+
+    def bind_run_scratch(self, path: str) -> None:
+        """Bind one validated Run-local or child-local scratch directory."""
+        from pathlib import PurePosixPath
+        from uuid import UUID
+
+        candidate = PurePosixPath(path)
+        if candidate.parts[:3] != ("/", "tmp", "fleet"):
+            raise ValueError("Run scratch must be under /tmp/fleet")
+        if len(candidate.parts) == 4:
+            run_id = candidate.parts[3]
+        elif len(candidate.parts) == 6 and candidate.parts[3] == "child-data":
+            run_id = candidate.parts[4]
+            call_index = candidate.parts[5]
+            if not call_index.isdecimal() or int(call_index) <= 0:
+                raise ValueError("child scratch call index is invalid")
+        else:
+            raise ValueError("Run scratch path shape is invalid")
+        try:
+            parsed_run_id = UUID(run_id)
+        except ValueError as exc:
+            raise ValueError("Run scratch identity is invalid") from exc
+        if parsed_run_id.int == 0 or str(parsed_run_id) != run_id:
+            raise ValueError("Run scratch identity is invalid")
+        self._run_scratch_path = str(candidate)
+
+    def cleanup_run_scratch(self) -> None:
+        path = self._run_scratch_path
+        if path is None:
+            return
+        fs = getattr(self._sandbox, "fs", None)
+        delete = getattr(fs, "delete_file", None)
+        if not callable(delete):
+            raise DaytonaAdapterError(
+                message="Sandbox filesystem cannot remove Run scratch",
+                cause_type="InterpreterConfigurationError",
+            )
+        try:
+            delete(path, recursive=True)
+        except TypeError:
+            delete(path)
+        self._run_scratch_path = None
 
     @property
     def sandbox(self) -> Any:
@@ -558,6 +621,12 @@ class _SandboxProcessBackend:
             return self._run_direct(code, variables, on_stdout=on_stdout)
 
         context_lines = ["if 'context' not in globals(): context = []"]
+        if self._run_scratch_path is not None:
+            context_lines.append(
+                "import os as _fleet_scratch_os; "
+                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+            )
         if self._context_binding is not None:
             mount_root, manifest_sha = self._context_binding
             context_lines.append(f"""
@@ -655,6 +724,12 @@ def _fleet_load_context_manifest(raw_manifest):
                 ) from exc
             var_lines.append(f"{name} = _fleet_bindings_json.loads({json.dumps(payload)})")
         preamble = remote_submit_setup_code(self._output_fields)
+        if self._run_scratch_path is not None:
+            preamble += (
+                "\nimport os as _fleet_scratch_os\n"
+                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True)\n"
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+            )
         if var_lines:
             preamble += "\nimport json as _fleet_bindings_json\n" + "\n".join(var_lines)
         full_code = f"{preamble}\n\n{code}"
@@ -772,6 +847,7 @@ class DaytonaCodeInterpreter:
         self._reservation_state_lock = Lock()
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
+        self._async_bridge: Any | None = None
         self._fleet_output_contract: FleetOutputContract | None = None
         self._output_fields: list[dict[str, Any]] | None = None
         self.output_fields = output_fields
@@ -1000,6 +1076,7 @@ class DaytonaCodeInterpreter:
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         """Pass the composition-owned async bridge to a live tool broker."""
         self._ensure_binding_mutation_allowed()
+        self._async_bridge = async_bridge
         backend = self._backend
         bind_bridge = getattr(backend, "bind_async_bridge", None)
         if callable(bind_bridge):
@@ -1028,6 +1105,33 @@ class DaytonaCodeInterpreter:
                 expected_manifest_sha256=binding[1],
             )
         self._context_binding = binding
+
+    def bind_run_scratch(self, run_id: Any, *, call_index: int | None = None) -> str:
+        """Bind scratch beneath /tmp/fleet for one Run or recursive call."""
+        self._ensure_binding_mutation_allowed()
+        from uuid import UUID
+
+        parsed = UUID(str(run_id))
+        if parsed.int == 0:
+            raise ValueError("run_id must be a non-zero UUID")
+        suffix = str(parsed)
+        if call_index is not None:
+            if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
+                raise ValueError("call_index must be positive")
+            path = f"/tmp/fleet/child-data/{suffix}/{call_index}"
+        else:
+            path = f"/tmp/fleet/{suffix}"
+        bind = getattr(self._backend, "bind_run_scratch", None)
+        if callable(bind):
+            bind(path)
+        return path
+
+    def cleanup_run_scratch(self) -> None:
+        """Remove this Run's scratch after its owned execution has settled."""
+        self._ensure_binding_mutation_allowed()
+        cleanup = getattr(self._backend, "cleanup_run_scratch", None)
+        if callable(cleanup):
+            cleanup()
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
         if not self._public_observation:
@@ -1364,18 +1468,18 @@ class DaytonaCodeInterpreter:
         fn = self._bound_tools.get(str(tool_name))
         if fn is None:
             raise CodeInterpreterError(f"Unknown tool: {tool_name}")
-        if inspect.iscoroutinefunction(fn):
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-            if loop is not None and loop.is_running():
-                future = asyncio.run_coroutine_threadsafe(fn(*args, **dict(kwargs)), loop)
-                return future.result()
-            return asyncio.run(fn(*args, **dict(kwargs)))
-        if args:
-            return fn(*args, **dict(kwargs))
-        return fn(**dict(kwargs))
+        result = fn(*args, **dict(kwargs))
+        if not inspect.isawaitable(result):
+            return result
+        if self._async_bridge is None:
+            if inspect.iscoroutine(result):
+                result.close()
+            cancel = getattr(result, "cancel", None)
+            if callable(cancel):
+                cancel()
+            raise CodeInterpreterError("async Tool requires a persistent async bridge")
+        deadline = self._turn_budget.deadline if self._turn_budget is not None else None
+        return self._async_bridge.run(result, deadline=deadline)
 
     def _ensure_bindings(self) -> None:
         backend = self._backend

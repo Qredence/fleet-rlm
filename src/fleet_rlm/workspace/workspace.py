@@ -18,8 +18,8 @@ from uuid import UUID
 import dspy
 
 from fleet_rlm.json_types import JsonValue
-from fleet_rlm.runtime.errors import FilesystemToolError
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.errors import FilesystemToolError
 from fleet_rlm.workspace.models import (
     WorkspaceCapabilityMetadata,
     WorkspaceConflictError,
@@ -32,7 +32,6 @@ from fleet_rlm.workspace.storage import (
     MAX_STORAGE_LIST_LIMIT,
     MAX_STORAGE_READ_CHARS,
     AsyncStorageSession,
-    HostWorkspaceAccessGateway,
     StorageSession,
 )
 
@@ -42,13 +41,6 @@ MAX_PUBLIC_READ_CHARS = MAX_STORAGE_READ_CHARS
 SESSION_WORKSPACE_NAMESPACE = "session_workspace"
 MAX_WORKSPACE_TEXT_BATCH_ITEMS = 32
 MAX_WORKSPACE_TEXT_BATCH_CHARS = 32_000
-
-# The old public DTO names are aliases, not second value models.  They make
-# staged route migrations possible while keeping Workspace models canonical.
-WorkspaceFileConflictError = WorkspaceConflictError
-WorkspaceFileEntry = WorkspaceEntry
-WorkspaceFileList = WorkspaceListResult
-WorkspaceFileSession = AsyncStorageSession
 
 
 class WorkspaceAccessGateway(Protocol):
@@ -769,17 +761,12 @@ __all__ = [
     "PUBLIC_WORKSPACE_NAMESPACE",
     "SESSION_WORKSPACE_NAMESPACE",
     "FilesystemToolError",
-    "HostWorkspaceAccessGateway",
     "SessionWorkspace",
     "WorkspaceAccessGateway",
     "WorkspaceCapabilityMetadata",
     "WorkspaceConflictError",
     "WorkspaceEntry",
-    "WorkspaceFileConflictError",
-    "WorkspaceFileEntry",
-    "WorkspaceFileList",
     "WorkspaceFileService",
-    "WorkspaceFileSession",
     "WorkspaceListResult",
     "WorkspaceTextPage",
     "WorkspaceToolError",

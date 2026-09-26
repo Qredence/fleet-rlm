@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
+from uuid import uuid4
 
 import pytest
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.diagnostics import (
+    build_snapshot_image,
+    environment_manifest,
+    snapshot_dependency_import_names,
+    snapshot_dependency_sha256,
+    snapshot_execution_dependencies,
+)
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.provisioning import (
+from fleet_rlm.daytona.runtime import (
     BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
     PYTHON_VERSION,
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
-    build_snapshot_image,
-    environment_manifest,
+    LiveDaytonaPlatform,
     sandbox_spec_from_settings,
-    snapshot_dependency_import_names,
-    snapshot_dependency_sha256,
-    snapshot_execution_dependencies,
     verify_sandbox_spec,
 )
+from fleet_rlm.sessions.bindings import session_workspace_volume_subpath
 
 
 def test_spec_requires_an_immutable_versioned_name() -> None:
@@ -51,6 +57,33 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
     assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
     assert dockerfile.index("apt-get install") < dockerfile.index("USER daytona")
     assert "dspy" not in dockerfile
+
+
+@pytest.mark.asyncio
+async def test_live_platform_builds_session_workspace_sdk_mount_offline() -> None:
+    class _Client:
+        params: Any | None = None
+
+        async def create(self, params: Any) -> Any:
+            self.params = params
+            return params
+
+    workspace_id = uuid4()
+    session_id = uuid4()
+    client = _Client()
+    platform = LiveDaytonaPlatform(client, DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME))
+
+    params = await platform.create(
+        volume_id="offline-test-volume",
+        mount_path="/workspace",
+        volume_subpath=session_workspace_volume_subpath(workspace_id, session_id),
+    )
+
+    assert params is client.params
+    mount = params.volumes[0]
+    assert mount.volume_id == "offline-test-volume"
+    assert mount.mount_path == "/workspace"
+    assert mount.subpath == session_workspace_volume_subpath(workspace_id, session_id)
 
 
 def test_default_snapshot_envelope_stays_fixed() -> None:

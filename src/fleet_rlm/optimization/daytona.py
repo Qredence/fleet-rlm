@@ -17,10 +17,15 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 import dspy
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.provisioning import DaytonaSandboxSpec
+from fleet_rlm.daytona.interpreter import (
+    DAYTONA_EXECUTION_INSTRUCTIONS,
+    DaytonaCodeInterpreter,
+    sandbox_backend,
+)
+from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import (
     PredictionOutputError,
@@ -30,7 +35,6 @@ from fleet_rlm.rlm.result import (
     prediction_result,
     rlm_termination_mode,
 )
-from fleet_rlm.runtime.owned_effect import OwnedEffect
 
 if TYPE_CHECKING:
     from fleet_rlm.optimization.types import OptimizationRecord
@@ -400,6 +404,12 @@ class StrictDaytonaEvaluationLifecycle:
                 tools={"read_curated_input": reader},
                 execution_output_cap=self._options.max_output_chars,
             )
+
+            def interpreter_factory(interpreter: DaytonaCodeInterpreter = interpreter) -> DaytonaCodeInterpreter:
+                assert interpreter is not None
+                return interpreter
+
+            interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
             signature = _strict_evaluator_signature()
             tool = dspy.Tool(
                 reader,
@@ -411,6 +421,7 @@ class StrictDaytonaEvaluationLifecycle:
                 options=self._options,
                 tools=(tool,),
                 sub_lm=self._models.sub_lm,
+                interpreter_factory=interpreter_factory,
                 verbose=False,
             )
             kwargs = _strict_named_inputs(handle.public_value())

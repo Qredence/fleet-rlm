@@ -360,7 +360,7 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
     app.add_middleware(_FirstStreamDeltaMiddleware, probe=probe)
     with TestClient(app) as client:
         inventory = app.state.runtime_inventory
-        resources = inventory.run_environment_resources
+        resources = inventory.daytona_runtime_owner
         preparation = inventory.run_preparation
         assert resources is not None
         assert preparation is not None
@@ -454,8 +454,8 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
                     "turn_resources_cleanup": True,
                 },
                 "resources": {
-                    "sandbox_count": len(resources._sandbox_ids),
-                    "broker_session_count": len(resources._sandbox_ids),
+                    "sandbox_count": len(resources._tracked_sandbox_ids),
+                    "broker_session_count": len(resources._tracked_sandbox_ids),
                     "owned_volume_only": True,
                 },
                 "failure": None,

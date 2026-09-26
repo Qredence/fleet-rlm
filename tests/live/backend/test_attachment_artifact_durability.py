@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
@@ -29,13 +30,17 @@ from fleet_rlm.attachments import (
     LocalAttachmentCatalog,
     WorkspaceAttachmentPathPolicy,
 )
-from fleet_rlm.composition.daytona_run_preparation import DaytonaRuntimeResources
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
-from fleet_rlm.daytona.session_manager import LeaseRequest
-from fleet_rlm.runtime.bindings import InMemorySandboxBindingStore, SandboxBinding
-from fleet_rlm.runtime.cleanup import RunCleanupSupervisor
+from fleet_rlm.daytona.runtime import (
+    DEFAULT_IDLE_STOP_SECONDS,
+    DaytonaRuntime,
+    LeaseRequest,
+    sandbox_spec_from_settings,
+)
+from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._evidence import candidate_identity, write_receipt
 
@@ -119,15 +124,19 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
     return path
 
 
-def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> DaytonaRuntimeResources:
-    return DaytonaRuntimeResources(
+def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> SimpleNamespace:
+    bindings = InMemorySandboxBindingStore()
+    runtime = DaytonaRuntime.from_settings(
         settings,
-        bindings=InMemorySandboxBindingStore(),
+        bindings=bindings,
         cleanup=cleanup,
+        sandbox_spec=sandbox_spec_from_settings(settings),
         max_active_leases=settings.max_active_daytona_leases,
+        idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
         execution_output_cap=settings.rlm_max_execution_output_chars,
         execution_timeout_s=settings.rlm_execution_timeout_s,
     )
+    return SimpleNamespace(runtime=runtime, settings=settings, bindings=bindings, volume_config=runtime.volume_config)
 
 
 @pytest.mark.asyncio
@@ -144,7 +153,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
     volume_id: str | None = None
 
     try:
-        lease = await resources.session_manager.acquire(
+        lease = await resources.runtime.acquire(
             LeaseRequest(
                 session_id=session_id,
                 user_id=user_id,
@@ -152,12 +161,12 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             ),
             deadline=asyncio.get_running_loop().time() + 120,
         )
-        resources.track_sandbox(lease.sandbox_id)
+        resources.runtime.track_sandbox(lease.sandbox_id)
         sandbox_ids.append(lease.sandbox_id)
         volume_id = lease.volume_id
         assert lease.volume_subpath == f"workspaces/{workspace_id}"
 
-        sandbox = await resources.platform.get(lease.sandbox_id)
+        sandbox = await resources.runtime._platform.get(lease.sandbox_id)
         assert sandbox is not None
         assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
         volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, asyncio.get_running_loop()))
@@ -206,12 +215,12 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             title="b5",
         )
         durable = artifact_store.durable_volume_blob_path(art.id, user_id=user_id, workspace_id=workspace_id)
-        await resources.session_manager.release(lease)
+        await resources.runtime.release(lease)
 
         binding = await resources.bindings.get(session_id)
         assert binding is not None
         old_sid = binding.sandbox_id
-        new_binding = await resources.session_manager.replace(
+        new_binding = await resources.runtime.replace(
             SandboxBinding(
                 session_id=session_id,
                 sandbox_id=old_sid,
@@ -225,14 +234,14 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             user_id=user_id,
         )
         assert new_binding.sandbox_id != old_sid
-        resources.track_sandbox(new_binding.sandbox_id)
+        resources.runtime.track_sandbox(new_binding.sandbox_id)
         if new_binding.sandbox_id:
             sandbox_ids.append(new_binding.sandbox_id)
-        replacement_sandbox = await resources.platform.get(new_binding.sandbox_id)
+        replacement_sandbox = await resources.runtime._platform.get(new_binding.sandbox_id)
         assert replacement_sandbox is not None
         assert getattr(replacement_sandbox, "snapshot", None) == settings.daytona_snapshot
 
-        lease2 = await resources.session_manager.acquire(
+        lease2 = await resources.runtime.acquire(
             LeaseRequest(
                 session_id=session_id,
                 user_id=user_id,
@@ -240,11 +249,11 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             ),
             deadline=asyncio.get_running_loop().time() + 120,
         )
-        resources.track_sandbox(lease2.sandbox_id)
+        resources.runtime.track_sandbox(lease2.sandbox_id)
         if lease2.sandbox_id not in sandbox_ids:
             sandbox_ids.append(lease2.sandbox_id)
 
-        sandbox2 = await resources.platform.get(lease2.sandbox_id)
+        sandbox2 = await resources.runtime._platform.get(lease2.sandbox_id)
         assert sandbox2 is not None
         assert getattr(sandbox2, "snapshot", None) == settings.daytona_snapshot
         volume_fs2 = DaytonaSandboxVolumeFs(sync_sandbox(sandbox2, asyncio.get_running_loop()))
@@ -265,7 +274,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             workspace_id=workspace_id,
         ) == ARTIFACT_TEXT.encode("utf-8")
 
-        await resources.session_manager.release(lease2)
+        await resources.runtime.release(lease2)
 
         evidence = {
             "gate": "B5",

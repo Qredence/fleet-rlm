@@ -124,52 +124,21 @@ The standalone
 `pnpm --dir tools/fleet-tui start -- [options]` command connects pi-tui to an
 already-running API.
 
-### Phase 4 campaign transport
+### Phase 6 evaluation planning
 
-The FastAPI HTTP/SSE service is the canonical backend interface. The TUI is an
-operator client of that same service and is not the campaign scheduler. To run
-the explicitly bounded campaign profile locally:
-
-```bash
-uv run fleet-rlm serve-api --profile phase4-campaign --port 8000
-uv run fleet cli --profile phase4-campaign
-uv run python scripts/benchmarks/run_phase4_campaign.py --dry-run \
-  --output .scratch/benchmark-reports/phase4-api-dry-run.json
-```
-
-The campaign driver supervises one isolated API service per arm (A/B/D from
-the candidate checkout, C from the frozen baseline) and sends every trial
-through `POST /api/attachments`,
-`POST /api/sessions`, and `POST /api/sessions/{id}/turns` over the public SSE
-contract. Arm behavior differs by sealed profile only. The profiles are opt-in;
-ordinary launchers retain their existing defaults. The prior receipt at
-`.scratch/benchmark-reports/phase4-ablation-decf0da7.json` is immutable,
-incomplete, and superseded, so it is not value proof.
-
-Every live campaign mode requires the MLflow tracking server from the
-campaign profile to be reachable before it admits a trial (local server at
-`http://127.0.0.1:5001` by default). Each completed trial links its sealed
-receipt row to the trial's MLflow root trace identifier; completed rows
-without linkage keep the campaign `incomplete`.
-
-To exercise the same API/SSE path against the ordinary committed profile, run
-the fixed exploratory sample (the driver supervises all four arm services; no
-separately running backend is needed):
+Use the maintained Phase 6 runner for current evaluation workflows. These
+commands create provider-free planning artifacts; they do not execute models,
+Daytona, or MLflow and do not establish campaign results:
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/benchmarks/run_phase4_campaign.py \
-  --partial-live \
-  --output .scratch/benchmark-reports/phase4-api-partial-YYYYMMDD.json
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-plan \
+  --output .scratch/evals/phase6-plan.json
+uv run python scripts/benchmarks/run_rlm_latency.py phase6-dry-run \
+  --output .scratch/evals/phase6-dry-run.json
 ```
 
-This admits ten sealed rows with every arm on supervised FastAPI services.
-It is deliberately partial and non-certifying; it records unknown
-cost instead of treating it as zero, and it leaves the ordinary launcher
-profile unchanged.
-
-The 2026-09-10 sample is retained at
-`.scratch/benchmark-reports/phase4-api-partial-20260910.json`; it attempted ten
-rows and is intentionally marked `incomplete`, not certified value evidence.
+See the [evaluation and optimization guide](../how-to-guides/evaluation-optimization.md)
+for current operator workflows and their authorization requirements.
 
 ## Daytona doctor
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -18,6 +21,7 @@ from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import (
     annotate_trace_io,
     annotate_turn_attributes,
+    annotate_turn_metadata,
     current_turn_trace_id,
     start_turn_span,
     turn_phase_span,
@@ -123,26 +127,43 @@ def _install_fake_mlflow(
     return calls
 
 
-def _in_process_child_runtime(call_index: int):
+def _in_process_child_runtime(call_index: int, *, profile: str):
     """Create an in-process child runtime lease for recursive execution tests.
 
     Parameters:
         call_index (int): Index used to identify the child runtime and workspace.
+        profile (str): Requested bounded child runtime profile.
 
     Returns:
         ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeLease
+    from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
         interpreter,
         f"child-{call_index}",
-        "test-volume",
-        f"recursive/test-workspace/test-run/{call_index}",
+        f"test-volume-{profile}",
+        f"recursive/{profile}/test-run/{call_index}",
         interpreter.shutdown,
+        _stage_files=lambda _files: None,
     )
+
+
+def _install_successful_native_child(monkeypatch: pytest.MonkeyPatch, answer: str) -> None:
+    """Keep trace tests focused on Fleet spans instead of DSPy adapter semantics."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    class Child:
+        signature = recursive_calls.RecursiveSubtaskSignature
+
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            return dspy.Prediction(answer=answer, evidence=[], gaps=[], result_files=[], trajectory=[{}])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
 
 
 def test_turn_trace_disabled_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -281,6 +302,91 @@ def test_execution_trace_records_bounded_runtime_identity(monkeypatch: pytest.Mo
     )
 
 
+def test_execution_trace_records_only_bounded_attempt_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        attempt_metadata={
+            "fleet.root_model": "provider/root api_key=trace-secret",
+            "fleet.sub_model": "provider/sub",
+            "fleet.checkpoint_version": "7",
+            "fleet.skill_versions": "skill-id@2.2.0",
+            "fleet.source_revision": "A" * 40,
+            "fleet.unapproved": "secret",
+            "fleet.source_revision_path": "/private/repository/customer-data.csv",
+        },
+    ):
+        pass
+    update = next(kwargs for kwargs in calls.update_kwargs if "tags" in kwargs)
+    assert "trace-secret" not in update["metadata"]["fleet.root_model"]
+    assert update["metadata"]["fleet.sub_model"] == "provider/sub"
+    assert update["metadata"]["fleet.checkpoint_version"] == "7"
+    assert update["metadata"]["fleet.skill_versions"] == "skill-id@2.2.0"
+    assert update["metadata"]["fleet.source_revision"] == "a" * 40
+    assert "fleet.unapproved" not in update["metadata"]
+    assert "fleet.source_revision_path" not in update["metadata"]
+
+
+@pytest.mark.parametrize("revision", ["main", "customer/project@abc1234", "x" * 257, "123456"])
+def test_execution_trace_rejects_non_opaque_source_revision(
+    monkeypatch: pytest.MonkeyPatch,
+    revision: str,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    with turn_trace(
+        uuid4(),
+        uuid4(),
+        enabled=True,
+        trace_phase="execution",
+        attempt_metadata={"fleet.source_revision": revision},
+    ):
+        pass
+    update = next(kwargs for kwargs in calls.update_kwargs if "tags" in kwargs)
+    assert "fleet.source_revision" not in update["metadata"]
+
+
+def test_concurrent_execution_traces_keep_session_context_isolated(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    mlflow = sys.modules["mlflow"]
+    current_span: ContextVar[object | None] = ContextVar("test_mlflow_current_span", default=None)
+    next_trace_id = 0
+
+    @contextmanager
+    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        nonlocal next_trace_id
+        del name, span_type
+        next_trace_id += 1
+        span = SimpleNamespace(request_id=f"tr-session-{next_trace_id}", span_id=f"span-{next_trace_id}")
+        token = current_span.set(span)
+        try:
+            yield span
+        finally:
+            current_span.reset(token)
+
+    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = current_span.get  # type: ignore[attr-defined]
+
+    async def trace_session() -> tuple[str | None, str | None]:
+        with turn_trace(uuid4(), uuid4(), enabled=True):
+            before_yield = current_turn_trace_id()
+            await asyncio.sleep(0)
+            after_yield = current_turn_trace_id()
+            return before_yield, after_yield
+
+    async def run_sessions() -> tuple[tuple[str | None, str | None], tuple[str | None, str | None]]:
+        first_session, second_session = await asyncio.gather(trace_session(), trace_session())
+        return first_session, second_session
+
+    first, second = asyncio.run(run_sessions())
+    assert first[0] == first[1]
+    assert second[0] == second[1]
+    assert first[0] != second[0]
+    assert calls.update_kwargs
+
+
 def test_execution_trace_rejects_unbounded_runtime_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution", image_identity="x" * 257):
@@ -334,45 +440,45 @@ def test_turn_trace_unrecognized_phase_is_ignored(monkeypatch: pytest.MonkeyPatc
     assert calls.update_kwargs[-1] == {"state": "OK"}
 
 
-def test_observed_url_tool_is_nested_under_turn_root_with_bounded_metadata(
+def test_observed_tool_is_nested_under_turn_root_with_bounded_metadata(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
     observed: list[Any] = []
 
-    def fetch_url(url: str) -> dict[str, object]:
-        """Return a simulated URL fetch result with private source content and cache status.
+    def lookup_sources(query: str) -> dict[str, object]:
+        """Return simulated metadata while keeping the query out of events.
 
         Parameters:
-                url (str): URL whose content would be fetched.
+                query (str): Search terms.
 
         Returns:
-                dict[str, object]: A result containing the source content and cache-hit status.
+                dict[str, object]: A result containing one discovered URL.
         """
-        del url
-        return {"content": "private source body", "cache_hit": False}
+        del query
+        return {"ok": True, "results": [{"url": "https://example.com/private"}]}
 
     source = dspy.Tool(
-        fetch_url,
-        name="fetch_url",
+        lookup_sources,
+        name="lookup_sources",
     )
     wrapped = observe_tool(
         source,
         observed.append,
         ToolEventView(
-            input_projection=lambda _arguments: {"source_id": "source-1"},
-            output_projection=lambda result: {"cache_hit": result["cache_hit"]},
+            input_projection=lambda arguments: {"query_chars": len(str(arguments["query"]))},
+            output_projection=lambda result: {"result_count": len(result["results"])},
         ),
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert wrapped.func(url="https://example.com/report")["content"] == "private source body"
+        assert wrapped.func(query="private research")["ok"] is True
 
-    assert calls.start_span_names == ["fleet_turn", "tool.fetch_url"]
-    assert calls.span_inputs[-1]["input"] == {"source_id": "source-1"}
-    assert calls.span_outputs[-1]["output"] == {"cache_hit": False}
-    assert "private source body" not in str(calls.span_inputs + calls.span_outputs)
-    assert "private source body" not in str(observed)
+    assert calls.start_span_names == ["fleet_turn", "tool.lookup_sources"]
+    assert calls.span_inputs[-1]["input"] == {"query_chars": 16}
+    assert calls.span_outputs[-1]["output"] == {"result_count": 1}
+    assert "example.com/private" not in str(calls.span_inputs + calls.span_outputs)
+    assert "example.com/private" not in str(observed)
 
 
 def test_daytona_broker_preserves_batched_tool_span_under_turn_root(
@@ -493,7 +599,11 @@ def test_turn_trace_preserves_managed_body_exception(monkeypatch: pytest.MonkeyP
         raise expected
 
     assert raised.value is expected
-    assert calls.span_outputs[-1] == {"failure_category": "unknown"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "unknown",
+        "failure_cause_class": "ValueError",
+        "provider_status_category": "none",
+    }
     assert calls.span_statuses[-1] == "ERROR"
     assert calls.update_kwargs[-1] == {"state": "ERROR"}
     assert current_turn_trace_id() is None
@@ -563,7 +673,11 @@ def test_turn_trace_omits_raw_exception_from_mlflow_context(monkeypatch: pytest.
     except TimeoutError as exc:
         assert "secret timeout" in str(exc)
 
-    assert calls.span_outputs[-1] == {"failure_category": "timeout"}
+    assert calls.span_outputs[-1] == {
+        "failure_category": "timeout",
+        "failure_cause_class": "TimeoutError",
+        "provider_status_category": "none",
+    }
     assert calls.span_statuses[-1] == "ERROR"
     assert exit_args == [(None, None, None)]
     assert "secret timeout" not in str(calls.span_outputs + calls.span_statuses)
@@ -582,9 +696,9 @@ def test_successful_model_execution_followed_by_commit_failure_marks_root_failed
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _install_fake_mlflow(monkeypatch)
-    from fleet_rlm.chat.turn_runtime import TurnRuntime
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.run_state import FailedRunReceipt
+    from fleet_rlm.turns import TurnRuntime
 
     outcome = RLMOutcome(
         terminal_status="completed",
@@ -801,8 +915,33 @@ def test_turn_phase_span_records_failures_without_suppressing_them(monkeypatch: 
 
     assert calls.span_outputs[-1] == {
         "failure_category": "unknown",
+        "failure_cause_class": "RuntimeError",
+        "provider_status_category": "none",
         "phase_status": "failed",
     }
+
+
+def test_turn_phase_span_exports_safe_provider_failure_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.errors import ProviderRequestError
+    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
+
+    calls = _install_fake_mlflow(monkeypatch)
+    cause = ProviderRequestError("api_key=private", cause_type="BadRequestException", status_code=400)
+
+    with pytest.raises(RunPreparationUnavailableError):
+        try:
+            raise cause
+        except ProviderRequestError as exc:
+            with turn_phase_span("Turn.acquire_environment", inputs={}):
+                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+
+    assert calls.span_outputs[-1] == {
+        "failure_category": "request_validation",
+        "failure_cause_class": "BadRequestException",
+        "provider_status_category": "4xx",
+        "phase_status": "failed",
+    }
+    assert "private" not in str(calls.span_outputs)
 
 
 def test_turn_phase_span_merges_handle_outputs_with_phase_status(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -831,6 +970,8 @@ def test_turn_phase_span_handle_outputs_survive_body_failure(monkeypatch: pytest
     assert calls.span_outputs[-1] == {
         "stdout_chars": 3,
         "failure_category": "unknown",
+        "failure_cause_class": "RuntimeError",
+        "provider_status_category": "none",
         "phase_status": "failed",
     }
 
@@ -869,11 +1010,17 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     calls = _install_fake_mlflow(monkeypatch)
+    _install_successful_native_child(monkeypatch, "child-ok")
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -884,9 +1031,9 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "classify selected row"})["answer"] == "child-ok"
+        assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
 
-    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    assert calls.start_span_names[:3] == ["fleet_turn", "RLM.child.resolve_inputs", "RLM.recursive_call"]
     recursive_inputs = [
         payload
         for payload in calls.span_inputs
@@ -896,7 +1043,7 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
         {
             "recursive_depth": 1,
             "call_index": 1,
-            "prompt_chars": 180,
+            "prompt_chars": 57,
         }
     ]
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
@@ -920,17 +1067,23 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
     class Child:
-        def __call__(self, _interpreter: object, *, prompt: str) -> dspy.Prediction:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
             del prompt
-            return dspy.Prediction(answer="child-ok", trajectory=[])
+            return dspy.Prediction(answer="child-ok", evidence=[], gaps=[], result_files=[], trajectory=[])
 
     calls = _install_fake_mlflow(monkeypatch)
     monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -941,7 +1094,10 @@ def test_recursive_batch_spans_finish_with_active_mlflow(
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert [item["answer"] for item in executor.batched_tool(capsules=[{"task": "first"}, {"task": "second"}])] == [
+        assert [
+            item["answer"]
+            for item in executor.batched_tool(tasks=[{"task": "first", "inputs": []}, {"task": "second", "inputs": []}])
+        ] == [
             "child-ok",
             "child-ok",
         ]
@@ -966,10 +1122,16 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
+    _install_successful_native_child(monkeypatch, "child-ok")
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
-                [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok')"}],
+                [
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+                    }
+                ],
                 adapter=adapter,
             ),
             dspy.utils.DummyLM([{"answer": "fallback"}], adapter=adapter),
@@ -989,7 +1151,7 @@ def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyP
         pytest.raises(ChildRuntimeCleanupError, match="recursive child cleanup failed") as raised,
         turn_trace(uuid4(), uuid4(), enabled=True),
     ):
-        executor.tool(capsule={"task": "classify selected row"})
+        executor.tool(task="classify selected row", inputs=[])
 
     assert trace_failure_category(raised.value) == "cleanup_failed"
     recursive_outputs = [payload for payload in calls.span_outputs if payload.get("phase_status")]
@@ -1009,7 +1171,8 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def _raise_setup_error(_call_index: int) -> None:
+    def _raise_setup_error(_call_index: int, *, profile: str) -> None:
+        del profile
         raise RuntimeError("interpreter setup failed")
 
     executor = RecursiveRLMExecutor(
@@ -1023,7 +1186,7 @@ def test_recursive_child_span_marks_native_setup_failure(monkeypatch: pytest.Mon
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "slice"})["status"] == "failed"
+        assert executor.tool(task="slice", inputs=[])["status"] == "failed"
 
     failed_outputs = [
         payload
@@ -1044,12 +1207,16 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
 
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
+    _install_successful_native_child(monkeypatch, "semantic-answer")
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
             dspy.utils.DummyLM(
                 [
                     {"reasoning": "semantic", "code": "value = llm_query('selected judgment')"},
-                    {"reasoning": "submit", "code": "SUBMIT(answer=value)"},
+                    {
+                        "reasoning": "submit",
+                        "code": "SUBMIT(answer=value, evidence=[], gaps=[], result_files=[])",
+                    },
                 ],
                 adapter=adapter,
             ),
@@ -1061,9 +1228,9 @@ def test_recursive_native_semantic_span_records_mode(monkeypatch: pytest.MonkeyP
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert "semantic-answer" in executor.tool(capsule={"task": "outer slice"})["answer"]
+        assert "semantic-answer" in executor.tool(task="outer slice", inputs=[])["answer"]
 
-    assert calls.start_span_names[:2] == ["fleet_turn", "RLM.recursive_call"]
+    assert calls.start_span_names[:3] == ["fleet_turn", "RLM.child.resolve_inputs", "RLM.recursive_call"]
     outputs = [payload for payload in calls.span_outputs if payload.get("termination_mode")]
     assert any(payload["termination_mode"] == "typed_submit" for payload in outputs)
 
@@ -1080,7 +1247,8 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     calls = _install_fake_mlflow(monkeypatch)
     adapter = dspy.JSONAdapter()
 
-    def timeout_factory(_call_index: int):
+    def timeout_factory(_call_index: int, *, profile: str):
+        del profile
         raise TimeoutError("child acquisition timed out")
 
     executor = RecursiveRLMExecutor(
@@ -1094,7 +1262,7 @@ def test_recursive_call_span_marks_failure_with_bounded_category(monkeypatch: py
     )
 
     with turn_trace(uuid4(), uuid4(), enabled=True):
-        assert executor.tool(capsule={"task": "slice"})["status"] == "timed_out"
+        assert executor.tool(task="slice", inputs=[])["status"] == "timed_out"
 
     failed_outputs = [
         payload
@@ -1158,6 +1326,71 @@ def test_annotate_turn_attributes_swallows_sink_failures(monkeypatch: pytest.Mon
 
     monkeypatch.setattr(mlflow, "get_current_active_span", lambda: _FailingSpan())
     annotate_turn_attributes({"fleet.memory_degradation.category": "normalization"})
+
+
+def test_annotate_turn_metadata_updates_only_bounded_loaded_skill_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution"):
+        annotate_turn_metadata(
+            {
+                "fleet.skill_loaded_versions": "skill-a@1.2.0,skill-b@2.0.0",
+                "fleet.root_model": "unapproved metadata",
+            }
+        )
+        annotate_turn_metadata({"fleet.skill_loaded_versions": "x" * 257})
+
+    dynamic_updates = [
+        kwargs["metadata"]
+        for kwargs in calls.update_kwargs
+        if "fleet.skill_loaded_versions" in kwargs.get("metadata", {})
+    ]
+    assert dynamic_updates == [{"fleet.skill_loaded_versions": "skill-a@1.2.0,skill-b@2.0.0"}]
+
+
+def test_annotate_turn_metadata_is_noop_without_active_turn_trace(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    token = turn_tracing._fleet_trace_active.set(False)
+    try:
+        annotate_turn_metadata({"fleet.skill_loaded_versions": "skill-a@1.0.0"})
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+    assert calls.update_kwargs == []
+
+
+@pytest.mark.asyncio
+async def test_turn_execution_records_skill_versions_as_they_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm import turns as turn_module
+    from fleet_rlm.rlm.events import EventRecorder, SkillLoaded
+    from fleet_rlm.turns import TurnRuntime
+
+    run_id = uuid4()
+    session_id = uuid4()
+    recorder = EventRecorder(run_id, session_id)
+    metadata_updates: list[dict[str, str]] = []
+    monkeypatch.setattr(turn_module, "annotate_turn_metadata", lambda value: metadata_updates.append(dict(value)))
+    runtime = TurnRuntime(lifecycle=object(), preparation=object(), runner=object())  # type: ignore[arg-type]
+
+    async def execute_claimed(*_args: Any, **_kwargs: Any) -> AsyncIterator[Any]:
+        yield recorder.record(SkillLoaded("skill-a", "long-context", "2.3.0"))
+        yield recorder.record(SkillLoaded("skill-b", "workspace-files", "1.4.0"))
+
+    monkeypatch.setattr(runtime, "_execute_claimed", execute_claimed)
+    run = SimpleNamespace(
+        run_id=run_id,
+        session_id=session_id,
+        checkpoint_version=1,
+        input=SimpleNamespace(skill_selections=()),
+    )
+    prepared = SimpleNamespace(execution=SimpleNamespace(execution=SimpleNamespace(models=None)))
+
+    events = [event async for event in runtime._execute(run, prepared, None)]
+
+    assert len(events) == 2
+    assert metadata_updates == [
+        {"fleet.skill_loaded_versions": "skill-a@2.3.0"},
+        {"fleet.skill_loaded_versions": "skill-a@2.3.0,skill-b@1.4.0"},
+    ]
 
 
 def test_dspy_turn_callbacks_carries_mlflow_autolog_callback() -> None:
@@ -1270,3 +1503,75 @@ def test_exhausted_finalization_is_not_classified_as_a_deadline() -> None:
 
     assert trace_failure_category(exhaustion) == "wrap_up_rejected"
     assert trace_failure_category(TimeoutError("Turn deadline exceeded")) == "timeout"
+
+
+def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import mlflow
+    from mlflow.dspy.callback import MlflowCallback
+    from mlflow.tracking import fluent
+
+    from fleet_rlm.observability import tracing
+    from fleet_rlm.rlm.events import _RLMReasoningCallback, _RLMTraceCallback
+
+    prior_uri = mlflow.get_tracking_uri()
+    mlflow.set_tracking_uri(f"sqlite:///{tmp_path / 'mlflow.db'}")
+    # Earlier MLflow tests may leave an active experiment ID from a different
+    # tracking store. Create this test's experiment in its own SQLite store.
+    monkeypatch.setattr(fluent, "_active_experiment_id", None)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "0")
+    mlflow.set_experiment("fleet-span-parentage")
+    monkeypatch.setattr("mlflow.dspy.callback.get_autologging_config", lambda *_args: True)
+    tracing.set_tracing_active_for_tests(True)
+    active_token = tracing._fleet_trace_active.set(True)
+    try:
+        autolog = MlflowCallback()
+        predictor = dspy.Predict("question -> answer")
+        root_lm = SimpleNamespace(model="openai/test", model_type="chat", kwargs={}, cache=False, history=[])
+        lm_callback = _RLMTraceCallback(root_lm=root_lm, sub_lm=object())
+        action_callback = _RLMReasoningCallback(lambda _event: None)
+
+        with mlflow.start_span("fleet_turn") as root:
+            trace_id = root.request_id
+            with (
+                tracing.turn_phase_span("RLM.execute", inputs={}) as phase,
+                tracing.rlm_callback_parent(phase),
+            ):
+                for iteration in range(3):
+                    module_id = f"module-{iteration}"
+                    lm_id = f"lm-{iteration}"
+                    autolog.on_module_start(module_id, predictor, {"question": "q"})
+                    action_callback.on_module_start(module_id, predictor, {"question": "q"})
+                    autolog.on_lm_start(lm_id, root_lm, {"prompt": "q"})
+                    lm_callback.on_lm_start(lm_id, root_lm, {"prompt": "q"})
+                    autolog.on_lm_end(lm_id, {"answer": "a"})
+                    lm_callback.on_lm_end(lm_id, {"answer": "a"})
+                    prediction = dspy.Prediction(reasoning="reason", code="pass", answer="a")
+                    autolog.on_module_end(module_id, prediction)
+                    action_callback.on_module_end(module_id, prediction)
+                    with tracing.turn_phase_span("sandbox.execute", inputs={"iteration": iteration}):
+                        pass
+
+        mlflow.flush_trace_async_logging()
+        spans = mlflow.get_trace(trace_id).data.spans
+    finally:
+        tracing._fleet_trace_active.reset(active_token)
+        tracing.set_tracing_active_for_tests(False)
+        mlflow.set_tracking_uri(prior_uri)
+
+    by_id = {span.span_id: span for span in spans}
+    predictions = sorted(
+        (span for span in spans if span.name == "Predict.forward"), key=lambda span: span.start_time_ns
+    )
+    assert len(predictions) == 3
+    assert len({span.parent_id for span in predictions}) == 1
+    assert sum(span.name == "RLM.root_action" for span in spans) == 3
+    assert sum(span.name == "RLM.root_lm" for span in spans) == 3
+    assert sum(span.name == "sandbox.execute" for span in spans) == 3
+    for span in spans:
+        if span.name in {"Predict.forward", "RLM.root_action", "RLM.root_lm", "sandbox.execute"}:
+            parent = by_id[span.parent_id]
+            assert parent.start_time_ns <= span.start_time_ns <= span.end_time_ns <= parent.end_time_ns
+            if span.name in {"RLM.root_action", "RLM.root_lm"}:
+                assert parent.name == "RLM.execute"

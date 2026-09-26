@@ -12,12 +12,12 @@ from fleet_rlm.rlm.program import (
     WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
     FleetRLMSignature,
     RLMOptions,
-    build_native_rlm,
     compose_rlm_instructions,
     fleet_rlm_instruction_fragments,
     root_signature_for_recursion,
 )
 from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
+from tests.support.native_rlm import build_native_rlm_for_test
 
 
 def test_default_fleet_signature_omits_recursive_fragments() -> None:
@@ -28,16 +28,17 @@ def test_default_fleet_signature_omits_recursive_fragments() -> None:
     assert fragments.tools == TOOL_RLM_INSTRUCTIONS
     assert fragments.recursion is None
     assert FleetRLMSignature.instructions == fragments.compose()
-    assert "rlm_query(capsule=capsule)" not in FleetRLMSignature.instructions
-    assert "5. Verify within the same action" in FleetRLMSignature.instructions
+    assert "rlm_query(task=task, inputs=inputs" not in FleetRLMSignature.instructions
+    assert "6. Verify within the same action" in FleetRLMSignature.instructions
+    assert "for exhaustive extraction, track every required partition" in FleetRLMSignature.instructions
 
 
 def test_nonrecursive_root_signature_omits_only_the_optional_recursion_fragment() -> None:
     recursive = compose_rlm_instructions(recursion_enabled=True)
     nonrecursive = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
 
-    assert "rlm_query(capsule=capsule)" not in nonrecursive
-    assert "5. Verify within the same action" in nonrecursive
+    assert "rlm_query(task=task, inputs=inputs" not in nonrecursive
+    assert "6. Verify within the same action" in nonrecursive
     assert RECURSION_RLM_INSTRUCTIONS in recursive
     assert RECURSION_RLM_INSTRUCTIONS not in nonrecursive
     assert nonrecursive.endswith(DISCOVERY_RLM_INSTRUCTIONS)
@@ -56,8 +57,8 @@ def test_custom_output_fields_stay_stable_while_fleet_policy_is_composed() -> No
     assert recursive is not CustomResult
     assert recursive.input_fields.keys() == CustomResult.input_fields.keys()
     assert recursive.output_fields.keys() == CustomResult.output_fields.keys()
-    assert "rlm_query(capsule=capsule)" in recursive.instructions
-    assert "rlm_query(capsule=capsule)" not in nonrecursive.instructions
+    assert "rlm_query(task=task, inputs=inputs" in recursive.instructions
+    assert "rlm_query(task=task, inputs=inputs" not in nonrecursive.instructions
 
 
 def test_fragment_composition_preserves_established_instruction_text() -> None:
@@ -107,12 +108,12 @@ def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> No
     assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in present
     assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in publish_only
     assert "named write or publish remains" in present
-    assert "Sandbox-local ``open()`` is not Session Workspace" in present
+    assert "Files outside the mounted ``/workspace`` are not Session Workspace" in present
 
 
-def test_tool_instructions_require_defensive_fetch_and_bounded_precision() -> None:
-    assert "workspace_path" in TOOL_RLM_INSTRUCTIONS
-    assert "workspace reference" in TOOL_RLM_INSTRUCTIONS
+def test_tool_instructions_require_sandbox_research_and_bounded_precision() -> None:
+    assert "SHA-256" in TOOL_RLM_INSTRUCTIONS
+    assert "sys.executable -m pip" in TOOL_RLM_INSTRUCTIONS
     assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
     assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
     assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS
@@ -192,12 +193,12 @@ def test_runtime_without_host_tool_dispatch_stops_advertising_those_tools() -> N
     # This overlay removes Fleet-provided tools only. DSPy adds its native
     # semantic tools outside this Signature instruction composition.
     for guidance in (
-        "call ``fetch_url`` once",
-        "Use ``rlm_query(capsule=capsule)``",
+        "load the long-context Skill when relevant",
+        'Use ``rlm_query(task=task, inputs=inputs, context="")``',
     ):
         assert guidance not in composed
     assert "Do not probe for" in composed
-    assert "``llm_query``" not in composed
+    assert "native ``llm_query``" in composed
 
 
 def test_host_tool_dispatch_still_emits_workspace_guidance_only_when_dispatched() -> None:
@@ -222,15 +223,15 @@ def test_host_tool_dispatch_still_emits_workspace_guidance_only_when_dispatched(
 
 def test_native_builder_threads_host_tool_dispatch_into_the_signature() -> None:
     options = RLMOptions(max_iters=1, max_llm_calls=1)
-    without = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
-    with_dispatch = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
+    without = build_native_rlm_for_test(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
+    with_dispatch = build_native_rlm_for_test(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
 
-    assert "Fleet recursion, URL-fetch, or Workspace host tool" in without.signature.instructions
-    assert "Fleet recursion, URL-fetch, or Workspace host tool" not in with_dispatch.signature.instructions
+    assert "Fleet recursion or Workspace host tool" in without.signature.instructions
+    assert "Fleet recursion or Workspace host tool" not in with_dispatch.signature.instructions
 
 
 def test_nondefault_observation_budget_preserves_the_original_signature() -> None:
-    program = build_native_rlm(
+    program = build_native_rlm_for_test(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=1, max_llm_calls=1, max_output_chars=6_000),
     )
@@ -243,9 +244,9 @@ def test_dspy_native_semantic_tools_survive_fleet_no_dispatch_overlay() -> None:
     from dspy.predict.rlm import ACTION_INSTRUCTIONS_TEMPLATE
 
     options = RLMOptions(max_iters=1, max_llm_calls=1)
-    rlm = build_native_rlm(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
+    rlm = build_native_rlm_for_test(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
 
-    assert "``llm_query``" not in rlm.signature.instructions
+    assert "native ``llm_query``" in rlm.signature.instructions
     assert "llm_query(prompt)" in ACTION_INSTRUCTIONS_TEMPLATE
     assert "llm_query(prompt)" in rlm.generate_action.signature.instructions
     assert set(rlm._make_llm_tools()) == {"llm_query", "llm_query_batched"}

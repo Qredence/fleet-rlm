@@ -16,12 +16,25 @@ jobs:
   preflight:
     name: Preflight Checks
     runs-on: ubuntu-latest
+    env:
+      FLEET_MLFLOW_TRACING_ENABLED: "false"
     outputs:
       normalized_version: ${{ steps.version.outputs.normalized_version }}
       tag_version: ${{ steps.version.outputs.tag_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up Node.js for TUI checks
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22.23.2"
+
+      - name: Install pinned TUI dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@11.15.1 --activate
+          pnpm --dir tools/fleet-tui install --frozen-lockfile
 
       - name: Install uv
         uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
@@ -50,10 +63,8 @@ jobs:
 
           echo "✅ Version $TOML_VERSION matches workflow input '$INPUT_VERSION'"
 
-      - name: Release hygiene checks
-        run: |
-          uv run python scripts/validate_release.py hygiene
-          uv run python scripts/validate_release.py metadata
+      - name: Full repository checks
+        run: make check
 
       - name: Security checks
         run: |
@@ -63,25 +74,10 @@ jobs:
           # pulls pip 26.0.1 / CVE-2026-3219.
           # TODO: Remove the DiskCache ignore once upstream ships a patched release
           # or DSPy removes the transitive dependency.
-          uvx pip-audit --ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2025-69872
-          uvx bandit -q -r src/fleet_rlm -x tests -lll
+          make check-security PIP_AUDIT_ARGS="--ignore-vuln GHSA-5239-wwwm-4pmq --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2025-69872"
 
-      - name: Lint with Ruff
-        run: |
-          uv run ruff check src tests scripts migrations
-          uv run ruff format --check src tests scripts migrations
-
-      - name: Type-check with ty
-        run: uv run ty check src
-
-      - name: Run tests
-        env:
-          FLEET_MLFLOW_TRACING_ENABLED: "false"
-        run: >
-          uv run pytest -q
-          -m "not packaging"
-          --timeout=120
-          --timeout-method=thread
+      - name: Release metadata and hygiene checks
+        run: make check-release
 
   build:
     name: Build Distribution
@@ -98,28 +94,10 @@ jobs:
         with:
           version: "latest"
 
-      - name: Clean previous builds
-        run: rm -rf dist build
-
-      - name: Build distributions
+      - name: Build and verify release distributions
         env:
           FLEET_RLM_UI_BUILD_DONE: "1"
-        run: |
-          SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
-          export SOURCE_DATE_EPOCH
-          uv build
-          uv run python scripts/normalize_release_artifacts.py --dist-dir dist --epoch "$SOURCE_DATE_EPOCH"
-
-      - name: Verify packaged backend assets
-        env:
-          FLEET_RLM_UI_BUILD_DONE: "1"
-        run: uv run python scripts/validate_release.py wheel
-
-      - name: Verify distributions
-        run: uvx twine check --strict dist/*.whl dist/*.tar.gz
-
-      - name: Record content-addressed artifact identity
-        run: uv run python scripts/validate_release.py artifacts --output dist/artifact-manifest.json
+        run: make build-release
 
       - name: List artifacts
         run: ls -lh dist/
@@ -171,7 +149,7 @@ jobs:
       - name: Run installed-package contract tests
         env:
           FLEET_RELEASE_DIST: ${{ github.workspace }}/dist
-        run: uv run pytest tests/unit/backend/packaging -q -n 0
+        run: make test-packaging
 
   check-pypi-availability:
     name: Check PyPI Package Name

@@ -1,26 +1,28 @@
-"""impl-08: DaytonaSessionManager lifecycle and leases (fake platform, no network)."""
+"""impl-08: DaytonaRuntime lifecycle and leases (fake platform, no network)."""
 
 from __future__ import annotations
 
 import asyncio
 import threading
 from dataclasses import replace
-from types import SimpleNamespace
 from typing import Any
 from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona.admission import DaytonaAdmission, DaytonaAdmissionTimeoutError
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
-from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
-from fleet_rlm.daytona.session_manager import (
+from fleet_rlm.daytona.runtime import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
-    DaytonaSessionManager,
+    DaytonaAdmission,
+    DaytonaAdmissionTimeoutError,
+    DaytonaLeaseAcquisitionTimeoutError,
+    DaytonaRuntime,
     LeaseRequest,
+    RootSessionSpec,
+    SessionCleanupState,
 )
-from fleet_rlm.runtime.bindings import SandboxBinding
+from fleet_rlm.sessions.bindings import SandboxBinding
 from tests.support.session_manager import (
     _FakeFilesystem,
     _FakePlatform,
@@ -122,9 +124,7 @@ class _FailingLayoutPlatform(_FakePlatform):
             # create_folder, so the failure must be injected there. A stat-only
             # injection would never be observed and silently stop exercising
             # the guard.
-            sandbox.fs.create_failures["/home/daytona/fleet/artifacts"] = RuntimeError(
-                "provider failed at /home/daytona/private"
-            )
+            sandbox.fs.create_failures["/tmp/fleet"] = RuntimeError("provider failed at /home/daytona/private")
         return sandbox
 
 
@@ -135,7 +135,7 @@ class _RacingFilesystem(_FakeFilesystem):
         self._artifacts_lock = threading.Lock()
 
     async def create_folder(self, path: str, mode: str) -> None:
-        if path != "/home/daytona/fleet/artifacts":
+        if path != "/tmp/fleet":
             return await super().create_folder(path, mode)
         await asyncio.to_thread(self._artifacts_barrier.wait, 5)
         with self._artifacts_lock:
@@ -147,7 +147,7 @@ class _RacingFilesystem(_FakeFilesystem):
 class _SharedFilesystemPlatform(_FakePlatform):
     def __init__(self) -> None:
         super().__init__()
-        self.filesystem = _RacingFilesystem("/home/daytona/fleet")
+        self.filesystem = _RacingFilesystem("/workspace")
 
     async def create(self, **kwargs: Any) -> _FakeSandbox:
         sandbox = await super().create(**kwargs)
@@ -159,7 +159,7 @@ def _request() -> LeaseRequest:
     return LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
 
 
-async def _acquire(mgr: DaytonaSessionManager, request: LeaseRequest):
+async def _acquire(mgr: DaytonaRuntime, request: LeaseRequest):
     return await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 10)
 
 
@@ -267,8 +267,8 @@ async def test_acquire_creates_running_sandbox_and_lease() -> None:
 
     assert lease.sandbox_id in plat.sandboxes
     assert lease.volume_id.startswith("vol-")
-    assert lease.mount_path == "/home/daytona/fleet"
-    assert lease.volume_subpath == f"workspaces/{req.workspace_id}"
+    assert lease.mount_path == "/workspace"
+    assert lease.volume_subpath == f"workspaces/{req.workspace_id}/sessions/{req.session_id}/workspace"
     assert volumes.gets  # volume resolved
     assert plat.created[0]["volume_subpath"] == lease.volume_subpath
     binding = await store.get(req.session_id)
@@ -280,7 +280,75 @@ async def test_acquire_creates_running_sandbox_and_lease() -> None:
 
 
 @pytest.mark.asyncio
-async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
+async def test_legacy_workspace_binding_retires_before_session_mount() -> None:
+    mgr, platform, store, _volumes = _manager()
+    request = _request()
+    volume_id = await mgr._resolve_volume_id()
+    legacy = await platform.create(
+        volume_id=volume_id,
+        mount_path="/home/daytona/fleet",
+        volume_subpath=f"workspaces/{request.workspace_id}",
+    )
+    await store.upsert(
+        SandboxBinding(
+            session_id=request.session_id,
+            sandbox_id=legacy.id,
+            workspace_id=request.workspace_id,
+            volume_id=volume_id,
+            volume_subpath=f"workspaces/{request.workspace_id}",
+            mount_path="/home/daytona/fleet",
+            provider_state="running",
+        )
+    )
+
+    lease = await _acquire(mgr, request)
+
+    assert legacy.id in platform.deleted
+    assert lease.sandbox_id != legacy.id
+    assert lease.mount_path == "/workspace"
+    assert lease.volume_subpath == f"workspaces/{request.workspace_id}/sessions/{request.session_id}/workspace"
+    binding = await store.get(request.session_id)
+    assert binding is not None and binding.generation == 2
+    await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_legacy_retirement_failure_keeps_binding_fenced() -> None:
+    class FailingDeletePlatform(_FakePlatform):
+        async def delete(self, sandbox_id: str) -> None:
+            del sandbox_id
+            raise RuntimeError("controlled deletion failure")
+
+    platform = FailingDeletePlatform()
+    mgr, _platform, store, _volumes = _manager(platform=platform)
+    request = _request()
+    volume_id = await mgr._resolve_volume_id()
+    legacy = await platform.create(
+        volume_id=volume_id,
+        mount_path="/home/daytona/fleet",
+        volume_subpath=f"workspaces/{request.workspace_id}",
+    )
+    await store.upsert(
+        SandboxBinding(
+            session_id=request.session_id,
+            sandbox_id=legacy.id,
+            workspace_id=request.workspace_id,
+            volume_id=volume_id,
+            volume_subpath=f"workspaces/{request.workspace_id}",
+            mount_path="/home/daytona/fleet",
+            provider_state="running",
+        )
+    )
+
+    with pytest.raises((DaytonaAdapterError, DaytonaLeaseAcquisitionTimeoutError)):
+        await mgr.acquire(request, deadline=asyncio.get_running_loop().time() + 0.05)
+    binding = await store.get(request.session_id)
+    assert binding is not None and binding.provider_state == "fencing"
+    assert len(platform.created) == 1
+
+
+@pytest.mark.asyncio
+async def test_acquire_provisions_session_mount_and_run_scratch() -> None:
     mgr, plat, _store, _volumes = _manager()
     session_id = uuid4()
     run_id = uuid4()
@@ -294,27 +362,9 @@ async def test_acquire_provisions_complete_workspace_volume_layout() -> None:
     lease = await _acquire(mgr, request)
 
     sandbox = plat.sandboxes[lease.sandbox_id]
-    root = "/home/daytona/fleet"
-    session = f"{root}/sessions/{session_id}"
-    run = f"{session}/runs/{run_id}"
-    expected_layout = {
-        root,
-        f"{root}/artifacts",
-        f"{root}/attachments",
-        f"{root}/sessions",
-        session,
-        f"{session}/workspace",
-        f"{session}/runs",
-        run,
-        f"{run}/artifacts",
-        f"{run}/attachments",
-    }
-    assert expected_layout <= sandbox.fs.directories
-    assert {path for path, _mode in sandbox.fs.created} == sandbox.fs.directories - {root}
+    assert sandbox.fs.directories == {"/workspace", "/tmp/fleet", f"/tmp/fleet/{run_id}"}
+    assert {path for path, _mode in sandbox.fs.created} == {"/tmp/fleet", f"/tmp/fleet/{run_id}"}
     assert {mode for _path, mode in sandbox.fs.created} == {"700"}
-    created_paths = [path for path, _mode in sandbox.fs.created]
-    assert created_paths.index(session) < created_paths.index(f"{session}/workspace")
-    assert created_paths.index(run) < created_paths.index(f"{run}/attachments")
     assert sandbox.fs.uploaded == {}
 
 
@@ -334,7 +384,7 @@ async def test_reacquire_repairs_missing_containers_without_touching_files() -> 
     )
     await mgr.release(first)
     sandbox = plat.sandboxes[first.sandbox_id]
-    workspace_path = f"/home/daytona/fleet/sessions/{session_id}/workspace"
+    workspace_path = "/workspace"
     durable_file = f"{workspace_path}/decision.md"
     sandbox.fs.files.add(durable_file)
 
@@ -351,7 +401,7 @@ async def test_reacquire_repairs_missing_containers_without_touching_files() -> 
 
     assert second.sandbox_id == first.sandbox_id
     assert durable_file in sandbox.fs.files
-    assert f"/home/daytona/fleet/sessions/{session_id}/runs/{second_run_id}/attachments" in (sandbox.fs.directories)
+    assert f"/tmp/fleet/{second_run_id}" in sandbox.fs.directories
 
 
 @pytest.mark.asyncio
@@ -366,8 +416,8 @@ async def test_reacquire_repairs_stopped_sandbox_after_restart() -> None:
     first = await _acquire(mgr, request)
     await mgr.release(first)
     sandbox = plat.sandboxes[first.sandbox_id]
-    attachments_path = "/home/daytona/fleet/attachments"
-    sandbox.fs.directories.remove(attachments_path)
+    scratch_path = "/tmp/fleet"
+    sandbox.fs.directories.remove(scratch_path)
     sandbox.stop()
 
     second = await _acquire(
@@ -382,7 +432,7 @@ async def test_reacquire_repairs_stopped_sandbox_after_restart() -> None:
 
     assert second.sandbox_id == first.sandbox_id
     assert sandbox.state == "running"
-    assert attachments_path in sandbox.fs.directories
+    assert scratch_path in sandbox.fs.directories
 
 
 @pytest.mark.asyncio
@@ -459,9 +509,9 @@ async def test_acquire_fails_closed_when_required_directory_is_a_file() -> None:
     first = await _acquire(mgr, request)
     await mgr.release(first)
     sandbox = plat.sandboxes[first.sandbox_id]
-    artifacts_path = "/home/daytona/fleet/artifacts"
-    sandbox.fs.directories.remove(artifacts_path)
-    sandbox.fs.files.add(artifacts_path)
+    scratch_path = "/tmp/fleet"
+    sandbox.fs.directories.remove(scratch_path)
+    sandbox.fs.files.add(scratch_path)
 
     with pytest.raises(DaytonaAdapterError) as captured:
         await _acquire(mgr, request)
@@ -508,9 +558,9 @@ async def test_sibling_session_acquisitions_tolerate_shared_root_creation_race()
 
     leases = await asyncio.gather(*(_acquire(mgr, request) for request in requests))
 
-    assert "/home/daytona/fleet/artifacts" in platform.filesystem.directories
+    assert "/tmp/fleet" in platform.filesystem.directories
     for request in requests:
-        assert f"/home/daytona/fleet/sessions/{request.session_id}/workspace" in (platform.filesystem.directories)
+        assert f"/tmp/fleet/{request.run_id}" in platform.filesystem.directories
     for lease in leases:
         await mgr.release(lease)
 
@@ -661,7 +711,7 @@ async def test_release_stops_retained_sandbox_after_explicit_idle_timeout() -> N
 @pytest.mark.asyncio
 async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
     mgr, plat, store, _volumes = _manager(idle_stop_seconds=0.01)
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=plat))
+    runtime = mgr
     req = _request()
     owner = await runtime.acquire_root_session(
         RootSessionSpec(
@@ -671,10 +721,10 @@ async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
         )
     )
 
-    await mgr.release(owner.lease)
+    await mgr.release(owner)
     await asyncio.sleep(0.05)
 
-    assert plat.sandboxes[owner.lease.sandbox_id].state == "running"
+    assert plat.sandboxes[owner.sandbox_id].state == "running"
     binding = await store.get(req.session_id)
     assert binding is not None
     assert binding.provider_state == "running"
@@ -683,7 +733,7 @@ async def test_idle_stop_skips_while_runtime_root_is_open() -> None:
 
 
 @pytest.mark.asyncio
-async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
+async def test_idle_stop_fails_closed_when_retained_root_probe_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     mgr, plat, _store, _volumes = _manager(idle_stop_seconds=0.01)
     req = _request()
     lease = await _acquire(mgr, req)
@@ -693,7 +743,7 @@ async def test_idle_stop_fails_closed_when_retained_root_probe_fails() -> None:
             raise ValueError("runtime ownership probe unavailable")
 
     runtime = BrokenRuntime()
-    mgr.bind_runtime(runtime)
+    monkeypatch.setattr(mgr, "owns_open_root", runtime.owns_open_root)
     await mgr.release(lease)
     await mgr._stop_after_idle(
         session_id=req.session_id,
@@ -829,29 +879,29 @@ async def test_acquisition_error_restores_admission_capacity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_eight_provider_acquisitions_hold_admission_and_ninth_waits() -> None:
-    platform = _BlockingCreatePlatform(expected_entries=8)
+async def test_seven_execution_acquisitions_hold_admission_and_eighth_waits() -> None:
+    platform = _BlockingCreatePlatform(expected_entries=7)
     admission = DaytonaAdmission(max_active_leases=8)
     mgr, _plat, _store, _volumes = _manager(platform=platform, admission=admission)
     deadline = asyncio.get_running_loop().time() + 10
-    acquisitions = [asyncio.create_task(mgr.acquire(_request(), deadline=deadline)) for _ in range(8)]
+    acquisitions = [asyncio.create_task(mgr.acquire(_request(), deadline=deadline)) for _ in range(7)]
     assert await asyncio.to_thread(platform.all_entered.wait, 2)
 
-    ninth = asyncio.create_task(mgr.acquire(_request(), deadline=deadline))
+    eighth = asyncio.create_task(mgr.acquire(_request(), deadline=deadline))
     await asyncio.sleep(0)
-    assert platform.entered == 8
-    assert not ninth.done()
+    assert platform.entered == 7
+    assert not eighth.done()
 
     platform.release_creates.set()
     leases = list(await asyncio.gather(*acquisitions))
     await asyncio.sleep(0)
-    assert platform.entered == 8
-    assert not ninth.done()
+    assert platform.entered == 7
+    assert not eighth.done()
 
     await mgr.release(leases.pop())
-    ninth_lease = await asyncio.wait_for(ninth, timeout=2)
-    assert platform.entered == 9
-    await mgr.release(ninth_lease)
+    eighth_lease = await asyncio.wait_for(eighth, timeout=2)
+    assert platform.entered == 8
+    await mgr.release(eighth_lease)
     for lease in leases:
         await mgr.release(lease)
 
@@ -886,7 +936,7 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.session_manager import DaytonaLeaseAcquisitionTimeoutError
+    from fleet_rlm.daytona.runtime import DaytonaLeaseAcquisitionTimeoutError
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -1092,7 +1142,7 @@ async def test_replace_keeps_volume_id() -> None:
     assert new_binding.volume_id == volume_id
     assert new_binding.sandbox_id != old_sid
     assert new_binding.workspace_id == req.workspace_id
-    assert new_binding.volume_subpath == f"workspaces/{req.workspace_id}"
+    assert new_binding.volume_subpath == f"workspaces/{req.workspace_id}/sessions/{req.session_id}/workspace"
     assert old_sid in plat.deleted
     assert new_binding.sandbox_id in plat.sandboxes
     labels = plat.created[-1]["labels"]
@@ -1102,9 +1152,66 @@ async def test_replace_keeps_volume_id() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forced_root_rotation_creates_exactly_one_replacement() -> None:
+    runtime, platform, _store, _volumes = _manager()
+    request = _request()
+    spec = RootSessionSpec(
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        run_id=request.run_id,
+    )
+    first = await runtime.acquire_root_session(spec)
+    second = await runtime.acquire_root_session(replace(spec, force_new=True))
+    assert first.closed
+    assert first.sandbox_id != second.sandbox_id
+    assert len(platform.created) == 2
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_shutdown_waits_for_active_invocation_release() -> None:
+    runtime, _platform, _store, _volumes = _manager()
+    request = _request()
+    release = await runtime.begin_root_invocation(
+        request.workspace_id,
+        request.session_id,
+        deadline=asyncio.get_running_loop().time() + 1,
+    )
+    assert not await runtime.aclose(drain_seconds=0.01)
+    release()
+    release()
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
+async def test_retained_root_rechecks_durable_generation_before_reuse() -> None:
+    runtime, _platform, store, _volumes = _manager()
+    request = _request()
+    spec = RootSessionSpec(
+        workspace_id=request.workspace_id,
+        session_id=request.session_id,
+        user_id=request.user_id,
+        run_id=request.run_id,
+    )
+    first = await runtime.acquire_root_session(spec)
+    binding = await store.get(request.session_id)
+    assert binding is not None
+    await store.upsert(replace(binding, generation=binding.generation + 1))
+
+    second = await runtime.acquire_root_session(spec)
+
+    assert first.closed
+    assert second is not first
+    assert second.sandbox_id == first.sandbox_id
+    assert second.binding_generation == binding.generation + 1
+    assert await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_replace_closes_retained_root_before_retiring_sandbox() -> None:
     mgr, platform, store, _volumes = _manager()
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    runtime = mgr
     request = _request()
     first_spec = RootSessionSpec(
         workspace_id=request.workspace_id,
@@ -1148,7 +1255,7 @@ async def test_replace_retains_root_and_binding_when_root_close_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mgr, platform, store, _volumes = _manager()
-    runtime = DaytonaRuntime(SimpleNamespace(session_manager=mgr, platform=platform))
+    runtime = mgr
     request = _request()
     retained = await runtime.acquire_root_session(
         RootSessionSpec(
@@ -1173,7 +1280,9 @@ async def test_replace_retains_root_and_binding_when_root_close_fails(
         )
 
     assert runtime.roots == (retained,)
-    assert retained.failed
+    record = runtime.session_record(request.workspace_id, request.session_id)
+    assert record is not None
+    assert record.cleanup_state is SessionCleanupState.UNRESOLVED
     assert retained.sandbox_id not in platform.deleted
     assert await store.get(request.session_id) == current
     assert mgr.active_leases.holder(request.session_id, workspace_id=request.workspace_id) is not None
@@ -1294,7 +1403,7 @@ async def test_lease_construction_failure_fences_persisted_replacement_before_cl
         del args, kwargs
         raise RuntimeError("interpreter construction interrupted")
 
-    monkeypatch.setattr("fleet_rlm.daytona.session_manager._build_interpreter", fail_construction)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime._build_interpreter", fail_construction)
 
     with pytest.raises(RuntimeError, match="interpreter construction interrupted"):
         await _acquire(mgr, request)

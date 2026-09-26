@@ -21,8 +21,9 @@ from fleet_rlm.artifacts.safety import (
     validate_content_size,
 )
 from fleet_rlm.json_types import JsonValue
+from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.tool_events import ToolEventView, bound_event_text
-from fleet_rlm.workspace.paths import VolumePaths, as_posix, normalize_workspace_path
+from fleet_rlm.workspace.paths import normalize_workspace_path
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 _EVENT_TEXT_MAX_CHARS = 256

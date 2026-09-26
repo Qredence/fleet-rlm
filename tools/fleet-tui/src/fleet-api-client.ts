@@ -2,6 +2,7 @@ import type { components } from "./generated/openapi.js";
 import { record } from "./tui/coerce.js";
 
 export type FleetSession = components["schemas"]["SessionDetailResponse"];
+export type FleetTask = components["schemas"]["SessionTaskResponse"];
 export type FleetTurn = components["schemas"]["UIMessageResponse"];
 export type FleetTurnPart = FleetTurn["parts"][number];
 type FleetTurnPage = components["schemas"]["SessionTurnPageResponse"];
@@ -54,6 +55,10 @@ export class FleetApiClient {
 
   async getSession(sessionId: string): Promise<FleetSession> {
     return this.requestJson<FleetSession>(`/api/sessions/${encodeURIComponent(sessionId)}`);
+  }
+
+  async getSessionTask(sessionId: string): Promise<FleetTask> {
+    return this.requestJson<FleetTask>(`/api/sessions/${encodeURIComponent(sessionId)}/task`);
   }
 
   async updateSession(sessionId: string, patch: SessionPatch): Promise<FleetSession> {

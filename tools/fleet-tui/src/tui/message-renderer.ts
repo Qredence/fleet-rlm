@@ -105,6 +105,39 @@ export function renderMessage(
       );
     case "tool":
       return renderTool(message, safeWidth);
+    case "child_progress": {
+      let stateColor: "success" | "error" | "accent" = "accent";
+      if (message.state === "completed") stateColor = "success";
+      else if (message.state === "failed" || message.state === "timed_out") stateColor = "error";
+      const heading = `${theme.fg("accent", theme.bold("◆ CHILD"))} ${theme.bold(terminalSafeText(message.taskLabel))}  ${theme.fg(stateColor, message.state.replaceAll("_", " "))} · ${formatDuration(message.elapsedMs)}`;
+      if (message.collapsed !== false) {
+        const outcome = message.outcome ? `  ${terminalSafeText(message.outcome)}` : "";
+        return panel(
+          [` ${heading}${outcome}  ${dim(`${keyText("fleet.toggleFold")} to expand`)}`],
+          safeWidth,
+        );
+      }
+      return panel(
+        [
+          ` ${heading}`,
+          ` ${muted(`cleanup: ${message.cleanupState.replaceAll("_", " ")}`)}`,
+          ...(message.outcome ? [` ${terminalSafeText(message.outcome)}`] : []),
+          ...(message.evidence?.map((item) => ` ${muted("evidence:")} ${terminalSafeText(item)}`) ??
+            []),
+          ...(message.gaps?.map((item) => ` ${muted("gap:")} ${terminalSafeText(item)}`) ?? []),
+          ...(message.codeExcerpt
+            ? [` ${muted("code:")} ${terminalSafeText(message.codeExcerpt)}`]
+            : []),
+          ...(message.outputExcerpt
+            ? [` ${muted("output:")} ${terminalSafeText(message.outputExcerpt)}`]
+            : []),
+          ...(message.resultFileCount
+            ? [` ${muted(`saved result files: ${message.resultFileCount}`)}`]
+            : []),
+        ],
+        safeWidth,
+      );
+    }
     case "code":
       return renderCode(message, safeWidth);
     case "output":

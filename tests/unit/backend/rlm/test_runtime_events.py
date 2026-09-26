@@ -14,6 +14,7 @@ def test_runtime_detail_union_has_the_exact_v1_discriminators() -> None:
     assert {detail_type.kind for detail_type in RUNTIME_DETAIL_TYPES} == {
         "run.started",
         "status",
+        "child.progress",
         "step.started",
         "step.finished",
         "rlm.reasoning",
@@ -36,6 +37,18 @@ def test_runtime_detail_union_has_the_exact_v1_discriminators() -> None:
         "run.cancelled",
         "run.timed_out",
     }
+
+
+def test_child_progress_is_a_bounded_snapshot() -> None:
+    from fleet_rlm.rlm.events import ChildProgress
+
+    detail = ChildProgress("run:call-2", "Search official docs", "completed", 1200, "Found two sources", "complete")
+    assert detail.kind == "child.progress"
+    assert detail.child_id == "run:call-2"
+    with pytest.raises(ValueError, match="elapsed_ms"):
+        ChildProgress("c1", "Task", "failed", -1)
+    with pytest.raises(ValueError, match="task_label"):
+        ChildProgress("c1", " ", "failed", 1)
 
 
 def test_event_recorder_wraps_typed_details_in_an_immutable_ordered_envelope() -> None:

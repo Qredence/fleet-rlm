@@ -11,18 +11,11 @@ ALLOWED_DAYTONA_IMPORT_ROOTS = {
 }
 EXPECTED_DAYTONA_MODULES = {
     "__init__.py",
-    "admission.py",
     "broker.py",
     "diagnostics.py",
     "errors.py",
     "interpreter.py",
-    "lifecycle.py",
-    "platform.py",
-    "provisioning.py",
-    "recursive_child_runtime.py",
     "runtime.py",
-    "sandbox.py",
-    "session_manager.py",
 }
 
 
@@ -80,17 +73,22 @@ def test_only_daytona_package_imports_daytona_sdk() -> None:
     assert violators == [], f"Daytona SDK imports outside daytona/: {violators}"
 
 
-def test_rlm_recursive_executor_uses_provider_neutral_child_runtime_contract() -> None:
+def test_rlm_recursive_executor_does_not_import_daytona_runtime() -> None:
     path = PACKAGE_ROOT / "rlm" / "recursion.py"
     imports = _imported_modules(ast.parse(path.read_text(encoding="utf-8")))
-    assert "fleet_rlm.daytona.recursive_child_runtime" not in imports
+    assert "fleet_rlm.daytona.runtime" not in imports
+    assert "fleet_rlm.rlm.recursion" not in _imported_modules(
+        ast.parse((PACKAGE_ROOT / "daytona" / "runtime.py").read_text(encoding="utf-8"))
+    )
 
 
-def test_child_runtime_cleanup_and_authorization_errors_have_provider_neutral_identity() -> None:
-    from fleet_rlm.daytona.recursive_child_runtime import (
+def test_child_runtime_cleanup_and_authorization_errors_have_shared_identity() -> None:
+    from fleet_rlm.daytona.errors import (
         ChildRuntimeAuthorizationError as DaytonaAuthorizationError,
     )
-    from fleet_rlm.daytona.recursive_child_runtime import ChildRuntimeCleanupError as DaytonaCleanupError
+    from fleet_rlm.daytona.errors import (
+        ChildRuntimeCleanupError as DaytonaCleanupError,
+    )
     from fleet_rlm.rlm.recursion import (
         ChildRuntimeAuthorizationError,
         ChildRuntimeCleanupError,
@@ -101,10 +99,10 @@ def test_child_runtime_cleanup_and_authorization_errors_have_provider_neutral_id
 
 
 def test_build_daytona_client_is_lazy() -> None:
-    """Platform module may import Daytona types, but must not construct at import."""
-    import fleet_rlm.daytona.platform as platform_module
+    """Runtime module may import Daytona types, but must not construct at import."""
+    import fleet_rlm.daytona.runtime as runtime_module
 
-    source = Path(platform_module.__file__).read_text(encoding="utf-8")
+    source = Path(runtime_module.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     for node in tree.body:
         if not isinstance(node, ast.Expr | ast.Assign | ast.AnnAssign):

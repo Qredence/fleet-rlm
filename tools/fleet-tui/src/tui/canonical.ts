@@ -130,6 +130,23 @@ export interface SkillEvent {
   affordances?: string[] | undefined;
 }
 
+export interface ChildProgressEvent {
+  type: "child_progress";
+  childId: string;
+  parentRunId?: string | undefined;
+  taskLabel: string;
+  state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
+  elapsedMs: number;
+  outcome?: string | undefined;
+  evidence?: string[] | undefined;
+  gaps?: string[] | undefined;
+  resultFileCount?: number | undefined;
+  codeExcerpt?: string | undefined;
+  outputExcerpt?: string | undefined;
+  cleanupState: "pending" | "complete" | "failed" | "not_required";
+  messageId?: string | undefined;
+}
+
 export interface AttachmentEvent {
   /** Adapter-provided positional/wire identity (message minting seed). */
   streamId?: string | undefined;
@@ -200,6 +217,7 @@ export type CanonicalEvent =
   | ToolCallEvent
   | ToolResultEvent
   | SkillEvent
+  | ChildProgressEvent
   | AttachmentEvent
   | WarningEvent
   | ArtifactEvent
@@ -226,6 +244,10 @@ export function serializeCanonicalEvent(event: CanonicalEvent): Record<string, u
     toolCallId: "tool_call_id",
     toolName: "tool_name",
     skillId: "skill_id",
+    childId: "child_id",
+    taskLabel: "task_label",
+    elapsedMs: "elapsed_ms",
+    cleanupState: "cleanup_state",
     attachmentId: "attachment_id",
     byteSize: "byte_size",
     artifactId: "artifact_id",
