@@ -1,0 +1,96 @@
+{
+  "schema": "fleet.phase6-evaluation-campaign/v1",
+  "status": "frozen_plan_only",
+  "records": [
+    {
+      "family": "sparse_retrieval",
+      "input": "Evidence: P1 signed access policy: access is permitted only after security approval. P2 ticket: approval requested, decision pending. P3 unverified chat: ‘probably approved’. Find the governing clause, decide whether access is established, and cite evidence.",
+      "input_sha256": "949f13dd6bea1d832d6b35c05f3749889960982ee8a6ba4b77761b6ac2855f9b",
+      "rubric": {
+        "criteria": [
+          "Identify the governing clause",
+          "Distinguish a request from an approval decision",
+          "Cite the decisive source",
+          "State uncertainty when approval evidence is absent"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "ad3dbe64c78408458464cc158d31070a285edc9185683bd5cac661558788c215"
+    },
+    {
+      "family": "exhaustive_semantic_aggregation",
+      "input": "Evidence ledger: L1 approved 120; L2 approved 80; L3 approved 45; L4 draft 900; L5 draft 700; L6 approved credit -15. Compute the approved net total, include every approved value and credit, exclude drafts, show arithmetic, and cite each included or excluded record.",
+      "input_sha256": "54b634efb16e7ca86fff8391efad0e250afcb794aa41924b1a6cac0ab8b0c5dd",
+      "rubric": {
+        "criteria": [
+          "Include every approved entry",
+          "Exclude every draft entry",
+          "Arithmetic is correct",
+          "Cite included and excluded records"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "251bc056a131fda7ffcd12f38545eaecae0489687de952fa04312cf743da3842"
+    },
+    {
+      "family": "cross_document_reconciliation",
+      "input": "Evidence: C1 signed agreement effective 2024-01-01 requires written notice received 30 days before renewal. C2 amendment effective 2025-01-01 requires 45 days only for agreements executed after that date. C3 agreement signature date is 2024-06-01 and it does not incorporate future amendments. C4 renewal is 2025-04-01. C5 notice sent 2025-02-27 and received 2025-02-28. Reconcile authority/effective dates and decide timeliness.",
+      "input_sha256": "8014e3048c92272b98e5cb6860490a90baca809732ca899663289823b757f185",
+      "rubric": {
+        "criteria": [
+          "Apply authority and effective-date hierarchy",
+          "Use receipt rather than sending date when required",
+          "Reach a supported timeliness conclusion",
+          "Cite each controlling source and identify residual uncertainty"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "4d65ccd0f910c6731176bbcb3d200266c973a1dff77e5e3b25d780a8750236b8"
+    },
+    {
+      "family": "repository_investigation",
+      "input": "Repository snapshot: src/request.py defines MAX_REQUEST_BYTES = 1024 and reject_oversized(body: bytes), which raises RequestTooLarge when len(body) > MAX_REQUEST_BYTES. tests/test_request.py::test_rejects_body_over_limit passes a 1025-byte body and asserts that exception. Identify the enforcing path and symbol, describe the limit behavior, and cite the test. Do not infer behavior from filenames alone.",
+      "input_sha256": "062ed5e1d054b2f792e6cbd11716730ff73ec36bfd8dc9ba11079fa5567019ad",
+      "rubric": {
+        "criteria": [
+          "Name a source-backed path and symbol",
+          "Explain actual enforcement behavior",
+          "Cite a test that exercises it",
+          "Avoid unsupported repository claims"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "c18bfc5b91aeb82cb52b4238570ef7b1ad4c63bf927f1ecd961b1903ae6cc1e7"
+    },
+    {
+      "family": "decomposable_reasoning",
+      "input": "Project records: Team A capacity 9; Team B capacity 7. Work item W1 requires 5; W2 requires 4; W3 requires 6. Each item must stay intact and be assigned once. Calculate remaining capacity, determine which items fit, and recommend an allocation with arithmetic and source-row citations.",
+      "input_sha256": "6401b9375e62a2885df570f713ef407375e399b2b14214cc6ee59811f0e8e0ec",
+      "rubric": {
+        "criteria": [
+          "Calculate capacity correctly for every team",
+          "Check each work item's full size",
+          "Allocation respects all capacities",
+          "Cite every numerical input"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "7a079c3d1cba4862fe7ef3667423066ab18bb0e2e49029de3f612b31211489e2"
+    },
+    {
+      "family": "multi_turn_continuation",
+      "input": "Context for both turns: R1 says access is allowed only after documented approval. R2 says all vendor access needs two approvers. R3 records two approvals on 2024-12-20. Turn 1: summarize the decision and evidence. Turn 2: using only established context plus this correction, update the decision and explain what changed: R4 supersedes R2 from 2025-01-01 onward, and the access request is dated 2025-02-01.",
+      "input_sha256": "f22df15cf17df01352905b23226d80e107471990a2130dd63ef0790937bdb44a",
+      "rubric": {
+        "criteria": [
+          "Preserve valid prior facts",
+          "Apply the new correction only within its stated scope",
+          "Explicitly identify changed and unchanged conclusions",
+          "Cite prior and new evidence; disclose missing context"
+        ],
+        "unknown_policy": "Unobserved evidence, coverage, usage, staging, cleanup, or failure status must remain unknown; never treat missing data as success."
+      },
+      "rubric_sha256": "92de4dcc09502ba35981cf0c580e2d02d48b74ddfa9374f894cd47ff1bafb37e"
+    }
+  ]
+}
