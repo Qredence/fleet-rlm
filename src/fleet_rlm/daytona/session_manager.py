@@ -618,9 +618,14 @@ class DaytonaSessionManager:
         try:
             release_task = asyncio.create_task(asyncio.to_thread(lease.release))
             await _settle_provider_task(release_task)
-        except BaseException:
+        except asyncio.CancelledError:
             # Cancellation cannot skip remote sandbox quarantine.
-            logger.warning("Late interpreter lease release failed; continuing sandbox quarantine")
+            logger.warning("Late interpreter lease release was cancelled; continuing sandbox quarantine")
+        except Exception as exc:
+            logger.warning(
+                "Late interpreter lease release failed; continuing sandbox quarantine",
+                extra={"error_type": type(exc).__name__},
+            )
 
         quarantine_error: BaseException | None = None
         # A failed interpreter/broker release cannot discard remote ownership.
@@ -636,7 +641,9 @@ class DaytonaSessionManager:
                     run_id=owner.run_id,
                 ),
             )
-        except BaseException as exc:
+        except asyncio.CancelledError as exc:
+            quarantine_error = exc
+        except Exception as exc:
             # Keep ownership and admission while failed quarantine is retried.
             quarantine_error = exc
 

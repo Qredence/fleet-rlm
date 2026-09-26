@@ -117,10 +117,14 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_provider_retries() ->
     policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
 
-    assert {key: document["defaults"]["rlm"][key] for key in ("max_iters", "max_llm_calls", "max_output_chars")} == {
+    assert {
+        key: document["defaults"]["rlm"][key]
+        for key in ("max_iters", "max_llm_calls", "max_output_chars", "max_final_output_chars")
+    } == {
         "max_iters": 12,
         "max_llm_calls": 32,
         "max_output_chars": 6_000,
+        "max_final_output_chars": 6_000,
     }
     # MaaS carries no per-minute output-token quota, but backs off provider 429s.
     assert document["defaults"]["llm"]["root"]["num_retries"] == 3
@@ -383,6 +387,7 @@ max_llm_calls = 4
 max_provider_attempts = 32
 max_tool_calls = 16
 max_output_chars = 500
+max_final_output_chars = 500
 max_execution_output_chars = 250
 max_execution_output_bytes = 10000
 execution_timeout_s = 90

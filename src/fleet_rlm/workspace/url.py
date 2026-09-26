@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import re
 import socket
 import time
@@ -73,11 +74,25 @@ class UrlFetchResult:
         return self.text.encode("utf-8")
 
 
+@dataclass(frozen=True, slots=True)
+class StoredUrlSource:
+    """One fetched source plus the truthfulness of its returned reference."""
+
+    text: str
+    durable: bool
+    workspace_path: str | None
+    byte_size: int
+    checksum_sha256: str
+
+
 class UrlSourceStore(Protocol):
     """Read and write one Session-scoped normalized URL source."""
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None: ...
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> bool: ...
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None:
+        raise NotImplementedError
+
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource:
+        raise NotImplementedError
 
 
 class UrlFetcher(Protocol):
@@ -312,8 +327,7 @@ class InMemoryUrlSourceStore:
         self._total_bytes = 0
         self._lock = RLock()
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None:
-        del max_bytes
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None:
         with self._lock:
             values = self._values.get(session_id)
             if values is None or path not in values:
@@ -323,14 +337,30 @@ class InMemoryUrlSourceStore:
             key = (session_id, path)
             self._order.pop(key, None)
             self._order[key] = None
-            return value
+            data = value.encode("utf-8")
+            if len(data) > max_bytes:
+                raise UrlToolError("too_large", "Cached URL content exceeds the configured size limit")
+            return StoredUrlSource(
+                text=value,
+                durable=False,
+                workspace_path=None,
+                byte_size=len(data),
+                checksum_sha256=hashlib.sha256(data).hexdigest(),
+            )
 
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> bool:
-        if len(content.encode("utf-8")) > max_bytes:
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource:
+        data = content.encode("utf-8")
+        if len(data) > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
-        content_bytes = len(content.encode("utf-8"))
+        content_bytes = len(data)
         if content_bytes > self._max_bytes_total:
-            return False
+            return StoredUrlSource(
+                text=content,
+                durable=False,
+                workspace_path=None,
+                byte_size=content_bytes,
+                checksum_sha256=hashlib.sha256(data).hexdigest(),
+            )
         with self._lock:
             values = self._values.setdefault(session_id, OrderedDict())
             previous = values.pop(path, None)
@@ -357,8 +387,15 @@ class InMemoryUrlSourceStore:
                     self._total_bytes -= len(evicted_content.encode("utf-8"))
                 if not evicted_values:
                     self._values.pop(evicted_session_id, None)
-            retained_values = self._values.get(session_id)
-            return retained_values is not None and path in retained_values
+            if path not in values:
+                raise UrlToolError("cache_full", "URL source cache is full")
+            return StoredUrlSource(
+                text=content,
+                durable=False,
+                workspace_path=None,
+                byte_size=content_bytes,
+                checksum_sha256=hashlib.sha256(data).hexdigest(),
+            )
 
 
 class WorkspaceUrlSourceStore:
@@ -387,7 +424,7 @@ class WorkspaceUrlSourceStore:
         self._max_entries_total = max_entries_total
         self._max_bytes_total = max_bytes_total
 
-    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> str | None:
+    def read(self, session_id: UUID, path: str, *, max_bytes: int) -> StoredUrlSource | None:
         try:
             entry = self._workspace.stat(path)
         except FileNotFoundError:
@@ -416,17 +453,21 @@ class WorkspaceUrlSourceStore:
                 _WORKSPACE_CACHE_INTEGRITY.pop(cache_key, None)
                 return None
             _WORKSPACE_CACHE_INTEGRITY.move_to_end(cache_key)
-        return "".join(chunks)
+        text = "".join(chunks)
+        data = text.encode("utf-8")
+        return StoredUrlSource(
+            text=text,
+            durable=True,
+            workspace_path=path,
+            byte_size=len(data),
+            checksum_sha256=checksum,
+        )
 
-    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> bool:
-        content_bytes = len(content.encode("utf-8"))
+    def write(self, session_id: UUID, path: str, content: str, *, max_bytes: int) -> StoredUrlSource:
+        data = content.encode("utf-8")
+        content_bytes = len(data)
         if content_bytes > max_bytes:
             raise UrlToolError("too_large", "URL content exceeds the configured size limit")
-
-        def capacity_refusal() -> bool:
-            if content_bytes > URL_INLINE_CONTENT_MAX_BYTES:
-                raise UrlToolError("cache_unavailable", "URL content could not be persisted")
-            return False
 
         try:
             try:
@@ -442,25 +483,34 @@ class WorkspaceUrlSourceStore:
             )
             existing = next((entry for entry in cache_entries if entry.path == path), None)
             if listing.truncated or any(entry.byte_size is None for entry in cache_entries):
-                return capacity_refusal()
+                raise UrlToolError("cache_unavailable", "URL source cache cannot be verified")
             total_bytes = sum(entry.byte_size or 0 for entry in cache_entries)
             if existing is None and len(cache_entries) >= self._max_entries_total:
-                return capacity_refusal()
+                raise UrlToolError("cache_full", "URL source cache is full")
             existing_bytes = 0
             if existing is not None:
                 if existing.byte_size is None:
-                    return capacity_refusal()
+                    raise UrlToolError("cache_unavailable", "URL source cache cannot be verified")
                 existing_bytes = existing.byte_size
             if total_bytes - existing_bytes + content_bytes > self._max_bytes_total:
-                return capacity_refusal()
-            self._workspace.write_text(path, content, overwrite=True)
+                raise UrlToolError("cache_full", "URL source cache is full")
+            entry = self._workspace.write_text(path, content, overwrite=True)
+            if entry.path != path or entry.kind != "file" or entry.byte_size != content_bytes:
+                raise UrlToolError("cache_unavailable", "URL source cache write could not be verified")
+            checksum = hashlib.sha256(data).hexdigest()
             cache_key = (session_id, path)
             with _WORKSPACE_CACHE_INTEGRITY_LOCK:
-                _WORKSPACE_CACHE_INTEGRITY[cache_key] = hashlib.sha256(content.encode("utf-8")).hexdigest()
+                _WORKSPACE_CACHE_INTEGRITY[cache_key] = checksum
                 _WORKSPACE_CACHE_INTEGRITY.move_to_end(cache_key)
                 while len(_WORKSPACE_CACHE_INTEGRITY) > URL_CACHE_MAX_ENTRIES_TOTAL:
                     _WORKSPACE_CACHE_INTEGRITY.popitem(last=False)
-            return True
+            return StoredUrlSource(
+                text=content,
+                durable=True,
+                workspace_path=path,
+                byte_size=content_bytes,
+                checksum_sha256=checksum,
+            )
         except UrlToolError:
             raise
         except Exception as exc:
@@ -497,21 +547,17 @@ class UrlToolHost:
                     return self._result(
                         source_id=source_id,
                         canonical_url=canonical,
-                        path=path,
                         content_type=None,
-                        text=cached,
+                        source=cached,
                         cache_hit=True,
                     )
                 fetched = self._fetcher.fetch(canonical, max_bytes=self._max_bytes)
-                persisted = self._store.write(self._session_id, path, fetched.text, max_bytes=self._max_bytes)
-                if len(fetched.data) > URL_INLINE_CONTENT_MAX_BYTES and not persisted:
-                    raise UrlToolError("cache_unavailable", "URL content could not be persisted")
+                source = self._store.write(self._session_id, path, fetched.text, max_bytes=self._max_bytes)
                 return self._result(
                     source_id=source_id,
                     canonical_url=fetched.canonical_url,
-                    path=path,
                     content_type=fetched.content_type,
-                    text=fetched.text,
+                    source=source,
                     cache_hit=False,
                 )
             except UrlToolError as exc:
@@ -566,26 +612,30 @@ class UrlToolHost:
         *,
         source_id: str,
         canonical_url: str,
-        path: str,
         content_type: str | None,
-        text: str,
+        source: StoredUrlSource,
         cache_hit: bool,
     ) -> dict[str, object]:
-        data = text.encode("utf-8")
         result: dict[str, object] = {
             "ok": True,
             "source_id": source_id,
             "canonical_url": canonical_url,
-            "workspace_path": path,
-            "byte_size": len(data),
-            "checksum_sha256": hashlib.sha256(data).hexdigest(),
+            "byte_size": source.byte_size,
+            "checksum_sha256": source.checksum_sha256,
             "cache_hit": cache_hit,
         }
-        if len(data) <= URL_INLINE_CONTENT_MAX_BYTES:
-            result["content"] = text
-        else:
+        if source.durable:
+            assert source.workspace_path is not None
+            result["workspace_path"] = source.workspace_path
+        inline = {**result, "content": source.text}
+        inline_bytes = json.dumps(inline, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        if len(inline_bytes) <= URL_INLINE_CONTENT_MAX_BYTES:
+            result["content"] = source.text
+        elif source.durable:
             result["content_available"] = True
-            result["content_preview"] = text[:URL_CONTENT_PREVIEW_CHARS]
+            result["content_preview"] = source.text[:URL_CONTENT_PREVIEW_CHARS]
+        else:
+            raise UrlToolError("cache_unavailable", "Large URL content requires Session Workspace storage")
         if content_type is not None:
             result["content_type"] = content_type
         return result
@@ -594,6 +644,7 @@ class UrlToolHost:
 __all__ = [
     "URL_INLINE_CONTENT_MAX_BYTES",
     "InMemoryUrlSourceStore",
+    "StoredUrlSource",
     "UrlFetchResult",
     "UrlFetcher",
     "UrlSourceStore",

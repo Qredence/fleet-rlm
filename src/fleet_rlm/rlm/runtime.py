@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import contextvars
 import logging
-import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -318,41 +317,26 @@ def _fingerprint(tool_name: str, arguments: Mapping[str, Any], result: object) -
     return sha256(value.encode("utf-8")).hexdigest()
 
 
-_WORKSPACE_PATH_RE = re.compile(
-    r"(?<![\w.-])(?:(?:workspace|projects)/)?(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,16}(?![\w.-])"
-)
-
-# Host tool name -> stable guard-target namespace. Fingerprints for existing
-# ``session_workspace:`` targets are unchanged; ``projects/<slug>/<path>``
-# targets join as ``project_workspace:<slug>/<path>``. The delete/edit tools
-# (WS-7) track against the same targets.
+# Host tool name -> stable guard-target namespace. Only mutations become
+# integrity obligations; reads are used to verify repaired writes.
 _WORKSPACE_TOOL_NAMESPACES = {
     "write_workspace_text": "session_workspace",
     "append_workspace_text": "session_workspace",
-    "read_workspace_text": "session_workspace",
     "delete_workspace_path": "session_workspace",
     "edit_workspace_text": "session_workspace",
     "publish_workspace_artifact": "session_workspace",
     "write_project_text": "project_workspace",
-    "read_project_text": "project_workspace",
     "delete_project_path": "project_workspace",
     "edit_project_text": "project_workspace",
 }
+_WORKSPACE_READ_NAMESPACES = {
+    "read_workspace_text": "session_workspace",
+    "read_project_text": "project_workspace",
+}
 
-_PREFIX_NAMESPACES = (("projects/", "project_workspace"), ("workspace/", "session_workspace"))
 
-
-def _canonical_target(path: object, *, namespace: str | None = None) -> str | None:
-    """Canonicalize one guard target; an explicit tool namespace is authoritative.
-
-    Without ``namespace`` (request-text obligations) the guard-target language
-    infers the namespace from a ``projects/`` or ``workspace/`` path prefix.
-    With ``namespace`` (tool-derived targets) prefixes never cross namespaces:
-    project tools tolerate only a redundant leading ``projects/`` segment
-    (mirroring ``normalize_project_path``), and session-workspace tools use
-    their paths verbatim, so a ``projects/...`` path passed to a session tool
-    stays a ``session_workspace:`` target.
-    """
+def _canonical_target(path: object, *, namespace: str) -> str | None:
+    """Canonicalize a target using the authoritative host-tool namespace."""
     if not isinstance(path, str):
         return None
     try:
@@ -361,73 +345,34 @@ def _canonical_target(path: object, *, namespace: str | None = None) -> str | No
         normalized = normalize_workspace_path(path)
     except (TypeError, WorkspacePathError):
         return None
-    if namespace is None:
-        namespace = "session_workspace"
-        for prefix, prefix_namespace in _PREFIX_NAMESPACES:
-            if normalized.startswith(prefix):
-                namespace = prefix_namespace
-                normalized = normalized.removeprefix(prefix)
-                break
-    elif namespace == "project_workspace":
+    if namespace == "project_workspace":
         normalized = normalized.removeprefix("projects/")
     return f"{namespace}:{normalized}"
 
 
 def _workspace_target(tool_name: str, arguments: Mapping[str, Any]) -> str | None:
-    namespace = _WORKSPACE_TOOL_NAMESPACES.get(tool_name)
+    namespace = _WORKSPACE_TOOL_NAMESPACES.get(tool_name) or _WORKSPACE_READ_NAMESPACES.get(tool_name)
     if namespace is None:
         return None
     return _canonical_target(arguments.get("path"), namespace=namespace)
 
 
-def workspace_obligations(request: str) -> frozenset[str] | None:
-    """Extract explicit workspace and project file targets from the user's task text."""
-    targets: set[str] = set()
-    for match in _WORKSPACE_PATH_RE.finditer(request):
-        target = _canonical_target(match.group(0))
-        if target:
-            targets.add(target)
-    return frozenset(targets) if targets else None
-
-
 @dataclass(slots=True)
 class RunIntegrityLedger:
-    """Keep failed required workspace mutations unresolved until repaired in-place."""
+    """Keep failed workspace mutations unresolved until repaired in-place."""
 
     _unresolved: set[str] = field(default_factory=set)
-    required_targets: frozenset[str] | None = None
     _expected_content: dict[str, str] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        if self.required_targets is not None:
-            self._unresolved.update(self.required_targets)
-
-    def set_required_targets(self, targets: frozenset[str] | None) -> None:
-        """Seed named request obligations before the worker can submit."""
-        self.required_targets = targets
-        if targets is not None:
-            self._unresolved.update(targets)
 
     def _target(self, tool_name: str, arguments: Mapping[str, Any]) -> str | None:
         target = _workspace_target(tool_name, arguments)
         if target is None:
             return None
-        if self.required_targets is not None:
-            if target in self.required_targets:
-                return target
-            # Request prose historically treats ``workspace/`` as an explicit
-            # session-workspace namespace marker, while host tools receive the
-            # literal path. Accept that unambiguous alias without allowing a
-            # project target or unrelated path to satisfy the obligation.
-            workspace_alias = "session_workspace:workspace/"
-            if target.startswith(workspace_alias):
-                stripped = "session_workspace:" + target.removeprefix(workspace_alias)
-                if stripped in self.required_targets:
-                    return stripped
-            return None
         return target
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
+        if tool_name not in _WORKSPACE_TOOL_NAMESPACES:
+            return
         if target := self._target(tool_name, arguments):
             self._unresolved.add(target)
             self._expected_content.pop(target, None)
@@ -505,19 +450,14 @@ class RunToolGuards:
 
     integrity: RunIntegrityLedger = field(default_factory=RunIntegrityLedger)
     progress: ToolProgressGuard = field(default_factory=ToolProgressGuard)
-    required_targets: frozenset[str] | None = None
     budget: TurnBudget | None = None
-
-    def __post_init__(self) -> None:
-        if self.required_targets is not None:
-            self.integrity.set_required_targets(self.required_targets)
 
     def completed(self, tool_name: str, arguments: Mapping[str, Any], result: object) -> str | None:
         self.integrity.completed(tool_name, arguments, result)
         return self.progress.completed(tool_name, arguments, result)
 
     def failed(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
-        """Record that a tool operation failed without resolving its workspace obligation."""
+        """Record a failed workspace mutation without resolving its integrity target."""
         self.integrity.failed(tool_name, arguments)
 
     def reserve_tool(self) -> None:
@@ -1104,7 +1044,7 @@ class RLMRunner:
             spec.signature,
             schema_id=spec.output_schema_id,
             schema_version=spec.output_schema_version,
-            max_output_chars=context.execution.options.max_output_chars,
+            max_output_chars=context.execution.options.max_final_output_chars,
         )
         outcome.append(
             RLMOutcome(
@@ -1181,10 +1121,7 @@ class RLMRunner:
         if self._closed:
             raise RunTerminalError("RLM runner is closed")
         spec = context.capabilities.spec
-        guards = RunToolGuards(
-            required_targets=workspace_obligations(context.session.request),
-            budget=getattr(context.execution.models, "budget", None),
-        )
+        guards = RunToolGuards(budget=getattr(context.execution.models, "budget", None))
         recursive_executor = None
         if context.delegation.recursive_options.enabled:
             if context.delegation.child_runtime_factory is None:
@@ -1693,5 +1630,4 @@ __all__ = [
     "probe_configured_root_lm",
     "probe_root_lm",
     "start_rlm_worker",
-    "workspace_obligations",
 ]

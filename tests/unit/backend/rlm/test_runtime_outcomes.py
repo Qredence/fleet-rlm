@@ -118,7 +118,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
         ),
         execution=ExecutionRuntime(
             models=SimpleNamespace(root_lm=object(), sub_lm=object()),
-            options=RLMOptions(max_output_chars=32),
+            options=RLMOptions(max_output_chars=32, max_final_output_chars=32),
             deadline=asyncio.get_running_loop().time() + 10,
             interpreter=None,
             cancellation_requested=not_cancelled,
