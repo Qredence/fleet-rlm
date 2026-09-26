@@ -625,7 +625,7 @@ def test_daytona_workspace_storage_rejects_listing_paths_outside_trusted_root(it
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    from fleet_rlm.workspace.paths import UnsafePathError
+    from fleet_rlm.paths import UnsafePathError
     from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
 
     fs = MagicMock()
