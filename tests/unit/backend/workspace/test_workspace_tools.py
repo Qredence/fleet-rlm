@@ -592,6 +592,7 @@ def test_daytona_workspace_storage_lists_direct_children(directory: str) -> None
     prefix = "" if directory == "." else f"{directory}/"
     full_path = root if directory == "." else f"{root}/{directory}"
     fs = MagicMock()
+    fs.get_file_info.return_value = {"mode": "040755", "is_symlink": False, "symlink": False}
     fs.list_files.return_value = [
         {"path": f"{full_path}/{name}", "is_dir": is_dir, "size": 7, "mod_time": "2026-09-20T00:00:00Z"}
         for name, is_dir in [
@@ -601,7 +602,7 @@ def test_daytona_workspace_storage_lists_direct_children(directory: str) -> None
             (".fleet-private", True),
             (".fleet-private/state", False),
         ]
-    ] + [{"path": full_path}, {"path": f"{root}/../outside.md"}, {"path": "/elsewhere/file.md"}]
+    ] + [{"path": full_path}]
     storage = DaytonaSandboxWorkspaceStorage(SimpleNamespace(fs=fs), volume_root="/workspace", root=root)
 
     first = storage.list_entries(directory, limit=1)
@@ -614,6 +615,28 @@ def test_daytona_workspace_storage_lists_direct_children(directory: str) -> None
     assert [(entry.path, entry.kind) for entry in second.entries] == [(f"{prefix}z.md", "file")]
     assert second.truncated is False
     assert second.next_cursor is None
+
+
+@pytest.mark.parametrize(
+    "item_path",
+    ["/workspace/sessions/session-a/workspace/../outside.md", "/elsewhere/file.md"],
+)
+def test_daytona_workspace_storage_rejects_listing_paths_outside_trusted_root(item_path: str) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from fleet_rlm.workspace.paths import UnsafePathError
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    fs = MagicMock()
+    fs.get_file_info.return_value = {"mode": "040755", "is_symlink": False, "symlink": False}
+    fs.list_files.return_value = [{"path": item_path}]
+    storage = DaytonaSandboxWorkspaceStorage(
+        SimpleNamespace(fs=fs), volume_root="/workspace", root="/workspace/sessions/session-a/workspace"
+    )
+
+    with pytest.raises(UnsafePathError, match="workspace listing escapes"):
+        storage.list_entries()
 
 
 def test_daytona_workspace_storage_mutates_only_through_sandbox_filesystem() -> None:

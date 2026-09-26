@@ -984,14 +984,17 @@ class DaytonaSandboxWorkspaceStorage:
             try:
                 item_posix = PurePosixPath(item_path)
                 relative = str(item_posix.relative_to(self._root))
+                child = str(item_posix.relative_to(PurePosixPath(full_path)))
             except ValueError as exc:
-                raise UnsafePathError("workspace listing escapes trusted root") from exc
+                raise UnsafePathError("workspace listing escapes requested path") from exc
+            if child == ".":
+                continue
             if relative in {"..", ""} or relative.startswith("../"):
                 raise UnsafePathError("workspace listing escapes trusted root")
             # Some SDK listing records omit symlink metadata, so verify each
             # candidate through get_file_info before projecting it.
             self._assert_no_symlink(str(item_posix))
-            if "/" in relative or relative.startswith(".fleet"):
+            if "/" in child or child.startswith(".fleet"):
                 continue
             is_dir = getattr(item, "is_dir", item.get("is_dir", False) if isinstance(item, Mapping) else False)
             size = getattr(item, "size", item.get("size") if isinstance(item, Mapping) else None)
