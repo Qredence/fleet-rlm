@@ -42,6 +42,30 @@ from fleet_rlm.workspace.storage import (
 logger = logging.getLogger(__name__)
 
 
+async def _cleanup_scratch_before_releasing_invocation(
+    cleanup: Callable[[], Any] | None,
+    release_invocation: Callable[[], None] | None,
+) -> None:
+    """Keep the Session invocation gate held until threaded scratch cleanup settles."""
+    try:
+        if cleanup is None:
+            return
+        cleanup_task = asyncio.create_task(asyncio.to_thread(cleanup))
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    continue
+            cleanup_task.result()
+            raise
+    finally:
+        if release_invocation is not None:
+            release_invocation()
+
+
 class _DaytonaRunSink:
     def __init__(
         self,
@@ -242,10 +266,10 @@ class _DaytonaEnvironmentProvider:
 
             async def release_preparation() -> None:
                 cleanup_run_scratch = getattr(lease.interpreter, "cleanup_run_scratch", None)
-                if callable(cleanup_run_scratch):
-                    await asyncio.to_thread(cleanup_run_scratch)
-                if release_invocation is not None:
-                    release_invocation()
+                await _cleanup_scratch_before_releasing_invocation(
+                    cleanup_run_scratch if callable(cleanup_run_scratch) else None,
+                    release_invocation,
+                )
 
             child_runtime_factory = self.runtime.build_child_factory(
                 volume_id=lease.volume_id,
