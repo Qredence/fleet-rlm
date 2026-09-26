@@ -18,7 +18,7 @@ import pytest
 from fastapi import HTTPException
 
 from fleet_rlm.api.dependencies import get_session_prewarm
-from fleet_rlm.app_services import RuntimeInventory
+from fleet_rlm.app_services import RouteServices, RuntimeInventory
 
 
 class _RecordingManager:
@@ -67,32 +67,26 @@ class _Request:
 
 class _App:
     def __init__(self, *, ready: bool, inventory: RuntimeInventory | None) -> None:
-        from fleet_rlm.app_services import RouteServices
-
         self.state = SimpleNamespace(
             composition_ready=ready,
             runtime_inventory=inventory,
-            route_services=(
-                RouteServices(
-                    turn_runtime=object(),
-                    attachment_lifecycle=object(),
-                    artifact_reader=object(),
-                    session_catalog=object(),
-                    session_lifecycle=object(),
-                    config_policy=object(),
-                    workspace_volume_gateway=object(),
-                    workspace_file_service=object(),
-                    daytona_runtime=inventory.daytona_runtime,
-                )
-                if inventory is not None
-                else None
-            ),
+            route_services=inventory.route_services if inventory is not None else None,
         )
 
 
 def _inventory(manager: _RecordingManager | None) -> RuntimeInventory:
-    resources = None if manager is None else SimpleNamespace(runtime=manager)
-    return RuntimeInventory(run_environment_resources=resources)  # type: ignore[arg-type]
+    routes = RouteServices(
+        turn_runtime=object(),
+        attachment_lifecycle=object(),
+        artifact_reader=object(),
+        session_catalog=object(),
+        session_lifecycle=object(),
+        config_policy=object(),
+        workspace_volume_gateway=object(),
+        workspace_file_service=object(),
+        daytona_runtime=manager,
+    )
+    return RuntimeInventory(route_services=routes, daytona_runtime_owner=manager)  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio

@@ -57,11 +57,9 @@ def test_strict_cleanup_awaits_provider_operations_before_returning() -> None:
     platform = _Platform()
     volume = _VolumeClient()
     resources = SimpleNamespace(
-        runtime=SimpleNamespace(
-            _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
-            _platform=platform,
-            _client=SimpleNamespace(volume=volume),
-        ),
+        _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
+        _platform=platform,
+        _client=SimpleNamespace(volume=volume),
     )
 
     failures = asyncio.run(_strict_cleanup(resources, "phase1-volume"))
@@ -71,7 +69,7 @@ def test_strict_cleanup_awaits_provider_operations_before_returning() -> None:
     assert platform.delete_calls == ["sandbox-a", "sandbox-b"]
     assert volume.get_calls == [("phase1-volume", False)]
     assert len(volume.delete_calls) == 1
-    assert resources.runtime._tracked_sandbox_ids == []
+    assert resources._tracked_sandbox_ids == []
 
 
 @pytest.mark.parametrize("failed_resource", ["sandbox", "volume"])
@@ -79,9 +77,7 @@ def test_cleanup_failure_is_reported_and_other_resources_still_settle(monkeypatc
     monkeypatch.setattr(_cleanup, "_CLEANUP_RETRY_DELAYS", ())
     platform, volume = _Platform(), _VolumeClient()
     resources = SimpleNamespace(
-        runtime=SimpleNamespace(
-            _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
-        )
+        _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
     )
 
     async def fail(_resource):
@@ -92,7 +88,7 @@ def test_cleanup_failure_is_reported_and_other_resources_still_settle(monkeypatc
     failures = asyncio.run(_strict_cleanup(resources, "owned-volume"))
 
     assert failures == (failed_resource,)
-    assert resources.runtime._tracked_sandbox_ids == []
+    assert resources._tracked_sandbox_ids == []
     if failed_resource == "sandbox":
         assert len(volume.delete_calls) == 1
     else:
@@ -103,11 +99,9 @@ def test_mvp_cleanup_skips_configured_shared_volume() -> None:
     platform = _Platform()
     volume = _VolumeClient()
     resources = SimpleNamespace(
-        runtime=SimpleNamespace(
-            _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
-            _platform=platform,
-            _client=SimpleNamespace(volume=volume),
-        ),
+        _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
+        _platform=platform,
+        _client=SimpleNamespace(volume=volume),
     )
 
     failures = asyncio.run(_mvp_strict_cleanup(resources, set(), "fleet-volume"))
@@ -117,16 +111,14 @@ def test_mvp_cleanup_skips_configured_shared_volume() -> None:
     assert platform.delete_calls == ["sandbox-a", "sandbox-b"]
     assert volume.get_calls == []
     assert volume.delete_calls == []
-    assert resources.runtime._tracked_sandbox_ids == []
+    assert resources._tracked_sandbox_ids == []
 
 
 def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
     platform = _Platform()
     volume = _VolumeClient()
     resources = SimpleNamespace(
-        runtime=SimpleNamespace(
-            _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
-        ),
+        _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
     )
     name = "fleet-rlm-live-mvp-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
@@ -136,4 +128,4 @@ def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
     assert platform.delete_calls == ["sandbox-a"]
     assert volume.get_calls == [(name, False)]
     assert len(volume.delete_calls) == 1
-    assert resources.runtime._tracked_sandbox_ids == []
+    assert resources._tracked_sandbox_ids == []
