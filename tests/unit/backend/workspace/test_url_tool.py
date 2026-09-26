@@ -305,7 +305,8 @@ def test_workspace_url_tool_rejects_large_result_when_cache_capacity_is_full(
 def test_in_memory_url_tool_does_not_evict_cached_content_for_unstorable_large_result() -> None:
     session_id = uuid4()
     store = InMemoryUrlSourceStore(max_bytes_total=128)
-    assert store.write(session_id, "sources/urls/keep.txt", "keep", max_bytes=128)
+    persisted = store.write(session_id, "sources/urls/keep.txt", "keep", max_bytes=128)
+    assert persisted
     content = "x" * (URL_INLINE_CONTENT_MAX_BYTES + 1)
     tool = UrlToolHost(
         session_id=session_id,

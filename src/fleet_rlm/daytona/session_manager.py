@@ -619,6 +619,7 @@ class DaytonaSessionManager:
             release_task = asyncio.create_task(asyncio.to_thread(lease.release))
             await _settle_provider_task(release_task)
         except BaseException:
+            # Cancellation cannot skip remote sandbox quarantine.
             logger.warning("Late interpreter lease release failed; continuing sandbox quarantine")
 
         quarantine_error: BaseException | None = None
@@ -636,6 +637,7 @@ class DaytonaSessionManager:
                 ),
             )
         except BaseException as exc:
+            # Keep ownership and admission while failed quarantine is retried.
             quarantine_error = exc
 
         if quarantine_error is not None:
@@ -1340,6 +1342,7 @@ class DaytonaSessionManager:
                 try:
                     await self._release_interpreter(lease)
                 except BaseException as exc:
+                    # Local release cancellation cannot skip provider retirement.
                     release_error = exc
             # Provider retirement is still required after a broker shutdown
             # failure. It is the containment fallback for a lease whose local
