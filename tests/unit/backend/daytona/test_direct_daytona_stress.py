@@ -19,6 +19,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from dspy import FinalOutput
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
@@ -40,7 +41,6 @@ from fleet_rlm.daytona.runtime import (
     cleanup_child_runtime_async,
     confirm_absence,
 )
-from fleet_rlm.rlm.compat_3_3_1 import FinalOutput
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 # ============================================================================

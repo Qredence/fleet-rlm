@@ -11,17 +11,21 @@ from fleet_rlm.daytona.runtime import (
     DEFAULT_VOLUME_NAME,
     VolumeConfig,
     get_or_create_volume_id,
+    require_volume_mount_subpath,
     volume_config_from_settings,
     volume_mount_spec,
 )
-from fleet_rlm.sessions.bindings import require_scoped_volume_subpath
-from fleet_rlm.workspace.paths import (
+from fleet_rlm.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
     UnsafePathError,
     VolumePaths,
     resolve_under_root,
     validate_mount_path,
     validate_path_id,
+)
+from fleet_rlm.sessions.bindings import (
+    require_scoped_volume_subpath,
+    session_workspace_volume_subpath,
 )
 
 
@@ -110,6 +114,20 @@ def test_resolve_under_root_rejects_escape() -> None:
         resolve_under_root(root, "sessions", "../x")
     ok = resolve_under_root(root, "sessions", str(uuid4()))
     assert str(ok).startswith("/home/daytona/fleet/sessions/")
+
+
+def test_volume_mount_subpath_accepts_only_canonical_session_workspaces() -> None:
+    workspace_id = uuid4()
+    session_id = uuid4()
+    subpath = session_workspace_volume_subpath(workspace_id, session_id)
+
+    assert require_volume_mount_subpath(subpath) == subpath
+    with pytest.raises(ValueError, match="canonical UUIDs"):
+        require_volume_mount_subpath(f"workspaces/{workspace_id}/sessions/../workspace")
+    with pytest.raises(ValueError, match="supported Fleet namespace"):
+        require_volume_mount_subpath(f"{subpath}/..")
+    with pytest.raises(ValueError, match="non-zero UUID"):
+        require_volume_mount_subpath(f"workspaces/{workspace_id}/sessions/{UUID(int=0)}/workspace")
 
 
 def test_volume_config_and_mount_spec() -> None:

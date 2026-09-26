@@ -21,8 +21,8 @@ from fleet_rlm.attachments import (
     LocalAttachmentCatalog,
     LocalAttachmentPathPolicy,
 )
-from fleet_rlm.workspace.paths import UnsafePathError, VolumePaths, as_posix
-from fleet_rlm.workspace.storage import HostVolumeMirror
+from fleet_rlm.paths import UnsafePathError, VolumePaths, as_posix
+from tests.support.workspace_storage import HostVolumeMirror
 
 
 class _Source:

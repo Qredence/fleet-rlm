@@ -18,7 +18,6 @@ from fleet_rlm.app import create_app
 from fleet_rlm.app_services import (
     RouteServices,
     RuntimeInventory,
-    RuntimeInventoryError,
     clear_runtime_inventory,
     install_runtime_inventory,
 )
@@ -28,18 +27,24 @@ from fleet_rlm.skills.catalog import SkillCatalog
 from tests.support.testing_app import create_testing_app
 
 
-def _complete_runtime_inventory() -> RuntimeInventory:
-    return RuntimeInventory(
-        turn_runtime=object(),
-        attachment_lifecycle=object(),
-        artifact_reader=object(),
-        session_catalog=object(),
-        session_lifecycle=object(),
-        run_lifecycle=object(),
-        config_policy=object(),
-        workspace_volume_gateway=object(),
-        workspace_file_service=object(),
-    )
+def _route_services(**overrides: object) -> RouteServices:
+    services: dict[str, object] = {
+        "turn_runtime": object(),
+        "attachment_lifecycle": object(),
+        "artifact_reader": object(),
+        "session_catalog": object(),
+        "session_lifecycle": object(),
+        "config_policy": object(),
+        "workspace_volume_gateway": object(),
+        "workspace_file_service": object(),
+        "daytona_runtime": None,
+    }
+    services.update(overrides)
+    return RouteServices(**services)  # type: ignore[arg-type]
+
+
+def _complete_runtime_inventory(**overrides: object) -> RuntimeInventory:
+    return RuntimeInventory(route_services=_route_services(**overrides))
 
 
 def test_composition_module_imports_without_credentials() -> None:
@@ -83,9 +88,9 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
     """Partial live composition cleanup must also run for task cancellation."""
     import fleet_rlm.app_lifecycle as composition
     import fleet_rlm.daytona.runtime as daytona_runtime
-    import fleet_rlm.daytona.turn_environment as run_environment
     import fleet_rlm.persistence.database as database
-    import fleet_rlm.rlm.compat_3_3_1 as dspy_contract
+    import fleet_rlm.rlm.program as program
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 
     class Engine:
         def __init__(self) -> None:
@@ -95,9 +100,8 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
             self.disposed = True
 
     engine = Engine()
-    monkeypatch.setattr(dspy_contract, "assert_dspy_version", lambda: None)
+    monkeypatch.setattr(program, "assert_dspy_version", lambda: None)
     monkeypatch.setattr(composition, "require_daytona_settings", lambda _settings: None)
-    monkeypatch.setattr(run_environment, "resolve_settings", lambda settings: settings)
     monkeypatch.setattr(daytona_runtime, "sandbox_spec_from_settings", lambda _settings: object())
     monkeypatch.setattr(database, "create_async_engine_from_url", lambda _url: engine)
 
@@ -110,6 +114,7 @@ async def test_daytona_build_cancellation_disposes_partial_engine(monkeypatch: p
         await composition.build_daytona_composition(
             SimpleNamespace(database_url="sqlite+aiosqlite:///:memory:"),
             skill_catalog=SkillCatalog(()),
+            dispatcher=SyncBridgeDispatcher(),
         )
 
     assert engine.disposed is True
@@ -377,9 +382,9 @@ def test_testing_app_composes_only_inside_lifespan() -> None:
         assert app.state.composition_ready is True
         inventory = app.state.runtime_inventory
         assert isinstance(inventory, RuntimeInventory)
-        assert inventory.turn_runtime is not None
-        assert inventory.attachment_lifecycle is not None
-        assert inventory.artifact_reader is not None
+        assert inventory.route_services.turn_runtime is not None
+        assert inventory.route_services.attachment_lifecycle is not None
+        assert inventory.route_services.artifact_reader is not None
         assert app.state.skill_catalog is not None
         # The clean-break API never creates an implicit Session.
         response = client.post(
@@ -434,8 +439,8 @@ def test_runtime_inventory_rejects_incomplete_graph_without_readiness() -> None:
 
     app = SimpleNamespace(state=RecordingState())
 
-    with pytest.raises(RuntimeInventoryError, match="turn_runtime"):
-        install_runtime_inventory(app, RuntimeInventory())
+    with pytest.raises(TypeError, match="route_services"):
+        RuntimeInventory()
 
     assert events == []
     assert app.state.runtime_inventory is None
@@ -450,7 +455,7 @@ def test_runtime_inventory_clear_marks_unready_and_detaches_inventory() -> None:
             events.append((name, value))
             super().__setattr__(name, value)
 
-    inventory = RuntimeInventory()
+    inventory = _complete_runtime_inventory()
     state = RecordingState()
     state.runtime_inventory = inventory
     state.composition_ready = True
@@ -499,9 +504,9 @@ async def test_daytona_dispose_detaches_inventory_before_disposal() -> None:
             record("gateway")
 
     inventory = RuntimeInventory(
+        route_services=_route_services(workspace_volume_gateway=Gateway()),
         run_cleanup_supervisor=Cleanup(),
-        run_environment_resources=Resources(),
-        workspace_volume_gateway=Gateway(),
+        daytona_runtime_owner=Resources(),
     )
     app.state.runtime_inventory = inventory
     app.state.composition_ready = True
@@ -539,9 +544,9 @@ async def test_daytona_dispose_retains_when_preparation_aclose_returns_false() -
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
     inventory = RuntimeInventory(
+        route_services=_route_services(workspace_volume_gateway=Gateway()),
         run_preparation=Preparation(),
-        run_environment_resources=Resources(),
-        workspace_volume_gateway=Gateway(),
+        daytona_runtime_owner=Resources(),
         bridge_dispatcher=dispatcher,
     )
     app = SimpleNamespace(state=SimpleNamespace())
@@ -592,7 +597,11 @@ async def test_shutdown_waits_for_active_stream_cleanup_before_provider_disposal
 
     cleanup = RunCleanupSupervisor()
     cleanup.submit(close_stream())
-    inventory = RuntimeInventory(run_cleanup_supervisor=cleanup, run_environment_resources=Resources())
+    inventory = RuntimeInventory(
+        route_services=_route_services(),
+        run_cleanup_supervisor=cleanup,
+        daytona_runtime_owner=Resources(),
+    )
     app = SimpleNamespace(state=SimpleNamespace(runtime_inventory=inventory, composition_ready=True))
     clear_runtime_inventory(app)
     closing = asyncio.create_task(composition.close_daytona_services(inventory))
@@ -633,6 +642,7 @@ async def test_close_inventory_services_drains_all_phases_after_cancellation() -
 
     result = await close_inventory_services(
         RuntimeInventory(
+            route_services=_route_services(),
             run_cleanup_supervisor=Cleanup(),
             runner=Runner(),
             run_preparation=Preparation(),
@@ -660,25 +670,18 @@ async def test_daytona_install_registers_and_dispose_clears_bridge_dispatcher(
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 
     inventory = RuntimeInventory(
-        turn_runtime=object(),
-        attachment_lifecycle=object(),
-        artifact_reader=object(),
-        session_catalog=object(),
-        session_lifecycle=object(),
-        run_lifecycle=object(),
+        route_services=_route_services(),
         run_preparation=object(),
         run_state_store=object(),
         model_bundle=object(),
-        run_environment_resources=SimpleNamespace(runtime=object()),
-        workspace_volume_gateway=object(),
-        workspace_file_service=object(),
+        daytona_runtime_owner=SimpleNamespace(runtime=object()),
     )
 
     async def fake_build(
         _settings: object,
         *,
         skill_catalog: SkillCatalog,
-        dispatcher: SyncBridgeDispatcher | None = None,
+        dispatcher: SyncBridgeDispatcher,
     ) -> RuntimeInventory:
         assert skill_catalog is app.state.skill_catalog
         assert dispatcher is not None
@@ -716,8 +719,8 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
     with TestClient(app):
         inventory = app.state.runtime_inventory
         assert isinstance(inventory, RuntimeInventory)
-        assert inventory.db_engine is not None
-        assert inventory.session_catalog is not None
+        assert inventory.database.engine is not None
+        assert inventory.route_services.session_catalog is not None
 
     assert app.state.runtime_inventory is None
 
@@ -841,15 +844,13 @@ async def test_daytona_lifespan_does_not_create_schema(monkeypatch) -> None:
 
     preparation = object()
     inventory = RuntimeInventory(
-        run_environment_resources=Resources(),
-        turn_runtime=object(),
-        session_catalog=object(),
-        session_lifecycle=object(),
-        run_lifecycle=object(),
-        attachment_lifecycle=object(),
-        artifact_reader=object(),
-        workspace_volume_gateway=Gateway(),
-        workspace_file_service=object(),
+        route_services=_route_services(
+            turn_runtime=object(),
+            session_catalog=object(),
+            session_lifecycle=object(),
+            workspace_volume_gateway=Gateway(),
+        ),
+        daytona_runtime_owner=Resources(),
         run_preparation=preparation,
     )
 
@@ -939,14 +940,8 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
             raise RuntimeError("cleanup failed")
 
     inventory = RuntimeInventory(
-        run_environment_resources=Resources(),
-        turn_runtime=object(),
-        session_catalog=object(),
-        session_lifecycle=object(),
-        run_lifecycle=object(),
-        attachment_lifecycle=object(),
-        artifact_reader=object(),
-        workspace_volume_gateway=Gateway(),
+        route_services=_route_services(workspace_volume_gateway=Gateway()),
+        daytona_runtime_owner=Resources(),
         orphan_cleanup_task=orphan_cleanup_task,
         memory_outbox_task=memory_outbox_task,
     )
@@ -958,16 +953,11 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
 
     monkeypatch.setattr(composition, "build_daytona_composition", fake_build)
 
-    def fail_policy(*_args, **_kwargs):
-        raise RuntimeError("wiring unavailable")
-
-    monkeypatch.setattr("fleet_rlm.config.policy.ConfigPolicyService.from_settings", fail_policy)
-
     with pytest.raises(RuntimeError, match="wiring unavailable"):
         async with composition.daytona_services(
             SimpleNamespace(state=SimpleNamespace(skill_catalog=SkillCatalog(()))), Settings(run_environment="daytona")
         ):
-            pass
+            raise RuntimeError("wiring unavailable")
 
     assert disposed == ["resources", "gateway"]
     assert orphan_cleanup_task.cancelled()

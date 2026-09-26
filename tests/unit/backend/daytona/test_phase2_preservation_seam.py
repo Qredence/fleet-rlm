@@ -24,36 +24,43 @@ import pytest
 
 from fleet_rlm.daytona.broker import _MAX_REQUEST_BYTES
 from fleet_rlm.daytona.runtime import (
-    ChildEnvironmentSpec,
-    DaytonaRuntime,
     DaytonaSessionRecord,
+    InterpreterLease,
+    LeaseRequest,
     RootSessionSpec,
     SessionCleanupState,
 )
+from tests.support.session_manager import make_daytona_runtime
 
 
 def _closable(*, sandbox_id: str = "sandbox-1") -> object:
-    class Lease:
+    class Interpreter:
         closed = False
 
-        async def release(self) -> None:
+        def shutdown(self, **_kwargs: object) -> None:
             self.closed = True
 
-    lease = Lease()
-    lease.sandbox_id = sandbox_id  # type: ignore[attr-defined]
-    return lease
+    return InterpreterLease(
+        sandbox_id=sandbox_id,
+        interpreter_id=f"interpreter-{sandbox_id}",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=Interpreter(),
+        sandbox=type("Sandbox", (), {"id": sandbox_id})(),
+    )
 
 
 @pytest.mark.asyncio
 async def test_sequential_root_reuse_returns_same_lease() -> None:
     creates = 0
 
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         nonlocal creates
         creates += 1
         return _closable()
 
-    runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
 
     first = await runtime.acquire_root_session(spec)
@@ -73,14 +80,15 @@ async def test_two_concurrent_sessions_acquire_independently() -> None:
     release_second = asyncio.Event()
     calls: list[str] = []
 
-    async def acquire(spec: RootSessionSpec, **_kwargs: object) -> object:
-        calls.append(str(spec.session_id))
+    async def acquire(request: LeaseRequest, **_kwargs: object) -> object:
+        calls.append(str(request.session_id))
         if len(calls) == 1:
             started.set()
             await release_second.wait()
         return _closable(sandbox_id=f"sandbox-{len(calls)}")
 
-    runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     first_spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
     second_spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
 
@@ -102,11 +110,12 @@ async def test_failed_root_creation_keeps_late_ownership_visible() -> None:
     landed = asyncio.Event()
     lease = _closable()
 
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         await landed.wait()
         return lease
 
-    runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     spec = RootSessionSpec(
         workspace_id=uuid4(),
         session_id=uuid4(),
@@ -132,12 +141,13 @@ async def test_cancelled_acquisition_does_not_publish_a_root() -> None:
     landed = asyncio.Event()
     lease = _closable()
 
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         started.set()
         await landed.wait()
         return lease
 
-    runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
 
     task = asyncio.create_task(runtime.acquire_root_session(spec))
@@ -155,40 +165,18 @@ async def test_cancelled_acquisition_does_not_publish_a_root() -> None:
 
 
 @pytest.mark.asyncio
-async def test_child_cleanup_failure_stays_retained_for_retry() -> None:
-    attempts = 0
-
-    class Lease:
-        async def close(self) -> None:
-            nonlocal attempts
-            attempts += 1
-            if attempts == 1:
-                raise RuntimeError("provider delete failed")
-
-    runtime = DaytonaRuntime(child_acquirer=lambda _spec: Lease())
-    with pytest.raises(RuntimeError, match="provider delete failed"):
-        async with runtime.open_child(ChildEnvironmentSpec()):
-            assert len(runtime.children) == 1
-
-    # First close failed: the child stays owned so a later close can retry.
-    assert len(runtime.children) == 1
-    assert await runtime.aclose() is True
-    assert runtime.children == ()
-    assert attempts == 2
-
-
-@pytest.mark.asyncio
 async def test_tainted_root_rotates_on_next_acquisition() -> None:
     leases = [_closable(sandbox_id="sandbox-old"), _closable(sandbox_id="sandbox-new")]
     calls = 0
 
-    async def acquire(_spec: RootSessionSpec, **_kwargs: object) -> object:
+    async def acquire(_request: object, **_kwargs: object) -> object:
         nonlocal calls
         lease = leases[calls]
         calls += 1
         return lease
 
-    runtime = DaytonaRuntime(root_acquirer=acquire, root_releaser=lambda lease: lease.release())
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
     spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
 
     first = await runtime.acquire_root_session(spec)

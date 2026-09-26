@@ -18,7 +18,7 @@ contracted child-runtime owner (deterministic owner lanes live in
   native completion, extraction fallback, generated-code error, terminal
   interpreter failure, or cancellation; the Fleet lease owner shuts the
   interpreter down exactly once. This lane shares its evidence lane with
-  VAL-RLM-007 (Root-scope shutdown authority in ``test_dspy_contract.py``);
+  VAL-RLM-007 (Root-scope shutdown authority in ``test_program_factory.py``);
   the child-scope assertion remains independently claimable here.
 - A cleanup failure after a syntactically valid child answer is
   recorded as fatal, re-observed by the executor without rerunning cleanup,
@@ -39,9 +39,8 @@ import dspy
 import pytest
 from dspy import CodeExecutionError, CodeInterpreterError
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, wrap_final_output
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
-from fleet_rlm.rlm.compat_3_3_1 import wrap_final_output
 from fleet_rlm.rlm.events import RunCompleted, Status
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
@@ -54,7 +53,6 @@ from fleet_rlm.rlm.execution import (
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
-    build_native_rlm,
 )
 from fleet_rlm.rlm.recursion import (
     ChildRuntimeAuthorizationError,
@@ -65,6 +63,7 @@ from fleet_rlm.rlm.recursion import (
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -654,7 +653,7 @@ async def test_dspy_native_child_paths_never_shut_down_caller_owned_interpreter(
     calls on the caller-owned interpreter; the Fleet lifecycle owner then
     shuts it down exactly once."""
     interpreter = _CountingInterpreter(behavior)
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature="prompt -> answer",
         options=RLMOptions(max_iters=child_max_iters, max_llm_calls=child_max_iters + 2),
     )
@@ -716,7 +715,7 @@ async def test_cancellation_never_shuts_down_caller_owned_child_interpreter() ->
             self.shutdown_calls += 1
 
     interpreter = _NoSubmitInterpreter()
-    rlm = build_native_rlm(
+    rlm = build_native_rlm_for_test(
         signature="prompt -> answer",
         options=RLMOptions(max_iters=3, max_llm_calls=3),
     )
