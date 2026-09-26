@@ -181,7 +181,7 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
     runtime = DaytonaRuntime(
         platform=platform,
         volume_client=object(),
-        volume_config=SimpleNamespace(paths=lambda: object()),
+        volume_config=SimpleNamespace(paths=object),
         admission=admission,
     )
 
@@ -255,7 +255,7 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     runtime = DaytonaRuntime(
         platform=Platform(),
         volume_client=object(),
-        volume_config=SimpleNamespace(paths=lambda: object()),
+        volume_config=SimpleNamespace(paths=object),
         admission=admission,
     )
     runtime._provisioner = SimpleNamespace(

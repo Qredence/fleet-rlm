@@ -87,8 +87,6 @@ def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
 
 @pytest.mark.asyncio
 async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None:
-    import asyncio
-
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop
 
     loop = asyncio.get_running_loop()
