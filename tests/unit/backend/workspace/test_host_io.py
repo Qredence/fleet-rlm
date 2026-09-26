@@ -131,3 +131,29 @@ async def test_concurrent_host_byte_operations_share_workspace_authority() -> No
     assert await host_io.volume_fs.aread_bytes("/volume/a.bin") == b"a"
     assert await host_io.volume_fs.aread_bytes("/volume/b.bin") == b"b"
     assert len(runtime.sandboxes) == 4
+
+
+@pytest.mark.asyncio
+async def test_run_scratch_read_uses_overflow_probe_byte() -> None:
+    from unittest.mock import AsyncMock
+
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+
+    run_id = uuid4()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    sandbox = SimpleNamespace(fs=SimpleNamespace(download_file=AsyncMock(return_value=b"oversized")))
+    storage = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=SimpleNamespace(),
+        host_io=SimpleNamespace(volume_fs=SimpleNamespace(aread_bytes=AsyncMock())),
+        run_id=run_id,
+    )
+    storage._files.read_bytes = AsyncMock(return_value=b"x" * 6)
+    location = f"/tmp/fleet/{run_id}/child-input.txt"
+
+    with pytest.raises(ValueError, match="value exceeds read bound"):
+        await storage.read(location, max_bytes=5)
+
+    storage._files.read_bytes.assert_awaited_once_with(location, max_bytes=6)

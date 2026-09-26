@@ -335,7 +335,7 @@ class DaytonaRunStorage:
 
     async def read(self, location: str, *, max_bytes: int) -> bytes:
         value = (
-            await self._files.read_bytes(location)
+            await self._files.read_bytes(location, max_bytes=max_bytes + 1)
             if self._is_scratch(location)
             else await self.host_io.volume_fs.aread_bytes(location, max_bytes=max_bytes)
         )
