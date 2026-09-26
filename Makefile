@@ -4,8 +4,8 @@ RELEASE_SOURCE_DATE_EPOCH ?= $(shell git -C "$(CURDIR)" show -s --format=%ct HEA
 # virtual environments and are covered by the dedicated package gate.
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
 PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
-PYTEST_FAST_PATHS = tests/unit/backend tests/unit/scripts tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e
-PYTEST_UNIT_PATHS = tests/unit/backend tests/unit/scripts tests/freeze tests/unit/test_litellm_invariant.py
+PYTEST_FAST_PATHS = tests/unit/backend tests/unit/scripts tests/unit/optimization tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e
+PYTEST_UNIT_PATHS = tests/unit/backend tests/unit/scripts tests/unit/optimization tests/freeze tests/unit/test_litellm_invariant.py
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \

@@ -1,8 +1,14 @@
-"""Production GEPA orchestration contracts remain strict and reproducible."""
+"""Production GEPA orchestration and development MLflow correlation contracts.
+
+* ``test_gepa_production.py``: Production GEPA orchestration contracts remain strict and reproducible.
+* ``test_mlflow_observability.py``: Unit contracts for development GEPA MLflow correlation.
+"""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import dspy
 import pytest
@@ -10,9 +16,11 @@ import pytest
 from fleet_rlm.optimization.evidence import StrictDaytonaPolicyBinding, validate_strict_daytona_proof
 from fleet_rlm.optimization.gepa_runner import OptimizationPreflightError, run_authoritative_gepa
 from fleet_rlm.optimization.metric import ScoreFeedback, TrustedGEPAFeedbackMetric
+from fleet_rlm.optimization.mlflow_observability import development_gepa_trace
 from tests.unit.optimization.test_evidence import _block_all_receipt
 
 
+# --- from test_gepa_production.py -------------------------------------
 class _Student(dspy.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -198,3 +206,72 @@ def test_authoritative_gepa_rejects_scorer_identity_mismatch(tmp_path: Path, mon
             held_out_evaluator=lambda *_args: {"complete": True, "quality": 1, "p95_seconds": 1, "cost_usd": 1},
             fresh_process_reload=lambda digest: digest,
         )
+
+
+# --- from test_mlflow_observability.py --------------------------------
+def test_development_gepa_trace_uses_only_aggregate_metadata(monkeypatch) -> None:
+    calls = SimpleNamespace(inputs=None, outputs=None, trace_updates=[], status=None)
+
+    class Span:
+        request_id = "trace-123"
+
+        def set_inputs(self, value):
+            calls.inputs = value
+
+        def set_outputs(self, value):
+            calls.outputs = value
+
+        def set_status(self, value):
+            calls.status = value
+
+    class Context:
+        def __enter__(self):
+            return Span()
+
+        def __exit__(self, *_args):
+            return None
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = lambda **_kwargs: Context()  # type: ignore[attr-defined]
+    mlflow.get_last_active_trace_id = lambda: "trace-123"  # type: ignore[attr-defined]
+    mlflow.update_current_trace = lambda **kwargs: calls.trace_updates.append(kwargs)  # type: ignore[attr-defined]
+    entities = ModuleType("mlflow.entities")
+    entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+    monkeypatch.setattr("fleet_rlm.config.loader.load_runtime_settings", lambda: object())
+    monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", lambda _settings: None)
+
+    metadata = {
+        "schema": "fleet.development-gepa-smoke/v1",
+        "run_id": "development-gepa-smoke-1",
+        "dataset_sha256": "a" * 64,
+        "train_records": 15,
+        "selection_records": 5,
+        "max_metric_calls": 2,
+        "engine": "gepa",
+        "environment": "development",
+        "synthetic": True,
+        "candidate_execution": "disabled",
+        "promotion_eligible": False,
+        "production_authorized": False,
+    }
+
+    with development_gepa_trace(metadata=metadata) as trace:
+        assert trace.trace_id == "trace-123"
+
+    assert calls.inputs == metadata
+    assert calls.outputs == {"status": "completed"}
+    assert calls.trace_updates[0]["tags"] == {
+        "fleet.trace_kind": "optimization_development_smoke",
+        "fleet.optimizer": "gepa",
+        "fleet.environment": "development",
+    }
+
+
+def test_development_gepa_trace_rejects_content_metadata() -> None:
+    try:
+        with development_gepa_trace(metadata={"candidate": "private instruction"}):
+            raise AssertionError("content metadata must be rejected before tracing")
+    except ValueError as exc:
+        assert "unsupported" in str(exc)
