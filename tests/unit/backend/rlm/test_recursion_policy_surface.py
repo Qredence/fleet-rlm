@@ -36,12 +36,13 @@ from fleet_rlm.rlm.execution import (
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -287,7 +288,7 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
 
     def capturing_builder(**kwargs: object) -> object:
         captured.update(kwargs)
-        return build_native_rlm(**kwargs)
+        return build_native_rlm_for_test(**kwargs)
 
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM([{"reasoning": "direct", "code": "SUBMIT(answer='direct')"}], adapter=adapter)
@@ -345,13 +346,14 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
         return rlm
 
     def root_builder(**kwargs: object) -> object:
-        rlm = build_native_rlm(**kwargs)
+        rlm = build_native_rlm_for_test(**kwargs)
         root_types.append(type(rlm))
         original_acall = rlm.acall
 
-        async def acall(interpreter: object, /, **input_args: object) -> object:
+        async def acall(*args: object, **input_args: object) -> object:
+            interpreter = args[0] if args else input_args.get("interpreter")
             root_invocations.append((type(rlm), interpreter, dict(input_args)))
-            return await original_acall(interpreter, **input_args)
+            return await original_acall(*args, **input_args)
 
         rlm.acall = acall
         return rlm
