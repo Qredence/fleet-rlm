@@ -142,6 +142,30 @@ remote-resource ownership through settlement. Cancellation, timeout, or
 authority loss stops new child admission; unresolved containment cannot be
 reported as a successful committed Turn.
 
+Turn preparation builds the Run's model-facing capabilities from the scoped
+storage handles supplied by its environment. Daytona acquisition binds those
+handles to the Sandbox and authorized host I/O; it does not build the tool
+catalog or project task, memory, attachment, or Skill context.
+`sessions/history.py` projects the claimed checkpoint, and
+`sessions/history_transport.py` owns the Sandbox-serializable history form;
+the environment selects which format the interpreter boundary accepts.
+
+Application composition constructs one complete `RouteServices` value and
+stores it in the lifespan-owned `RuntimeInventory` beside optional process
+resources. Routes receive that same typed value; readiness is published only
+after the inventory has been built.
+
+The runtime's `DaytonaSessionRecord` is the registry entry for a retained
+Session root and its active invocation. It points directly to the
+`InterpreterLease`; the record owns Session cleanup state, while the runtime
+tracks any asynchronous release task. Each disposable child has one
+Sandbox-keyed runtime record that associates its active lease with pending
+provider cleanup. Children do not pass through the
+root-session registry or a second asynchronous context-manager acquisition
+path. Cleanup tasks remain attached to their owning `DaytonaRuntime`. Daytona
+owns child lifecycle errors; the RLM executor owns delegation policy. The
+provider runtime does not import recursion policy.
+
 Public search, known-page downloads, Git inspection, and package installation
 run as ordinary Sandbox Python or subprocess work. The host URL-fetching
 subsystem remains retired under the recorded Phase 5 network-policy waiver.

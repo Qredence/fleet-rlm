@@ -167,8 +167,8 @@ pre-3.3 iteration-budget key fail validation. Native RLM construction installs
 a fail-closed interpreter factory so an invocation without a caller-owned
 interpreter becomes a bounded `RLMConfigError` rather than silently creating a
 DSPy interpreter; production execution passes the acquired interpreter to
-`rlm.acall(...)`. Exact-version and FinalOutput adaptation lives in
-`rlm.compat_3_3_1`.
+`rlm.acall(...)`. The exact-version guard lives beside native construction in
+`rlm.program`; Daytona uses DSPy's public `FinalOutput` type directly.
 
 The pinned contract was checked against the official DSPy 3.3.1 sources on
 2026-09-08: [`dspy/predict/rlm.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py),
