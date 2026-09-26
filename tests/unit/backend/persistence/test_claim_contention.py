@@ -1,4 +1,8 @@
-"""Only expected unique claim constraints may enter race reconciliation."""
+"""Claim contention and reconciliation contracts.
+
+* ``test_contention_scenarios.py``: Execute live-lane assertions locally; this is not PostgreSQL certification.
+* ``test_claim_constraint_classification.py``: Only expected unique claim constraints may enter race reconciliation.
+"""
 
 import sqlite3
 
@@ -7,8 +11,33 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from fleet_rlm.persistence.repositories.turns import _expected_claim_conflict
+from tests.support import claim_scenarios
+from tests.support.sqlite_claims import postgres_claim_store
+
+__all__ = ["postgres_claim_store"]
+
+# --- from test_contention_scenarios.py --------------------------------
+pytestmark = pytest.mark.asyncio
 
 
+@pytest.mark.parametrize("race", ["duplicate", "conflicting_input", "active_run"])
+async def test_postgres_concurrent_claims_have_one_owner(postgres_claim_store, race):
+    await claim_scenarios.concurrent_claims_have_one_owner(postgres_claim_store, race)
+
+
+async def test_postgres_cancel_settlement_races_commit(postgres_claim_store):
+    await claim_scenarios.cancel_settlement_races_commit(postgres_claim_store)
+
+
+async def test_postgres_recovery_owner_cas_fences_stale_commit(postgres_claim_store):
+    await claim_scenarios.recovery_owner_cas_fences_stale_commit(postgres_claim_store)
+
+
+async def test_postgres_outbox_claims_are_disjoint(postgres_claim_store):
+    await claim_scenarios.outbox_claims_are_disjoint(postgres_claim_store)
+
+
+# --- from test_claim_constraint_classification.py ---------------------
 @pytest.mark.parametrize(
     "message,code,expected",
     [
