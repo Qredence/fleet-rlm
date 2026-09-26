@@ -1,252 +1,140 @@
 # Fleet RLM Architecture
 
-Fleet RLM is a durable, Session-first system for long-running model work.
-FastAPI exposes HTTP and SSE, DSPy owns native RLM reasoning, and Daytona
-provides execution environments. The maintained interactive client is the
-pi-tui application in `tools/fleet-tui/`.
-
-This document describes current ownership and trust boundaries. It is not a
-roadmap. Change it alongside code, tests, policy, and generated contracts when
-those boundaries change.
+Fleet RLM is a Session-first FastAPI application. DSPy owns the native RLM
+reasoning loop, Daytona runs generated Python in Sandboxes, and the maintained
+pi-tui client consumes the public HTTP/SSE contract. This document records
+current ownership and trust boundaries. For the literal package tree, use the
+[source layout](docs/reference/source-layout.md).
 
 Canonical Run Environment set: `daytona`.
 
-## Conceptual package map
-
-The following sketch records the plan's ownership target. It is not a literal
-description of every current file and is not a rename checklist. The current
-package layout and source-of-truth owners are listed in the ownership map
-below; keep working packages in place unless a structural change is separately
-justified.
+## Request and ownership flow
 
 ```text
-src/fleet_rlm/
-├── __init__.py
-├── main.py                  # Existing application entry point
-├── app.py                   # FastAPI construction and lifespan
-├── config.py                # Typed configuration and loading
-├── turns.py                 # One turn lifecycle coordinator
-├── sessions.py              # Conversation and active-task context
-├── events.py                # Application event types
-├── paths.py                 # Canonical workspace/path policy
-├── memory.py                # Memory retrieval and mutation policy
-├── telemetry.py             # Optional observation, not execution ownership
-│
-├── rlm/
-│   ├── __init__.py
-│   ├── program.py           # Signatures, model setup, native RLM construction
-│   ├── execution.py         # Invocation boundary and observation relay
-│   ├── recursion.py         # Optional child-RLM delegation
-│   └── budget.py            # Necessary shared resource accounting
-│
-├── daytona/
-│   ├── __init__.py          # Small exports only
-│   ├── runtime.py           # Sandbox/volume acquisition and lifecycle
-│   ├── interpreter.py       # Native DSPy CodeInterpreter implementation
-│   └── broker.py            # Authenticated remote execution/tool transport
-│
-├── workspace/
-│   ├── __init__.py
-│   ├── files.py             # Concrete workspace file operations
-│   └── tools.py             # Small model-facing capability functions
-│
-├── api/                     # Existing HTTP/SSE contract; transport only
-├── persistence/             # Existing database models and durable operations
-│
-├── skills/
-│   ├── __init__.py
-│   ├── loader.py            # Loading, selection, resource installation
-│   └── bundled/             # Packaged skill content
-│
-├── cli/
-│   ├── __init__.py
-│   ├── main.py              # Preserve published entry points
-│   ├── supervisor.py
-│   └── doctor.py
-│
-└── optimization/            # Optional workflow, isolated from serving
+fleet CLI / ASGI entry point
+  → FastAPI lifespan and RouteServices
+  → API validation and SSE projection
+  → TurnRuntime: claim → prepare → execute → settle → cleanup
+       ├─ DSPy RLM + Daytona interpreter and tool broker
+       └─ Session/Run repositories and commit-gated Artifacts
+  → committed Turn replay → pi-tui
 ```
 
-For example, the current implementation keeps typed settings in
-`config/settings.py`, active-task persistence in `sessions/task.py`, memory in
-`workspace/memory.py`, and optional tracing in `observability/`. Keep these
-established owners; do not add the sketch's `config.py`, `sessions.py`,
-`memory.py`, or `telemetry.py` just to match its shape.
+`src/fleet_rlm/main.py` exports the ASGI app; `cli/main.py` exposes the `fleet`
+and `fleet-rlm` commands. `app.py` builds FastAPI and owns its lifespan.
+`app_lifecycle.py` composes provider resources and one typed `RouteServices`
+inventory, defined in `app_services.py`. Routes receive those services after
+composition is ready; they do not construct a second runtime.
 
-## Runtime model
+The Turn route validates the request, opens an owned `TurnRuntime` stream, and
+projects transport-neutral Runtime Events into SSE. Transient preparation
+status can precede the canonical Run stream. The TypeScript client under
+`tools/fleet-tui/` renders live and durable projections; it does not execute
+models or own backend lifecycle.
 
-```text
-Workspace -> Session -> Turn -> Run claim and preparation
-  -> native DSPy RLM in a Daytona interpreter
-  -> Runtime Events -> HTTP/SSE -> pi-tui
-  -> settlement -> artifact promotion -> Turn Commit -> durable replay
-```
+## Turn lifecycle and durable state
 
-A Workspace owns Sessions, Skills, Attachments, Artifacts, and workspace-scoped
-state. A Session owns ordered Turns and committed conversation history. A Turn
-is one user request; a Run is an attempt to execute it. An answer or Artifact
-becomes public only after durable settlement and Turn Commit.
+A Workspace owns Sessions, files, memory, Skills, Attachments, and Artifacts. A
+Session owns ordered committed Turns. A Turn is one user request; a Run is an
+attempt to execute it. The public answer and Artifacts become durable only
+through successful settlement and Turn Commit.
 
-## Reasoning and delegation
-
-DSPy owns the reasoning loop, `REPLHistory`, and native trajectory behavior.
-Fleet constructs native `dspy.RLM` programs and supplies invocation-scoped
-interpreters, tools, and budgets. There is no mandatory planner or model
-router.
-
-Use the least costly mechanism that fits the work:
-
-| Mechanism | Use |
+| Owner | Responsibility |
 | --- | --- |
-| Ordinary Python | Deterministic search, parsing, joins, calculations, and validation. |
-| Native `llm_query` / `llm_query_batched` | Bounded semantic interpretation, extraction, or comparison within the current invocation. |
-| Fleet `rlm_query` / `rlm_query_batched` | A distinct investigation that benefits from its own iterative DSPy invocation. |
+| `turns.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
+| `turn_preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
+| `turn_settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
+| `persistence/` | Owns SQL-backed Session and Run state, durable repositories, and commit operations; Alembic owns live schema changes. |
+| `sessions/` | Projects committed history and owns the bounded, revisioned task checkpoint. |
+| `attachments/`, `artifacts/`, `workspace/` | Own durable content, scoped file access, host I/O, and workspace memory. |
 
-The native-only `daytona-native` profile is the configured default and keeps
-Fleet full-child recursion disabled. `daytona-recursive` is the explicit
-opt-in. Full child depth is limited to one level; children may use native
-semantic calls but Fleet does not start full grandchildren. Child work shares
-the owning Turn's resource budget and remains subject to bounded admission,
-deadlines, and cleanup.
+Committed Turns are projected into native `dspy.History` for a new invocation.
+The interpreter may receive a serialized projection of that history, while
+durable conversation authority remains with the Session and its persistence
+owners. The task checkpoint separately retains bounded goal and progress; Python
+variables and DSPy's private `REPLHistory` are not application-owned durable
+state. Workspace memory is cross-Session file state with process-local
+coordination, not a substitute for Turn Commit.
 
-## Execution and trust boundaries
+## Reasoning and execution
 
-The root interpreter runs model-authored Python inside a Session Daytona
-Sandbox. That Sandbox mounts the authorized Session workspace at `/workspace`;
-ordinary Python and Session workspace tools address those files. Each Run has
-invocation-local scratch. A sandbox-local broker forwards JSON-only tool
-requests to host tools and returns bounded, sanitized results; model code does
-not run in the Fleet process.
+`rlm/program.py` constructs pinned native `dspy.RLM` and `dspy.LM` instances;
+`rlm/execution.py` owns invocation and observation, and `rlm/recursion.py`
+owns Fleet child policy and admission. DSPy owns its loop, `REPLHistory`, and
+trajectory semantics. Fleet supplies Turn-scoped tools, deadlines, and the
+shared budget. There is no second planner or model router.
 
-The current recursive executor selects the `semantic-child` profile. Fleet
-requests a child Sandbox without a Volume mount, resolves only the selected
-files or subtree under existing Session/Project authority, and copies those
-files into private child-local scratch. File sizes and available modification
-metadata are checked around bounded materialization; bounded
-resolve/stage spans record file counts, bytes, and elapsed time. Declared child
-result paths are checked for traversal and symlinks, harvested, size-bounded,
-and persisted in the parent Run before child cleanup. Children receive no
-parent Workspace tools, memory, task checkpoints, attachment storage,
-publication capability, credential-bearing files, or Root mutable state. The
-Root verifies findings and performs durable updates through existing owners.
-This describes Fleet's request and data flow, not independent proof of provider
-mount or network enforcement. The canary confirms the provider reports no
-Volume mount for its child; the requested network block remains unverified. It
-does not prove network blocking, timeout or claim-loss containment, or
-comparative quality.
+Use ordinary Sandbox Python for deterministic inspection and reduction. Native
+`llm_query` and `llm_query_batched` provide bounded semantic calls inside the
+current invocation. Fleet `rlm_query` and `rlm_query_batched` are separate,
+opt-in child investigations that run their own iterative DSPy invocation.
+The configured default `daytona-native` profile disables full-child recursion;
+`daytona-recursive` enables it. Full children stop at depth one, share the
+parent Turn budget, and have bounded admission and ordered outcomes.
 
-`DaytonaRuntime` owns reusable Session resources, ephemeral child resources,
-host I/O Sandboxes, and cleanup. The Turn coordinator owns claim, preparation,
-execution, settlement, and commit. Each Run retains interpreter, worker, and
-remote-resource ownership through settlement. Cancellation, timeout, or
-authority loss stops new child admission; unresolved containment cannot be
-reported as a successful committed Turn.
+`daytona/runtime.py` owns provider Sandboxes, retained Session roots, disposable
+children, host I/O leases, and cleanup. `daytona/interpreter.py` submits
+generated Python to Daytona. Its authenticated, JSON-only broker in
+`daytona/broker.py` dispatches authorized host tools and DSPy semantic calls;
+model-authored code does not run in the Fleet process. A healthy root Sandbox
+may be reused across clean sequential Turns, but each invocation gets fresh
+bindings, tools, budget, and DSPy history.
 
-`TurnPreparationPlan` owns preparation orchestration and receives one bound
-environment-acquisition callable from application composition. It does not
-retain a stateful provider wrapper. The callable acquires the Session root
-through `DaytonaRuntime`, while the separate Workspace gateway provisions the
-volume layout; these authorities remain distinct.
-`workspace/host_io.py` owns `DaytonaRunStorage`: asynchronous private
-attachment, artifact, and result-snapshot operations route between Run scratch
-and authorized host storage. Its narrow synchronous `volume_fs` view bridges
-the interpreter's storage tools. Turn preparation builds model-facing
-capabilities from the resulting scoped handles; it does not build the tool
-catalog or project task, memory, attachment, or Skill context.
-`sessions/history.py` projects the claimed checkpoint, and
-`sessions/history_transport.py` owns the Sandbox-serializable history form;
-the environment selects which format the interpreter boundary accepts.
+The active semantic-child path requests a Volume-less Sandbox. Fleet resolves
+selected child inputs under existing Session authority, stages bounded copies
+in private scratch, validates and harvests declared result files, and then
+cleans up the child. Children receive no parent Workspace tools, memory, task
+checkpoint, publication capability, credentials, or writable parent Volume.
+Root verifies child findings and owns any durable updates. An unresolved child
+or provider cleanup cannot become a successful committed Turn.
 
-Application composition constructs one complete `RouteServices` value and
-stores it in the lifespan-owned `RuntimeInventory` beside optional process
-resources. Routes receive that same typed value; readiness is published only
-after the inventory has been built.
+Public search, page retrieval, Git inspection, and package installation run as
+ordinary Sandbox Python or subprocess work. The retired host URL-fetching
+subsystem is not an alternate execution path. Daytona network and mount policy
+requests do not by themselves prove provider enforcement; the recorded Phase 5
+network-policy waiver remains in force.
 
-The runtime's `DaytonaSessionRecord` is the registry entry for a retained
-Session root and its active invocation. It points directly to the
-`InterpreterLease`; the record owns Session cleanup state, while the runtime
-retains pending provider operations. Each disposable child has one
-Sandbox-keyed cleanup record that owns its active lease, admission permit, and
-close task. Temporary Workspace I/O Sandboxes use the same runtime-owned
-`SandboxLease` records used for confirmed cleanup. Children do not pass through
-the root-session registry or a second asynchronous context-manager acquisition
-path. Cleanup tasks remain attached to their owning `DaytonaRuntime`. Daytona
-owns child lifecycle errors; the RLM executor owns delegation policy. The
-provider runtime does not import recursion policy.
+## Events, policy, and optional services
 
-Public search, known-page downloads, Git inspection, and package installation
-run as ordinary Sandbox Python or subprocess work. The host URL-fetching
-subsystem remains retired under the recorded Phase 5 network-policy waiver.
-Sandbox network requests reflect deployed Daytona policy; the waiver does not
-establish public-only egress or child network isolation.
+`rlm/events.py` defines transport-neutral Runtime Events. API projection owns
+the public SSE shape and durable replay; the TUI consumes that contract and
+generated HTTP types. `observability/` may record MLflow traces and evaluation
+data, but tracking failures do not decide execution or commit. `optimization/`
+is separate from serving. Bundled Skills provide strategy and manifested
+resources without granting tools, permissions, budgets, or scheduling authority.
 
-## Durable state, observation, and interaction
+Non-secret runtime policy comes from `config/fleet.toml` through typed settings
+in `config/`. The selected profile names the environment variables from which
+secrets are read. Policy changes require a restart. Runtime state such as
+callbacks, bindings, deadlines, and budgets stays scoped to a Turn or
+invocation; process resources are composed and closed by the lifespan.
 
-Committed Turns enter native `dspy.History`. The versioned Session task
-checkpoint separately stores bounded goal, decisions, source references and
-revisions, completed work, and pending work. Python variables and interpreter
-history do not survive as application-owned durable state. Memory coordination
-remains single-process; trace concurrency does not strengthen that guarantee.
+## Boundaries and contracts for changes
 
-MLflow observes execution attempts, including child invocation, staging,
-harvesting, settlement, and cleanup. One trace belongs to one attempt; children
-are nested under it. Content is bounded and sanitized before export. Tracking
-and export failures remain fail-soft and never grant execution authority or
-prove a Turn committed.
+- Keep API routes as validation and projection adapters. Keep provider errors,
+  credentials, private paths, and raw infrastructure failures out of public
+  events and traces.
+- Preserve Session authority for child paths and files. Validate sizes,
+  symlinks, and declared outputs; do not infer permissions from model or Skill
+  text.
+- Keep `DaytonaRuntime` responsible for provider-resource ownership and
+  cleanup, and `TurnRuntime` responsible for the Run lifecycle. Late work
+  cannot mutate settled state.
+- Change `config/fleet.toml` and Alembic migrations through their owning
+  workflows. Do not add a parallel loop, scheduler, or execution path without
+  an explicit boundary change.
 
-Runtime Events are transport-neutral. The API projects live events and durable
-replay into the same public shapes; pi-tui renders child progress and task
-continuity without owning backend lifecycle or execution policy. Skills are
-progressively loaded strategy guidance with versioned, manifested resources;
-they do not grant tools, permissions, budgets, or scheduling authority.
+Public contracts originate in backend models and generators. Never hand-edit
+generated artifacts:
 
-## Ownership map
-
-| Area | Owner and boundary |
+| Generated artifact | Regenerate / verify |
 | --- | --- |
-| HTTP, schemas, OpenAPI, SSE | `src/fleet_rlm/api/` validates and projects transport; routes use lifespan services. |
-| Process wiring | `app.py` owns FastAPI lifespan; `app_lifecycle.py` builds and closes provider resources. |
-| Turn lifecycle | `src/fleet_rlm/turns.py` coordinates claim, preparation, execution, settlement, and commit. |
-| Reasoning and budgets | `src/fleet_rlm/rlm/` owns DSPy construction, semantic and child tools, shared accounting, and transport-neutral events. |
-| Daytona integration | `src/fleet_rlm/daytona/` owns SDK interaction through `runtime.py`, `interpreter.py`, and `broker.py`; `diagnostics.py` and `errors.py` provide support functions, not resource lifecycle. |
-| Workspace and host I/O | `workspace/` resolves authorized files and performs short-lived host operations. |
-| Durable task state | `sessions/task.py` owns the bounded checkpoint; API and TUI project it without creating another task database. |
-| Durable domain data | `sessions/`, `workspace/`, `attachments/`, `artifacts/`, and `persistence/` own their policies and adapters. |
-| Observation and evaluation | `observability/` and `optimization/` own tracing and evaluation, not serving execution. |
-| Terminal client | `tools/fleet-tui/` consumes generated HTTP types and public SSE; it owns interaction only. |
+| `openapi.yaml`, `tools/fleet-tui/src/generated/openapi.ts` | `make api-sync` / `make api-check` |
+| TUI stream fixtures and validators | `make stream-sync` / `make stream-check` |
+| `docs/reference/profile-matrix.md` | `make profile-matrix` / `make check-docs` |
 
-## Boundaries for changes
-
-- Keep API handlers as adapters. Runtime Events stay provider-neutral until
-  projected to clients.
-- Keep mutable adapters, callbacks, deadlines, retries, tools, and budgets
-  scoped to a Turn or invocation. Process-scoped model objects are templates.
-- Keep provider exceptions, credentials, private paths, and raw infrastructure
-  failures out of public events, traces, and API errors.
-- Validate child paths, file types, sizes, and symlinks before staging or
-  harvesting. Do not infer authorization from prompts or Skill text.
-- Keep root-owned task, memory, artifact publication, and settlement under
-  their existing services. Alembic owns live schema evolution.
-- Preserve Phase 5's explicit network-policy risk acceptance. Do not add a
-  host research service or claim stronger egress guarantees without evidence.
-- Do not add arbitrary-depth recursion, another scheduler, shared writable
-  child state, a source/snapshot service, or an alternate execution path
-  without a concrete measured need and an updated ownership boundary.
-
-## Contracts and validation
-
-Public contracts originate in backend models and owning generators. Never
-hand-edit generated artifacts or client types.
-
-| Artifact | Regenerate / verify |
-| --- | --- |
-| `openapi.yaml`, `tools/fleet-tui/src/generated/openapi.ts` | `make api-sync`, then `make api-check` |
-| TUI stream fixtures and validators | `make stream-sync`, then `make stream-check` |
-| `docs/reference/profile-matrix.md` | `make profile-matrix`, then `make check-docs` |
-
-Use [AGENTS.md](AGENTS.md#work-and-validate-safely) to select local checks and
-the [testing strategy](docs/how-to-guides/testing-strategy.md) for suite
-boundaries. `make check-codebase-tree` and `make check-dependency-boundaries`
-guard ownership; `make api-check` and `make stream-check` guard public
-contracts. Passing local tests does not certify provider behavior, release
-readiness, or promotion.
+Use [AGENTS.md](AGENTS.md#work-and-validate-safely) for validation selection
+and the [testing strategy](docs/how-to-guides/testing-strategy.md) for test
+lanes. `make check-codebase-tree` and `make check-dependency-boundaries` guard
+ownership. Local checks do not certify provider behavior, containment,
+comparative quality, or release promotion.

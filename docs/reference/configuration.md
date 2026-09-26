@@ -14,7 +14,9 @@ same TOML file.
 The TOML file contains no secret values. It declares the environment-variable
 names for Root/Sub API keys, the database URL, the Daytona API key, and managed
 MLflow destinations when that profile is selected. Only those named values are
-read from the process or repository `.env` (process values win).
+read from the process or repository `.env`. Process values win for ordinary
+secrets and database references; for Daytona organization and Snapshot identity,
+`.env` wins and conflicting process values are rejected.
 `FLEET_CONFIG_PROFILE` is not consulted; other `FLEET_*`
 variables, including model, RLM, endpoint, runtime, and MLflow settings, are
 ignored unless the selected TOML profile explicitly names them as references.
@@ -69,10 +71,10 @@ files, and `storage.max_artifact_bytes` bounds artifact bodies.
 
 `runtime.live_enabled` defaults to `true` for explicitly invoked provider and
 Daytona commands. Set it to `false` in the selected TOML policy to fail closed
-before those commands construct provider or Daytona clients. This policy
-replaces the old `FLEET_LIVE=1` shell switch for the live verifier scripts;
-invoking a live command remains an explicit operator action, and the required
-credentials are still validated.
+before those commands construct provider or Daytona clients. The live verifier
+scripts additionally require `FLEET_LIVE=1` as an explicit operator opt-in;
+the TOML setting does not replace that guard. Required credentials are still
+validated.
 
 When MLflow tracing is enabled, `mlflow.async_logging` keeps trace export off
 the Turn path and `mlflow.trace_sampling_ratio` controls the fraction of Turns
@@ -148,8 +150,8 @@ admissions, including retries and adapter repairs; `max_tool_calls` and
 recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
 
-The `[rlm]` recursion settings include `recursion_enabled` (currently `true`
-in the operator-selected shipped default) and bound the native
+The `[rlm]` recursion settings include `recursion_enabled` (set to `false` in
+the shipped `daytona-native` default) and bound the Fleet
 `rlm_query(task=..., inputs=..., context=...)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
@@ -160,23 +162,20 @@ The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CH
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. Profiles without an explicit recursion override inherit the
-operator-selected value from `[defaults.rlm]`; `daytona-native` is the selected
-default profile. The `phase4-campaign-a` and
-`phase4-campaign-b` profiles explicitly disable recursion for comparison, while
-`phase4-campaign` inherits the enabled value. The
+override them. Profiles without an explicit recursion override inherit
+`false` from `[defaults.rlm]`; `daytona-native` is the selected default profile.
+`daytona-recursive` and `phase4-campaign` explicitly enable recursion, while
+`phase4-campaign-a` and `phase4-campaign-b` explicitly disable it. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
 When recursion is enabled, each child receives a fresh, dedicated Daytona
-Sandbox and ordinary Daytona network egress. `rlm_query` selects the
-volume-less `semantic-child` profile when its child snapshot is configured;
-`workspace-child` is the explicit fallback for work that needs durable files
-and mounts the same Volume ID at
-`recursive/<workspace-id>/<run-id>/<call-index>`. That private sibling scope
-cannot reach the Root `workspaces/<workspace-id>` mount. The child receives no
-Fleet Tools or credentials; strict cleanup purges its scope and deletes its
-Sandbox before Root success can commit.
+Sandbox. The active `rlm_query` executor selects the volume-less
+`semantic-child` profile and stages only selected, authorized files in private
+scratch; it does not fall back to a mounted `workspace-child` profile. The
+child receives no parent Workspace tools or credentials. Validated result files
+are harvested before cleanup, and unresolved cleanup blocks Root success.
+Daytona network-policy requests are not proof of child egress isolation.
 `rlm.autonomous_memory_categories` is a TOML-only list of canonical Workspace
 Memory category names and defaults to `[]`, which omits `propose_memory` from
 the Root Tool inventory entirely. A non-empty profile allowlist enables a
