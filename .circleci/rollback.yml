@@ -69,8 +69,6 @@ jobs:
   deploy-pypi-rollback-release:
     type: release
     plan_name: deploy-pypi-rollback
-    validation:
-      enabled: true
 
 
 workflows:

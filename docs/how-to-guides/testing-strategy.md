@@ -102,7 +102,18 @@ full gate image; 3.11/3.12 certify declared support without duplicating
 Daytona coverage or the canonical E2E atoms. Packaging/install certification
 runs in the release package gate rather than every unit shard. The opt-in
 `deploy-pypi` bridge is attached to this workflow and runs only on `main`
-after every listed quality, test, compatibility, coverage, and TUI gate.
+after every listed quality, test, compatibility, coverage, and TUI gate. It
+tracks the PyPI publication as a CircleCI deploy: the marker moves through
+pending and running, then records success, failure, or cancellation for the
+version validated against `pyproject.toml`. The CircleCI entry links to its
+pipeline; the job log includes the GitHub Actions run URL for a new publish or
+the GitHub release URL when tracking a previously published version. This is
+release tracking for the package registry, not health validation of a running
+service. Verify publication separately at
+`https://pypi.org/project/fleet-rlm/<version>/` and confirm that both the wheel
+and source distribution are present. PyPI versions are immutable, so recovery
+from a bad publication follows the explicit operator procedure; CircleCI does
+not roll package versions back.
 
 The manually dispatched GitHub release workflow independently runs `make check`,
 security and release checks before building. Its preflight installs the pinned
