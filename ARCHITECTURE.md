@@ -64,6 +64,11 @@ owns Fleet child policy and admission. DSPy owns its loop, `REPLHistory`, and
 trajectory semantics. Fleet supplies Turn-scoped tools, deadlines, and the
 shared budget. There is no second planner or model router.
 
+`RLMRunner` retains non-cancellable work through `WorkerOwnership`. If a Turn
+ends while that worker is still running, its execution trace stays open until
+the owned work drains; trace export completion does not delay Turn settlement
+or allow late work to change committed state.
+
 Use ordinary Sandbox Python for deterministic inspection and reduction. Native
 `llm_query` and `llm_query_batched` provide bounded semantic calls inside the
 current invocation. Fleet `rlm_query` and `rlm_query_batched` are separate,

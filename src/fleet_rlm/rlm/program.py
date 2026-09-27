@@ -18,10 +18,19 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import dspy
 from dspy import BaseLM, Signature
+from dspy.lm15 import (
+    AccessPolicy,
+    EndpointSupport,
+    ModelSupport,
+    OpenAIChatCompat,
+    ProviderDefinition,
+    register_provider,
+)
 from dspy.utils.callback import ACTIVE_CALL_ID
 from dspy.utils.exceptions import AdapterParseError, LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -56,6 +65,9 @@ RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
 CERTIFIED_DSPY_VERSION = "3.4.0"
+_DATABRICKS_DEEPSEEK_SERVICE = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+_DATABRICKS_NATIVE_PROVIDER = "fleet-databricks"
+_ALIBABA_DEEPSEEK_MODEL = "openai/deepseek-v4.1-flash"
 _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
 _LOGGER = logging.getLogger(__name__)
 
@@ -191,6 +203,16 @@ def _action_code(response: object) -> object:
 
 class FleetJSONAdapter(dspy.JSONAdapter):
     """The pinned JSON action protocol plus a bounded corrective re-ask."""
+
+    def _prepare_response_format(self, lm: Any, lm_kwargs: dict[str, Any], signature: Signature) -> None:
+        # The selected DashScope endpoint accepted json_object in a live
+        # provider probe but rejected json_schema. DSPy's model catalog does
+        # not advertise either mode, so request only the proven wire format.
+        base_url = str(getattr(lm, "kwargs", {}).get("api_base", "")).rstrip("/")
+        if getattr(lm, "model", None) == _ALIBABA_DEEPSEEK_MODEL and base_url.endswith("/compatible-mode/v1"):
+            lm_kwargs["response_format"] = {"type": "json_object"}
+            return
+        super()._prepare_response_format(lm, lm_kwargs, signature)
 
     def __init__(
         self,
@@ -699,7 +721,11 @@ def fleet_rlm_instruction_fragments(
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
-   that action when practical. Use a later iteration only when verification cannot be completed in the same
+   that action when practical. Estimate the verification cost against the remaining action budget. Prefer a bounded
+   reference lookup, local invariant, or precision comparison; do not recompute a large result with a slower
+   independent algorithm solely to verify it. If existing checks are sufficient, ``SUBMIT`` in the next action.
+   If evidence remains insufficient and no bounded check fits, state the uncertainty instead of starting an
+   unbounded verification. Use a later iteration only when verification cannot be completed in the same
    action. Once the request is fully satisfied and sufficient verification exists, the next action must contain ``SUBMIT``; it is the very next
    action. Completing a verification helper does not finish the Turn while named host-tool work remains. Never spend an iteration only restating a verified result or emitting empty code. Do not reproduce a large
    code block. Never pass positional arguments.
@@ -1104,6 +1130,39 @@ def build_lm(
     num_retries: int = 3,
 ) -> dspy.LM:
     model_id = normalize_model_id(model)
+    databricks_model = model_id.removeprefix("openai/")
+    if model_id.startswith("openai/") and databricks_model == _DATABRICKS_DEEPSEEK_SERVICE:
+        try:
+            gateway_url = urlsplit(base_url or "")
+        except ValueError:
+            gateway_url = None
+        if (
+            not api_key
+            or gateway_url is None
+            or gateway_url.scheme != "https"
+            or not gateway_url.netloc
+            or gateway_url.path.rstrip("/") != "/ai-gateway/mlflow/v1"
+        ):
+            raise ValueError("Databricks DeepSeek requires credentials and the configured AI Gateway base URL")
+        # DSPy's bundled model catalog does not yet advertise response_format for
+        # this endpoint. Declare only the exact model's documented schema support
+        # through lm15 so JSONAdapter can enforce the native action contract.
+        # api_base is mandatory above; this unreachable declaration URL cannot
+        # become an accidental fallback destination.
+        register_provider(
+            ProviderDefinition.chat(
+                AccessPolicy(
+                    provider=_DATABRICKS_NATIVE_PROVIDER,
+                    base_url="https://fleet.invalid",
+                    supports=EndpointSupport(complete=True),
+                    auth_modes=("bearer",),
+                    auth_scheme=("bearer",),
+                ),
+                compat=OpenAIChatCompat.preset("openai"),
+            ),
+            models={databricks_model: ModelSupport(response_schema=True)},
+        )
+        model_id = f"{_DATABRICKS_NATIVE_PROVIDER}/{databricks_model}"
     kwargs: dict[str, Any] = {
         "model_type": "chat",
         "engine": "lm15",

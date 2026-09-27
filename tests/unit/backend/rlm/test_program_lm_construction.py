@@ -193,6 +193,153 @@ def test_native_route_resolves_unqualified_deepseek_model() -> None:
     assert selected.clients["api_base"] == "https://gateway.example/v1"
 
 
+@pytest.mark.parametrize("trailing_slash", ["", "/"])
+def test_databricks_deepseek_declares_exact_schema_capability(trailing_slash: str) -> None:
+    from dspy.clients.backend_selection import select_backend
+
+    lm = factory.build_lm(
+        "uscentral.ai_gateway.deepseek-v4-1-flash-service",
+        api_key="token",
+        base_url=f"https://workspace.example/ai-gateway/mlflow/v1{trailing_slash}",
+        cache=False,
+    )
+
+    selected = select_backend(lm)
+    assert selected.native is True
+    assert selected.resolution.provider == "fleet-databricks"
+    assert selected.resolution.model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+    assert selected.clients["api_base"] == f"https://workspace.example/ai-gateway/mlflow/v1{trailing_slash}"
+    assert "response_format" in lm.supported_params
+    assert lm.supports_response_schema is True
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        None,
+        "https://workspace.example/v1",
+        "http://workspace.example/ai-gateway/mlflow/v1",
+        "http://workspace.example/ai-gateway/mlflow/v1/",
+        "workspace.example/ai-gateway/mlflow/v1",
+        "https:///ai-gateway/mlflow/v1",
+        "https://[bad/ai-gateway/mlflow/v1",
+        "https://workspace.example/other/ai-gateway/mlflow/v1",
+    ],
+)
+def test_databricks_deepseek_requires_ai_gateway_route(base_url: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = MagicMock()
+    monkeypatch.setattr(factory.dspy, "LM", lm)
+    with pytest.raises(ValueError, match="AI Gateway base URL"):
+        factory.build_lm("uscentral.ai_gateway.deepseek-v4-1-flash-service", api_key="token", base_url=base_url)
+    lm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_databricks_action_request_carries_json_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dspy
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+    from dspy.lm15 import Request, Response, response_from_openai_chat
+
+    from fleet_rlm.rlm.program import FleetJSONAdapter
+
+    class Action(dspy.Signature):
+        """One RLM action."""
+
+        request: str = dspy.InputField()
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    seen: list[Request] = []
+
+    async def complete(_self: AsyncLM15Engine, request: Request) -> Response:
+        seen.append(request)
+        return response_from_openai_chat(
+            {
+                "id": "offline-action",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "uscentral.ai_gateway.deepseek-v4-1-flash-service",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": '{"reasoning":"run","code":"print(1)"}'},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
+
+    monkeypatch.setattr(AsyncLM15Engine, "complete", complete)
+    lm = factory.build_lm(
+        "uscentral.ai_gateway.deepseek-v4-1-flash-service",
+        api_key="token",
+        base_url="https://workspace.example/ai-gateway/mlflow/v1",
+        cache=False,
+    )
+    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        result = await dspy.Predict(Action).acall(request="execute")
+
+    assert result.code == "print(1)"
+    assert len(seen) == 1
+    assert seen[0].model.endswith("/uscentral.ai_gateway.deepseek-v4-1-flash-service")
+    assert seen[0].config.response_format is not None
+    assert seen[0].config.response_format["type"] == "json_schema"
+
+
+@pytest.mark.asyncio
+async def test_alibaba_action_request_uses_json_object_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dspy
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+    from dspy.lm15 import Request, Response, response_from_openai_chat
+
+    from fleet_rlm.rlm.program import FleetJSONAdapter
+
+    class Action(dspy.Signature):
+        """One RLM action."""
+
+        request: str = dspy.InputField()
+        reasoning: str = dspy.OutputField()
+        code: str = dspy.OutputField()
+
+    seen: list[Request] = []
+
+    async def complete(_self: AsyncLM15Engine, request: Request) -> Response:
+        seen.append(request)
+        return response_from_openai_chat(
+            {
+                "id": "offline-action",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "deepseek-v4.1-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": '{"reasoning":"run","code":"print(1)"}'},
+                    }
+                ],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
+
+    monkeypatch.setattr(AsyncLM15Engine, "complete", complete)
+    lm = factory.build_lm(
+        "deepseek-v4.1-flash",
+        api_key="token",
+        base_url="https://dashscope.example/compatible-mode/v1",
+        cache=False,
+    )
+    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        result = await dspy.Predict(Action).acall(request="execute")
+
+    assert result.code == "print(1)"
+    assert len(seen) == 1
+    assert seen[0].config.response_format == {"type": "json_object"}
+
+
 @pytest.mark.asyncio
 async def test_unsupported_native_request_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
     import dspy.clients.lm as dspy_lm

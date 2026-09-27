@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 from dspy.primitives.code_interpreter import CodeExecutionError
 
+from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, TurnBudgetExhausted
 
@@ -160,6 +161,35 @@ def test_sandbox_execute_span_marks_failed_phase_without_suppressing(
     assert calls.start_span_names == ["sandbox.execute"]
     assert calls.span_outputs[0]["phase_status"] == "failed"
     assert calls.span_outputs[0]["failure_category"] == "execution_error"
+
+
+@pytest.mark.parametrize(
+    ("cause_type", "expected_category"),
+    [("BrokerExecutionTimeout", "timeout"), ("BrokerExecutionError", "adapter_error")],
+)
+def test_sandbox_execute_span_classifies_broker_failure_and_keeps_it_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    fleet_trace_active: None,
+    cause_type: str,
+    expected_category: str,
+) -> None:
+    del fleet_trace_active
+    calls = _install_fake_mlflow(monkeypatch)
+
+    class FailingBackend:
+        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+            del code, variables
+            raise DaytonaAdapterError("safe failure", cause_type=cause_type)
+
+        def close(self) -> None:
+            return None
+
+    interpreter = DaytonaCodeInterpreter(backend=FailingBackend())
+    with pytest.raises(DaytonaAdapterError):
+        interpreter.execute("print('never')")
+
+    assert calls.span_outputs[0]["failure_category"] == expected_category
+    assert calls.span_outputs[0]["phase_status"] == "failed"
 
 
 def test_sandbox_execute_span_classifies_budget_exhaustion(

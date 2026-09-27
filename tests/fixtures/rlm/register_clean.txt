@@ -1,0 +1,61 @@
+Answer with ONLY the final results requested in the last line. Do not write out intermediate steps, tables, or working — no scratchpad, no chain-of-thought in your output. You must track all state internally and emit only the final answers. (If you cannot help writing steps, you have failed the constraint this task is testing.)
+
+You are given a machine with 5 registers: A B C D E, all starting at 0.
+Process the following 40 instructions strictly in order. Each instruction mutates registers based on their CURRENT values. Some instructions are conditional and depend on state you must carry forward.
+
+Instruction set semantics:
+- ADD x n      : x = x + n
+- SUB x n      : x = x - n
+- COPY x y     : x = y (x takes y's current value)
+- SWAP x y     : exchange the values of x and y
+- IFPOS x: y   : if x > 0 right now, execute instruction y (y is a full instruction); else skip
+- IFEVEN x: y  : if x is even right now (0 counts as even), execute y; else skip
+- DOUBLE x     : x = x * 2
+- MOD x n      : x = x mod n (result always non-negative, 0 <= r < n)
+
+PROGRAM:
+1. ADD A 5
+2. ADD B 3
+3. COPY C A
+4. DOUBLE C
+5. SUB C 4
+6. IFPOS C: ADD D 10
+7. SWAP A B
+8. ADD E 7
+9. MOD E 4
+10. IFEVEN E: ADD A 2
+11. COPY B C
+12. SUB B 6
+13. IFPOS B: DOUBLE A
+14. ADD C 1
+15. IFEVEN C: SWAP C D
+16. ADD A 3
+17. MOD A 7
+18. COPY E A
+19. IFPOS D: ADD E 5
+20. DOUBLE B
+21. SUB B 3
+22. IFEVEN B: ADD C 4
+23. SWAP D E
+24. ADD A 1
+25. IFPOS A: SUB D 2
+26. COPY C B
+27. MOD C 5
+28. ADD D 6
+29. IFEVEN D: DOUBLE E
+30. SWAP A C
+31. ADD B 2
+32. IFPOS E: ADD A 4
+33. SUB C 1
+34. MOD B 3
+35. COPY D A
+36. IFEVEN A: SUB E 3
+37. ADD C 2
+38. DOUBLE D
+39. IFPOS C: SWAP B E
+40. ADD A 1
+
+FINAL LINE — emit ONLY these, one per line, nothing else:
+- The final values of A, B, C, D, E.
+- The number of times any IFPOS/IFEVEN condition evaluated TRUE (i.e., its inner instruction actually executed).
+- Which register holds the largest final value (name it; if tied, name all tied).

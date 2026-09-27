@@ -66,6 +66,9 @@ class _FakeSpan:
             raise RuntimeError("link unsupported")
         self.links.append(link)
 
+    def end(self) -> None:
+        """Mark the fake span ended without changing its recorded fields."""
+
 
 def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """
@@ -76,13 +79,31 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """
     calls = SimpleNamespace(spans=[], update_kwargs=[], stack=[], fail_links=False)
 
+    def create_span(name: str) -> _FakeSpan:
+        span = _FakeSpan(f"tr-span-{len(calls.spans) + 1}")
+        span.fail_links = calls.fail_links
+        calls.spans.append((name, span))
+        return span
+
     @contextmanager
     def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
         """Create and yield a fake tracing span for the duration of a context."""
         del span_type
-        span = _FakeSpan(f"tr-span-{len(calls.spans) + 1}")
-        span.fail_links = calls.fail_links
-        calls.spans.append((name, span))
+        span = create_span(name)
+        calls.stack.append(span)
+        try:
+            yield span
+        finally:
+            calls.stack.pop()
+
+    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
+        """Start and return a root span without pushing it onto the fake context stack."""
+        del span_type
+        return create_span(name)
+
+    @contextmanager
+    def safe_set_span_in_context(span: Any) -> Iterator[Any]:
+        """Temporarily make a manually managed span current."""
         calls.stack.append(span)
         try:
             yield span
@@ -104,6 +125,7 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     mlflow = ModuleType("mlflow")
     mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
     mlflow.update_current_trace = update_current_trace  # type: ignore[attr-defined]
     mlflow.get_current_active_span = get_current_active_span  # type: ignore[attr-defined]
 
@@ -118,8 +140,15 @@ def _install_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 
     entities.Link = Link  # type: ignore[attr-defined]
 
+    fluent = ModuleType("mlflow.tracing.fluent")
+    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    tracing_module = ModuleType("mlflow.tracing")
+    tracing_module.fluent = fluent  # type: ignore[attr-defined]
+
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
     return calls
 
 

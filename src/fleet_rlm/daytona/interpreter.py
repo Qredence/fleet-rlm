@@ -1409,8 +1409,9 @@ class DaytonaCodeInterpreter:
                     },
                 )
                 raise _repair_error(str(exc), category="SyntaxError") from None
-            except DaytonaAdapterError:
-                _fail_step("Execution failed", "adapter_error")
+            except DaytonaAdapterError as exc:
+                category = "timeout" if exc.cause_type == "BrokerExecutionTimeout" else "adapter_error"
+                _fail_step("Execution failed", category)
                 raise
             except Exception as exc:
                 _fail_step("Execution failed", "execution_error")

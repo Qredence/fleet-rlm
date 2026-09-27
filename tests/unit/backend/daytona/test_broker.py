@@ -18,6 +18,8 @@ import pytest
 
 from fleet_rlm.daytona import broker as broker_module
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.errors import DaytonaAdapterError
+from fleet_rlm.observability.diagnostics import trace_failure_category
 
 
 def _free_port() -> int:
@@ -72,6 +74,31 @@ def _run_execute(
     )
     thread.start()
     return thread, responses
+
+
+@pytest.mark.parametrize(
+    ("failure", "cause_type", "category"),
+    [
+        (httpx.ReadTimeout("private endpoint detail"), "BrokerExecutionTimeout", "timeout"),
+        (httpx.ConnectError("private endpoint detail"), "BrokerExecutionError", "unknown"),
+    ],
+)
+def test_execute_classifies_request_timeout_without_exposing_transport_detail(
+    failure: Exception, cause_type: str, category: str
+) -> None:
+    broker = DaytonaHttpToolBroker(object(), port=1)
+    client = MagicMock()
+    client.post.side_effect = failure
+    broker._client = client
+    broker._url = "http://sandbox.invalid"
+    broker._poll_once = lambda: None  # type: ignore[method-assign]
+
+    with pytest.raises(DaytonaAdapterError) as caught:
+        broker.execute("print('hello')", {}, timeout_s=2)
+
+    assert caught.value.cause_type == cause_type
+    assert trace_failure_category(caught.value) == category
+    assert "private endpoint detail" not in str(caught.value)
 
 
 def test_embedded_server_preserves_failure_and_rejects_completed_duplicate(

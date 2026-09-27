@@ -319,6 +319,10 @@ class DaytonaHttpToolBroker:
         delivery_error = self._delivery_error
         if delivery_error is not None:
             raise delivery_error
+        if outcome and isinstance(outcome[0], httpx.TimeoutException):
+            raise DaytonaAdapterError(
+                message="sandbox execution request timed out", cause_type="BrokerExecutionTimeout"
+            ) from None
         if not outcome or isinstance(outcome[0], BaseException):
             raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
         response = outcome[0]

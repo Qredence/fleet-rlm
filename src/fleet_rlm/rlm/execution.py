@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import contextvars
 import logging
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -484,12 +485,17 @@ _WORKER_SETTLE_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrup
 
 
 class WorkerOwnership:
-    """Keep one started worker and its blocking resource waiters owned."""
+    """Keep a started worker, blocking waiters, and their completion callbacks owned."""
 
     def __init__(self) -> None:
         """Initialize an empty worker ownership registry."""
         self._effect: OwnedEffect[Any] | None = None
         self._blocking_waiters: list[Callable[[], None]] = []
+        self._completion_callbacks: list[Callable[[], None]] = []
+        self._completion_lock = threading.Lock()
+        self._drain_lock = asyncio.Lock()
+        self._drained = False
+        self._waiter_error: BaseException | None = None
 
     def attach(self, effect: OwnedEffect[Any]) -> None:
         """Attach the owned effect without exposing task mechanics."""
@@ -499,6 +505,15 @@ class WorkerOwnership:
         """Register synchronous resource ownership that outlives the RLM task."""
         self._blocking_waiters.append(waiter)
 
+    def add_completion_callback(self, callback: Callable[[], None]) -> None:
+        """Run a fail-soft callback once this worker and its blocking owners drain."""
+        with self._completion_lock:
+            drained = self._drained
+            if not drained:
+                self._completion_callbacks.append(callback)
+        if drained:
+            self._run_completion_callback(callback)
+
     async def wait_owned(self) -> None:
         """
         Wait for the worker and all blocking resource owners to settle.
@@ -506,23 +521,46 @@ class WorkerOwnership:
         Raises:
             BaseException: The first error raised while settling a blocking resource owner.
         """
-        if self._effect is not None:
-            with contextlib.suppress(BaseException):
-                await self._effect.settle()
+        async with self._drain_lock:
+            if self._drained:
+                waiter_error = self._waiter_error
+                if waiter_error is not None:
+                    raise waiter_error
+                return
 
-        # Recursive child workers run on owned blocking threads joined through
-        # the Turn scheduler. A Root task can finish after a batch has failed
-        # while those workers still own child leases, so wait for each
-        # ownership callback off the event loop before Run resources are released.
-        waiter_errors: list[BaseException] = []
-        for waiter in tuple(self._blocking_waiters):
-            owned = OwnedEffect.start(asyncio.to_thread(waiter))
-            try:
-                await owned.settle()
-            except _WORKER_SETTLE_EXCEPTIONS as exc:
-                waiter_errors.append(exc)
-        if waiter_errors:
-            raise waiter_errors[0]
+            if self._effect is not None:
+                with contextlib.suppress(BaseException):
+                    await self._effect.settle()
+
+            # Recursive child workers run on owned blocking threads joined through
+            # the Turn scheduler. A Root task can finish after a batch has failed
+            # while those workers still own child leases, so wait for each
+            # ownership callback off the event loop before Run resources are released.
+            for waiter in tuple(self._blocking_waiters):
+                owned = OwnedEffect.start(asyncio.to_thread(waiter))
+                try:
+                    await owned.settle()
+                except _WORKER_SETTLE_EXCEPTIONS as exc:
+                    if self._waiter_error is None:
+                        self._waiter_error = exc
+
+            with self._completion_lock:
+                self._drained = True
+                callbacks = tuple(self._completion_callbacks)
+                self._completion_callbacks.clear()
+            for callback in callbacks:
+                self._run_completion_callback(callback)
+
+        waiter_error = self._waiter_error
+        if waiter_error is not None:
+            raise waiter_error
+
+    @staticmethod
+    def _run_completion_callback(callback: Callable[[], None]) -> None:
+        try:
+            callback()
+        except Exception:
+            logger.debug("owned worker completion callback failed", exc_info=True)
 
 
 class RLMWorkerHandle(Generic[T]):
@@ -1159,6 +1197,9 @@ class RLMRunner:
             raise RunTerminalError("RLM runner is closed")
         outcome: list[RLMOutcome] = []
         ownership = WorkerOwnership()
+        from fleet_rlm.observability.tracing import defer_current_turn_trace_completion
+
+        defer_current_turn_trace_completion(ownership.add_completion_callback)
         self._active_ownerships.add(ownership)
 
         def unregister() -> None:

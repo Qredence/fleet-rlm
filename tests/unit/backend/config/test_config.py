@@ -58,6 +58,13 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
         "ALIBABA_API_KEY",
         "FLEET_MAAS_BASE_URL",
     )
+    for profile in ("daytona-native-databricks", "daytona-recursive-databricks"):
+        assert contracts[profile].provider_environment_names == (
+            "FLEET_DAYTONA_API_KEY",
+            "FLEET_DAYTONA_ORG_ID",
+            "DATABRICKS_TOKEN",
+            "FLEET_LLM_BASE_URL",
+        )
     assert contracts["daytona-managed"].managed_policy_environment_names == (
         "FLEET_DAYTONA_API_KEY",
         "FLEET_DAYTONA_ORG_ID",
@@ -81,6 +88,8 @@ def test_committed_policy_declares_default_maas_model_roles() -> None:
     assert set(document["profiles"]) == {
         "daytona-native",
         "daytona-recursive",
+        "daytona-native-databricks",
+        "daytona-recursive-databricks",
         "daytona-managed",
         "phase4-campaign",
         "phase4-campaign-a",
@@ -114,7 +123,7 @@ def test_committed_policy_declares_default_maas_model_roles() -> None:
     # The managed Databricks deployment keeps the Unity AI Gateway transport even
     # though the committed defaults select Alibaba MaaS.
     assert document["profiles"]["daytona-managed"]["llm"]["root"] == {
-        "model": "databricks-deepseek-v4-1-flash",
+        "model": "uscentral.ai_gateway.deepseek-v4-1-flash-service",
         "api_key_env": "DATABRICKS_TOKEN",
         "base_url_env": "FLEET_LLM_BASE_URL",
     }
@@ -143,7 +152,7 @@ def test_committed_policy_uses_bounded_root_rlm_budget_and_provider_retries() ->
 # Databricks deployment profile pins the Unity AI Gateway transport.
 _MAAS_MODEL = "deepseek-v4.1-flash"
 _MAAS_ROLE = ("ALIBABA_API_KEY", "FLEET_MAAS_BASE_URL")
-_DATABRICKS_MODEL = "databricks-deepseek-v4-1-flash"
+_DATABRICKS_SERVICE = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
@@ -152,7 +161,9 @@ _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
     (
         ("daytona-native", _MAAS_MODEL, _MAAS_ROLE),
         ("daytona-recursive", _MAAS_MODEL, _MAAS_ROLE),
-        ("daytona-managed", _DATABRICKS_MODEL, _DATABRICKS_ROLE),
+        ("daytona-native-databricks", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
+        ("daytona-recursive-databricks", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
+        ("daytona-managed", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
     ),
 )
 def test_daytona_profiles_use_expected_model_for_both_roles(

@@ -110,6 +110,31 @@ host = "https://eu.i.posthog.com"
 [profiles.daytona-recursive.rlm]
 recursion_enabled = true
 
+# Opt-in local Databricks gates. Promote the local default only after bounded
+# full-Turn evidence establishes format, correctness, settlement, and cleanup.
+[profiles.daytona-native-databricks.llm.root]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
+[profiles.daytona-native-databricks.llm.sub]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
+[profiles.daytona-recursive-databricks.llm.root]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
+[profiles.daytona-recursive-databricks.llm.sub]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
+
+[profiles.daytona-recursive-databricks.rlm]
+recursion_enabled = true
+
 # Explicit, non-default policy for the retained Phase 4 four-arm certification.
 # It preserves the configured provider model and deterministic child decoding,
 # while making every admitted trial small enough for the US$50 fail-closed
@@ -203,12 +228,12 @@ turn_timeout_seconds = 90
 # the committed defaults now select Alibaba MaaS: this profile is the credentialed
 # Lakebase + managed-MLflow deployment contract.
 [profiles.daytona-managed.llm.root]
-model = "databricks-deepseek-v4-1-flash"
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 
 [profiles.daytona-managed.llm.sub]
-model = "databricks-deepseek-v4-1-flash"
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 

@@ -146,6 +146,10 @@ def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
     assert "do not submit in the initial" not in instructions
     assert "independent invariant" in instructions
     assert "known reference prefix" in instructions
+    assert "Estimate the verification cost against the remaining action budget" in normalized_instructions
+    assert "do not recompute a large result with a slower independent algorithm" in normalized_instructions
+    assert "If existing checks are sufficient, ``SUBMIT`` in the next action" in normalized_instructions
+    assert "state the uncertainty instead of starting an unbounded verification" in normalized_instructions
     assert "Never pass positional arguments" in instructions
     assert "SUBMIT(answer=answer)" in instructions
     assert "json.dumps(..., ensure_ascii=False)" in instructions
