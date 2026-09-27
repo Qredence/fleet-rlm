@@ -1,38 +1,54 @@
-# Fleet TUI — Agent Instructions
+# Fleet TUI — Agent Guide
 
-Applies to `tools/fleet-tui/`; repository rules and validation selection come from [AGENTS.md](../../AGENTS.md).
-The maintained client is a pi-tui TypeScript terminal application consuming backend HTTP/SSE contracts.
+These rules apply to `tools/fleet-tui/`. The root [AGENTS.md](../../AGENTS.md)
+sets repository-wide ownership, safety, and validation rules. The TUI is a
+TypeScript pi-tui client of Fleet's HTTP/SSE contract; it does not own backend
+execution or runtime policy.
 
-## Tooling
+## Client boundaries
 
-- Use workspace-defined Node/pnpm versions and run pnpm from this package.
-- Run root Make targets from the repository root; TUI code uses the root guide's TUI lane.
-- Never hand-edit `src/generated/`; regenerate changed backend contracts using the root guide's source commands.
-- Documentation-only changes use the documentation lane without a terminal launch or live backend.
+- `fleet-turn-stream.ts` owns the Turn stream lifecycle. `sse.ts` parses SSE
+  frames and validates typed chunks against the generated contract.
+- Live and durable adapters project backend information into client state.
+  `store.ts` owns state transitions through dispatch and reducers; do not mutate
+  shared state directly.
+- Transcript, screen, presenter, and rendering modules own presentation, not
+  execution semantics. Add slash commands through the command registry and
+  facade, without creating a second parsing path.
+- Keep equivalent committed information consistent between live and durable
+  projections. Use typed backend evidence for recursion, depth, settlement, and
+  execution state; never infer those from model text or presentation details.
 
-## Ownership
+## Turn stream contract
 
-- `fleet-turn-stream.ts` owns strict Turn stream lifecycle; `sse.ts` owns frame/chunk validation.
-- Live and durable projections convert typed backend information into client state.
-- `store.ts` owns transitions through dispatch/reducers; do not directly mutate shared state.
-- Transcript/screen/presenter modules own presentation, not execution semantics.
-- Slash commands extend the command registry/facade, without parallel parsing paths.
+- A normal stream has one `start`, ordered intermediate chunks, one terminal
+  outcome, and `[DONE]` last. Transient preparation status may precede `start`.
+- A claim or preparation failure can end before `start` as `error`,
+  `finish:error`, `[DONE]`. Pre-stream cancellation uses `abort`, `[DONE]`.
+- Cancellation after `start` emits `abort` then `[DONE]`, without `finish` or
+  post-terminal usage. Do not accept chunks after the terminal outcome or
+  `[DONE]`.
+- Preserve backend chunk types and ordering through parsing and projection.
+  Update generated validation or fixtures through the root guide's owning
+  commands; never hand-edit `src/generated/`.
 
-## Stream contract
+## Settings and private data
 
-Preserve one stream start, ordered intermediate chunks, one terminal outcome, and `[DONE]` last.
-Cancellation emits `abort` then `[DONE]`, without `finish` or post-terminal usage.
-Transient preparation heartbeats may precede `start`.
+- Settings edit non-secret `config/fleet.toml` policy through the backend API.
+  Profile changes require a restart unless the backend contract changes.
+  The client does not enable child tools or select execution policy locally.
+- Use typed Fleet API errors and bounded public error details. Never expose
+  secret environment values, credentials, provider-private paths, or raw
+  infrastructure errors. User-authorized Workspace paths remain governed by
+  the backend file contract.
 
-Use typed backend evidence for recursion, depth, settlement, and execution state;
-do not infer these from model text or presentation details.
-Live and durable projections must converge for equivalent committed information.
+## Tooling and checks
 
-## Settings and errors
-
-Settings edit non-secret `config/fleet.toml` policy through the backend contract.
-Profile changes target a restart unless that contract explicitly says otherwise;
-the client does not independently enable child tools or switch execution policy.
-
-Use typed Fleet API errors and bounded public error information.
-Never read or display secret environment values, credentials, or private infrastructure errors.
+- Use the Node and pnpm versions declared by this package and run pnpm commands
+  from `tools/fleet-tui/` so the pinned package manager resolves correctly.
+- Run root Make targets from the repository root. `make tui-check` runs
+  generated API and stream checks plus TUI format, lint, typecheck, and tests.
+- For backend contract changes, regenerate from the backend source with
+  `make api-sync` or `make stream-sync`; then run the corresponding check lane.
+  Documentation-only changes use `make check-docs` and do not need a terminal
+  launch or live backend.
