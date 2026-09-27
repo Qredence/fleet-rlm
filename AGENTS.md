@@ -35,10 +35,12 @@ behavior and tests define what the system does.
 - Full child recursion is bounded to one level. `daytona-native` is the
   configured default; `daytona-recursive` opts into Fleet children. Preserve
   the shared Turn budget, bounded admission, and ordered partial outcomes.
-- Resolve child inputs under Session authority. Stage bounded copies in private
-  scratch and validate harvested results before cleanup. Children do not get
-  root-owned memory, task checkpoints, publication, credentials, or writable
-  access to the parent Workspace. Root verifies child findings before acting.
+- Resolve child inputs under Session authority. The active `semantic-child`
+  path stages bounded copies in private scratch, validates outputs before
+  cleanup, and stays Volume-less. The separate `workspace-child` profile
+  supports child work that needs durable files through a mount scoped to
+  `workspaces/<workspace_id>`. Keep task checkpoints, memory tools, publication,
+  and credentials under their existing owners; Root verifies child findings.
 - Keep invocation state scoped to a Turn. Sessions own committed conversation
   and task checkpoints; Workspace services own durable files and memory.
   `DaytonaRuntime` owns provider resources and cleanup; `TurnRuntime`
