@@ -210,6 +210,13 @@ class OpenedTurnStream:
     async def _close_owned(self) -> None:
         try:
             await self._resolve_open()
+        except asyncio.CancelledError:
+            current_task = asyncio.current_task()
+            if current_task is not None and current_task.cancelling():
+                raise
+            if self._events is None:
+                return
+            raise
         except BaseException:
             # The caller's open path owns the original failure. There are no
             # prepared resources to close when opening never produced a stream.
@@ -266,8 +273,20 @@ class OpenedTurnStream:
                 if context is None:
                     # Python versions without Task.get_context cannot move a
                     # suspended traced generator into another Context safely.
-                    await self._close_owned()
+                    current_task = asyncio.current_task()
+                    caller_cancelled = False
+                    while True:
+                        try:
+                            await self._close_owned()
+                            break
+                        except asyncio.CancelledError:
+                            if current_task is None or not current_task.cancelling():
+                                raise
+                            caller_cancelled = True
+                            current_task.uncancel()
                     self._close_complete = True
+                    if caller_cancelled:
+                        raise asyncio.CancelledError
                     return
                 self._close_task = asyncio.create_task(
                     self._close_owned(),
