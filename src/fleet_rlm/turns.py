@@ -14,6 +14,7 @@ from fleet_rlm.observability.tracing import (
     annotate_trace_io,
     annotate_turn_metadata,
     record_settlement_status,
+    record_turn_stop_reason,
     turn_phase_span,
     turn_trace,
 )
@@ -152,6 +153,8 @@ class OpenedTurnStream:
         self._opened_resource: Any | None = None
         self._iter_started = False
         self._close_task: asyncio.Task[None] | None = None
+        self._close_lock = asyncio.Lock()
+        self._close_complete = False
         self._open_error: BaseException | None = None
 
     def __aiter__(self) -> Self:
@@ -228,7 +231,10 @@ class OpenedTurnStream:
         if not self._iter_started:
             self._iter_started = True
             try:
-                await shield_cleanup(self._iterator.__anext__())
+                # Prime and close the Turn generator in the same Context. Its
+                # tracing scope may span multiple yields and must reset the
+                # ContextVar tokens in the Context where they were created.
+                await self._iterator.__anext__()
             except StopAsyncIteration:
                 pass
             except BaseException as exc:
@@ -236,7 +242,7 @@ class OpenedTurnStream:
         close = getattr(self._iterator, "aclose", None)
         if close is not None:
             try:
-                await shield_cleanup(close())
+                await close()
             except BaseException as exc:
                 remember(exc)
         opened_close = getattr(self._opened_resource, "aclose", None)
@@ -250,9 +256,26 @@ class OpenedTurnStream:
 
     async def aclose(self) -> None:
         """Close once and shield the complete TurnRuntime settlement."""
-        if self._close_task is None:
-            self._close_task = asyncio.create_task(self._close_owned(), name="fleet-turn-stream-close")
-        await shield_cleanup(self._close_task)
+        async with self._close_lock:
+            if self._close_complete:
+                return
+            if self._close_task is None:
+                current_task = asyncio.current_task()
+                get_context = getattr(current_task, "get_context", None)
+                context = get_context() if callable(get_context) else None
+                if context is None:
+                    # Python versions without Task.get_context cannot move a
+                    # suspended traced generator into another Context safely.
+                    await self._close_owned()
+                    self._close_complete = True
+                    return
+                self._close_task = asyncio.create_task(
+                    self._close_owned(),
+                    name="fleet-turn-stream-close",
+                    context=context,
+                )
+            await shield_cleanup(self._close_task)
+            self._close_complete = True
 
     @property
     def outcome(self) -> RLMOutcome | None:
@@ -816,11 +839,14 @@ class TurnRuntime:
             attempt_metadata=attempt_metadata,
         ) as handle:
             loaded_skill_versions: set[str] = set()
-            async for event in self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id):
-                if isinstance(event.detail, SkillLoaded):
-                    loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
-                    annotate_turn_metadata({"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))})
-                yield event
+            async with contextlib.aclosing(
+                self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id)
+            ) as execution_events:
+                async for event in execution_events:
+                    if isinstance(event.detail, SkillLoaded):
+                        loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
+                        annotate_turn_metadata({"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))})
+                    yield event
 
     async def _execute_claimed(
         self,
@@ -868,7 +894,12 @@ class TurnRuntime:
                 for event in self._projector.project(receipt.committed_turn, state.recorder, mode="live_suffix"):
                     yield event
             yield terminal(state.recorder, receipt, trace_id=trace_id)
-        except (GeneratorExit, asyncio.CancelledError):
+        except GeneratorExit:
+            record_turn_stop_reason("client_disconnect")
+            await self._settle_cancellation(run, prepared, state)
+            raise
+        except asyncio.CancelledError:
+            record_turn_stop_reason("request_cancelled")
             await self._settle_cancellation(run, prepared, state)
             raise
         except Exception:
@@ -930,6 +961,7 @@ class TurnRuntime:
                 if next_event.done():
                     state.pending_event = None
             if isinstance(result, _ClaimLost):
+                record_turn_stop_reason("claim_lost")
                 _mark_stream_runtime(state.stream, committed=False)
                 await self._handoff_cleanup_or_drain(
                     run,
@@ -1049,10 +1081,12 @@ class TurnRuntime:
             committed = await self._reconcile_finalization_after_claim_loss(state.finalization_task)
             if isinstance(committed, CommittedTurnReceipt):
                 return committed
+            record_turn_stop_reason("claim_lost")
             state.settled = True
             annotate_trace_io(request=trace_request, response_text="Turn failed", failed=True)
             return result
         if result is None:
+            record_turn_stop_reason("turn_timeout")
             await self._stop_claim_waiter(state)
             run.authority.revoke()
             try:
@@ -1207,6 +1241,7 @@ class TurnRuntime:
         prepared: PreparedTurn,
         trace_request: str,
     ) -> FailedRunReceipt | CommittedTurnReceipt | None:
+        record_turn_stop_reason("execution_failure")
         annotate_trace_io(request=trace_request, response_text="Turn failed", failed=True)
         try:
             return await asyncio.shield(
@@ -1481,6 +1516,14 @@ class TurnRuntime:
 
     @staticmethod
     def _annotate_outcome(trace_request: str, outcome: RLMOutcome) -> None:
+        if outcome.terminal_status == "timeout":
+            record_turn_stop_reason("execution_timeout")
+        elif outcome.terminal_status == "cancelled":
+            record_turn_stop_reason("explicit_cancellation")
+        elif outcome.succeeded:
+            record_turn_stop_reason("completed")
+        else:
+            record_turn_stop_reason("execution_failure")
         annotate_trace_io(
             request=trace_request,
             response_text=(outcome.prediction.display_text if outcome.prediction else outcome.public_error_message),
@@ -1495,6 +1538,7 @@ class TurnRuntime:
         receipt: RunSettlement,
     ) -> None:
         if isinstance(receipt, FailedRunReceipt) and outcome.succeeded:
+            record_turn_stop_reason("settlement_failure")
             annotate_trace_io(
                 request=trace_request,
                 response_text=receipt.public_message or "Turn failed",

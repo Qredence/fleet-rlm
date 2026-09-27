@@ -1,0 +1,80 @@
+Answer with ONLY the final results requested in the last line. Do not write out intermediate steps, tables, or working — no scratchpad, no chain-of-thought in your output. You must track all state internally and emit only the final answers. (If you cannot help writing steps, you have failed the constraint this task is testing.)
+
+You are given a machine with 5 registers: A B C D E, all starting at 0.
+Process the following 40 instructions strictly in order. Each instruction mutates registers based on their CURRENT values. Some instructions are conditional and depend on state you must carry forward.
+
+Instruction set semantics:
+- ADD x n      : x = x + n
+- SUB x n      : x = x - n
+- COPY x y     : x = y (x takes y's current value)
+- SWAP x y     : exchange the values of x and y
+- IFPOS x: y   : if x > 0 right now, execute instruction y (y is a full instruction); else skip
+- IFEVEN x: y  : if x is even right now (0 counts as even), execute y; else skip
+- DOUBLE x     : x = x * 2
+- MOD x n      : x = x mod n (result always non-negative, 0 <= r < n)
+
+PROGRAM:
+1. ADD A 5
+2. ADD B 3
+3. COPY C A
+4. DOUBLE C
+5. SUB C 4
+6. IFPOS C: ADD D 10
+7. SWAP A B
+8. ADD E 7
+9. MOD E 4
+10. IFEVEN E: ADD A 2
+11. COPY B C
+12. SUB B 6
+13. IFPOS B: DOUBLE A
+14. ADD C 1
+15. IFEVEN C: SWAP C D
+16. ADD A 3
+17. MOD A 7
+18. COPY E A
+19. IFPOS D: ADD E 5
+20. DOUBLE B
+21. SUB B 3
+22. IFEVEN B: ADD C 4
+23. SWAP D E
+24. ADD A 1
+25. IFPOS A: SUB D 2
+26. COPY C B
+27. MOD C 5
+28. ADD D 6
+29. IFEVEN D: DOUBLE E
+30. SWAP A C
+31. ADD B 2
+32. IFPOS E: ADD A 4
+33. SUB C 1
+34. MOD B 3
+35. COPY D A
+36. IFEVEN A: SUB E 3
+37. ADD C 2
+38. DOUBLE D
+39. IFPOS C: SWAP B E
+40. ADD A 1
+
+FINAL LINE — emit ONLY these, one per line, nothing else:
+- The final values of A, B, C, D, E.
+- The number of times any IFPOS/IFEVEN condition evaluated TRUE (i.e., its inner instruction actually executed).
+- Which register holds the largest final value (name it; if tied, name all tied).
+</parameter>
+</invoke>
+
+**Why this targets a latent-reasoning model specifically:**
+
+- **It's pure depth, not length.** The program is short — it fits trivially in any context window. The difficulty is the 40-step *sequential dependency chain*: every value depends on all prior mutations, and the conditionals (`IFPOS`, `IFEVEN`) branch on live state, so the model can't precompute or reorder. This is exactly the "iterate internally N times" pressure a recurrent-depth model is built to handle — and where too-shallow latent computation produces a confidently wrong register.
+
+- **The no-scratchpad constraint is the actual test.** A normal LM passes this by writing out all 40 steps. A latent-reasoning model is *supposed* to do that tracking in its recurrent loop and emit only the answer. The instruction forbids externalization precisely to measure whether the internal computation is faithful — if it can only get it right by writing steps, its latent depth isn't doing the work.
+
+- **The SWAP + conditional interplay is the trap.** `SWAP` moves values between registers mid-stream (steps 7, 15, 23, 30, 39), so an `IFPOS C` later is checking a value that used to live in a different register. A model that loses track of one swap gets a cascade of wrong downstream branches. This is the state-tracking-without-notes failure mode.
+
+- **The TRUE-count and argmax questions force aggregation over the whole run**, not just the endpoint — so it can't shortcut by only tracking final registers; it has to have faithfully evaluated every conditional along the way.
+
+**How to grade it:** Run the program yourself once (or have any code-running agent execute it) to get the ground-truth registers, the true-count, and the argmax. Then check the latent model's answer against it. The revealing signal isn't just right/wrong — it's *which* register is wrong. An error in A or E (many downstream ops) means it lost the chain early; an error only in the true-count means its registers were right but it didn't faithfully track the branch evaluations.
+
+Want me to:
+- **Provide the worked ground-truth answer key** (I'll trace all 40 steps so you have the exact expected output to grade against), or
+- **Make it depth-adaptive** — interleave a few trivial questions with the hard chain so you can see if it over- or under-allocates internal compute, or
+- **Add a "declare your confidence per register" line** to test whether the model knows *which* of its own internal values it's unsure about — the calibration signal that matters most for latent reasoners?

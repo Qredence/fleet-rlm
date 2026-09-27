@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -23,6 +24,8 @@ from fleet_rlm.observability.tracing import (
     annotate_turn_attributes,
     annotate_turn_metadata,
     current_turn_trace_id,
+    defer_current_turn_trace_completion,
+    record_turn_stop_reason,
     start_turn_span,
     turn_phase_span,
     turn_trace,
@@ -50,6 +53,7 @@ def _install_fake_mlflow(
     monkeypatch: pytest.MonkeyPatch,
     *,
     explode: bool = False,
+    context_enter_explode: bool = False,
     teardown_explode: bool = False,
 ) -> SimpleNamespace:
     """
@@ -66,10 +70,13 @@ def _install_fake_mlflow(
         start_span_names=[],
         update_kwargs=[],
         get_trace_calls=0,
+        span_context_enter_attempts=0,
         span_inputs=[],
         span_outputs=[],
         span_attributes=[],
         span_statuses=[],
+        span_ends=[],
+        span_context_exit_args=[],
     )
 
     class _FakeSpan:
@@ -91,17 +98,46 @@ def _install_fake_mlflow(
             self.status = status
             calls.span_statuses.append(status)
 
+        def end(self) -> None:
+            calls.span_ends.append(self.request_id)
+            if teardown_explode:
+                raise RuntimeError("span teardown boom")
+
     active_span = _FakeSpan()
 
-    @contextmanager
-    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
         del span_type
         if explode:
             raise RuntimeError("span boom")
         calls.start_span_names.append(name)
+        return active_span
+
+    @contextmanager
+    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        del span_type
+        calls.start_span_names.append(name)
         yield active_span
         if teardown_explode:
             raise RuntimeError("span teardown boom")
+
+    class _FakeSpanContext:
+        def __init__(self, span: Any) -> None:
+            self.span = span
+
+        def __enter__(self) -> Any:
+            calls.span_context_enter_attempts += 1
+            if context_enter_explode:
+                raise RuntimeError("span context enter boom")
+            return self.span
+
+        def __exit__(self, *_args: Any) -> bool:
+            calls.span_context_exit_args.append((None, None, None))
+            if teardown_explode:
+                raise RuntimeError("span context teardown boom")
+            return False
+
+    def safe_set_span_in_context(span: Any) -> _FakeSpanContext:
+        return _FakeSpanContext(span)
 
     def update_current_trace(**kwargs: Any) -> None:
         calls.update_kwargs.append(kwargs)
@@ -114,6 +150,7 @@ def _install_fake_mlflow(
         return active_span
 
     mlflow = ModuleType("mlflow")
+    mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
     mlflow.start_span = start_span  # type: ignore[attr-defined]
     mlflow.update_current_trace = update_current_trace  # type: ignore[attr-defined]
     mlflow.get_last_active_trace_id = get_last_active_trace_id  # type: ignore[attr-defined]
@@ -122,8 +159,15 @@ def _install_fake_mlflow(
     entities = ModuleType("mlflow.entities")
     entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
 
+    fluent = ModuleType("mlflow.tracing.fluent")
+    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    tracing_module = ModuleType("mlflow.tracing")
+    tracing_module.fluent = fluent  # type: ignore[attr-defined]
+
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
     return calls
 
 
@@ -204,6 +248,293 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
         }
     assert calls.update_kwargs[-1] == {"state": "OK"}
     assert current_turn_trace_id() is None
+
+
+def test_turn_trace_setup_failure_detaches_and_ends_created_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch, context_enter_explode=True)
+
+    with turn_trace(uuid4(), uuid4(), enabled=True) as handle:
+        assert handle.trace_id is None
+
+    assert calls.span_context_enter_attempts == 1
+    assert calls.span_context_exit_args == [(None, None, None)]
+    assert calls.span_ends == ["tr-from-span"]
+
+
+@pytest.mark.parametrize("worker_finishes_first", [False, True])
+def test_turn_trace_completion_waits_for_scope_and_owned_worker(
+    monkeypatch: pytest.MonkeyPatch,
+    worker_finishes_first: bool,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    callbacks: list[Any] = []
+    session_id = uuid4()
+    run_id = uuid4()
+
+    with turn_trace(session_id, run_id, enabled=True):
+        assert defer_current_turn_trace_completion(callbacks.append)
+        record_turn_stop_reason("execution_timeout")
+        assert calls.span_attributes[-1] == {"turn_stop_reason": "execution_timeout"}
+        if worker_finishes_first:
+            callbacks[0]()
+            assert calls.span_ends == []
+
+    if not worker_finishes_first:
+        assert calls.span_ends == []
+        callbacks[0]()
+    assert calls.span_ends == ["tr-from-span"]
+
+
+@pytest.mark.parametrize(
+    ("terminal_status", "expected_reason"),
+    [
+        ("timeout", "execution_timeout"),
+        ("cancelled", "explicit_cancellation"),
+        ("failed", "execution_failure"),
+        ("completed", "completed"),
+    ],
+)
+def test_turn_outcome_records_bounded_stop_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_status: str,
+    expected_reason: str,
+) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.turns import TurnRuntime
+
+    prediction = SimpleNamespace(display_text="answer", outputs={"answer": "answer"})
+    outcome = RLMOutcome(
+        terminal_status=terminal_status,  # type: ignore[arg-type]
+        prediction=prediction if terminal_status == "completed" else None,
+        public_error_message="Turn failed" if terminal_status != "completed" else None,
+    )
+    with turn_trace(uuid4(), uuid4(), enabled=True):
+        TurnRuntime._annotate_outcome("request", outcome)
+
+    assert calls.span_attributes[-1] == {"turn_stop_reason": expected_reason}
+
+
+@pytest.mark.asyncio
+async def test_rlm_stream_delays_root_trace_until_owned_worker_drains(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.rlm.execution import ExecutionRuntime, RLMExecutionContext, RLMRunner, RunIdentity, SessionView
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Factory:
+        def create(self, **_kwargs: Any) -> Any:
+            class Program:
+                async def acall(self, **_call_kwargs: Any) -> Any:
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    runner = RLMRunner(program_builder=Factory().create)
+    stream = None
+
+    async def consume() -> None:
+        assert stream is not None
+        async for _event in stream:
+            pass
+
+    with turn_trace(uuid4(), uuid4(), enabled=True, trace_phase="execution"):
+        stream = runner.stream(context)
+        stream.defer_runtime_release()
+        consumer = asyncio.create_task(consume())
+        assert await asyncio.to_thread(entered.wait, 2)
+        consumer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await consumer
+        assert calls.span_ends == []
+        await stream.aclose()
+
+    assert calls.span_ends == []
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+
+    release.set()
+    await stream.wait_owned()
+    await stream.release_runtime()
+    await runner.aclose(drain_seconds=1)
+    assert calls.span_ends == ["tr-from-span"]
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_turn_disconnect_records_cancellation_before_owned_worker_drains(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A client disconnect records cancellation promptly while its owned RLM worker drains."""
+    calls = _install_fake_mlflow(monkeypatch)
+    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
+    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.turn_settlement import TestingRunSettlement
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    entered = threading.Event()
+    release = threading.Event()
+    late_success_returned = threading.Event()
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="disconnect while worker drains",
+    )
+    run_id = uuid4()
+
+    class Factory:
+        def create(self, **_kwargs: Any) -> Any:
+            class Program:
+                observer: Any = None
+
+                def bind_observer(self, observer: Any, **_options: Any) -> None:
+                    self.observer = observer
+
+                async def acall(self, **_call_kwargs: Any) -> Any:
+                    assert self.observer is not None
+                    self.observer(RLMReasoning("worker is still running", step=1))
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    late_success_returned.set()
+                    return dspy.Prediction(answer="late success", trajectory=[])
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    class Prepared:
+        def __init__(self, execution: RLMExecutionContext) -> None:
+            self.execution = execution
+            self.artifact_sink = None
+            self.result_snapshot_sink = None
+            self.post_commit_memory_promotion = None
+
+        async def aclose(self) -> None:
+            return None
+
+    class Preparation:
+        async def prepare(self, claimed: Any, *, deadline: float) -> Prepared:
+            del deadline
+            context = RLMExecutionContext(
+                identity=RunIdentity(
+                    run_id=claimed.run_id,
+                    session_id=claimed.session_id,
+                    access=claimed.access,
+                    authority=claimed.authority,
+                ),
+                session=SessionView(
+                    request=claimed.input.text,
+                    session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+                    attachments=(),
+                ),
+                execution=ExecutionRuntime(
+                    models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+                    options=RLMOptions(),
+                    deadline=asyncio.get_running_loop().time() + 10,
+                    interpreter=None,
+                    cancellation_requested=not_cancelled,
+                ),
+                capabilities=EmptyCapabilities(),
+            )
+            return Prepared(context)
+
+    cleanup = RunCleanupSupervisor()
+    runner = RLMRunner(program_builder=Factory().create)
+    runtime = TurnRuntime(
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
+        preparation=Preparation(),
+        runner=runner,
+        cleanup=cleanup,
+        turn_timeout_seconds=10,
+        mlflow_tracing_enabled=True,
+    )
+    opened = await runtime.open(OpenTurnCommand(access, session.id, TurnInput("disconnect"), "disconnect-key", run_id))
+
+    try:
+        # Consume the initial events and one worker event so ``aclose`` reaches
+        # TurnRuntime's GeneratorExit branch while its root worker is blocked.
+        first = await opened.__anext__()
+        second = await opened.__anext__()
+        assert first.kind == "run.started"
+        assert second.kind == "status"
+        async with asyncio.timeout(2):
+            third = await opened.__anext__()
+        assert entered.is_set()
+        assert isinstance(third.detail, RLMReasoning)
+
+        # Preparation has closed its own trace; the execution root must remain
+        # open after the response closes because the worker still owns it.
+        assert len(calls.span_ends) == 1
+        async with asyncio.timeout(1):
+            await opened.aclose()
+        assert not release.is_set()
+        assert store._runs[run_id].status == "settling"
+        assert store._runs[run_id].failure_code == "cancelled"
+        assert store._runs[run_id].terminal_intent is not None
+        assert store._runs[run_id].terminal_intent.terminal_status == "cancelled"
+        assert len(calls.span_ends) == 1
+        assert any(attrs.get("turn_stop_reason") == "client_disconnect" for attrs in calls.span_attributes)
+
+        # Releasing the worker allows cleanup and final settlement, but its
+        # late successful value must not replace the cancelled Turn.
+        release.set()
+        await asyncio.wait_for(runner.aclose(drain_seconds=2), timeout=2)
+        await asyncio.wait_for(cleanup.shutdown(drain_seconds=2), timeout=2)
+
+        assert late_success_returned.is_set()
+        assert store._runs[run_id].status == "cancelled"
+        assert store._runs[run_id].failure_code == "cancelled"
+        assert len(calls.span_ends) == 2
+    finally:
+        release.set()
+        await opened.aclose()
+        await runner.aclose(drain_seconds=2)
+        await cleanup.shutdown(drain_seconds=2)
 
 
 def test_consecutive_sessions_do_not_contaminate_trace_tags(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -354,20 +685,25 @@ def test_concurrent_execution_traces_keep_session_context_isolated(monkeypatch: 
     current_span: ContextVar[object | None] = ContextVar("test_mlflow_current_span", default=None)
     next_trace_id = 0
 
-    @contextmanager
-    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
         nonlocal next_trace_id
         del name, span_type
         next_trace_id += 1
         span = SimpleNamespace(request_id=f"tr-session-{next_trace_id}", span_id=f"span-{next_trace_id}")
+        return span
+
+    @contextmanager
+    def safe_set_span_in_context(span: Any) -> Iterator[Any]:
         token = current_span.set(span)
         try:
             yield span
         finally:
             current_span.reset(token)
 
-    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.start_span_no_context = start_span_no_context  # type: ignore[attr-defined]
     mlflow.get_current_active_span = current_span.get  # type: ignore[attr-defined]
+    fluent = sys.modules["mlflow.tracing.fluent"]
+    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
 
     async def trace_session() -> tuple[str | None, str | None]:
         with turn_trace(uuid4(), uuid4(), enabled=True):
@@ -621,20 +957,28 @@ def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pyte
         def set_status(self, _status: str) -> None:
             raise RuntimeError("status failed")
 
-    class SpanContext:
-        def __enter__(self) -> Span:
-            return Span()
+        def end(self) -> None:
+            pass
 
-        def __exit__(self, *args: object) -> None:
-            exits.append(args)
+    @contextmanager
+    def safe_set_span_in_context(span: Span) -> Iterator[Span]:
+        try:
+            yield span
+        finally:
+            exits.append((None, None, None))
 
-    fake_mlflow = SimpleNamespace(
-        start_span=lambda **_kwargs: SpanContext(),
-        update_current_trace=lambda **_kwargs: None,
-        get_current_active_span=lambda: Span(),
-    )
+    fake_mlflow = ModuleType("mlflow")
+    fake_mlflow.start_span_no_context = lambda **_kwargs: Span()  # type: ignore[attr-defined]
+    fake_mlflow.update_current_trace = lambda **_kwargs: None  # type: ignore[attr-defined]
+    fake_mlflow.get_current_active_span = lambda: Span()  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
     monkeypatch.setitem(sys.modules, "mlflow.entities", SimpleNamespace(SpanType=SimpleNamespace(CHAIN="CHAIN")))
+    fluent = ModuleType("mlflow.tracing.fluent")
+    fluent.safe_set_span_in_context = safe_set_span_in_context  # type: ignore[attr-defined]
+    tracing_module = ModuleType("mlflow.tracing")
+    tracing_module.fluent = fluent  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
 
     expected = ValueError("original turn failure")
 
@@ -651,21 +995,6 @@ def test_turn_trace_closes_root_when_failure_annotation_raises(monkeypatch: pyte
 
 def test_turn_trace_omits_raw_exception_from_mlflow_context(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
-    mlflow = sys.modules["mlflow"]
-    exit_args: list[tuple[object, object, object]] = []
-
-    class _CapturingSpanContext:
-        def __enter__(self) -> object:
-            return mlflow.get_current_active_span()  # type: ignore[attr-defined]
-
-        def __exit__(self, *args: object) -> None:
-            exit_args.append(args)
-
-    def start_span(*, name: str = "span", **_kwargs: object) -> _CapturingSpanContext:
-        calls.start_span_names.append(name)
-        return _CapturingSpanContext()
-
-    mlflow.start_span = start_span  # type: ignore[attr-defined]
 
     try:
         with turn_trace(uuid4(), uuid4(), enabled=True):
@@ -679,7 +1008,7 @@ def test_turn_trace_omits_raw_exception_from_mlflow_context(monkeypatch: pytest.
         "provider_status_category": "none",
     }
     assert calls.span_statuses[-1] == "ERROR"
-    assert exit_args == [(None, None, None)]
+    assert calls.span_context_exit_args == [(None, None, None)]
     assert "secret timeout" not in str(calls.span_outputs + calls.span_statuses)
 
 

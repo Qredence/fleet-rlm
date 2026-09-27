@@ -297,6 +297,8 @@ def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> 
     assert set(before.available_profiles) == {
         "daytona-native",
         "daytona-recursive",
+        "daytona-native-databricks",
+        "daytona-recursive-databricks",
         "daytona-managed",
         "phase4-campaign",
         "phase4-campaign-a",

@@ -35,6 +35,13 @@ calls; MaaS carries no such quota, which is why it is the committed default.
 The committed policy uses `daytona-native` as the local/disposable default.
 It inherits `[defaults]` with Fleet-child recursion disabled;
 `daytona-recursive` is an explicit opt-in that enables bounded Fleet children.
+`daytona-native-databricks` and `daytona-recursive-databricks` are local
+Databricks gate profiles for the same DeepSeek V4.1 Flash endpoint. They select
+`DATABRICKS_TOKEN` and `FLEET_LLM_BASE_URL` for both model roles while retaining
+local persistence. Their provider-visible model ID is the owned Unity Catalog
+service `uscentral.ai_gateway.deepseek-v4-1-flash-service`, which routes to
+`system.ai.databricks-deepseek-v4-1-flash`. Use them only for bounded full-Turn
+validation; their presence does not promote Databricks as the default.
 `daytona-managed` is the explicit Lakebase production policy; it pins Root and
 Sub to the Databricks Unity AI Gateway transport (`DATABRICKS_TOKEN`,
 `FLEET_LLM_BASE_URL`) and requires `FLEET_DATABASE_URL` to be a TLS PostgreSQL
@@ -44,6 +51,8 @@ URL authenticated as `fleet_app`.
 | --- | --- | --- |
 | `daytona-native` (default) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled; child recursion is disabled. |
 | `daytona-recursive` (opt-in) | `ALIBABA_API_KEY`, `FLEET_MAAS_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local/disposable SQLite or a test PostgreSQL target; local MLflow tracing is enabled; bounded child recursion is enabled. |
+| `daytona-native-databricks` (gate) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local persistence and MLflow tracing; child recursion is disabled. |
+| `daytona-recursive-databricks` (gate) | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID` | Local persistence and MLflow tracing; bounded child recursion is enabled. |
 | `daytona-managed` | `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`, `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `FLEET_DATABASE_URL` | TLS Lakebase PostgreSQL as `fleet_app`, at Alembic head; local MLflow tracing remains enabled. |
 
 Profiles are explicit and do not fall back to each other. Daytona startup never
@@ -189,12 +198,23 @@ All committed profiles use the OpenAI-compatible Chat Completion format.
 committed Root and Sub roles use `deepseek-v4.1-flash` with the
 `ALIBABA_API_KEY` and `FLEET_MAAS_BASE_URL` references, no reasoning-effort
 override, and LM caching disabled. `FLEET_MAAS_BASE_URL` must be the DashScope
-`/compatible-mode/v1` base; the client appends `/chat/completions`. Their
-`num_retries = 3` policy lets the client back off provider 429s, and their
-`max_tokens = 16384` ceiling and Fleet's character-level output caps are
+`/compatible-mode/v1` base; the client appends `/chat/completions`.
+`FleetJSONAdapter` requests the endpoint's verified `json_object` mode for
+this exact model and route. The endpoint rejected `json_schema`, so Fleet
+does not request a schema there; strict object parsing and bounded re-asks
+still apply. The `num_retries = 3` policy lets the client back off provider
+429s. The `max_tokens = 16384` ceiling and Fleet's character-level output caps are
 independent policy bounds. The pinned `daytona-managed` profile instead uses
-`databricks-deepseek-v4-1-flash` with `DATABRICKS_TOKEN` and
+`uscentral.ai_gateway.deepseek-v4-1-flash-service` with `DATABRICKS_TOKEN` and
 `FLEET_LLM_BASE_URL`, where the base must be the `/ai-gateway/mlflow/v1` base.
+For this exact Databricks model, Fleet registers DSPy's native `lm15` schema
+capability so the JSON action adapter requests `response_format`. Fleet still
+requires an object with `reasoning` and `code`, and malformed actions exhaust
+the existing two corrective re-asks without executing code. The
+[dated live gate](../testing/root-action-protocol-gate-2026-09-27.md) confirms
+format and answer behavior for the opt-in local profiles; reported cost remains
+unavailable, so default promotion is still gated. The managed profile's
+Lakebase and managed-MLflow lifecycle was not exercised by those local Turns.
 
 The committed default routes traces to the local `fleet-rlm` experiment at
 `http://127.0.0.1:5001`; the supervised `fleet cli` command starts or reuses

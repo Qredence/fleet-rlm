@@ -69,6 +69,8 @@ def test_settings_policy_is_loopback_only_and_revision_checked(monkeypatch, tmp_
             "defaults",
             "daytona-native",
             "daytona-recursive",
+            "daytona-native-databricks",
+            "daytona-recursive-databricks",
             "daytona-managed",
             "phase4-campaign",
             "phase4-campaign-a",

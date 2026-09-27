@@ -26,7 +26,8 @@ import logging
 import os
 import re
 import socket
-from collections.abc import Iterator, Mapping
+import threading
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
@@ -182,6 +183,7 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "image_identity",
         "settlement_status",
         "settlement_durable",
+        "turn_stop_reason",
         "run_id",
         "session_id",
         "child_call_id",
@@ -962,6 +964,7 @@ except PackageNotFoundError:
     _FLEET_APP_VERSION = "unknown"
 _current_trace_id: ContextVar[str | None] = ContextVar("fleet_mlflow_trace_id", default=None)
 _current_trace_failed: ContextVar[bool] = ContextVar("fleet_mlflow_trace_failed", default=False)
+_current_trace_completion: ContextVar[Any | None] = ContextVar("fleet_mlflow_trace_completion", default=None)
 # True only while a fleet_turn root span is open. Phase spans gate on this so
 # tracing-disabled turns never import or touch MLflow at all.
 _fleet_trace_active: ContextVar[bool] = ContextVar("fleet_turn_trace_active", default=False)
@@ -976,6 +979,91 @@ class TraceHandle:
     # Internal-only span identity used for cross-trace links. This field must
     # never be copied into product events, durable turns, or public API data.
     _span_id: str | None = field(default=None, repr=False)
+
+
+class _TraceCompletion:
+    """End a root span after both its Turn scope and owned workers finish."""
+
+    def __init__(self, span: Any) -> None:
+        self._span = span
+        self._lock = threading.Lock()
+        self._deferred_workers = 0
+        self._drained_workers = 0
+        self._turn_finished = False
+        self._ended = False
+
+    def defer_until(self, register: Callable[[Callable[[], None]], None]) -> bool:
+        """Transfer one completion edge to an existing worker owner."""
+        with self._lock:
+            if self._turn_finished or self._ended:
+                return False
+            self._deferred_workers += 1
+        try:
+            register(self.worker_drained)
+        except Exception:
+            logger.debug("MLflow trace completion handoff failed; ending with the Turn scope", exc_info=True)
+            self.worker_drained()
+        return True
+
+    def worker_drained(self) -> None:
+        """Record one owned worker drain without requiring its trace context."""
+        with self._lock:
+            if self._drained_workers < self._deferred_workers:
+                self._drained_workers += 1
+            should_end = self._claim_end_locked()
+        if should_end:
+            self._end_span()
+
+    def turn_finished(self) -> None:
+        """Record completion of the request scope and end when workers are done."""
+        with self._lock:
+            self._turn_finished = True
+            should_end = self._claim_end_locked()
+        if should_end:
+            self._end_span()
+
+    def _claim_end_locked(self) -> bool:
+        if self._ended or not self._turn_finished:
+            return False
+        if self._deferred_workers and self._drained_workers < self._deferred_workers:
+            return False
+        self._ended = True
+        return True
+
+    def _end_span(self) -> None:
+        try:
+            self._span.end()
+        except BaseException:
+            logger.debug("MLflow turn span teardown failed; continuing", exc_info=True)
+
+
+def defer_current_turn_trace_completion(register: Callable[[Callable[[], None]], None]) -> bool:
+    """Let an owned worker delay root-span export after the request scope exits."""
+    completion = _current_trace_completion.get()
+    if completion is None:
+        return False
+    return completion.defer_until(register)
+
+
+_TURN_STOP_REASONS = frozenset(
+    {
+        "completed",
+        "execution_failure",
+        "execution_timeout",
+        "turn_timeout",
+        "explicit_cancellation",
+        "client_disconnect",
+        "request_cancelled",
+        "claim_lost",
+        "settlement_failure",
+    }
+)
+
+
+def record_turn_stop_reason(reason: str) -> None:
+    """Attach an allowlisted low-cardinality reason for the Turn's terminal path."""
+    if reason in _TURN_STOP_REASONS:
+        annotate_turn_attributes({"turn_stop_reason": reason})
 
 
 def _is_local_supervised_tracking_uri(uri: str | None) -> bool:
@@ -1376,6 +1464,11 @@ def turn_trace(
     token = _current_trace_id.set(None)
     failed_token = _current_trace_failed.set(False)
     active_token: Token[bool] | None = None
+    completion_token: Token[Any | None] | None = None
+    completion: _TraceCompletion | None = None
+    span_context: Any | None = None
+    span: Any | None = None
+    active_context_open = False
     try:
         try:
             import mlflow
@@ -1386,12 +1479,21 @@ def turn_trace(
             return
 
         try:
-            span_context = mlflow.start_span(
+            span = mlflow.start_span_no_context(
                 name=_SPAN_NAME,
                 span_type=SpanType.CHAIN,
                 log_level="INFO",
             )
-            span = span_context.__enter__()
+            from mlflow.tracing.fluent import safe_set_span_in_context
+
+            span_context = safe_set_span_in_context(span)
+            # A context manager may partially install its context before
+            # __enter__ raises. Mark it for teardown before entering so the
+            # outer finally can make a best-effort reset in that case too.
+            active_context_open = True
+            span_context.__enter__()
+            completion = _TraceCompletion(span)
+            completion_token = _current_trace_completion.set(completion)
         except Exception:
             logger.warning("MLflow turn span setup failed; continuing without traces")
             yield TraceHandle(trace_id=None)
@@ -1527,19 +1629,27 @@ def turn_trace(
                     logger.warning("MLflow turn span failure status annotation failed; continuing")
             except BaseException:
                 logger.warning("MLflow turn span failure annotation failed; continuing")
-            finally:
-                try:
-                    span_context.__exit__(None, None, None)
-                except BaseException:
-                    logger.warning("MLflow turn span teardown failed; continuing")
             raise
         else:
             _set_current_trace_state("ERROR" if _current_trace_failed.get() else "OK")
+    finally:
+        if active_context_open and span_context is not None:
             try:
                 span_context.__exit__(None, None, None)
             except BaseException:
-                logger.warning("MLflow turn span teardown failed; continuing")
-    finally:
+                logger.warning("MLflow turn span context teardown failed; continuing")
+        if completion is not None:
+            completion.turn_finished()
+        elif span is not None:
+            # Setup can fail after the span is created but before completion
+            # ownership is installed. End that root only after attempting to
+            # detach its active context.
+            try:
+                span.end()
+            except BaseException:
+                logger.debug("MLflow turn span setup cleanup failed; continuing", exc_info=True)
+        if completion_token is not None:
+            _current_trace_completion.reset(completion_token)
         if active_token is not None:
             _fleet_trace_active.reset(active_token)
         _current_trace_failed.reset(failed_token)
