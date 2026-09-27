@@ -173,6 +173,13 @@ class _Interpreter:
         self._fail_shutdown = fail_shutdown
         self._shutdown = False
 
+    def new_invocation(self) -> SimpleNamespace:
+        def shutdown() -> None:
+            assert not self._shutdown
+            self._events.append("invocation_shutdown")
+
+        return SimpleNamespace(shutdown=shutdown)
+
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """Record interpreter shutdown and raise an error when shutdown is configured to fail."""
         assert strict_broker_cleanup is True
@@ -205,13 +212,15 @@ class _RLM:
         """
         assert set(kwargs) == {"curated_input_handle", "interpreter_factory"}
         assert set(kwargs["curated_input_handle"]) == {"transaction_id", "sha256", "schema", "byte_size"}
-        if isinstance(self._prediction, BaseException):
-            raise self._prediction
         interpreter_factory = kwargs["interpreter_factory"]
         assert callable(interpreter_factory)
         interpreter = interpreter_factory()
-        interpreter.shutdown(strict_broker_cleanup=True)
-        return self._prediction
+        try:
+            if isinstance(self._prediction, BaseException):
+                raise self._prediction
+            return self._prediction
+        finally:
+            interpreter.shutdown()
 
 
 class _LifecycleFactory:
@@ -412,7 +421,7 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
     assert len(interpreters) == len(rlms) == 2
     assert interpreters[0] is not interpreters[1]
     assert rlms[0] is not rlms[1]
-    assert events == ["create", "shutdown", "delete", "create", "shutdown", "delete"]
+    assert events == ["create", "invocation_shutdown", "shutdown", "delete"] * 2
 
 
 @pytest.mark.asyncio
@@ -428,7 +437,7 @@ async def test_lifecycle_preserves_primary_failure_when_cleanup_also_fails(monke
     with pytest.raises(RuntimeError, match="rlm failed"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "shutdown", "delete"]
+    assert events == ["create", "invocation_shutdown", "shutdown", "delete"]
 
 
 @pytest.mark.asyncio
@@ -448,4 +457,4 @@ async def test_lifecycle_raises_cleanup_error_without_primary_failure(monkeypatc
     with pytest.raises(StrictEvaluationCleanupError, match="cleanup"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "shutdown", "delete"]
+    assert events == ["create", "invocation_shutdown", "shutdown", "delete"]

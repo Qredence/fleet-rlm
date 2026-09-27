@@ -407,7 +407,7 @@ class StrictDaytonaEvaluationLifecycle:
 
             def interpreter_factory(interpreter: DaytonaCodeInterpreter = interpreter) -> DaytonaCodeInterpreter:
                 assert interpreter is not None
-                return interpreter
+                return interpreter.new_invocation()
 
             interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
             signature = _strict_evaluator_signature()

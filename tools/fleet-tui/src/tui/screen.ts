@@ -45,7 +45,7 @@ export class FleetScreen extends VStack {
       primary: true,
       scrollbar: "auto",
       scrollbarTrackStyle: (text) => theme.surface("toolPanelBg")(text),
-      scrollbarThumbStyle: (text) => theme.surface("toolPanelBg")(text),
+      scrollbarThumbStyle: (text) => theme.fg("accent", theme.surface("toolPanelBg")(text)),
     });
     this.addChild(this.transcriptView, { grow: 1, shrink: 1, minSize: 1 });
     this.dock = new OperatorDockComponent(store, editor, terminal, ui);

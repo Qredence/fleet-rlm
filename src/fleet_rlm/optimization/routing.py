@@ -381,8 +381,10 @@ async def run_routing_scenario(
         root_interpreter = await _maybe_await(root_interpreter_factory())
         try:
 
-            def interpreter_factory(interpreter: Any = root_interpreter) -> Any:
-                return interpreter
+            def interpreter_factory(
+                interpreter: Any = root_interpreter, observer: Callable[[Any], None] = captured.append
+            ) -> Any:
+                return interpreter.new_invocation(observer=observer, observation_max_chars=2_000)
 
             interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
             rlm = build_native_rlm(
@@ -393,9 +395,6 @@ async def run_routing_scenario(
                 interpreter_factory=interpreter_factory,
                 verbose=False,
             )
-            bind_observer = getattr(root_interpreter, "bind_observer", None)
-            if callable(bind_observer):
-                bind_observer(captured.append, max_chars=2_000)
             with dspy.context(
                 lm=root_lm,
                 adapter=dspy.JSONAdapter(),

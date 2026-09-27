@@ -119,7 +119,8 @@ separate validation gates.
   Unsupported models or request fields fail rather than falling back to
   LiteLLM. DSPy 3.4 still installs LiteLLM as a transitive dependency.
 - Fleet remains on DSPy's public program and LM call surfaces:
-  `rlm.acall(interpreter, ...)` delegates request and response normalization to
+  `await rlm.acall(**named_inputs)`, with an invocation-scoped interpreter factory,
+  delegates request and response normalization to
   stock DSPy. Application code does not call LM `forward()` methods, construct
   provider-shaped requests, or opt into DSPy's experimental typed LM API while
   the supported DSPy 3.4.0 line is selected. The current lock resolves the
@@ -199,9 +200,10 @@ authoritative, while Fleet preserves its RuntimeEvent, SSE, and TUI projections.
 
 Fleet does not wrap `dspy.RLM` with `dspy.streamify`, register DSPy
 `StreamListener` objects, or project token-level `StreamResponse` values. The
-pinned DSPy call remains one standard `await rlm.acall(interpreter, **inputs)`
-per action. This avoids a second delta grammar and the producer cost of
-re-entering provider streaming for repeated action prompts.
+pinned DSPy call remains one standard `await rlm.acall(**named_inputs)`
+per action, with an invocation-scoped interpreter factory. This avoids a second
+delta grammar and the producer cost of re-entering provider streaming for
+repeated action prompts.
 
 Operator-visible progress is still live: Fleet observes native DSPy callback
 reasoning, generated interpreter code and output at the interpreter boundary,
@@ -315,7 +317,8 @@ live measurements show their lifecycle exceeds the documented decision gate.
 
 Fleet keeps domain dataclasses authoritative and validates the bounded
 model-visible payload once at the `rlm.inputs` boundary immediately before
-`rlm.acall(interpreter, ...)`. The default `FleetRLMSignature` describes that payload with
+`await rlm.acall(**named_inputs)`, with an invocation-scoped interpreter factory.
+The default `FleetRLMSignature` describes that payload with
 strict Pydantic DTOs. Skill instructions, resource bodies, Attachment bytes,
 provider paths, and older history remain behind host-mediated Tools.
 
