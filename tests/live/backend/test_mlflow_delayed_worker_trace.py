@@ -174,7 +174,9 @@ def _start_server(tmp_path: Path) -> tuple[str, subprocess.Popen[bytes], Path]:
         except httpx.HTTPError:
             time.sleep(0.1)
     _stop_server(process, server_log)
-    pytest.fail(f"local MLflow server did not become ready:\n{server_log.read_text(encoding='utf-8')}")
+    raise AssertionError(
+        f"local MLflow server did not become ready:\n{server_log.read_text(encoding='utf-8')}"
+    )
 
 
 def _get_trace_when_available(client: Any, trace_id: str) -> Any:

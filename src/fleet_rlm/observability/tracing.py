@@ -1033,7 +1033,7 @@ class _TraceCompletion:
     def _end_span(self) -> None:
         try:
             self._span.end()
-        except BaseException:
+        except Exception:
             logger.debug("MLflow turn span teardown failed; continuing", exc_info=True)
 
 
@@ -1646,7 +1646,7 @@ def turn_trace(
             # detach its active context.
             try:
                 span.end()
-            except BaseException:
+            except Exception:
                 logger.debug("MLflow turn span setup cleanup failed; continuing", exc_info=True)
         if completion_token is not None:
             _current_trace_completion.reset(completion_token)

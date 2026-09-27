@@ -372,8 +372,8 @@ async def test_rlm_stream_delays_root_trace_until_owned_worker_drains(monkeypatc
         consumer = asyncio.create_task(consume())
         assert await asyncio.to_thread(entered.wait, 2)
         consumer.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await consumer
+        consumer_result = await asyncio.gather(consumer, return_exceptions=True)
+        assert isinstance(consumer_result[0], asyncio.CancelledError)
         assert calls.span_ends == []
         await stream.aclose()
 

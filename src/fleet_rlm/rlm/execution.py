@@ -523,8 +523,9 @@ class WorkerOwnership:
         """
         async with self._drain_lock:
             if self._drained:
-                if self._waiter_error is not None:
-                    raise self._waiter_error
+                waiter_error = self._waiter_error
+                if waiter_error is not None:
+                    raise cast(BaseException, waiter_error)
                 return
 
             if self._effect is not None:
@@ -550,14 +551,15 @@ class WorkerOwnership:
             for callback in callbacks:
                 self._run_completion_callback(callback)
 
-        if self._waiter_error is not None:
-            raise self._waiter_error
+        waiter_error = self._waiter_error
+        if waiter_error is not None:
+            raise cast(BaseException, waiter_error)
 
     @staticmethod
     def _run_completion_callback(callback: Callable[[], None]) -> None:
         try:
             callback()
-        except BaseException:
+        except Exception:
             logger.debug("owned worker completion callback failed", exc_info=True)
 
 
