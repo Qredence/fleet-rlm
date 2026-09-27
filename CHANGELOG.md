@@ -4,19 +4,24 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-## [0.7.10] - 2026-09-20
+## [0.7.10] - 2026-09-27
 
-This release packages the layer 4 release documentation and tooling updates.
-The committed `daytona-recursive` defaults are documented consistently as
-Alibaba DashScope (MaaS) with three provider retries, and local health probes
-use `/health`.
+Fleet RLM 0.7.10 updates its execution stack to native DSPy 3.4 and Daytona's
+direct asynchronous SDK. Sessions keep their history and workspace continuity
+across Daytona runs, while recursive child work stays bounded and can report
+progress and preserve partial results.
 
-### Changed
+### Highlights
 
-- Updated the release metadata and generated API contract to `0.7.10`.
-- Aligned the README, `.env.example`, DSPy integration guide, and configuration
-  reference with the Alibaba/MaaS default provider and `num_retries = 3`.
-- Corrected the Codex feedback-loop application probe to target `/health`.
+- Run the native DSPy RLM with Daytona's direct async client and filesystem
+  operations.
+- Preserve Session continuity across Daytona runs and bound recursive child
+  execution, with progress updates and partial results when child work fails.
+- Improve workspace and tool reliability with bounded reads and outputs, and
+  strengthen Daytona cleanup behavior.
+- Keep the FastAPI SSE contract aligned with the maintained Fleet TUI.
+- Refresh the `daytona-recursive` profile guidance for Alibaba DashScope (MaaS)
+  and three provider retries; correct local health probes to use `/health`.
 
 ## [0.7.9] - 2026-09-15
 
