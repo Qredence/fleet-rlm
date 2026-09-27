@@ -30,7 +30,7 @@ def _databricks_chat_base_url_is_valid(role: object) -> bool:
     except ValueError:
         return False
     return (
-        parsed.scheme in {"http", "https"}
+        parsed.scheme == "https"
         and bool(parsed.netloc)
         and parsed.path.rstrip("/") == _DATABRICKS_MLFLOW_CHAT_BASE_PATH
     )

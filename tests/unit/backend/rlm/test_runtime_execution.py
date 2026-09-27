@@ -655,6 +655,55 @@ async def test_worker_handle_propagates_context_and_hides_thread_details() -> No
     await ownership.wait_owned()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_worker_ownership_preserves_drain_result_for_all_callers(fails: bool) -> None:
+    ownership = WorkerOwnership()
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
+    release = threading.Event()
+    calls: list[str] = []
+    first_error = RuntimeError("first waiter failed")
+
+    def first_waiter() -> None:
+        calls.append("first")
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(timeout=5)
+        if fails:
+            raise first_error
+
+    def second_waiter() -> None:
+        calls.append("second")
+        if fails:
+            raise ValueError("second waiter failed")
+
+    async def wait_and_capture() -> Exception | None:
+        try:
+            await ownership.wait_owned()
+        except Exception as exc:
+            return exc
+        return None
+
+    ownership.add_blocking_waiter(first_waiter)
+    ownership.add_blocking_waiter(second_waiter)
+    ownership.add_completion_callback(lambda: calls.append("completed"))
+    initial = asyncio.create_task(wait_and_capture())
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        concurrent = asyncio.create_task(wait_and_capture())
+        await asyncio.sleep(0)
+        assert not concurrent.done()
+    finally:
+        release.set()
+
+    results = await asyncio.gather(initial, concurrent)
+    results.extend([await wait_and_capture(), await wait_and_capture()])
+    assert all(result is (first_error if fails else None) for result in results)
+    assert calls == ["first", "second", "completed"]
+    ownership.add_completion_callback(lambda: calls.append("late callback"))
+    assert calls == ["first", "second", "completed", "late callback"]
+
+
 # --- from test_session_runtime_reuse.py -------------------------------
 class _Interpreter:
     def __init__(self) -> None:

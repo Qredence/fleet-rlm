@@ -495,6 +495,7 @@ class WorkerOwnership:
         self._completion_lock = threading.Lock()
         self._drain_lock = asyncio.Lock()
         self._drained = False
+        self._waiter_error: BaseException | None = None
 
     def attach(self, effect: OwnedEffect[Any]) -> None:
         """Attach the owned effect without exposing task mechanics."""
@@ -522,6 +523,8 @@ class WorkerOwnership:
         """
         async with self._drain_lock:
             if self._drained:
+                if self._waiter_error is not None:
+                    raise self._waiter_error
                 return
 
             if self._effect is not None:
@@ -532,13 +535,13 @@ class WorkerOwnership:
             # the Turn scheduler. A Root task can finish after a batch has failed
             # while those workers still own child leases, so wait for each
             # ownership callback off the event loop before Run resources are released.
-            waiter_errors: list[BaseException] = []
             for waiter in tuple(self._blocking_waiters):
                 owned = OwnedEffect.start(asyncio.to_thread(waiter))
                 try:
                     await owned.settle()
                 except _WORKER_SETTLE_EXCEPTIONS as exc:
-                    waiter_errors.append(exc)
+                    if self._waiter_error is None:
+                        self._waiter_error = exc
 
             with self._completion_lock:
                 self._drained = True
@@ -547,8 +550,8 @@ class WorkerOwnership:
             for callback in callbacks:
                 self._run_completion_callback(callback)
 
-        if waiter_errors:
-            raise waiter_errors[0]
+        if self._waiter_error is not None:
+            raise self._waiter_error
 
     @staticmethod
     def _run_completion_callback(callback: Callable[[], None]) -> None:

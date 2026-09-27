@@ -193,13 +193,14 @@ def test_native_route_resolves_unqualified_deepseek_model() -> None:
     assert selected.clients["api_base"] == "https://gateway.example/v1"
 
 
-def test_databricks_deepseek_declares_exact_schema_capability() -> None:
+@pytest.mark.parametrize("trailing_slash", ["", "/"])
+def test_databricks_deepseek_declares_exact_schema_capability(trailing_slash: str) -> None:
     from dspy.clients.backend_selection import select_backend
 
     lm = factory.build_lm(
         "uscentral.ai_gateway.deepseek-v4-1-flash-service",
         api_key="token",
-        base_url="https://workspace.example/ai-gateway/mlflow/v1",
+        base_url=f"https://workspace.example/ai-gateway/mlflow/v1{trailing_slash}",
         cache=False,
     )
 
@@ -207,15 +208,30 @@ def test_databricks_deepseek_declares_exact_schema_capability() -> None:
     assert selected.native is True
     assert selected.resolution.provider == "fleet-databricks"
     assert selected.resolution.model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-    assert selected.clients["api_base"] == "https://workspace.example/ai-gateway/mlflow/v1"
+    assert selected.clients["api_base"] == f"https://workspace.example/ai-gateway/mlflow/v1{trailing_slash}"
     assert "response_format" in lm.supported_params
     assert lm.supports_response_schema is True
 
 
-@pytest.mark.parametrize("base_url", [None, "https://workspace.example/v1"])
-def test_databricks_deepseek_requires_ai_gateway_route(base_url: str | None) -> None:
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        None,
+        "https://workspace.example/v1",
+        "http://workspace.example/ai-gateway/mlflow/v1",
+        "http://workspace.example/ai-gateway/mlflow/v1/",
+        "workspace.example/ai-gateway/mlflow/v1",
+        "https:///ai-gateway/mlflow/v1",
+        "https://[bad/ai-gateway/mlflow/v1",
+        "https://workspace.example/other/ai-gateway/mlflow/v1",
+    ],
+)
+def test_databricks_deepseek_requires_ai_gateway_route(base_url: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
+    lm = MagicMock()
+    monkeypatch.setattr(factory.dspy, "LM", lm)
     with pytest.raises(ValueError, match="AI Gateway base URL"):
         factory.build_lm("uscentral.ai_gateway.deepseek-v4-1-flash-service", api_key="token", base_url=base_url)
+    lm.assert_not_called()
 
 
 @pytest.mark.asyncio

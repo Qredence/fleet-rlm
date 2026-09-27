@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
+from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 import dspy
@@ -1131,7 +1132,17 @@ def build_lm(
     model_id = normalize_model_id(model)
     databricks_model = model_id.removeprefix("openai/")
     if model_id.startswith("openai/") and databricks_model == _DATABRICKS_DEEPSEEK_SERVICE:
-        if not api_key or not base_url or not base_url.rstrip("/").endswith("/ai-gateway/mlflow/v1"):
+        try:
+            gateway_url = urlsplit(base_url or "")
+        except ValueError:
+            gateway_url = None
+        if (
+            not api_key
+            or gateway_url is None
+            or gateway_url.scheme != "https"
+            or not gateway_url.netloc
+            or gateway_url.path.rstrip("/") != "/ai-gateway/mlflow/v1"
+        ):
             raise ValueError("Databricks DeepSeek requires credentials and the configured AI Gateway base URL")
         # DSPy's bundled model catalog does not yet advertise response_format for
         # this endpoint. Declare only the exact model's documented schema support
