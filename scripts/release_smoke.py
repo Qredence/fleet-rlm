@@ -74,7 +74,7 @@ def run(expected_version: str | None) -> int:
     )
     if not all(asset.is_file() for asset in required_assets):
         raise RuntimeError("installed Fleet package assets are incomplete")
-    if importlib.metadata.version("dspy") != "3.3.1":
+    if importlib.metadata.version("dspy") != "3.4.0":
         raise RuntimeError("installed DSPy is not the certified final release")
     fleet_help = _run_help("fleet")
     fleet_rlm_help = _run_help("fleet-rlm")

@@ -5,16 +5,14 @@ Two-part policy, both mechanically enforced here:
 1. No source file under ``src/fleet_rlm/`` may import or call litellm directly,
    or bypass DSPy's public LM call boundary with a direct ``forward()`` or
    ``aforward()`` call on an LM-shaped receiver. Fleet interacts with language
-   models exclusively through stock DSPy public entry points. litellm is a
-   transitive dependency of DSPy and remains DSPy's internal compatibility
-   layer (see
-   https://dspy.ai/community/normalized-lm-api-migration/ — "Removing the
-   legacy BaseLM.forward contract does not necessitate removing LiteLLM").
+   models exclusively through stock DSPy public entry points with the native
+   lm15 engine. LiteLLM remains a required transitive dependency of DSPy 3.4,
+   but Fleet's LM factory does not select its compatibility engine.
 
-2. litellm MUST NOT be declared as a direct dependency in
-   ``[project].dependencies`` in ``pyproject.toml``. It MAY — and must —
-   remain pinned under ``[tool.uv].override-dependencies`` to close the
-   7 CVEs tracked in the override comment.
+2. LiteLLM and OpenAI MUST NOT be declared as direct dependencies in
+   ``[project].dependencies`` in ``pyproject.toml``. LiteLLM must remain
+   pinned under ``[tool.uv].override-dependencies`` to close the 7 CVEs
+   tracked in the override comment. DSPy owns both transitive packages.
 
 Uses AST parsing for the import scan and ``tomllib`` for the pyproject policy
 check, so comments, docstrings, and string literals do not trigger false
@@ -28,6 +26,7 @@ import tomllib
 from pathlib import Path
 
 import pytest
+from packaging.requirements import Requirement
 
 # Resolve the package source tree relative to this test file.
 _SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "fleet_rlm"
@@ -145,6 +144,9 @@ def test_litellm_dependency_pin_is_intentional() -> None:
         "litellm must NOT appear in [project].dependencies — it is installed only "
         "as DSPy's transitive dependency. Found it among: "
         f"{[dep for dep in project_deps if 'litellm' in dep.lower()]}"
+    )
+    assert not any(Requirement(dep).name.lower() == "openai" for dep in project_deps), (
+        "OpenAI is a DSPy transitive dependency; Fleet's native lm15 path does not import its SDK directly"
     )
 
     uv_overrides: list[str] = data.get("tool", {}).get("uv", {}).get("override-dependencies", [])

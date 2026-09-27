@@ -115,12 +115,15 @@ separate validation gates.
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
+- Fleet constructs Root, Sub, and probe LMs with DSPy's native `lm15` engine.
+  Unsupported models or request fields fail rather than falling back to
+  LiteLLM. DSPy 3.4 still installs LiteLLM as a transitive dependency.
 - Fleet remains on DSPy's public program and LM call surfaces:
   `rlm.acall(interpreter, ...)` delegates request and response normalization to
   stock DSPy. Application code does not call LM `forward()` methods, construct
   provider-shaped requests, or opt into DSPy's experimental typed LM API while
-  the supported DSPy 3.3.x line is selected. The current lock resolves the
-  exact published registry release 3.3.1.
+  the supported DSPy 3.4.0 line is selected. The current lock resolves the
+  exact published registry release 3.4.0.
   See DSPy's
   [normalized LM API migration](https://dspy.ai/community/normalized-lm-api-migration/).
 - Do not replace the Turn-scoped adapter with global `dspy.configure()`.
@@ -129,7 +132,7 @@ separate validation gates.
 
 ## Native RLM budgets
 
-Fleet's `RLMOptions` mirrors the pinned DSPy 3.3.x constructor fields:
+Fleet's `RLMOptions` mirrors the pinned DSPy 3.4.0 constructor fields:
 
 - `max_iters` bounds Root or child action/REPL iterations. It is not a
   recursion-depth setting.
@@ -157,42 +160,40 @@ Fleet has no configurable native `max_depth`: the Root starts at depth `0`, a
 direct native child is depth `1`, and deeper recursive requests use the bounded
 Sub Model instead of creating a grandchild RLM or Sandbox.
 
-## DSPy 3.3.x ownership contract
+## DSPy 3.4.0 interpreter factory contract
 
-Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end. The public
-configuration key is `rlm.max_iters` (`Settings.rlm_max_iters`), and
-`RLMOptions.max_iters` is passed directly to `dspy.RLM(max_iters=...)` in
-`rlm.program` with no adapter or alias. Policies that still set the legacy
-pre-3.3 iteration-budget key fail validation. Native RLM construction installs
-a fail-closed interpreter factory so an invocation without a caller-owned
-interpreter becomes a bounded `RLMConfigError` rather than silently creating a
-DSPy interpreter; production execution passes the acquired interpreter to
-`rlm.acall(...)`. The exact-version guard lives beside native construction in
-`rlm.program`; Daytona uses DSPy's public `FinalOutput` type directly.
+The public configuration key is rlm.max_iters (Settings.rlm_max_iters), and
+RLMOptions.max_iters is passed directly to dspy.RLM(max_iters=...) in
+rlm.program. Policies that set a legacy iteration-budget key fail validation.
+Native RLM construction requires an explicitly selected zero-argument
+interpreter_factory; the installed-version guard lives beside that
+construction in rlm.program.
 
-The pinned contract was checked against the official DSPy 3.3.1 sources on
-2026-09-08: [`dspy/predict/rlm.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py),
-[`dspy/primitives/code_interpreter.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/primitives/code_interpreter.py),
-and [`dspy/primitives/sandbox_serializable.py`](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/primitives/sandbox_serializable.py).
-Those sources define the zero-argument factory versus positional
-caller-owned-interpreter split, invocation-scoped tool injection, native
-`REPLHistory`, `FinalOutput`, and the `SandboxSerializable` transport hooks
-used by this integration. DSPy invokes interpreter actions synchronously even
-from `RLM.aforward`, so async Fleet host Tools are resolved through the
-composition-owned bridge instead of leaking a coroutine into the adapter. The
-rolling [DSPy RLM API](https://dspy.ai/api/modules/RLM/)
-is useful for orientation, but the exact pinned source and installed
-`dspy==3.3.1` remain the compatibility authority.
+DSPy 3.4 requires interpreter_factory as a keyword-only argument to
+RLM.forward and RLM.aforward. Each invocation must receive a fresh interpreter
+from the factory. DSPy injects execution tools and output metadata, then shuts
+down that interpreter on both success and failure. Fleet calls
+await rlm.acall(**named_inputs) and does not pass an interpreter positionally.
+The retained interpreter is a template for creating an invocation adapter;
+DaytonaRuntime continues to own the provider Sandbox and its cleanup. Child
+RLMs use the same factory contract.
 
-At execution time, Fleet passes its existing interpreter positionally:
-`await rlm.acall(interpreter, **named_inputs)`. Fleet or the child lease owns
-shutdown for the caller-provided interpreter; DSPy must not shut it down. The
-same call is used for live and deterministic execution; operator-visible
-progress comes from Fleet's interpreter, Tool, callback, and trajectory
-observation boundaries rather than a second DSPy streaming protocol.
-Deterministic test RLMs remain keyword-only substitutes. DSPy 3.3.x's stricter
-namespace, Tool, and sub-LM response validation remains authoritative, while
-Fleet preserves its existing RuntimeEvent, SSE, and TUI projections.
+The pinned contract was checked against the installed DSPy 3.4.0 source and
+the published dspy/predict/rlm.py
+(https://raw.githubusercontent.com/stanfordnlp/dspy/3.4.0/dspy/predict/rlm.py)
+on 2026-09-26. The implementation creates and shuts down one factory result
+per call. DSPy also owns native REPLHistory, FinalOutput, and
+SandboxSerializable transport. It invokes interpreter actions synchronously
+inside RLM.aforward, so async Fleet Host Tools use the composition-owned
+bridge. The rolling DSPy RLM API (https://dspy.ai/api/modules/RLM/) is useful
+for orientation; the exact pinned source and installed version remain the
+compatibility authority.
+
+Operator-visible progress still comes from Fleet's interpreter, Tool,
+callback, and trajectory observation boundaries instead of a second DSPy
+streaming protocol. Deterministic test RLMs remain keyword-only substitutes.
+DSPy 3.4.0's namespace, Tool, and sub-LM response validation remains
+authoritative, while Fleet preserves its RuntimeEvent, SSE, and TUI projections.
 
 ## Live iteration observation
 

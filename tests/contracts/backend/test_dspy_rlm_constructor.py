@@ -11,8 +11,8 @@ import pytest
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
 
-def test_dspy_rlm_constructor_uses_max_iters_and_caller_owned_interpreters() -> None:
-    """Lock the DSPy 3.3.x constructor contract at the dependency seam."""
+def test_dspy_rlm_constructor_uses_max_iters_and_factory_owned_interpreters() -> None:
+    """Lock the DSPy 3.4 constructor and invocation contract at the dependency seam."""
     import dspy
 
     parameters = inspect.signature(dspy.RLM.__init__).parameters
@@ -28,6 +28,8 @@ def test_dspy_rlm_constructor_uses_max_iters_and_caller_owned_interpreters() -> 
     ):
         assert name in parameters, f"missing constructor field: {name}"
     assert "interpreter" not in parameters
+    forward_parameters = inspect.signature(dspy.RLM.aforward).parameters
+    assert forward_parameters["interpreter_factory"].kind is inspect.Parameter.KEYWORD_ONLY
 
 
 def test_dspy_rlm_accepts_file_tool_names_and_fresh_custom_interpreters() -> None:
@@ -163,7 +165,7 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
 
         with dspy.context(lm=lm, adapter=adapter):
             prediction = await rlm.acall(
-                interpreter,
+                interpreter_factory=lambda: interpreter,
                 request="Tell me the 14952th digit after the decimal point of Pi",
             )
     finally:
@@ -193,7 +195,7 @@ async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action(
     rlm.generate_action = actions
 
     try:
-        prediction = await rlm.acall(interpreter, request="recover")
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="recover")
     finally:
         interpreter.shutdown()
 
@@ -205,6 +207,8 @@ async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action(
 @pytest.mark.asyncio
 async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
     from dspy.primitives.repl_types import REPLHistory
+
+    from tests.support.native_rlm import in_process_interpreter_factory
 
     class Actions:
         def __init__(self) -> None:
@@ -224,15 +228,11 @@ async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_b
             return dspy.Prediction(reasoning="submit typed output", code="SUBMIT(answer='ok')")
 
     actions = Actions()
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     rlm = dspy.RLM("request -> answer: str", max_iters=2, max_output_chars=12)
     rlm.generate_action = actions
 
-    try:
-        first = await rlm.acall(interpreter, request="first")
-        second = await rlm.acall(interpreter, request="second")
-    finally:
-        interpreter.shutdown()
+    first = await rlm.acall(interpreter_factory=in_process_interpreter_factory, request="first")
+    second = await rlm.acall(interpreter_factory=in_process_interpreter_factory, request="second")
 
     assert first.answer == second.answer == "ok"
     assert first.final_reasoning == second.final_reasoning == "submit typed output"

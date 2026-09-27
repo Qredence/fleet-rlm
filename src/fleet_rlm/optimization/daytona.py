@@ -429,7 +429,7 @@ class StrictDaytonaEvaluationLifecycle:
             try:
                 async with asyncio.timeout(self._execution_timeout_seconds):
                     with dspy.context(lm=self._models.root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
-                        prediction = await rlm.acall(interpreter, **kwargs)
+                        prediction = await rlm.acall(interpreter_factory=interpreter_factory, **kwargs)
             except TimeoutError as exc:
                 raise StrictEvaluationError("strict evaluator execution timed out") from exc
             elapsed_ms = int((time.perf_counter() - started) * 1_000)

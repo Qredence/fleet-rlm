@@ -6,19 +6,23 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import re
 import time
 from collections.abc import Callable, Generator, Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Literal, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import dspy
 from dspy import BaseLM, Signature
+from dspy.utils.callback import ACTIVE_CALL_ID
 from dspy.utils.exceptions import AdapterParseError, LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -51,8 +55,9 @@ if TYPE_CHECKING:
 RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
-CERTIFIED_DSPY_VERSION = "3.3.1"
+CERTIFIED_DSPY_VERSION = "3.4.0"
 _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
+_LOGGER = logging.getLogger(__name__)
 
 
 class UncertifiedDSpyVersionError(RuntimeError):
@@ -215,7 +220,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     def _remaining(self) -> float | None:
         return self._budget.remaining()
 
-    def _lm_for_request(self, lm: BaseLM, *, action: bool, wrap_up: bool) -> BaseLM:
+    def _lm_for_request(self, lm: BaseLM | DeadlineLMProxy, *, action: bool, wrap_up: bool) -> DeadlineLMProxy:
         if isinstance(lm, DeadlineLMProxy) and lm.budget is not None and lm.budget is not self._budget.turn:
             if self._explicit_budget or any(self._budget.turn.snapshot().values()):
                 raise ValueError("adapter cannot switch Turn budgets")
@@ -236,7 +241,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         """
         return {"parse_repairs_used": self._budget.parse_repairs_used}
 
-    def _next_wrap_up_attempt(self, lm: BaseLM) -> None:
+    def _next_wrap_up_attempt(self, lm: BaseLM | DeadlineLMProxy) -> None:
         self._budget.reclassify_late_response(can_finalize=isinstance(lm, DeadlineLMProxy) and lm.can_finalize)
 
     def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
@@ -294,7 +299,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def __call__(
         self,
-        lm: BaseLM,
+        lm: BaseLM | DeadlineLMProxy,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         demos: list[dict[str, Any]],
@@ -350,12 +355,12 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def _repair_steps(
         self,
-        lm: BaseLM,
+        lm: BaseLM | DeadlineLMProxy,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         inputs: dict[str, Any],
     ) -> Generator[
-        tuple[BaseLM, dict[str, Any], type[Signature], dict[str, Any]],
+        tuple[BaseLM | DeadlineLMProxy, dict[str, Any], type[Signature], dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
@@ -1099,9 +1104,9 @@ def build_lm(
     num_retries: int = 3,
 ) -> dspy.LM:
     model_id = normalize_model_id(model)
-    allowed_openai_params: list[str] = []
     kwargs: dict[str, Any] = {
         "model_type": "chat",
+        "engine": "lm15",
         "cache": cache,
         "num_retries": num_retries,
     }
@@ -1117,8 +1122,6 @@ def build_lm(
         kwargs["temperature"] = temperature
     if reasoning_effort is not None:
         kwargs["reasoning_effort"] = reasoning_effort
-        allowed_openai_params.append("reasoning_effort")
-    kwargs["allowed_openai_params"] = allowed_openai_params
     return dspy.LM(model_id, **kwargs)
 
 
@@ -1242,7 +1245,7 @@ def _apply_role_timeout(lm: Any, role_timeout: float | None) -> None:
         lm.kwargs["timeout"] = role_timeout
 
 
-class DeadlineLMProxy(dspy.BaseLM):
+class DeadlineLMProxy(BaseLM):
     """Turn-owned DSPy LM proxy with one retry owner and deadline bounding."""
 
     _fleet_trace_identity: Any
@@ -1261,10 +1264,10 @@ class DeadlineLMProxy(dspy.BaseLM):
         role_timeout: float | None = None,
     ) -> None:
         super().__init__(
-            model=getattr(wrapped, "model", "test/deadline"),
+            model=getattr(wrapped, "model", "fleet-deadline-proxy"),
             model_type=getattr(wrapped, "model_type", "chat"),
-            cache=getattr(wrapped, "cache", False),
-            callbacks=getattr(wrapped, "callbacks", None),
+            cache=getattr(wrapped, "cache", True),
+            callbacks=list(getattr(wrapped, "callbacks", None) or []),
             num_retries=0,
         )
         self.wrapped = wrapped
@@ -1390,6 +1393,77 @@ class DeadlineLMProxy(dspy.BaseLM):
         bounded = _positive_timeout(timeout)
         return now + bounded if bounded is not None else None
 
+    def __call__(self, prompt: Any = None, *, messages: Any = None, **kwargs: Any) -> Any:
+        inputs = {"prompt": prompt, "messages": messages, "kwargs": kwargs}
+        if prompt is None:
+            return self._with_lm_callbacks(inputs, lambda: self.forward(messages=messages, **kwargs))
+        return self._with_lm_callbacks(inputs, lambda: self.forward(prompt=prompt, messages=messages, **kwargs))
+
+    async def acall(self, prompt: Any = None, *, messages: Any = None, **kwargs: Any) -> Any:
+        inputs = {"prompt": prompt, "messages": messages, "kwargs": kwargs}
+        if prompt is None:
+            return await self._awith_lm_callbacks(inputs, lambda: self.aforward(messages=messages, **kwargs))
+        return await self._awith_lm_callbacks(inputs, lambda: self.aforward(prompt=prompt, messages=messages, **kwargs))
+
+    def _active_lm_callbacks(self) -> list[Any]:
+        return [*dspy.settings.get("callbacks", []), *self.callbacks]
+
+    def _with_lm_callbacks(self, inputs: dict[str, Any], invoke: Callable[[], Any]) -> Any:
+        callbacks = self._active_lm_callbacks()
+        if not callbacks:
+            return invoke()
+        call_id = uuid4().hex
+        for callback in callbacks:
+            try:
+                callback.on_lm_start(call_id=call_id, instance=self, inputs=inputs)
+            except Exception as exc:
+                _LOGGER.warning("Error when calling LM callback %r: %s", callback, exc)
+        active_call_id = cast(ContextVar[str | None], ACTIVE_CALL_ID)
+        token = active_call_id.set(call_id)
+        outputs = None
+        exception = None
+        try:
+            outputs = invoke()
+            return outputs
+        except BaseException as exc:
+            exception = exc
+            raise
+        finally:
+            active_call_id.reset(token)
+            for callback in callbacks:
+                try:
+                    callback.on_lm_end(call_id=call_id, outputs=outputs, exception=exception)
+                except Exception as exc:
+                    _LOGGER.warning("Error when applying LM callback %r: %s", callback, exc)
+
+    async def _awith_lm_callbacks(self, inputs: dict[str, Any], invoke: Callable[[], Any]) -> Any:
+        callbacks = self._active_lm_callbacks()
+        if not callbacks:
+            return await invoke()
+        call_id = uuid4().hex
+        for callback in callbacks:
+            try:
+                callback.on_lm_start(call_id=call_id, instance=self, inputs=inputs)
+            except Exception as exc:
+                _LOGGER.warning("Error when calling LM callback %r: %s", callback, exc)
+        active_call_id = cast(ContextVar[str | None], ACTIVE_CALL_ID)
+        token = active_call_id.set(call_id)
+        outputs = None
+        exception = None
+        try:
+            outputs = await invoke()
+            return outputs
+        except BaseException as exc:
+            exception = exc
+            raise
+        finally:
+            active_call_id.reset(token)
+            for callback in callbacks:
+                try:
+                    callback.on_lm_end(call_id=call_id, outputs=outputs, exception=exception)
+                except Exception as exc:
+                    _LOGGER.warning("Error when applying LM callback %r: %s", callback, exc)
+
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         call_deadline: float | None = None
         for attempt in range(self._fleet_retry_budget + 1):
@@ -1397,7 +1471,11 @@ class DeadlineLMProxy(dspy.BaseLM):
             if call_deadline is None:
                 call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
-                return self.wrapped.forward(*args, **bounded)
+                call_kwargs = self._wrapped_call_kwargs(bounded)
+                response = self.wrapped.forward(*args, **call_kwargs)
+                outputs = self._normalize_response(response, call_kwargs)
+                self._record_history(args, call_kwargs, response, outputs)
+                return outputs
             except _RETRYABLE_LM_ERRORS:
                 if attempt == self._fleet_retry_budget:
                     raise
@@ -1410,11 +1488,101 @@ class DeadlineLMProxy(dspy.BaseLM):
             if call_deadline is None:
                 call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
             try:
-                return await self.wrapped.aforward(*args, **bounded)
+                call_kwargs = self._wrapped_call_kwargs(bounded)
+                response = await self.wrapped.aforward(*args, **call_kwargs)
+                outputs = self._normalize_response(response, call_kwargs)
+                self._record_history(args, call_kwargs, response, outputs)
+                return outputs
             except _RETRYABLE_LM_ERRORS:
                 if attempt == self._fleet_retry_budget:
                     raise
         raise AssertionError("provider retry loop exhausted")
+
+    def _wrapped_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        # DSPy's deterministic DummyLM is backed by a custom engine that
+        # rejects connection settings such as timeout. Fleet's admission and
+        # deadline checks still run; real provider LMs receive the bounded
+        # timeout below.
+        if isinstance(self.wrapped, dspy.utils.DummyLM):
+            return {key: value for key, value in kwargs.items() if key != "timeout"}
+        return kwargs
+
+    def _normalize_response(self, response: Any, kwargs: dict[str, Any]) -> Any:
+        """Convert DSPy's provider response to the legacy output used by adapters."""
+        if isinstance(response, (list, tuple)):
+            return response
+
+        def value(item: Any, key: str, default: Any = None) -> Any:
+            if isinstance(item, Mapping):
+                return item.get(key, default)
+            return getattr(item, key, default)
+
+        model_type = getattr(self.wrapped, "model_type", None)
+        response_processor = getattr(self.wrapped, "_process_response", None)
+        if model_type == "responses" and callable(response_processor):
+            return response_processor(response)
+
+        choices = value(response, "choices")
+        if choices is None:
+            return response
+        completion_processor = getattr(self.wrapped, "_process_completion", None)
+        if callable(completion_processor):
+            return completion_processor(response, {**getattr(self.wrapped, "kwargs", {}), **kwargs})
+
+        outputs = []
+        for choice in choices:
+            message = value(choice, "message")
+            output: dict[str, Any] = {
+                "text": value(message, "content") if message is not None else value(choice, "text")
+            }
+            if reasoning := value(message, "reasoning_content"):
+                output["reasoning_content"] = reasoning
+            if kwargs.get("logprobs"):
+                output["logprobs"] = value(choice, "logprobs")
+            if calls := value(message, "tool_calls"):
+                output["tool_calls"] = calls
+            outputs.append(output)
+        return [output["text"] for output in outputs] if all(len(output) == 1 for output in outputs) else outputs
+
+    def _record_history(
+        self,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        response: Any,
+        outputs: Any,
+    ) -> None:
+        if dspy.settings.get("disable_history"):
+            return
+
+        def value(item: Any, key: str, default: Any = None) -> Any:
+            if isinstance(item, Mapping):
+                return item.get(key, default)
+            return getattr(item, key, default)
+
+        usage = value(response, "usage", {}) or {}
+        if not isinstance(usage, Mapping):
+            model_dump = getattr(usage, "model_dump", None)
+            usage = model_dump() if callable(model_dump) else {}
+        model = getattr(self.wrapped, "model", "unknown")
+        prompt = args[0] if args else kwargs.get("prompt")
+        messages = args[1] if len(args) > 1 else kwargs.get("messages")
+        entry = {
+            "prompt": prompt,
+            "messages": messages,
+            "kwargs": {key: item for key, item in kwargs.items() if not key.startswith("api_")},
+            "response": response,
+            "outputs": outputs,
+            "usage": dict(usage),
+            "timestamp": datetime.now(UTC).isoformat(),
+            "uuid": str(uuid4()),
+            "model": model,
+            "response_model": value(response, "model"),
+            "model_type": getattr(self.wrapped, "model_type", "chat"),
+        }
+        self.update_history(entry)
+        usage_tracker = dspy.settings.get("usage_tracker")
+        if usage_tracker is not None and not value(response, "cache_hit", False):
+            usage_tracker.add_usage(model, dict(usage))
 
 
 def _copy_lm_for_deadline(

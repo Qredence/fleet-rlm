@@ -404,7 +404,9 @@ async def run_routing_scenario(
                 ),
                 track_usage=True,
             ):
-                effect = OwnedEffect.start(asyncio.to_thread(rlm, root_interpreter, prompt=scenario.prompt))
+                effect = OwnedEffect.start(
+                    asyncio.to_thread(rlm, interpreter_factory=interpreter_factory, prompt=scenario.prompt)
+                )
                 settled = await effect.settle()
                 if settled.caller_cancelled:
                     raise asyncio.CancelledError

@@ -1,4 +1,4 @@
-"""DSPy 3.3.1 interpreter error taxonomy and repair contracts."""
+"""DSPy 3.4.0 interpreter error taxonomy and repair contracts."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ def test_native_rlm_reinjects_recoverable_error_and_accepts_corrected_action() -
     rlm.generate_action = actions
 
     try:
-        prediction = asyncio.run(rlm.acall(interpreter, request="repair"))
+        prediction = asyncio.run(rlm.acall(interpreter_factory=lambda: interpreter, request="repair"))
     finally:
         interpreter.shutdown()
 
@@ -140,7 +140,7 @@ def test_terminal_interpreter_error_stops_native_rlm_without_repair_or_extract()
     rlm.extract = extract
     try:
         with pytest.raises(CodeInterpreterError, match="protocol is corrupt"):
-            asyncio.run(rlm.acall(interpreter, request="stop"))
+            asyncio.run(rlm.acall(interpreter_factory=lambda: interpreter, request="stop"))
     finally:
         interpreter.shutdown()
 

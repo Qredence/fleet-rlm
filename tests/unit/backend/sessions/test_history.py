@@ -376,15 +376,17 @@ async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None
         await create_tables(engine)
         factory = create_session_factory(engine)
         async with factory() as db, db.begin():
+            db.add_all((UserRow(id=access.user_id),))
+            await db.flush()
+            db.add_all((WorkspaceRow(id=access.workspace_id),))
+            await db.flush()
             db.add_all(
                 (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
                     SessionRow(id=session_a, user_id=access.user_id, workspace_id=access.workspace_id, title="A"),
                     SessionRow(id=session_b, user_id=access.user_id, workspace_id=access.workspace_id, title="B"),
                 )
             )
-            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+            await db.flush()
         store = SqlAlchemyRunStateStore(factory)
 
         async def commit(session_id: object, request: str, answer: str, key: str) -> None:

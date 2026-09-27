@@ -448,7 +448,7 @@ async def test_distilled_trace_rejects_late_exploration_and_submits_existing_evi
 
     try:
         with dspy.context(lm=lm, adapter=adapter):
-            prediction = await rlm.acall(interpreter, request="identify the person")
+            prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="identify the person")
     finally:
         interpreter.shutdown()
 

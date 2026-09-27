@@ -212,7 +212,7 @@ async def test_native_rlm_preserves_state_tools_submit_prediction_and_trajectory
     rlm.generate_action = _StatefulActionPredictor()
     bind_native_rlm_observer(rlm, observed.append, max_chars=1_000)
 
-    prediction = await rlm.acall(interpreter, request="run the deterministic contract")
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="run the deterministic contract")
 
     assert isinstance(rlm, dspy.RLM)
     assert rlm.verbose is True
@@ -254,7 +254,9 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
     actions = _ThreeIterationActions()
     first.generate_action = actions
 
-    prediction = await first.acall(first_interpreter, request="complete the accumulator contract")
+    prediction = await first.acall(
+        interpreter_factory=lambda: first_interpreter, request="complete the accumulator contract"
+    )
 
     assert prediction.answer == "10"
     assert prediction.final_reasoning == "submit the verified result"
@@ -279,7 +281,9 @@ async def test_native_repl_history_and_python_state_are_isolated_per_turn() -> N
     fresh_action = _FreshTurnAction()
     second.generate_action = fresh_action
 
-    fresh_prediction = await second.acall(second_interpreter, request="confirm transient state was discarded")
+    fresh_prediction = await second.acall(
+        interpreter_factory=lambda: second_interpreter, request="confirm transient state was discarded"
+    )
 
     assert first is not second
     assert first_interpreter is not second_interpreter
@@ -302,7 +306,7 @@ async def test_native_extract_fallback_receives_accumulated_repl_history() -> No
     rlm.generate_action = _TwoIterationNoSubmit()
     rlm.extract = extractor
 
-    prediction = await rlm.acall(interpreter, request="exercise extraction")
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="exercise extraction")
 
     assert extractor.history is not None
     assert len(extractor.history.entries) == 2
@@ -369,7 +373,7 @@ async def test_native_root_retains_large_evidence_and_reports_coverage(
     actions = _SelectedEvidenceActions(first_code, final_code)
     rlm.generate_action = actions
     try:
-        prediction = await rlm.acall(interpreter, request=source)
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request=source)
         assert expected in prediction.answer
         assert len(actions.histories) == 2
         assert source not in str(actions.histories[1].entries[0].output)
@@ -410,7 +414,7 @@ async def test_native_semantic_batch_keeps_order_error_slots_and_prompt_budget()
     )
     rlm.generate_action = actions
     try:
-        prediction = await rlm.acall(interpreter, request="verify native semantic calls")
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="verify native semantic calls")
         assert prediction.answer == "2 valid results, 1 unresolved gap, and per-prompt budget verified"
         assert "LLM call limit exceeded" in actions.histories[2].entries[1].output
         assert "rlm_query" not in rlm.tools
@@ -428,7 +432,7 @@ async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() ->
         signature="request -> answer: str",
     )
     repaired.generate_action = _InvalidThenValidSubmit()
-    repaired_prediction = await repaired.acall(repaired_interpreter, request="repair")
+    repaired_prediction = await repaired.acall(interpreter_factory=lambda: repaired_interpreter, request="repair")
 
     extracted_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     extracted = _build_native(
@@ -438,7 +442,7 @@ async def test_native_rlm_repairs_invalid_submit_and_typed_extract_fallback() ->
     )
     extracted.generate_action = _NeverSubmit()
     extracted.extract = _TypedExtract()
-    extracted_prediction = await extracted.acall(extracted_interpreter, request="extract")
+    extracted_prediction = await extracted.acall(interpreter_factory=lambda: extracted_interpreter, request="extract")
 
     assert repaired_prediction.answer == "repaired"
     assert len(repaired_prediction.trajectory) == 2
@@ -468,7 +472,7 @@ async def test_native_rlm_rejects_invalid_host_tool_type_before_host_logic() -> 
     )
     rlm.generate_action = _InvalidToolThenSubmit()
 
-    prediction = await rlm.acall(interpreter, request="repair invalid host Tool input")
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="repair invalid host Tool input")
 
     assert prediction.answer == "repaired"
     assert host_calls == 0

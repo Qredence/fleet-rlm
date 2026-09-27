@@ -1,4 +1,4 @@
-"""DSPy 3.3.1 interpreter-callback shadow contracts."""
+"""DSPy 3.4.0 interpreter-callback shadow contracts."""
 
 from __future__ import annotations
 

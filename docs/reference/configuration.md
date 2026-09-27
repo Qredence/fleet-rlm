@@ -88,7 +88,7 @@ shutdown flush, and process-global autolog teardown; application construction
 performs no external MLflow probe, and an unavailable setup marks that lifespan
 inactive instead of poisoning later lifespans.
 
-The lock pins MLflow `3.16.0` with `opentelemetry-sdk==1.44.0`. Feedback
+The lock pins MLflow `3.16.1` with `opentelemetry-sdk==1.45.0`. Feedback
 assessments use the same application-owned MLflow lifecycle as tracing; they
 are session-bound, execution-only, and are never allowed to reset or flush the
 global exporter while a request is in flight.
@@ -133,7 +133,7 @@ stream and keeps trace timelines focused on timed execution operations.
 `rlm.verbose` controls native DSPy host logs only. It does not control the
 typed Runtime Events projected through SSE or the terminal client.
 
-The native RLM policy fields map directly to DSPy 3.3.x: `max_iters` bounds
+The native RLM policy fields map directly to DSPy 3.4.0: `max_iters` bounds
 Root/child action iterations, `max_llm_calls` bounds prompts sent through native
 `llm_query` and `llm_query_batched` tools (each batched prompt counts), and
 `max_output_chars` bounds each REPL output when DSPy renders native history for

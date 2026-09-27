@@ -1814,10 +1814,8 @@ async def probe_root_lm(
             requirements or produces an invalid response.
     """
 
-    interpreter = interpreter_factory()
-
-    def probe_interpreter_factory(interpreter: Any = interpreter) -> Any:
-        return interpreter
+    def probe_interpreter_factory() -> Any:
+        return interpreter_factory()
 
     probe_interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
     recursive = RecursiveRLMExecutor(
@@ -1837,7 +1835,7 @@ async def probe_root_lm(
             effect = OwnedEffect.start(
                 asyncio.to_thread(
                     rlm,
-                    interpreter,
+                    interpreter_factory=probe_interpreter_factory,
                     probe=(
                         "Set marker = 'probe-slice'. On a later REPL iteration call "
                         "child = rlm_query(task='Classify the selected value ' + marker, inputs=[]), "
@@ -1856,10 +1854,7 @@ async def probe_root_lm(
     except Exception as exc:
         raise RLMProviderContractError("Root LM RLM compatibility probe failed") from exc
     finally:
-        try:
-            await OwnedEffect.start(asyncio.to_thread(recursive.wait_owned)).settle()
-        finally:
-            await OwnedEffect.start(asyncio.to_thread(interpreter.shutdown)).settle()
+        await OwnedEffect.start(asyncio.to_thread(recursive.wait_owned)).settle()
 
     trajectory = getattr(prediction, "trajectory", ())
     answer = getattr(prediction, "answer", None)

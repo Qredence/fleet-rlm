@@ -41,7 +41,7 @@ to be started separately.
 
 ### Upgrade the local MLflow store to 3.16
 
-Fleet pins MLflow `3.16.0` and does not apply MLflow schema migrations during
+Fleet pins MLflow `3.16.1` and does not apply MLflow schema migrations during
 startup. MLflow owns this database schema; Fleet's Alembic migrations manage a
 separate Fleet database. Follow the [official MLflow migration guidance](https://mlflow.org/docs/latest/self-hosting/migration/)
 and stop Fleet plus every other writer to the local MLflow database before

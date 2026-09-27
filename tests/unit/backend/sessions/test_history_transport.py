@@ -144,7 +144,7 @@ async def test_native_rlm_acall_sees_complete_history_through_the_transport() ->
     rlm.generate_action = actions
     interpreter = _InProcessInterpreter()
 
-    prediction = await rlm.acall(interpreter, request="current", history=history)
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="current", history=history)
 
     assert actions.calls == 1
     assert prediction.answer == "latest answer"

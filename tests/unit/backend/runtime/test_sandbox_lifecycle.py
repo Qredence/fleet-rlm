@@ -425,14 +425,12 @@ async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None
         factory = create_session_factory(engine)
         user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=user_id),
-                    WorkspaceRow(id=workspace_id),
-                    SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),
-                )
-            )
-            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+            db.add_all((UserRow(id=user_id),))
+            await db.flush()
+            db.add_all((WorkspaceRow(id=workspace_id),))
+            await db.flush()
+            db.add_all((SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),))
+            await db.flush()
 
         store = SqlAlchemySandboxBindingStore(factory)
         first = await store.upsert(
@@ -530,14 +528,12 @@ async def test_sql_sandbox_binding_store_retries_lost_insert_race() -> None:
         factory = create_session_factory(engine)
         user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
         async with factory() as db, db.begin():
-            db.add_all(
-                (
-                    UserRow(id=user_id),
-                    WorkspaceRow(id=workspace_id),
-                    SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),
-                )
-            )
-            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+            db.add_all((UserRow(id=user_id),))
+            await db.flush()
+            db.add_all((WorkspaceRow(id=workspace_id),))
+            await db.flush()
+            db.add_all((SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),))
+            await db.flush()
 
         store = SqlAlchemySandboxBindingStore(factory)
         binding = SandboxBinding(

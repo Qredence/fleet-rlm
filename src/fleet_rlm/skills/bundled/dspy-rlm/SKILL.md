@@ -43,4 +43,4 @@ or implementing `dspy.RLM`; ordinary RLM Turns do not need it.
    Compute and verify in one action when practical, inspect its output, then
    submit in a later action; do not repeat an already verified computation.
 
-Authority: the exact pinned DSPy 3.3.1 source and installed implementation; the rolling https://dspy.ai/api/modules/RLM/ page is orientation. Do not use Daytona docs as DSPy authority.
+Authority: the exact pinned DSPy 3.4.0 source and installed implementation; the rolling https://dspy.ai/api/modules/RLM/ page is orientation. Do not use Daytona docs as DSPy authority.

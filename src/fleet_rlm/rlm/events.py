@@ -863,7 +863,7 @@ def observe_tool(
         # source validator below remains the single validation/observation
         # point and can report invalid values publicly.
         args=permissive_args,
-        # DSPy 3.3.x validates the normalized Tool before invoking its
+        # DSPy 3.4.0 validates the normalized Tool before invoking its
         # function. Keep that outer adapter permissive so Fleet's wrapped
         # validator can emit the public ToolStarted/ToolFailed events and
         # preserve the original source validation contract.
@@ -1240,13 +1240,9 @@ async def invoke_native_rlm(
     context: RLMExecutionContext,
     kwargs: Mapping[str, Any],
 ) -> Any:
-    """Invoke the RLM operation using the caller-owned interpreter when required."""
-    native_call_args: tuple[Any, ...] = ()
-    if is_native_rlm(rlm):
-        if context.execution.interpreter is None:
-            raise RLMConfigError("native RLM execution requires a caller-owned interpreter")
-        native_call_args = (context.execution.interpreter,)
-    return await rlm.acall(*native_call_args, **dict(kwargs))
+    """Invoke native DSPy through its factory, which owns one fresh adapter."""
+    del context
+    return await rlm.acall(**dict(kwargs))
 
 
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
@@ -1445,7 +1441,7 @@ class ExecutionTraceAssembler:
             rlm_callback_parent(phase),
             dspy.context(
                 lm=context.execution.models.root_lm,
-                # DSPy 3.3.x combines context callbacks with instance callbacks
+                # DSPy 3.4.0 combines context callbacks with instance callbacks
                 # around LM requests (dspy/utils/callback.py:258-288), but a
                 # context callbacks list REPLACES dspy.settings.callbacks. Re-add
                 # MLflow's autolog callback so module/adapter/LM spans survive.
@@ -2318,7 +2314,6 @@ def bind_native_rlm_observer(
     max_chars: int = 10_000,
     deadline: float | None = None,
 ) -> None:
-    from fleet_rlm.rlm.result import RLMConfigError
 
     if not is_native_rlm(rlm):
         raise RLMConfigError("reasoning observation requires native dspy.RLM")

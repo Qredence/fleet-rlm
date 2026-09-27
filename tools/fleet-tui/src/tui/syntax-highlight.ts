@@ -1,16 +1,16 @@
-import hljs from "highlight.js/lib/core.js";
-import bash from "highlight.js/lib/languages/bash.js";
-import css from "highlight.js/lib/languages/css.js";
-import go from "highlight.js/lib/languages/go.js";
-import javascript from "highlight.js/lib/languages/javascript.js";
-import json from "highlight.js/lib/languages/json.js";
-import markdown from "highlight.js/lib/languages/markdown.js";
-import python from "highlight.js/lib/languages/python.js";
-import rust from "highlight.js/lib/languages/rust.js";
-import sql from "highlight.js/lib/languages/sql.js";
-import typescript from "highlight.js/lib/languages/typescript.js";
-import xml from "highlight.js/lib/languages/xml.js";
-import yaml from "highlight.js/lib/languages/yaml.js";
+import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
+import css from "highlight.js/lib/languages/css";
+import go from "highlight.js/lib/languages/go";
+import javascript from "highlight.js/lib/languages/javascript";
+import json from "highlight.js/lib/languages/json";
+import markdown from "highlight.js/lib/languages/markdown";
+import python from "highlight.js/lib/languages/python";
+import rust from "highlight.js/lib/languages/rust";
+import sql from "highlight.js/lib/languages/sql";
+import typescript from "highlight.js/lib/languages/typescript";
+import xml from "highlight.js/lib/languages/xml";
+import yaml from "highlight.js/lib/languages/yaml";
 
 import type { ThemeColor } from "./theme.js";
 

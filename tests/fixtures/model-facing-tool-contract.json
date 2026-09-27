@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Fleet RLM model-facing Tool contract",
   "schema_version": 1,
-  "dspy_version": "3.3.1",
+  "dspy_version": "3.4.0",
   "scope": "This is the model-facing inventory for one Fleet RLM invocation. It records tool names, DSPy argument schemas, result success shapes, composition availability, authority, and public event redaction. It is not an HTTP/OpenAPI contract.",
   "argument_schema_note": "Each argument_schema.properties value is the current dspy.Tool.args value. required follows dspy.Tool.format_as_litellm_function_call(): properties with no schema default are required.",
   "result_schema_note": "Result schemas describe successful JSON values. Tools may instead raise a closed, sanitized error; schemas permit documented optional failure fields where the host returns them.",
@@ -1669,7 +1669,7 @@
     {
       "name": "llm_query",
       "category": "semantic",
-      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.3.1)",
+      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.4.0)",
       "description": "query a sub-LLM (~500K char capacity) for semantic analysis",
       "argument_schema": {
         "type": "object",
@@ -1705,7 +1705,7 @@
     {
       "name": "llm_query_batched",
       "category": "semantic",
-      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.3.1)",
+      "source": "dspy/predict/rlm.py:RLM._make_llm_tools (installed dspy==3.4.0)",
       "description": "query multiple prompts concurrently (much faster for multiple queries)",
       "argument_schema": {
         "type": "object",

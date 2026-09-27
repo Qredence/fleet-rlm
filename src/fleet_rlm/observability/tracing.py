@@ -80,10 +80,10 @@ _TRACKING_URI_APPLIED: str | None = None
 _TRACE_CONFIG_CONTEXT: Any | None = None
 _DSPY_AUTOLOG_ENABLED = False
 _MLFLOW_EXPORT_DISTRIBUTIONS = (
-    ("mlflow", "3.16.0"),
-    ("mlflow-skinny", "3.16.0"),
-    ("mlflow-tracing", "3.16.0"),
-    ("opentelemetry-sdk", "1.44.0"),
+    ("mlflow", "3.16.1"),
+    ("mlflow-skinny", "3.16.1"),
+    ("mlflow-tracing", "3.16.1"),
+    ("opentelemetry-sdk", "1.45.0"),
 )
 
 
@@ -456,7 +456,7 @@ def _sanitize_mlflow_span(span: object) -> None:
 
 
 def _sanitize_live_mlflow_span(span: Any) -> None:
-    """MLflow 3.16.0 export compatibility, certified against actual SDK spans.
+    """MLflow 3.16.1 export compatibility, certified against actual SDK spans.
 
     Public setters merge attributes and cannot remove exception events or
     attachments. Keep the necessary private access here, at the existing export

@@ -640,7 +640,7 @@ def test_extraction_fallback_termination_parity_between_root_and_child() -> None
         )
         try:
             with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
-                return await rlm.acall(interpreter, request="root extraction")
+                return await rlm.acall(interpreter_factory=lambda: interpreter, request="root extraction")
         finally:
             interpreter.shutdown()
 

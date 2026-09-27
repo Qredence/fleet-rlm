@@ -139,14 +139,12 @@ async def _seed_store():
     factory = create_session_factory(engine)
     access, session_id = TurnAccess(uuid4(), uuid4()), uuid4()
     async with factory() as db, db.begin():
-        db.add_all(
-            (
-                UserRow(id=access.user_id),
-                WorkspaceRow(id=access.workspace_id),
-                SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id),
-            )
-        )
-        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+        db.add_all((UserRow(id=access.user_id),))
+        await db.flush()
+        db.add_all((WorkspaceRow(id=access.workspace_id),))
+        await db.flush()
+        db.add_all((SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id),))
+        await db.flush()
     store = SqlAlchemyRunStateStore(factory)
     run = await store.begin(RunClaim(access, session_id, TurnInput("hello"), "key", uuid4()))
     return engine, factory, store, run

@@ -163,13 +163,17 @@ def test_existing_baseline_database_upgrades_to_settling_head(
     config.set_main_option("script_location", str(root / "migrations"))
 
     command.upgrade(config, "019f5b3c96bd")
-    with create_engine(database_url).connect() as connection:
-        assert "terminal_intent" not in {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert "terminal_intent" not in {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
 
-    command.upgrade(config, "head")
-    with create_engine(database_url).connect() as connection:
-        columns = {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
-        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            columns = {column["name"] for column in inspect(connection).get_columns("fleet_runs")}
+            revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    finally:
+        engine.dispose()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
     assert revision == "01a087800002"
 
@@ -186,16 +190,20 @@ def test_existing_baseline_database_upgrades_to_memory_intents_head(
     config.set_main_option("script_location", str(root / "migrations"))
 
     command.upgrade(config, "019f5b3c96bd")
-    with create_engine(database_url).connect() as connection:
-        assert "fleet_memory_promotion_intents" not in set(inspect(connection).get_table_names())
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert "fleet_memory_promotion_intents" not in set(inspect(connection).get_table_names())
 
-    command.upgrade(config, "head")
-    with create_engine(database_url).connect() as connection:
-        tables = set(inspect(connection).get_table_names())
-        revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-        intent_columns = {
-            column["name"] for column in inspect(connection).get_columns("fleet_memory_promotion_intents")
-        }
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            tables = set(inspect(connection).get_table_names())
+            revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            intent_columns = {
+                column["name"] for column in inspect(connection).get_columns("fleet_memory_promotion_intents")
+            }
+    finally:
+        engine.dispose()
     assert "fleet_memory_promotion_intents" in tables
     assert {
         "run_id",

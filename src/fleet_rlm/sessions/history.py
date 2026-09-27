@@ -19,7 +19,7 @@ Exclusion is enforced through the existing
 out before the canonical record is materialized.
 
 The ``dspy.History`` instance is built directly from the installed
-``dspy.History`` Pydantic model (DSPy 3.3.1). Fleet never re-implements the
+``dspy.History`` Pydantic model (DSPy 3.4.0). Fleet never re-implements the
 History container; the function only ever returns the exact installed class.
 """
 
@@ -139,7 +139,7 @@ def to_dspy_history(
     """Materialize the complete committed Session conversation as a ``dspy.History``.
 
     The returned object is the exact installed ``dspy.History`` Pydantic
-    model (DSPy 3.3.1). It is never a subclass, replacement, or Pydantic
+    model (DSPy 3.4.0). It is never a subclass, replacement, or Pydantic
     shadow. An empty input sequence yields a valid ``dspy.History(messages=[])``
     that remains compatible with the existing ``read_session_history`` Tool
     and the canonical ``{request, answer}`` contract.

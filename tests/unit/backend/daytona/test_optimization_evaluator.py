@@ -171,20 +171,24 @@ class _Interpreter:
         """
         self._events = events
         self._fail_shutdown = fail_shutdown
+        self._shutdown = False
 
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """Record interpreter shutdown and raise an error when shutdown is configured to fail."""
         assert strict_broker_cleanup is True
+        if self._shutdown:
+            return
         self._events.append("shutdown")
         if self._fail_shutdown:
             raise RuntimeError("shutdown failed")
+        self._shutdown = True
 
 
 class _RLM:
     def __init__(self, prediction: object | BaseException) -> None:
         self._prediction = prediction
 
-    async def acall(self, *args: Any, **kwargs: Any) -> object:
+    async def acall(self, **kwargs: Any) -> object:
         """
         Evaluate a curated input request and provide the configured prediction.
 
@@ -199,11 +203,14 @@ class _RLM:
             BaseException: The configured prediction exception, when evaluation is
                 configured to fail.
         """
-        assert len(args) == 1
-        assert set(kwargs) == {"curated_input_handle"}
+        assert set(kwargs) == {"curated_input_handle", "interpreter_factory"}
         assert set(kwargs["curated_input_handle"]) == {"transaction_id", "sha256", "schema", "byte_size"}
         if isinstance(self._prediction, BaseException):
             raise self._prediction
+        interpreter_factory = kwargs["interpreter_factory"]
+        assert callable(interpreter_factory)
+        interpreter = interpreter_factory()
+        interpreter.shutdown(strict_broker_cleanup=True)
         return self._prediction
 
 

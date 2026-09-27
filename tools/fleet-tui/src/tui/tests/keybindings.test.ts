@@ -14,7 +14,7 @@ describe("Fleet keybindings", () => {
 });
 
 /**
- * pi-tui 0.84.2 adds default alt-screen keybindings for transcript search
+ * pi-tui supplies default alt-screen keybindings for transcript search
  * (Ctrl+Shift+F) plus unbound half-page/line scrolling. Those keys are
  * consumed by Pi's viewport input listener — registered in the TuiAltScreen
  * constructor, before Fleet's application-level listener — so they can never
@@ -31,7 +31,7 @@ const FLEET_BINDINGS = [
   "fleet.toggleFold",
 ] as const;
 
-describe("pi-tui 0.84.2 alt-screen search defaults", () => {
+describe("pi-tui alt-screen search defaults", () => {
   it("ships the transcript search defaults relied on by the Fleet UI and docs", () => {
     expect(TUI_KEYBINDINGS["tui.altScreen.search"].defaultKeys).toBe("ctrl+shift+f");
     expect(TUI_KEYBINDINGS["tui.altScreen.searchNext"].defaultKeys).toEqual(["enter", "ctrl+g"]);

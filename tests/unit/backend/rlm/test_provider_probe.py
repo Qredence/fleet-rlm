@@ -82,8 +82,8 @@ async def test_provider_probe_reports_native_extraction_fallback_for_forced_fina
             pass
 
     class FakeRLM:
-        def __call__(self, interpreter, **kwargs):
-            del interpreter
+        def __call__(self, *, interpreter_factory, **kwargs):
+            assert callable(interpreter_factory)
             assert "probe" in kwargs
             return SimpleNamespace(
                 trajectory=["step-1", "step-2", "step-3"],

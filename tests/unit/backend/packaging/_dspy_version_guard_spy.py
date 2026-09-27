@@ -1,4 +1,4 @@
-"""Private subprocess spy lanes for the exact-3.3.1 runtime DSPy guard.
+"""Private subprocess spy lanes for the exact-3.4.0 runtime DSPy guard.
 
 This module is private test-lane instrumentation only; it is never imported by
 production code. Each invocation injects a reported ``dspy.__version__``,

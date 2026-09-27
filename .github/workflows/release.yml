@@ -33,7 +33,7 @@ jobs:
       - name: Install pinned TUI dependencies
         run: |
           corepack enable
-          corepack prepare pnpm@11.15.1 --activate
+          corepack prepare pnpm@12.6.0 --activate
           pnpm --dir tools/fleet-tui install --frozen-lockfile
 
       - name: Install uv

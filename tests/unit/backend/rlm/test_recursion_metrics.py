@@ -96,7 +96,7 @@ def test_metrics_token_totals_partial_usage_is_not_collapsed_to_zero() -> None:
 
 
 def test_lm_telemetry_matches_callback_outputs_in_concurrent_history() -> None:
-    # P38-RLM-006: the certified DSPy 3.3.1 legacy contract pairs each
+    # P38-RLM-006: the certified DSPy 3.4.0 legacy contract pairs each
     # ``on_lm_end`` payload with its history entry by identity on ``outputs``.
     first_outputs = object()
     second_outputs = object()

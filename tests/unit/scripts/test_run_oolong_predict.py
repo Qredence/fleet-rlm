@@ -186,6 +186,27 @@ def test_build_native_program_uses_dataset_signature(monkeypatch: pytest.MonkeyP
     assert captured["signature"] is FleetRLMSignature
 
 
+def test_oolong_worker_passes_factory_to_native_dspy() -> None:
+    interpreter = object()
+
+    def factory() -> object:
+        return interpreter
+
+    seen: dict[str, object] = {}
+
+    class RLM:
+        async def acall(self, *, interpreter_factory, **kwargs):
+            seen["interpreter"] = interpreter_factory()
+            seen["kwargs"] = kwargs
+            return dspy.Prediction(answer="ok")
+
+    prediction = oolong_adapter._run_prediction_on_worker(
+        RLM(), factory, object(), dspy.JSONAdapter(), {"request": "check"}
+    )
+    assert prediction.answer == "ok"
+    assert seen == {"interpreter": interpreter, "kwargs": {"request": "check"}}
+
+
 def _receipt_kwargs() -> dict[str, object]:
     return {
         "mode": "live",
@@ -296,16 +317,18 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
     sub_lm = MagicMock()
     worker_result = MagicMock(answer="Label: spam")
     deadline = 1_000_000.0
+    captured: dict[str, object] = {}
+
+    def build_program(*_args: object, **build_kwargs: object) -> MagicMock:
+        captured.update(build_kwargs)
+        return MagicMock()
 
     with pytest.MonkeyPatch.context() as patcher:
         patcher.setattr(
             "fleet_rlm.rlm.program.build_model_bundle",
             lambda _settings: MagicMock(root_lm=root_lm, sub_lm=sub_lm),
         )
-        patcher.setattr(
-            "scripts.benchmarks.oolong.adapter.build_native_program",
-            lambda *_args, **_kwargs: MagicMock(),
-        )
+        patcher.setattr("scripts.benchmarks.oolong.adapter.build_native_program", build_program)
         patcher.setattr("scripts.benchmarks.oolong.adapter._run_prediction_on_worker", lambda *_args: worker_result)
         patcher.setattr("fleet_rlm.rlm.program.assert_dspy_version", lambda: None)
         answer = await invoke_live_prediction(
@@ -319,6 +342,10 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
         )
 
     interpreter.bind_context_capsule.assert_called_once_with(capsule)
+    factory = captured["interpreter_factory"]
+    assert callable(factory)
+    assert factory() is interpreter.new_invocation.return_value
+    interpreter.new_invocation.assert_called_once_with(context_capsule=capsule)
     assert answer.answer == "Label: spam"
     assert answer.usage is None
 

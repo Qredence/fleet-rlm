@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
+import subprocess
+import sys
 from unittest.mock import MagicMock
 
 import pytest
@@ -10,6 +11,27 @@ from pydantic import SecretStr
 
 import fleet_rlm.rlm.program as factory
 from fleet_rlm.config.settings import Settings
+
+
+def test_build_lm_stays_native_in_a_fresh_process() -> None:
+    script = """
+import dspy
+import sys
+from fleet_rlm.rlm.program import build_lm
+
+lm = build_lm("openai/test", api_key=None)
+assert lm.engine == "lm15"
+assert "litellm" not in sys.modules
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,7 +70,7 @@ def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.Monkey
     assert build.call_args_list[1].kwargs["temperature"] == 0.3
 
 
-def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_build_lm_passes_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     lm = MagicMock(side_effect=("default-lm", "bounded-lm"))
     monkeypatch.setattr(factory.dspy, "LM", lm)
 
@@ -57,11 +79,9 @@ def test_build_lm_allows_reasoning_effort_only_when_configured(monkeypatch: pyte
 
     assert default == "default-lm"
     assert bounded == "bounded-lm"
-    # reasoning_effort is allowlisted only when explicitly configured.
     assert "reasoning_effort" not in lm.call_args_list[0].kwargs
-    assert lm.call_args_list[0].kwargs["allowed_openai_params"] == []
     assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
-    assert lm.call_args_list[1].kwargs["allowed_openai_params"] == ["reasoning_effort"]
+    assert "allowed_openai_params" not in lm.call_args_list[1].kwargs
 
 
 def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -75,7 +95,7 @@ def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.Monke
     # than a raw streaming wrapper.
     assert "stream" not in kwargs
     assert "stream_options" not in kwargs
-    assert kwargs["allowed_openai_params"] == []
+    assert kwargs["engine"] == "lm15"
 
 
 def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -88,48 +108,38 @@ def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pyte
     assert kwargs["reasoning_effort"] == "none"
     assert "stream" not in kwargs
     assert "stream_options" not in kwargs
-    assert kwargs["allowed_openai_params"] == ["reasoning_effort"]
+    assert "allowed_openai_params" not in kwargs
 
 
+@pytest.mark.parametrize("reasoning_effort", [None, "none"])
 @pytest.mark.asyncio
 async def test_build_lm_async_call_processes_an_aggregated_completion(
     monkeypatch: pytest.MonkeyPatch,
+    reasoning_effort: str | None,
 ) -> None:
     """The native async RLM path receives an aggregated completion response."""
 
     import dspy.clients.lm as dspy_lm
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+    from dspy.lm15 import Request, Response, response_from_openai_chat
 
-    class FakeStreamingResponse:
-        pass
+    async def complete(self: AsyncLM15Engine, request: Request) -> Response:
+        assert self.resolve(request.model).provider == "openai-chat"
+        return response_from_openai_chat(
+            {
+                "id": "offline-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test",
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "OK"}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
 
-    class FakeCompletionResponse(dict):
-        def __init__(self) -> None:
-            choice = SimpleNamespace(
-                finish_reason="stop",
-                message=SimpleNamespace(content="OK"),
-            )
-            super().__init__(choices=[choice])
-            self.choices = [choice]
-            self.model = "openai/test"
-            self.usage = {}
-            self._hidden_params = {}
+    monkeypatch.setattr(AsyncLM15Engine, "complete", complete)
 
-    def completion(**kwargs):
-        # A raw stream wrapper is intentionally incompatible with this path.
-        if kwargs.get("stream") or "stream_options" in kwargs:
-            return FakeStreamingResponse()
-        return FakeCompletionResponse()
-
-    async def acompletion(**kwargs):
-        return completion(**kwargs)
-
-    monkeypatch.setattr(
-        dspy_lm,
-        "_get_litellm",
-        lambda: SimpleNamespace(completion=completion, acompletion=acompletion),
-    )
-
-    lm = factory.build_lm("openai/model", api_key=None, cache=False)
+    lm = factory.build_lm("openai/model", api_key=None, cache=False, reasoning_effort=reasoning_effort)
 
     process_send_stream = getattr(dspy_lm.dspy.settings, "send_stream", None)
     with dspy_lm.dspy.context(send_stream=None):
@@ -165,12 +175,9 @@ def test_build_lm_passes_provider_timeout(monkeypatch: pytest.MonkeyPatch) -> No
     assert lm.call_args.kwargs["timeout"] == 37
 
 
-def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    import dspy.clients.lm as dspy_lm
-    from litellm import get_llm_provider
+def test_native_route_resolves_unqualified_deepseek_model() -> None:
+    from dspy.clients.backend_selection import select_backend
 
-    completion = MagicMock(return_value={"choices": []})
-    monkeypatch.setattr(dspy_lm, "_get_litellm", lambda: SimpleNamespace(completion=completion))
     lm = factory.build_lm(
         "deepseek-v4-flash",
         api_key="token",
@@ -178,18 +185,27 @@ def test_mocked_litellm_request_resolves_unqualified_deepseek_model(monkeypatch:
         cache=False,
     )
 
-    dspy_lm.litellm_completion(
-        request={"model": lm.model, "messages": [{"role": "user", "content": "ping"}], **lm.kwargs},
-        num_retries=0,
-    )
+    selected = select_backend(lm)
+    assert lm.engine == "lm15"
+    assert selected.native is True
+    assert selected.resolution.provider == "openai-chat"
+    assert selected.resolution.model == "deepseek-v4-flash"
+    assert selected.clients["api_base"] == "https://gateway.example/v1"
 
-    request = completion.call_args.kwargs
-    model, provider, _, api_base = get_llm_provider(model=request["model"], api_base=request["api_base"])
-    assert model == "deepseek-v4-flash"
-    assert provider == "openai"
-    assert api_base == "https://gateway.example/v1"
-    assert request["model"] == "openai/deepseek-v4-flash"
-    assert "Databricks-Model-Provider-Service" not in request.get("headers", {})
+
+@pytest.mark.asyncio
+async def test_unsupported_native_request_does_not_fall_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    import dspy.clients.lm as dspy_lm
+    from dspy.utils.exceptions import LMUnsupportedFeatureError
+
+    fallback = MagicMock(side_effect=AssertionError("LiteLLM fallback was called"))
+    monkeypatch.setattr(dspy_lm, "_get_litellm", fallback)
+    lm = factory.build_lm("openai/test", api_key=None, cache=False)
+
+    with pytest.raises(LMUnsupportedFeatureError, match="allowed_openai_params"):
+        await lm.acall(prompt="ping", allowed_openai_params=["unsupported"])
+
+    fallback.assert_not_called()
 
 
 def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:
