@@ -525,7 +525,7 @@ class WorkerOwnership:
             if self._drained:
                 waiter_error = self._waiter_error
                 if waiter_error is not None:
-                    raise cast(BaseException, waiter_error)
+                    raise waiter_error
                 return
 
             if self._effect is not None:
@@ -553,7 +553,7 @@ class WorkerOwnership:
 
         waiter_error = self._waiter_error
         if waiter_error is not None:
-            raise cast(BaseException, waiter_error)
+            raise waiter_error
 
     @staticmethod
     def _run_completion_callback(callback: Callable[[], None]) -> None:
