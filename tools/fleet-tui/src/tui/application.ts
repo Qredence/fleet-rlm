@@ -70,8 +70,8 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.ui = new TuiAltScreen(this.terminal, undefined, undefined, {
       mouse: true,
       wheelScrollLines: 3,
-      // pi-tui 0.84.2 transcript search (Ctrl+Shift+F): style matches from the
-      // Fleet theme. Resolved per call so a live theme switch restyles matches.
+      // Style transcript-search matches from the Fleet theme. Resolve per call
+      // so a live theme switch restyles matches.
       searchMatchStyle: (text) => theme.searchMatch()(text),
       searchCurrentMatchStyle: (text) => theme.currentSearchMatch()(text),
     });

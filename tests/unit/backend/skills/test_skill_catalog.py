@@ -44,8 +44,8 @@ def test_dspy_rlm_skill_defines_recursive_not_retrieval_language_model() -> None
     assert "`FleetRLMSignature`" in resource.content
     assert "every required output field" in resource.content
     assert "`max_iters`" in resource.content
-    assert "| Fleet iteration budget | `max_iters` | `max_iters` |" in resource.content
-    assert "caller-owned interpreter" in resource.content
+    assert "| Fleet iteration budget | max_iters | max_iters |" in resource.content
+    assert "invocation adapter" in resource.content
     assert '["skill_markdown"]' in skill.instructions
     assert '["content"]' in skill.instructions
     assert "not" in resource.content.lower()

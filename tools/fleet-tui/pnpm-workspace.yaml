@@ -1,7 +1,12 @@
 overrides:
   js-yaml: 4.3.1
-  postcss: 8.5.23
+  postcss: 8.5.28
 allowBuilds:
   esbuild: true
+peerDependencyRules:
+  allowedVersions:
+    # TypeScript 6 re-exports the TypeScript 5.9 API used by this generator;
+    # TypeScript 7 is separately installed as the native compiler.
+    'openapi-typescript>typescript': 6.0.2
 minimumReleaseAgeExclude:
-  - '@earendil-works/pi-tui@0.84.2'
+  - '@earendil-works/pi-tui@0.87.1'

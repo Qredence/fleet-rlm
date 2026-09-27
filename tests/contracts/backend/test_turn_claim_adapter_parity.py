@@ -59,14 +59,14 @@ async def _build_harness(adapter_kind: str) -> _Harness:
     await create_tables(engine)
     factory = create_session_factory(engine)
     async with factory() as db, db.begin():
+        db.add_all((UserRow(id=access.user_id),))
+        await db.flush()
+        db.add_all((WorkspaceRow(id=access.workspace_id),))
+        await db.flush()
         db.add_all(
-            (
-                UserRow(id=access.user_id),
-                WorkspaceRow(id=access.workspace_id),
-                SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="parity"),
-            )
+            (SessionRow(id=session_id, user_id=access.user_id, workspace_id=access.workspace_id, title="parity"),)
         )
-        await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+        await db.flush()
     store = SqlAlchemyRunStateStore(factory)
     turn = await store.begin(RunClaim(access, session_id, TurnInput("claim parity"), "parity", run_id))
     assert isinstance(turn, ClaimedRun)

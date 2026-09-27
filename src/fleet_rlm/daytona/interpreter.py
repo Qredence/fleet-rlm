@@ -26,6 +26,7 @@ from typing import Any, Protocol, cast
 from uuid import uuid4
 
 import dspy
+from daytona.common.errors import DaytonaFileNotFoundError
 from dspy import CodeExecutionError, CodeInterpreterError, FinalOutput
 from dspy.utils.callback import BaseCallback, with_callbacks
 
@@ -547,9 +548,14 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         try:
-            delete(path, recursive=True)
-        except TypeError:
-            delete(path)
+            try:
+                delete(path, recursive=True)
+            except TypeError:
+                delete(path)
+        except DaytonaFileNotFoundError:
+            # A Run that failed before its first action may never create its
+            # bound scratch directory. Absence confirms this path is clean.
+            pass
         self._run_scratch_path = None
 
     @property
@@ -902,6 +908,8 @@ class DaytonaCodeInterpreter:
                 timeout_s=backend.timeout_s,
                 workdir=backend._workdir,
             )
+            if backend._run_scratch_path is not None:
+                fresh_backend.bind_run_scratch(backend._run_scratch_path)
         else:
             raise DaytonaAdapterError(
                 message="interpreter cannot create an invocation-scoped adapter",

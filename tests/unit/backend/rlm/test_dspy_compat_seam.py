@@ -1,4 +1,4 @@
-"""DSPy 3.3.1 Daytona interpreter seam certification tests."""
+"""DSPy 3.4.0 Daytona interpreter seam certification tests."""
 
 from __future__ import annotations
 
@@ -30,6 +30,16 @@ def _rlm(*, tools: list[Callable[..., Any]] | None = None, signature: str = "req
         tools=tools,
         verbose=False,
     )
+
+
+def _tracked_interpreter_factory(created: list[DaytonaCodeInterpreter]) -> Callable[[], DaytonaCodeInterpreter]:
+    def create() -> DaytonaCodeInterpreter:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        created.append(interpreter)
+        return interpreter
+
+    create.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+    return create
 
 
 class _OneAction:
@@ -85,34 +95,32 @@ async def test_sequential_reinjection_removes_old_tool_and_keeps_new_tool() -> N
         calls.append("new")
         return "new"
 
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreters: list[DaytonaCodeInterpreter] = []
+    interpreter_factory = _tracked_interpreter_factory(interpreters)
     first = _rlm(tools=[old_tool])
     second = _rlm(tools=[new_tool])
     first_action = _OneAction("SUBMIT(answer=old_tool())")
 
     first.generate_action = first_action
 
-    try:
-        first_prediction = await first.acall(interpreter, request="first")
-        assert first_prediction.answer == "old"
+    first_prediction = await first.acall(interpreter_factory=interpreter_factory, request="first")
+    assert first_prediction.answer == "old"
 
-        class _RemovedThenFresh:
-            calls = 0
+    class _RemovedThenFresh:
+        calls = 0
 
-            async def acall(self, **_kwargs: Any) -> dspy.Prediction:
-                self.calls += 1
-                code = "old_tool()" if self.calls == 1 else "SUBMIT(answer=new_tool())"
-                return dspy.Prediction(reasoning="refresh bindings", code=code)
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            self.calls += 1
+            code = "old_tool()" if self.calls == 1 else "SUBMIT(answer=new_tool())"
+            return dspy.Prediction(reasoning="refresh bindings", code=code)
 
-        second_action = _RemovedThenFresh()
-        second.generate_action = second_action
-        second_prediction = await second.acall(interpreter, request="second")
-    finally:
-        interpreter.shutdown()
+    second_action = _RemovedThenFresh()
+    second.generate_action = second_action
+    second_prediction = await second.acall(interpreter_factory=interpreter_factory, request="second")
 
     assert second_prediction.answer == "new"
     assert calls == ["old", "new"]
-    assert "old_tool" not in interpreter.tools
+    assert "old_tool" not in interpreters[1].tools
 
 
 @pytest.mark.asyncio
@@ -129,24 +137,21 @@ async def test_sequential_same_name_tool_closure_uses_only_new_binding() -> None
 
     first_tool.__name__ = "same_name"
     second_tool.__name__ = "same_name"
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter_factory = _tracked_interpreter_factory([])
     first = _rlm(tools=[first_tool])
     second = _rlm(tools=[second_tool])
     first.generate_action = _OneAction("SUBMIT(answer=same_name())")
     second.generate_action = _OneAction("SUBMIT(answer=same_name())")
 
-    try:
-        assert (await first.acall(interpreter, request="first")).answer == "first"
-        assert (await second.acall(interpreter, request="second")).answer == "second"
-    finally:
-        interpreter.shutdown()
+    assert (await first.acall(interpreter_factory=interpreter_factory, request="first")).answer == "first"
+    assert (await second.acall(interpreter_factory=interpreter_factory, request="second")).answer == "second"
 
     assert calls == ["first", "second"]
 
 
 @pytest.mark.asyncio
 async def test_sequential_output_metadata_rejects_old_submit_shape() -> None:
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter_factory = _tracked_interpreter_factory([])
     first = _rlm(signature="request -> answer: str")
     second = _rlm(signature="request -> result: int")
     first.generate_action = _OneAction("SUBMIT(answer='first')")
@@ -160,18 +165,15 @@ async def test_sequential_output_metadata_rejects_old_submit_shape() -> None:
             return dspy.Prediction(reasoning="refresh output metadata", code=code)
 
     second.generate_action = _OldThenNew()
-    try:
-        assert (await first.acall(interpreter, request="first")).answer == "first"
-        prediction = await second.acall(interpreter, request="second")
-    finally:
-        interpreter.shutdown()
+    assert (await first.acall(interpreter_factory=interpreter_factory, request="first")).answer == "first"
+    prediction = await second.acall(interpreter_factory=interpreter_factory, request="second")
 
     assert prediction.result == 7
     assert second.generate_action.calls == 2
 
 
 @pytest.mark.asyncio
-async def test_overlapping_native_acall_is_rejected_before_second_action_generation() -> None:
+async def test_overlapping_native_calls_receive_separate_factory_owned_interpreters() -> None:
     entered = asyncio.Event()
     release = asyncio.Event()
 
@@ -181,20 +183,25 @@ async def test_overlapping_native_acall_is_rejected_before_second_action_generat
             await release.wait()
             return dspy.Prediction(reasoning="submit", code="SUBMIT(answer='first')")
 
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    first_interpreters: list[DaytonaCodeInterpreter] = []
+    second_interpreters: list[DaytonaCodeInterpreter] = []
     first = _rlm()
     second = _rlm()
     first.generate_action = _BlockingAction()
     second.generate_action = _OneAction("SUBMIT(answer='second')")
-    first_task = asyncio.create_task(first.acall(interpreter, request="first"))
+    first_task = asyncio.create_task(
+        first.acall(interpreter_factory=_tracked_interpreter_factory(first_interpreters), request="first")
+    )
     await entered.wait()
 
-    with pytest.raises(DaytonaAdapterError, match="already executing"):
-        await second.acall(interpreter, request="second")
+    second_prediction = await second.acall(
+        interpreter_factory=_tracked_interpreter_factory(second_interpreters), request="second"
+    )
+    assert second_prediction.answer == "second"
 
     release.set()
     assert (await first_task).answer == "first"
-    interpreter.shutdown()
+    assert first_interpreters[0] is not second_interpreters[0]
 
 
 def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:

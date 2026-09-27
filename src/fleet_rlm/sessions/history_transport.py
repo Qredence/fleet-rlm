@@ -1,6 +1,6 @@
 """Narrow committed-Session-History transport for native ``dspy.RLM``.
 
-This is the single permitted P43.7 fallback for the fact that DSPy 3.3.1's
+This is the single permitted P43.7 fallback for the fact that DSPy 3.4.0's
 Daytona interpreter bridge cannot inject a raw ``dspy.History`` Pydantic value
 into the Sandbox. The wrapper carries exactly the same canonical
 ``{"request": ..., "answer": ...}`` records that ``dspy.History`` would carry;

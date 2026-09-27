@@ -180,7 +180,7 @@ def test_native_child_semantic_call_has_no_second_sandbox() -> None:
 
 
 @pytest.mark.asyncio
-async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
+async def test_harness_runs_an_isolated_fake_lm_python_scenario(monkeypatch: pytest.MonkeyPatch) -> None:
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [{"reasoning": "compute in Python", "code": "value = 18434 + 92786\nSUBMIT(answer=str(value))"}],
@@ -188,6 +188,23 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     child_calls = 0
+    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    invocations: list[DaytonaCodeInterpreter] = []
+    new_invocation = retained.new_invocation
+
+    def track_invocation(**kwargs):
+        invocation = new_invocation(**kwargs)
+        invocations.append(invocation)
+        shutdown = invocation.shutdown
+
+        def shutdown_invocation():
+            assert not retained._shutdown
+            shutdown()
+
+        monkeypatch.setattr(invocation, "shutdown", shutdown_invocation)
+        return invocation
+
+    monkeypatch.setattr(retained, "new_invocation", track_invocation)
 
     def child_factory(call_index: int):
         nonlocal child_calls
@@ -206,7 +223,7 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
         scenario,
         root_lm=root,
         sub_lm=sub,
-        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        root_interpreter_factory=lambda: retained,
         child_runtime_factory=child_factory,
     )
 
@@ -216,6 +233,10 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
     assert classify_routing_facts(scores[0].facts) == "python_native"
     assert child_calls == 0
     assert scores[0].facts.sandbox_count == 0
+    assert len(invocations) == 1
+    assert invocations[0] is not retained
+    assert invocations[0]._shutdown
+    assert retained._shutdown
 
 
 @pytest.mark.asyncio

@@ -14,10 +14,10 @@ contracted child-runtime owner (deterministic owner lanes live in
   acquisition; an expired deadline performs no allocation; a blocked batch
   reports ``recursive child batch deadline exceeded`` bounded by the same
   deadline; the parent outcome is timeout rather than success.
-- DSPy never shuts down caller-owned child interpreters through
+- DSPy shuts each factory-created invocation adapter exactly once through
   native completion, extraction fallback, generated-code error, terminal
-  interpreter failure, or cancellation; the Fleet lease owner shuts the
-  interpreter down exactly once. This lane shares its evidence lane with
+  interpreter failure, and cancellation. Fleet separately closes the retained
+  child lease exactly once. This lane shares its evidence lane with
   VAL-RLM-007 (Root-scope shutdown authority in ``test_program_factory.py``);
   the child-scope assertion remains independently claimable here.
 - A cleanup failure after a syntactically valid child answer is
@@ -69,7 +69,7 @@ from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
 class _CountingInterpreter:
-    """Interpreter double counting DSPy-originated shutdown calls.
+    """Interpreter double counting factory-owned shutdown calls.
 
     ``behavior`` selects the execution contract:
 
@@ -641,17 +641,13 @@ def test_child_receives_only_remaining_time_on_forked_lm() -> None:
     ids=["typed_submit", "generated_code_error", "extraction_fallback", "terminal_interpreter_error"],
 )
 @pytest.mark.asyncio
-async def test_dspy_native_child_paths_never_shut_down_caller_owned_interpreter(
+async def test_dspy_native_child_paths_shutdown_factory_created_interpreter(
     behavior: str,
     lm_actions: list[dict[str, str]],
     child_max_iters: int,
     expected_answer: str | None,
 ) -> None:
-    """Native child scope, paired with VAL-RLM-007: through
-    typed completion, generated-code error recovery, extraction fallback, and
-    terminal interpreter failure, a native child RLM performs zero shutdown
-    calls on the caller-owned interpreter; the Fleet lifecycle owner then
-    shuts it down exactly once."""
+    """Native child scope: DSPy closes its invocation adapter on every exit path."""
     interpreter = _CountingInterpreter(behavior)
     rlm = build_native_rlm_for_test(
         signature="prompt -> answer",
@@ -662,23 +658,17 @@ async def test_dspy_native_child_paths_never_shut_down_caller_owned_interpreter(
     with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
         if behavior == "interpreter_error":
             with pytest.raises(CodeInterpreterError):
-                await rlm.acall(interpreter, prompt="go")
+                await rlm.acall(interpreter_factory=lambda: interpreter, prompt="go")
         else:
-            prediction = await rlm.acall(interpreter, prompt="go")
+            prediction = await rlm.acall(interpreter_factory=lambda: interpreter, prompt="go")
             assert prediction.answer == expected_answer
 
-    # Zero DSPy-originated shutdown calls through completion and failure.
-    assert interpreter.shutdown_calls == 0
-    # Exactly one explicit Fleet-owned shutdown through the lifecycle close.
-    interpreter.shutdown()
     assert interpreter.shutdown_calls == 1
 
 
 @pytest.mark.asyncio
-async def test_cancellation_never_shuts_down_caller_owned_child_interpreter() -> None:
-    """Cancellation, paired with VAL-RLM-007: cancelling a
-    native child mid-execution performs no DSPy-originated shutdown; the
-    Fleet owner alone closes the interpreter."""
+async def test_cancellation_shuts_down_factory_created_child_interpreter() -> None:
+    """Cancellation still exits DSPy's invocation context and closes its adapter."""
     entered_second_action = asyncio.Event()
 
     class _SuspendingSecondAction(dspy.Predict):
@@ -725,18 +715,15 @@ async def test_cancellation_never_shuts_down_caller_owned_child_interpreter() ->
         lm=dspy.utils.DummyLM([{"answer": "unused"}], adapter=dspy.JSONAdapter()),
         adapter=dspy.JSONAdapter(),
     ):
-        task = asyncio.create_task(rlm.acall(interpreter, prompt="go"))
+        task = asyncio.create_task(rlm.acall(interpreter_factory=lambda: interpreter, prompt="go"))
         await asyncio.wait_for(entered_second_action.wait(), timeout=5)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
 
     # The first action executed; cancellation interrupted the native loop and
-    # never grants DSPy shutdown authority.
+    # DSPy's context closed the factory-created adapter.
     assert interpreter.execute_calls == 1
-    assert interpreter.shutdown_calls == 0
-    # Exactly one explicit Fleet-owned shutdown through the lifecycle close.
-    interpreter.shutdown()
     assert interpreter.shutdown_calls == 1
 
 
@@ -765,8 +752,8 @@ def test_fleet_executor_closes_child_lease_exactly_once() -> None:
 
 def test_executor_terminal_child_failure_still_settles_lease_once() -> None:
     """Executor failure scope: a terminal interpreter failure
-    propagates to Root without any DSPy-originated shutdown, and the Fleet
-    owner still settles the lease exactly once on the failure path."""
+    propagates to Root; DSPy closes the invocation adapter while Fleet settles
+    the retained lease exactly once on the failure path."""
     recorder = _Recorder()
     executor = _executor(
         [{"reasoning": "run code", "code": "print('work')"}],
@@ -779,7 +766,7 @@ def test_executor_terminal_child_failure_still_settles_lease_once() -> None:
     assert outcome["answer"] == ""
 
     interpreter = recorder.interpreters[1]
-    # DSPy propagated the failure without touching shutdown; the owner closed.
+    # Fleet closes the retained lease after DSPy closes its invocation adapter.
     assert recorder.close_calls.get(1) == 1
     assert interpreter.shutdown_calls == 1
     recorder.leases[0].close()

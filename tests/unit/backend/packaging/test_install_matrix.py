@@ -110,7 +110,7 @@ class TestInstallMatrixAndCliSmoke:
                 "import fleet_rlm\n"
                 "import dspy\n"
                 "assert fleet_rlm.__version__ == '" + project_version + "'\n"
-                "assert dspy.__version__ == '3.3.1'\n"
+                "assert dspy.__version__ == '3.4.0'\n"
                 "eps = {ep.name: ep.value for ep in importlib.metadata.entry_points(group='console_scripts')}\n"
                 "assert eps['fleet'] == 'fleet_rlm.cli.main:fleet_main'\n"
                 "assert eps['fleet-rlm'] == 'fleet_rlm.cli.main:fleet_rlm_main'\n"
@@ -199,7 +199,7 @@ class TestInstallMatrixAndCliSmoke:
                 "import dspy\n"
                 "import gepa\n"
                 "assert fleet_rlm.__version__ == '" + project_version + "'\n"
-                "assert dspy.__version__ == '3.3.1'\n"
+                "assert dspy.__version__ == '3.4.0'\n"
                 "assert importlib.metadata.version('gepa') == '0.1.4'\n"
                 "print('OK_OPTIMIZE')\n"
             )

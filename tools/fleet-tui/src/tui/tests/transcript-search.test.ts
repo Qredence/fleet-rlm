@@ -34,7 +34,7 @@ function tick(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 60));
 }
 
-describe("transcript search (pi-tui 0.84.2)", () => {
+describe("transcript search", () => {
   it("opens the search overlay on Ctrl+Shift+F and closes it with Escape", async () => {
     const terminal = new FakeTerminal();
     const ui = new TuiAltScreen(terminal, undefined, undefined, { mouse: true });

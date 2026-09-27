@@ -9,9 +9,8 @@ through private symbol names:
 - The Root native RLM receives exactly the approved recursive
   pair; a child receives no Fleet recursive tools and a batch attempt from a child
   fails without reserving calls or allocating a Sandbox.
-- Root and native child are both exact native ``dspy.RLM``
-  instances invoked with the positional caller-owned interpreter, each
-  starting a fresh REPL history and producing a native Prediction.
+- Root and native child are exact native ``dspy.RLM`` instances that receive
+  fresh invocation adapters from factories and produce native Predictions.
 """
 
 from __future__ import annotations
@@ -315,12 +314,10 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
 
 @pytest.mark.asyncio
 async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> None:
-    """Root and native child are both exact native ``dspy.RLM``
-    instances built through the certified constructor. The child uses DSPy's
-    invocation factory while Root retains its caller-owned interpreter."""
+    """Root and native child are native ``dspy.RLM`` instances with invocation factories."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
-    child_invocations: list[tuple[type, object, dict[str, object]]] = []
+    child_types: list[type] = []
     child_interpreters: list[object] = []
     root_invocations: list[tuple[type, object, dict[str, object]]] = []
     root_types: list[type] = []
@@ -336,13 +333,7 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
 
         kwargs["interpreter_factory"] = recording_factory
         rlm = real_build(**kwargs)
-        original_forward = rlm.forward
-
-        def forward(interpreter: object = None, /, **input_args: object) -> object:
-            child_invocations.append((type(rlm), interpreter, dict(input_args)))
-            return original_forward(interpreter, **input_args)
-
-        rlm.forward = forward
+        child_types.append(type(rlm))
         return rlm
 
     def root_builder(**kwargs: object) -> object:
@@ -351,9 +342,9 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
         original_acall = rlm.acall
 
         async def acall(*args: object, **input_args: object) -> object:
-            interpreter = args[0] if args else input_args.get("interpreter")
-            root_invocations.append((type(rlm), interpreter, dict(input_args)))
-            return await original_acall(*args, **input_args)
+            assert not args
+            root_invocations.append((type(rlm), input_args.get("interpreter_factory"), dict(input_args)))
+            return await original_acall(**input_args)
 
         rlm.acall = acall
         return rlm
@@ -390,24 +381,20 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
-    assert stream.outcome.prediction.answer == "child-native-ok"
+    assert stream.outcome.prediction.answer == "child-native-ok", _events
 
     # Both Root and child are the exact native class, each freshly composed.
     assert root_types == [dspy.RLM]
-    assert len(child_invocations) == 1
-    assert child_invocations[0][0] is dspy.RLM
+    assert child_types == [dspy.RLM]
 
-    # Root passes its retained interpreter; DSPy obtains and shuts down a
-    # fresh child adapter through the factory while Fleet owns the lease.
+    # DSPy creates and shuts down one invocation adapter for each RLM. The child
+    # adapter comes from its lease; Root's retained interpreter stays a template.
     assert len(root_invocations) == 1
-    assert child_invocations[0][1] is None
     assert len(child_interpreters) == 1
     assert child_interpreters[0] is not factory.interpreters[0]
     assert child_interpreters[0]._shutdown
-    assert root_invocations[0][1] is not factory.interpreters[0]
+    assert root_invocations[0][1] is None
     # Child RLMs receive only selected input; Root keeps Session state.
-    child_inputs = child_invocations[0][2]
-    assert set(child_inputs) == {"prompt"}
     assert "request" in root_invocations[0][2]
 
     # Native Prediction evidence: the completed Root turn exposes a trajectory

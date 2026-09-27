@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from daytona.common.errors import DaytonaFileNotFoundError
 
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
 from fleet_rlm.rlm.events import EventRecorder, RLMReasoning, RunCompleted, RunStarted, RuntimeEvent
 
 
@@ -82,3 +84,72 @@ async def test_native_runtime_deltas_reach_fastapi_sse_before_done() -> None:
     }
     assert frames[-1].raw_data == "[DONE]"
     assert opened.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_scratch", [True, False])
+async def test_run_scratch_cleanup_preserves_completed_sse_boundary(missing_scratch: bool) -> None:
+    from fleet_rlm.api.routes.turns import create_turn
+    from fleet_rlm.api.schemas import CreateTurnRequest
+    from fleet_rlm.turns import OpenedTurnStream
+
+    run_id = uuid4()
+    path = f"/tmp/fleet/{run_id}"
+    deleted: list[str] = []
+
+    class Filesystem:
+        def delete_file(self, target: str, *, recursive: bool) -> None:
+            assert recursive
+            deleted.append(target)
+            if missing_scratch:
+                raise DaytonaFileNotFoundError("missing Run scratch", status_code=404)
+            raise RuntimeError("Sandbox is unavailable")
+
+    template = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=Filesystem())))
+    template.bind_run_scratch(run_id)
+    invocation = template.new_invocation()
+    assert invocation._backend._run_scratch_path == path
+
+    recorder = EventRecorder(uuid4(), run_id)
+
+    class Opened:
+        def __init__(self) -> None:
+            self.events = iter((recorder.record(RunStarted("live")), recorder.record(RunCompleted(1, "live"))))
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            try:
+                return next(self.events)
+            except StopIteration:
+                template.cleanup_run_scratch()
+                raise StopAsyncIteration from None
+
+        async def aclose(self) -> None:
+            return None
+
+    class Coordinator:
+        def open_owned(self, _command):
+            return OpenedTurnStream(run_id, Opened())
+
+    stream = create_turn(
+        uuid4(),
+        CreateTurnRequest(text="hello"),
+        SimpleNamespace(headers={}),
+        SimpleNamespace(user_id=uuid4(), workspace_id=uuid4()),
+        Coordinator(),
+        SimpleNamespace(run_heartbeat_seconds=10),
+        "scratch-cleanup",
+        None,
+    )
+    if missing_scratch:
+        frames = [frame async for frame in stream]
+        assert [frame.data["type"] for frame in frames[1:-1]] == ["start", "finish"]
+        assert frames[-1].raw_data == "[DONE]"
+        assert template._backend._run_scratch_path is None
+    else:
+        with pytest.raises(RuntimeError, match="Sandbox is unavailable"):
+            _ = [frame async for frame in stream]
+        assert template._backend._run_scratch_path == path
+    assert deleted == [path]

@@ -4,7 +4,7 @@ VAL-PKG-025: shipped Fleet Python files carry zero references to the retired
 ``optimize_anything`` / ``OptimizeAnythingConfig`` API.
 VAL-OPT-025: no USD reflection-cost-cap contract exists in source, config, or docs.
 Base install: no Fleet runtime, tool-registration, or optimizer module imports
-``gepa`` beyond what the official ``dspy`` 3.3.1 base import graph loads itself.
+``gepa`` beyond what the official ``dspy`` 3.4.0 base import graph loads itself.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def test_no_usd_reflection_cost_cap_in_source_or_docs() -> None:
 
 
 def test_fleet_imports_add_no_gepa_modules_beyond_dspy_base() -> None:
-    """Published dspy 3.3.1 declares gepa as a base dependency and imports it
+    """Published dspy 3.4.0 declares gepa as a base dependency and imports it
     eagerly; the Fleet contract is that Fleet modules never add further gepa
     imports at import time (optimizer gepa usage stays function-local/lazy)."""
     probe = (

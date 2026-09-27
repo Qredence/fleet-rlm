@@ -56,7 +56,7 @@ Live mode acquires an ephemeral volume-backed Daytona interpreter through
 Daytona runtime path), stages `context_window_text` on the workspace
 volume using `WorkspaceAttachmentPathPolicy` (same layout as Turn
 `AttachmentContextCapsule` staging), constructs `build_native_rlm(...)`, and
-invokes `await rlm.acall(interpreter, **kwargs)` with `FleetJSONAdapter` so
+invokes `await rlm.acall(interpreter_factory=interpreter_factory, **kwargs)` with `FleetJSONAdapter` so
 wrap-up and parse re-asks match production Turns. Capsule `sandbox_path` and
 `mount_root` are under the interpreter volume mount (typically
 `/home/daytona/fleet`), not host-only temp paths.

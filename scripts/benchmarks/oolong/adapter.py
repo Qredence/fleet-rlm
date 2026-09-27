@@ -7,7 +7,7 @@ import hashlib
 import json
 import subprocess
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -640,7 +640,7 @@ async def release_ephemeral_lease(
 
 def _run_prediction_on_worker(
     rlm: Any,
-    interpreter: Any,
+    interpreter_factory: Callable[[], Any],
     resolved_root: Any,
     adapter: Any,
     invoke_kwargs: Mapping[str, Any],
@@ -649,7 +649,7 @@ def _run_prediction_on_worker(
 
     async def _execute() -> Any:
         with dspy.context(lm=resolved_root, adapter=adapter, track_usage=True):
-            return await rlm.acall(interpreter, **dict(invoke_kwargs))
+            return await rlm.acall(interpreter_factory=interpreter_factory, **dict(invoke_kwargs))
 
     return asyncio.run(_execute())
 
@@ -692,7 +692,13 @@ async def invoke_live_prediction(
         bind = getattr(interpreter, "bind_context_capsule", None)
         if callable(bind):
             bind(capsule)
-    rlm = build_native_program(settings, interpreter_factory=lambda: interpreter, sub_lm=resolved_sub, dataset=dataset)
+
+    def interpreter_factory() -> Any:
+        return interpreter.new_invocation(
+            context_capsule=capsule if isinstance(capsule, AttachmentContextCapsule) else None
+        )
+
+    rlm = build_native_program(settings, interpreter_factory=interpreter_factory, sub_lm=resolved_sub, dataset=dataset)
     invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
     adapter = FleetJSONAdapter(
         deadline=deadline,
@@ -704,7 +710,7 @@ async def invoke_live_prediction(
         asyncio.to_thread(
             _run_prediction_on_worker,
             rlm,
-            interpreter,
+            interpreter_factory,
             resolved_root,
             adapter,
             invoke_kwargs,

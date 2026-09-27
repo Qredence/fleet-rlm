@@ -24,8 +24,8 @@ the behaviors below keep passing their lanes.
 
 | Frozen behavior | Public surface | Owner | Enforcing lanes |
 | --- | --- | --- | --- |
-| Exact `dspy==3.3.1` published dependency | Runtime version guard; locked install; wheel/sdist metadata | Release policy | `tests/unit/backend/packaging/`, `tests/unit/backend/rlm/` |
-| Native RLM execution per Turn | Typed outputs, one native `dspy.RLM` per Turn, caller-owned interpreter lifecycle | RLM runner | `tests/unit/backend/rlm/` |
+| Exact `dspy==3.4.0` published dependency | Runtime version guard; locked install; wheel/sdist metadata | Release policy | `tests/unit/backend/packaging/`, `tests/unit/backend/rlm/` |
+| Native RLM execution per Turn | Typed outputs, one native `dspy.RLM` per Turn, DSPy-owned invocation adapter lifecycle with Fleet-owned Sandbox lease | RLM runner | `tests/unit/backend/rlm/` |
 | Recursion contract | Root depth 0, one native child depth, Root-only batch, shared budgets, Sub-LM fallback | Recursion policy | `tests/unit/backend/rlm/`, `tests/live/backend/` |
 | Turn orchestration | Claim/open/cancellation/deadline/heartbeat, stream settlement, replay determinism | Turn orchestration (`TurnRuntime`) | `tests/unit/backend/chat/` |
 | Atomic Turn settlement | Commit, failure, cancellation settlement; result snapshot and Memory intents | Turn settlement (`RunLifecycleService`) | `tests/unit/backend/chat/`, `tests/unit/backend/turn/test_committed_turn*.py` |

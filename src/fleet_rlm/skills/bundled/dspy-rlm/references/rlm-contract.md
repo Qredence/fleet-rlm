@@ -1,6 +1,6 @@
-# dspy.RLM contract (Fleet / DSPy 3.3.x)
+# dspy.RLM contract (Fleet / DSPy 3.4.0)
 
-Authority: the exact pinned [DSPy 3.3.1 RLM source](https://raw.githubusercontent.com/stanfordnlp/dspy/3.3.1/dspy/predict/rlm.py) and installed implementation. The rolling [RLM API](https://dspy.ai/api/modules/RLM/) is orientation; do not treat Daytona provider docs as DSPy module authority.
+Authority: the exact pinned [DSPy 3.4.0 RLM source](https://raw.githubusercontent.com/stanfordnlp/dspy/3.4.0/dspy/predict/rlm.py) and installed implementation. The rolling [RLM API](https://dspy.ai/api/modules/RLM/) is orientation; do not treat Daytona provider docs as DSPy module authority.
 
 ## Name
 
@@ -72,7 +72,7 @@ profile currently uses Root values `12`, `32`, and `6000`; its child RLM values
 are `8`, `12`, and `4000`. Treat `config/fleet.toml` as authoritative when a
 different profile is selected.
 
-Fleet uses DSPy 3.3.x's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
+Fleet uses DSPy 3.4.0's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
 `Settings.rlm_max_iters`, and the TOML policy key `rlm.max_iters` are passed
 directly to `dspy.RLM(max_iters=...)` in `rlm.program` with no alias.
 Settings resolve only from the selected TOML policy; ambient `FLEET_*`
@@ -80,20 +80,21 @@ environment variables are ignored.
 
 ## Fleet-to-DSPy construction and ownership
 
-| Fleet surface | Fleet value | DSPy 3.3.x surface |
+| Fleet surface | Fleet value | DSPy 3.4.0 surface |
 |---|---|---|
-| Fleet iteration budget | `max_iters` | `max_iters` |
-| Native construction | `build_native_rlm(..., interpreter_factory=...)` with a caller-owned factory | `dspy.RLM(..., interpreter_factory=...)` |
-| Native async execution | Existing caller-owned interpreter | `await rlm.acall(interpreter, **named_inputs)` |
-| Native streaming | Existing caller-owned interpreter | `stream_program(interpreter, **named_inputs)` |
-| Shutdown | Fleet or the child lease | DSPy does not shut down caller-owned interpreters |
+| Fleet iteration budget | max_iters | max_iters |
+| Native construction | build_native_rlm(..., interpreter_factory=...) with a fresh invocation factory | dspy.RLM(..., interpreter_factory=...) |
+| Native async execution | await rlm.acall(**named_inputs) | DSPy calls the zero-argument factory for this invocation |
+| Factory result | One invocation-scoped interpreter | DSPy injects execution tools and output metadata |
+| Shutdown | DaytonaRuntime retains Sandbox ownership; the invocation factory yields one adapter | DSPy shuts down the factory-created interpreter |
 
-Fleet's private `interpreter_factory` is fail-closed: if a native RLM is
-invoked without the caller-owned positional interpreter, it raises the
-sanitized `RLMConfigError` instead of creating DSPy's default interpreter.
-Never pass an existing Fleet interpreter through `interpreter_factory`; DSPy
-would then treat it as DSPy-owned. Deterministic `_TestingRLM` substitutes stay
-keyword-only and are not routed through the native positional call contract.
+Fleet native RLM construction is fail-closed and requires the explicitly
+selected Fleet interpreter factory instead of DSPy's default interpreter.
+Each call must return a fresh invocation adapter; do not reuse an adapter
+across calls because DSPy injects mutable execution bindings and shuts the
+adapter down when the call settles. DaytonaRuntime retains ownership of the
+provider Sandbox and its cleanup. Deterministic _TestingRLM substitutes stay
+keyword-only.
 
 ## Fleet mapping
 
@@ -130,7 +131,7 @@ bounds REPL output retained in recursive history.
   unbounded generated content are not retained in these spans.
 - Declared `answer` JSON must fit the Turn commit budget. Oversized SUBMIT fails with public message `Turn output is too large`. Prefer writing long reports to Session Workspace, then SUBMIT a short summary.
 
-DSPy 3.3.x's final namespace, Tool, and sub-LM response validation is
+DSPy 3.4.0's final namespace, Tool, and sub-LM response validation is
 authoritative. Fleet host Tools preserve their own bounded validation and event
 views; generated Tool calls use keyword arguments, including
 `rlm_query(task=..., inputs=..., context=...)`.

@@ -1,4 +1,4 @@
-"""Fail-soft DSPy 3.3.1 interpreter callback shadow evidence.
+"""Fail-soft DSPy 3.4.0 interpreter callback shadow evidence.
 
 The callback API is an engineering-observability probe only.  It deliberately
 does not publish Runtime Events, mutate a Turn result, or replace the manual

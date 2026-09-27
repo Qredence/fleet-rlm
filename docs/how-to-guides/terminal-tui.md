@@ -1,7 +1,7 @@
 # Use the Fleet terminal UI
 
 `tools/fleet-tui/` is the maintained Node 22.19+ development client for Fleet's
-FastAPI HTTP/SSE API. It uses pi-tui 0.84.2 and owns no model, provider key,
+FastAPI HTTP/SSE API. It uses pi-tui 0.87.1 and owns no model, provider key,
 Sandbox, or execution runtime.
 
 ## Start a supervised session

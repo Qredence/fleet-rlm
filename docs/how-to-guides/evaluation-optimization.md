@@ -134,7 +134,7 @@ detached ephemeral lane and consume exported records in the 3.13 lane:
 
 ```bash
 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.1' --with 'databricks-agents>=1.12.0' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py <ingest-static|ingest-traces|show|export|history|tag> ...
 ```
@@ -184,18 +184,18 @@ and cleanup limits. Unknown usage or spend remains unknown.
 
 ```bash
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.1' --with 'databricks-agents>=1.12.0' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-static \
   --experiment-id <id> --output .scratch/evals/dataset-static.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.1' --with 'databricks-agents>=1.12.0' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py ingest-traces \
   --experiment-id <id> --expectations-json .scratch/evals/expectations.json \
   --output .scratch/evals/dataset-traces.json
 FLEET_LIVE=1 uv run --no-project --python 3.12 \
-  --with 'mlflow[genai]==3.16.0' --with 'databricks-agents>=1.11' \
+  --with 'mlflow[genai]==3.16.1' --with 'databricks-agents>=1.12.0' \
   --with 'databricks-connect==18.0.0' --with httpx --with python-dotenv \
   python scripts/benchmarks/rlm_eval_dataset.py show \
   --experiment-id <id> --output .scratch/evals/dataset-show.json

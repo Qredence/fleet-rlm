@@ -1,10 +1,10 @@
-"""Exact-final ``dspy==3.3.1`` runtime guard certification.
+"""Exact-final ``dspy==3.4.0`` runtime guard certification.
 
 Covers VAL-PKG-005/006/007/008 and the deterministic VAL-CROSS-002 lanes:
 composition/import validation and the public ``fleet``/``fleet-rlm`` CLI
 surfaces fail closed unless the installed DSPy is exactly the final published
-``3.3.1`` release. Rejection is a literal string comparison (not PEP 440
-specifier equality, so ``3.3.1+local`` and every prerelease/post-release are
+``3.4.0`` release. Rejection is a literal string comparison (not PEP 440
+specifier equality, so ``3.4.0+local`` and every prerelease/post-release are
 rejected), happens before any provider, database, or Daytona resource
 construction, and leaves no listener on the validator ports. Spy/counter
 instrumentation lives only in this private test lane plus the
@@ -30,27 +30,26 @@ CIRCLECI_CONFIG = REPO_ROOT / ".circleci" / "config.yml"
 EVIDENCE_ROOT = REPO_ROOT / ".fleet-evidence"
 RECEIPTS_DIR = EVIDENCE_ROOT / "receipts" / "p35a" / "exact-version-guard"
 
-CERTIFIED_VERSION = "3.3.1"
+CERTIFIED_VERSION = "3.4.0"
 REJECTED_VERSIONS = (
     # Neighboring patches (VAL-PKG-006).
-    "3.3.0",
-    "3.3.2",
+    "3.3.1",
+    "3.4.1",
     # Prereleases, post release, and local segment (VAL-PKG-007).
-    "3.3.1.dev1",
-    "3.3.1a1",
-    "3.3.1b1",
-    "3.3.1rc1",
-    "3.3.1.post1",
-    "3.3.1+local",
+    "3.4.0.dev1",
+    "3.4.0a1",
+    "3.4.0b1",
+    "3.4.0rc1",
+    "3.4.0.post1",
+    "3.4.0+local",
     # Malformed string and other release lines (VAL-PKG-008).
     "not-a-version",
     "3.2.9",
-    "3.4.0",
     "4.0.0",
 )
 # Representative variants re-proven through every startup surface; the strict
 # production Daytona composition entry covers the complete matrix on its own.
-_SURFACE_SAMPLE_VERSIONS = ("3.3.0", "3.3.2", "3.3.1+local", "not-a-version")
+_SURFACE_SAMPLE_VERSIONS = ("3.3.1", "3.4.1", "3.4.0+local", "not-a-version")
 
 _GUARD_COUNTER_LABELS = ("guard", "database", "daytona", "provider", "server")
 _GUARD_REJECTED_EXIT = 3
@@ -138,7 +137,7 @@ def _assert_zero_resource_construction(report: dict[str, Any]) -> None:
 
 
 def _assert_bounded_exact_version_error(message: str) -> None:
-    assert "exactly DSPy 3.3.1" in message
+    assert "exactly DSPy 3.4.0" in message
     assert len(message) <= 256
     for forbidden in ("Traceback", "Exception", "site-packages"):
         assert forbidden not in message
@@ -153,7 +152,7 @@ class TestGuardStaticContract:
             UncertifiedDSpyVersionError,
         )
 
-        assert CERTIFIED_DSPY_VERSION == "3.3.1"
+        assert CERTIFIED_DSPY_VERSION == "3.4.0"
         assert issubclass(UncertifiedDSpyVersionError, RuntimeError)
 
     def test_guard_uses_literal_comparison_only(self) -> None:
@@ -163,18 +162,18 @@ class TestGuardStaticContract:
 
 
 class TestCircleCiExactVersionCheck:
-    """CI must pin the literal final release, not a floating 3.3.x window."""
+    """CI must pin the literal final release, not a floating 3.4.0 window."""
 
     def test_python_compat_job_requires_literal_3_3_1(self) -> None:
         text = CIRCLECI_CONFIG.read_text(encoding="utf-8")
-        assert 'assert dspy.__version__ == "3.3.1", dspy.__version__' in text
+        assert 'assert dspy.__version__ == "3.4.0", dspy.__version__' in text
         for legacy in ('startswith("3.3.', "startswith('3.3."):
             assert legacy not in text
 
 
 @pytest.mark.parametrize("mode", ("create-app", "composition-local", "composition-daytona"))
 class TestCertifiedReleaseAccepted:
-    """VAL-PKG-005: exact final 3.3.1 composes; resources only after the guard."""
+    """VAL-PKG-005: exact final 3.4.0 composes; resources only after the guard."""
 
     def test_guard_accepts_certified_release(self, mode: str) -> None:
         lane = _run_spy(mode, CERTIFIED_VERSION)
@@ -313,7 +312,7 @@ class TestBlackBoxPublicStartupRejection:
             assert proc.returncode != 0, (
                 f"{entry_name} {command} accepted reported dspy {reported_version!r}:\n{combined_output}"
             )
-            assert "exactly DSPy 3.3.1" in combined_output, combined_output
+            assert "exactly DSPy 3.4.0" in combined_output, combined_output
             assert _port_closed(port), f"listener left behind on 127.0.0.1:{port}"
             transcripts.append(
                 {
@@ -333,7 +332,7 @@ class TestBlackBoxPublicStartupRejection:
         assert _port_closed(port), "validator port 8011 must still be free after black-box guard lanes"
 
     def test_certified_runtime_proceeds_past_guard(self, tmp_path: Path) -> None:
-        """Acceptance control: installed exact 3.3.1 gets past the version guard."""
+        """Acceptance control: installed exact 3.4.0 gets past the version guard."""
         port = 8011
         assert _port_closed(port), "validator port 8011 must be free before the acceptance control"
         script = self._entry_script("fleet-rlm")
@@ -352,10 +351,10 @@ class TestBlackBoxPublicStartupRejection:
         # still must fail closed on configuration AFTER the version guard; the
         # guard itself must not fire on the certified release.
         assert proc.returncode != 0
-        assert "exactly DSPy 3.3.1" not in combined_output
+        assert "exactly DSPy 3.4.0" not in combined_output
         assert _port_closed(port), f"acceptance control left a listener on 127.0.0.1:{port}"
         _record_receipt(
-            "blackbox-public-startup-acceptance-3.3.1",
+            "blackbox-public-startup-acceptance-3.4.0",
             {
                 "port": port,
                 "assertion": "certified runtime passes the guard (startup then fails closed on absent policy)",

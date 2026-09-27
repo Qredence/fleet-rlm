@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import math
 import time
+from types import SimpleNamespace
 
 import dspy
 import pytest
 from dspy.utils.exceptions import LMServerError
+from dspy.utils.usage_tracker import UsageTracker
 
 from fleet_rlm.rlm.budget import (
     AdapterBudget,
@@ -228,28 +230,23 @@ async def test_settled_budget_rejects_adapter_without_calling_provider(asynchron
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
 async def test_real_lm_template_is_copied_without_mutating_retries_or_history(monkeypatch, asynchronous) -> None:
-    from types import SimpleNamespace
+    # This fake provider is intentionally unregistered; the test covers
+    # deadline copying and not provider capability discovery.
+    from dspy.clients import capabilities
 
+    monkeypatch.setattr(
+        capabilities,
+        "_litellm_capabilities",
+        lambda *_args, **_kwargs: capabilities.Capabilities(),
+    )
+    monkeypatch.setattr(dspy.LM, "supported_params", property(lambda _instance: set()))
     template = dspy.LM("test/template", num_retries=4, timeout=25)
     seen = []
 
     def forward(instance, **kwargs):
-        """
-        Record a model invocation and return a successful completion response.
-
-        Parameters:
-                instance: Request object containing the model name.
-                **kwargs: Additional invocation arguments.
-
-        Returns:
-                A completion response containing the configured content, token usage, and model name.
-        """
+        """Record the bounded call and return one adapter-ready completion."""
         seen.append((instance, kwargs))
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content=GOOD, tool_calls=None))],
-            usage={"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-            model=instance.model,
-        )
+        return [{"text": GOOD}]
 
     async def aforward(instance, **kwargs):
         """
@@ -363,6 +360,53 @@ def test_positive_infinite_adapter_deadline_is_the_unbounded_compatibility_case(
     budget = AdapterBudget(deadline=math.inf)
     assert budget.deadline is None
     assert budget.remaining() is None
+
+
+@pytest.mark.parametrize("cache_hit", [False, True])
+def test_deadline_proxy_counts_only_uncached_provider_usage(cache_hit: bool) -> None:
+    from fleet_rlm.rlm.program import DeadlineLMProxy
+
+    class Provider(dspy.BaseLM):
+        def __init__(self) -> None:
+            super().__init__(model="test/cached")
+
+        def forward(self, **_kwargs):
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+                usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
+                model=self.model,
+                cache_hit=cache_hit,
+            )
+
+    provider = Provider()
+    proxy = DeadlineLMProxy(provider, deadline=None, reserve_seconds=0, retries=0, error_message="expired")
+    tracker = UsageTracker()
+    with dspy.context(usage_tracker=tracker):
+        assert proxy(messages=[{"role": "user", "content": "check"}]) == ["ok"]
+    assert provider.history[-1]["usage"]["total_tokens"] == 12
+    assert tracker.usage_data.get(provider.model, []) == ([] if cache_hit else [provider.history[-1]["usage"]])
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.asyncio
+async def test_deadline_proxy_records_dspy_global_and_calling_module_history(asynchronous: bool) -> None:
+    from dspy.clients.base_lm import GLOBAL_HISTORY
+
+    from fleet_rlm.rlm.program import DeadlineLMProxy
+
+    provider = _ScriptedLM([GOOD])
+    proxy = DeadlineLMProxy(provider, deadline=None, reserve_seconds=0, retries=0, error_message="expired")
+    caller = dspy.Predict(_IterationActionSignature)
+    global_before = len(GLOBAL_HISTORY)
+    with dspy.context(caller_modules=[caller]):
+        if asynchronous:
+            await proxy.acall(messages=[{"role": "user", "content": "check"}])
+        else:
+            proxy(messages=[{"role": "user", "content": "check"}])
+    entry = provider.history[-1]
+    assert len(GLOBAL_HISTORY) == global_before + 1
+    assert GLOBAL_HISTORY[-1] is entry
+    assert caller.history[-1] is entry
 
 
 def test_concurrent_finalization_admissions_do_not_overdraw():

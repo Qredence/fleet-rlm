@@ -148,11 +148,14 @@ async def test_artifact_repository_enumerates_workspace_keep_sets() -> None:
         user_id, workspace_id, session_id, run_id = (uuid4() for _ in range(4))
         storage_ref = f"/home/daytona/fleet/artifacts/{uuid4()}/blob"
         async with factory() as db, db.begin():
+            db.add_all((UserRow(id=user_id),))
+            await db.flush()
+            db.add_all((WorkspaceRow(id=workspace_id),))
+            await db.flush()
+            db.add_all((SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="cleanup"),))
+            await db.flush()
             db.add_all(
                 (
-                    UserRow(id=user_id),
-                    WorkspaceRow(id=workspace_id),
-                    SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="cleanup"),
                     RunRow(
                         id=run_id,
                         session_id=session_id,
@@ -162,6 +165,11 @@ async def test_artifact_repository_enumerates_workspace_keep_sets() -> None:
                         base_checkpoint_version=0,
                         commit_checkpoint_version=1,
                     ),
+                )
+            )
+            await db.flush()
+            db.add_all(
+                (
                     ArtifactRow(
                         id=uuid4(),
                         workspace_id=workspace_id,
@@ -173,9 +181,7 @@ async def test_artifact_repository_enumerates_workspace_keep_sets() -> None:
                     ),
                 )
             )
-            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
-            await db.flush([row for row in db.new if isinstance(row, SessionRow)])
-            await db.flush([row for row in db.new if isinstance(row, RunRow)])
+            await db.flush()
 
         catalog = SqlAlchemyArtifactCatalog(factory)
         assert await catalog.list_storage_refs(workspace_id=workspace_id) == frozenset({storage_ref})

@@ -310,10 +310,12 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
         await create_tables(engine)
         factory = create_session_factory(engine)
         async with factory() as db, db.begin():
+            db.add_all((UserRow(id=access.user_id),))
+            await db.flush()
+            db.add_all((WorkspaceRow(id=access.workspace_id),))
+            await db.flush()
             db.add_all(
                 (
-                    UserRow(id=access.user_id),
-                    WorkspaceRow(id=access.workspace_id),
                     SessionRow(
                         id=session_id,
                         user_id=access.user_id,
@@ -322,7 +324,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
                     ),
                 )
             )
-            await db.flush([row for row in db.new if isinstance(row, (UserRow, WorkspaceRow))])
+            await db.flush()
 
         class Prepared:
             execution = SimpleNamespace(run_id=run_id, session_id=session_id)

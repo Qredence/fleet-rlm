@@ -31,7 +31,7 @@ def _interpreter(monkeypatch, chunks):
 
 @pytest.mark.asyncio
 async def test_exact_sdk_accumulates_output_even_with_a_callback(monkeypatch):
-    assert version("daytona") == "0.210.0"
+    assert version("daytona") == "0.218.0"
     interpreter, ws = _interpreter(monkeypatch, [{"type": "stdout", "text": "x" * 4096}] * 32)
     seen = []
     result = await interpreter.run_code(

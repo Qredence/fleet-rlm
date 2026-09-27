@@ -1,6 +1,6 @@
 """Published-dependency cutover contract (VAL-PKG-001/002/003/004/028).
 
-The production cognitive runtime is exactly published ``dspy==3.3.1`` and the
+The production cognitive runtime is exactly published ``dspy==3.4.0`` and the
 optimizer extra is exactly official ``gepa==0.1.4``. No base, extra, group, or
 override requirement may use a VCS or direct-URL source, the lock must resolve
 both packages from the registry with hashed artifacts, and the retired
@@ -22,7 +22,7 @@ LOCK = ROOT / "uv.lock"
 GITHUB_WORKFLOWS = ROOT / ".github" / "workflows"
 CIRCLECI_CONFIG = ROOT / ".circleci" / "config.yml"
 
-DSPY_EXACT = "dspy==3.3.1"
+DSPY_EXACT = "dspy==3.4.0"
 GEPA_EXACT = "gepa==0.1.4"
 
 _VCS_SCHEME_MARKERS = ("git+", "hg+", "svn+", "bzr+")
@@ -172,7 +172,7 @@ class TestRegistryLockedIdentities:
     """VAL-PKG-001/002: the lock resolves exact published artifacts with hashes."""
 
     def test_lock_dspy_identity(self, lock: dict) -> None:
-        _assert_registry_resolved_with_hashes(_lock_package(lock, "dspy"), expected_version="3.3.1")
+        _assert_registry_resolved_with_hashes(_lock_package(lock, "dspy"), expected_version="3.4.0")
 
     def test_lock_gepa_identity(self, lock: dict) -> None:
         _assert_registry_resolved_with_hashes(_lock_package(lock, "gepa"), expected_version="0.1.4")

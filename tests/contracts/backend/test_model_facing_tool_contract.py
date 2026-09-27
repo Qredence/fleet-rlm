@@ -179,7 +179,7 @@ def _source_tools() -> dict[str, dspy.Tool]:
 def test_model_facing_tool_contract_fixture_matches_dspy_and_host_tool_metadata() -> None:
     fixture = _fixture()
     assert fixture["schema_version"] == 1
-    assert fixture["dspy_version"] == dspy.__version__ == "3.3.1"
+    assert fixture["dspy_version"] == dspy.__version__ == "3.4.0"
 
     entries = cast(list[dict[str, Any]], fixture["entries"])
     by_name = {entry["name"]: entry for entry in entries}

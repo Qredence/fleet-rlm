@@ -360,7 +360,7 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
     )
 
     with dspy.context(lm=lm, adapter=dspy.JSONAdapter()):
-        prediction = await rlm.acall(interpreter, **kwargs)
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, **kwargs)
 
     interpreter.shutdown()
 
@@ -483,7 +483,7 @@ async def test_attachment_context_integrity_failure_aborts_before_reasoning(tmp_
         pytest.raises(DaytonaAdapterError, match="prepared context failed integrity verification"),
     ):
         await rlm.acall(
-            interpreter,
+            interpreter_factory=lambda: interpreter,
             request="inspect",
             attachments=capsule,
         )

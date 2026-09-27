@@ -182,9 +182,9 @@ class TestDistributionMetadata:
         sdist_requires = sorted(sdist_msg.get_all("Requires-Dist", []))
         assert wheel_requires == sdist_requires
 
-        # Base requirement dspy==3.3.1
+        # Base requirement dspy==3.4.0
         base_dspy = [r for r in wheel_requires if r.startswith("dspy==")]
-        assert base_dspy == ["dspy==3.3.1"], f"expected exact dspy==3.3.1 base requirement, got {base_dspy}"
+        assert base_dspy == ["dspy==3.4.0"], f"expected exact dspy==3.4.0 base requirement, got {base_dspy}"
 
         # Extra gepa==0.1.4 under optimize
         gepa_req = [r for r in wheel_requires if "gepa" in r]

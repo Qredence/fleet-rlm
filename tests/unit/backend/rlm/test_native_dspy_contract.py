@@ -394,18 +394,18 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     rlm.generate_action = Action()
     bind_native_rlm_observer(rlm, observed.append, max_chars=64)
 
-    prediction = await rlm.acall(interpreter, request="go")
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="go")
 
     assert type(rlm) is dspy.RLM
     assert prediction.answer == "ok"
-    assert interpreter.shutdown_calls == 0
+    assert interpreter.shutdown_calls == 1
     assert [type(item) for item in observed] == [RLMReasoning]
     assert observed[0].text == "Decide the answer directly."
     assert observed[0].step == 1
     interpreter.shutdown()
 
 
-def test_composition_version_guard_accepts_exact_final_3_3_1_only(
+def test_composition_version_guard_accepts_exact_final_3_4_0_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.rlm.program import (
@@ -414,28 +414,27 @@ def test_composition_version_guard_accepts_exact_final_3_3_1_only(
         assert_dspy_version,
     )
 
-    assert CERTIFIED_DSPY_VERSION == "3.3.1"
-    monkeypatch.setattr(dspy, "__version__", "3.3.1")
+    assert CERTIFIED_DSPY_VERSION == "3.4.0"
+    monkeypatch.setattr(dspy, "__version__", "3.4.0")
     assert_dspy_version()  # the certified final release
     rejected_versions = (
-        "3.3.0",
-        "3.3.2",
-        "3.3.1.dev1",
-        "3.3.1a1",
-        "3.3.1b1",
-        "3.3.1rc1",
-        "3.3.1.post1",
+        "3.3.1",
+        "3.4.1",
+        "3.4.0.dev1",
+        "3.4.0a1",
+        "3.4.0b1",
+        "3.4.0rc1",
+        "3.4.0.post1",
         # Literal string comparison must reject local segments that PEP 440
         # specifier equality would silently ignore.
-        "3.3.1+local",
+        "3.4.0+local",
         "not-a-version",
         "3.2.9",
-        "3.4.0",
         "4.0.0",
     )
     for reported in rejected_versions:
         monkeypatch.setattr(dspy, "__version__", reported)
-        with pytest.raises(UncertifiedDSpyVersionError, match=r"exactly DSPy 3\.3\.1"):
+        with pytest.raises(UncertifiedDSpyVersionError, match=r"exactly DSPy 3\.4\.0"):
             assert_dspy_version()
 
 
@@ -448,12 +447,12 @@ def test_composition_version_guard_error_is_bounded_and_typed(
     )
 
     assert issubclass(UncertifiedDSpyVersionError, RuntimeError)
-    hostile = "3.3.1+" + "x" * 5000
+    hostile = "3.4.0+" + "x" * 5000
     monkeypatch.setattr(dspy, "__version__", hostile)
     with pytest.raises(UncertifiedDSpyVersionError) as caught:
         assert_dspy_version()
     message = str(caught.value)
-    assert "exactly DSPy 3.3.1" in message
+    assert "exactly DSPy 3.4.0" in message
     assert hostile not in message
     assert len(message) <= 256
 
@@ -1059,7 +1058,7 @@ def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None
     from fleet_rlm.rlm.events import _lm_output_profile
 
     # P38-RLM-006/011: raw LiteLLM ModelResponse shapes are never delivered by
-    # the certified DSPy 3.3.1 legacy contract and are no longer probed.
+    # the certified DSPy 3.4.0 legacy contract and are no longer probed.
     class _ChoicesLike:
         choices: ClassVar[list[dict[str, object]]] = [{"message": {"content": "secret"}, "finish_reason": "stop"}]
 
@@ -1279,7 +1278,7 @@ async def test_native_submit_honors_required_defaults_and_nullable_outputs() -> 
     rlm.generate_action = _Actions('SUBMIT(answer="done", note=None)')
     rlm.extract = _NeverExtract()
     try:
-        prediction = await rlm.acall(interpreter, request="defaults")
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="defaults")
     finally:
         interpreter.shutdown()
 
@@ -1307,7 +1306,7 @@ async def test_native_submit_preserves_explicit_none_and_rejects_non_nullable_no
     )
     rlm.generate_action = actions
     try:
-        prediction = await rlm.acall(interpreter, request="nullable")
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="nullable")
     finally:
         interpreter.shutdown()
 
@@ -1333,7 +1332,7 @@ async def test_native_submit_rejects_non_json_values_and_non_finite_numbers() ->
     )
     rlm.generate_action = actions
     try:
-        prediction = await rlm.acall(interpreter, request="strict")
+        prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="strict")
     finally:
         interpreter.shutdown()
 
@@ -1515,7 +1514,7 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
 
     try:
         prediction = await rlm.acall(
-            interpreter,
+            interpreter_factory=lambda: interpreter,
             request="fetch",
             payload=ItemPayload("test-key", 42),
         )
