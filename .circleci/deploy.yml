@@ -93,9 +93,6 @@ jobs:
   deploy-pypi-release:
     type: release
     plan_name: deploy-pypi
-    validation:
-      enabled: true
-      auto_rollback_on_failure: true
 
 workflows:
   deploy:

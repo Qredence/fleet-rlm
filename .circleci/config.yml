@@ -220,10 +220,6 @@ jobs:
               echo "release_version must be supplied when enabling deploy_pypi" >&2
               exit 1
             }
-            test -n "${GITHUB_TOKEN:-}" || {
-              echo "GITHUB_TOKEN must be configured in the CircleCI project or context" >&2
-              exit 1
-            }
             export RELEASE_VERSION="<< pipeline.parameters.release_version >>"
             python - \<<'PY'
             import os
@@ -241,10 +237,13 @@ jobs:
       - run:
           name: Plan a PyPI deploy
           command: |
-            circleci run release plan \
+            circleci run release plan pypi-publish \
               --environment-name="pypi" \
               --component-name="fleet-rlm" \
               --target-version="<< pipeline.parameters.release_version >>"
+      - run:
+          name: Mark PyPI publish as running
+          command: circleci run release update pypi-publish --status=RUNNING
       - run:
           name: Trigger and wait for GitHub Actions release
           no_output_timeout: 45m
@@ -255,12 +254,20 @@ jobs:
               --ref=main
       - run:
           name: Update deploy to SUCCESS
-          command: circleci run release update --status=SUCCESS
+          command: circleci run release update pypi-publish --status=SUCCESS
           when: on_success
       - run:
           name: Update planned deploy to FAILED
-          command: circleci run release update --status=FAILED
+          command: circleci run release update pypi-publish --status=FAILED
           when: on_fail
+
+  cancel-deploy-pypi:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Update planned PyPI publish to CANCELED
+          command: circleci run release update pypi-publish --status=CANCELED
 
   python-compat:
     parameters:
@@ -358,4 +365,9 @@ workflows:
             - python-compat-312
             - python-compat-313
             - tui
+          filters: pipeline.parameters.deploy_pypi and pipeline.git.branch == "main"
+      - cancel-deploy-pypi:
+          requires:
+            - deploy-pypi:
+                - canceled
           filters: pipeline.parameters.deploy_pypi and pipeline.git.branch == "main"
