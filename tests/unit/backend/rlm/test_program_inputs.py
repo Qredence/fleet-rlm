@@ -31,6 +31,7 @@ from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import SessionHistory, TurnInput
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
+from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 
 
@@ -706,7 +707,7 @@ def test_child_inputs_use_relative_workspace_paths() -> None:
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage, TurnAccess
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -794,7 +795,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         _RunClaimToken(uuid4(), 7),
     )
     prepared = await TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,

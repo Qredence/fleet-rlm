@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
 
@@ -17,7 +18,7 @@ from tests.support.turn_settlement import TestingRunSettlement
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -104,7 +105,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         _RunClaimToken(uuid4()),
     )
     prepared = await TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -183,7 +184,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
     import asyncio
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -233,7 +234,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         _RunClaimToken(uuid4()),
     )
     module = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -248,7 +249,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
     from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -309,7 +310,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         _RunClaimToken(uuid4()),
     )
     module = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -327,7 +328,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
     from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.execution import RLMExecutionSpec
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -403,7 +404,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
 
     with pytest.raises(ValueError, match="outside"):
         await TestingRunPreparer(
-            models=RLMModelBundle(object(), object()),
+            models=placeholder_bundle(),
             options=RLMOptions(),
             attachments=Attachments(),
             acquire_environment=Environments().acquire,

@@ -21,6 +21,7 @@ import dspy
 import pytest
 
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
 
@@ -51,7 +52,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
 
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage
     from fleet_rlm.turn_preparation import RunEnvironment
 
@@ -120,7 +121,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -175,7 +176,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.turn_preparation import RunEnvironment
 
     claim = _make_claim(history_messages=())
@@ -238,7 +239,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -259,7 +260,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
 
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.history_transport import committed_history_for_claim
     from fleet_rlm.turn_preparation import RunEnvironment
 
@@ -331,7 +332,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
             )
 
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -380,7 +381,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -454,7 +455,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,

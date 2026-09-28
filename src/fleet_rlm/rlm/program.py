@@ -7,10 +7,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import math
 import os
 import re
-import time
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -29,7 +27,7 @@ from dspy.lm15 import (
     ProviderDefinition,
     register_provider,
 )
-from dspy.utils.exceptions import AdapterParseError, LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError
+from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config.settings import LLMRoleSettings, Settings
@@ -37,9 +35,7 @@ from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
 from fleet_rlm.rlm.budget import (
     DEFAULT_PARSE_RETRIES,
     AdapterBudget,
-    BudgetDimension,
     FinalizationExhausted,
-    ProviderAdmission,
     TurnBudget,
 )
 from fleet_rlm.rlm.result import RLMConfigError, RLMModelBundleError, truncate_public_text
@@ -167,16 +163,15 @@ def _retry_call_arguments(
     return retry_signature, retry_inputs
 
 
-def _budget_directive(remaining: float, *, attempts_exhausted: bool = False, final_iteration: bool = False) -> str:
-    seconds = max(0, int(remaining))
+def _budget_directive(*, attempts_exhausted: bool = False, final_iteration: bool = False) -> str:
     if attempts_exhausted:
         reason = "Exploration attempt budget exhausted"
     elif final_iteration:
         reason = "Final iteration reached"
     else:
-        reason = "Time budget nearly exhausted"
+        reason = "Wrap-up required"
     return (
-        f"{reason} ({seconds}s remaining). Submit your best-supported answer now "
+        f"{reason}. Submit your best-supported answer now "
         "using evidence already gathered. Do not explore or call tools. "
         "Return data-only answer assignments followed by one SUBMIT(...) call, or just SUBMIT(...). "
         "No imports, print, tool calls, or other statements."
@@ -215,39 +210,22 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         self,
         *,
         max_parse_retries: int = DEFAULT_PARSE_RETRIES,
-        deadline: float | None = None,
-        wrap_up_seconds: float = 0.0,
         budget: TurnBudget | None = None,
     ) -> None:
         super().__init__()
-        self._budget = AdapterBudget(
-            deadline=deadline,
-            reserve_seconds=wrap_up_seconds,
-            max_parse_retries=max_parse_retries,
-            turn=budget,
-        )
-        self._explicit_budget = budget is not None
-
-    @property
-    def _wrap_up_seconds(self) -> float:
-        return self._budget.reserve_seconds
+        self._budget = AdapterBudget(max_parse_retries=max_parse_retries, turn=budget)
 
     @property
     def _wrap_up_attempts(self) -> int:
         return self._budget.finalization_used
 
-    def _remaining(self) -> float | None:
-        return self._budget.remaining()
+    def _lm_for_request(self, lm: Any) -> Any:
+        # The Turn-scoped LM is already an isolated copy owned by this Turn, so
+        # the call view is the LM itself and no per-request wrapper is created.
+        return lm
 
-    def _lm_for_request(self, lm: BaseLM | DeadlineLMProxy, *, action: bool, wrap_up: bool) -> DeadlineLMProxy:
-        if isinstance(lm, DeadlineLMProxy) and lm.budget is not None and lm.budget is not self._budget.turn:
-            if self._explicit_budget or any(self._budget.turn.snapshot().values()):
-                raise ValueError("adapter cannot switch Turn budgets")
-            self._budget.turn = lm.budget
-        return DeadlineLMProxy.for_adapter(lm, self._budget, action=action, wrap_up=wrap_up)
-
-    def _enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
-        self._budget.enter_wrap_up(remaining, rejection_reason=rejection_reason)
+    def _enter_wrap_up(self, *, rejection_reason: str | None = None) -> None:
+        self._budget.enter_wrap_up(rejection_reason=rejection_reason)
 
     def wrap_up_summary(self) -> dict[str, Any]:
         return dict(self._budget.wrap_up_summary())
@@ -260,31 +238,23 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         """
         return {"parse_repairs_used": self._budget.parse_repairs_used}
 
-    def _next_wrap_up_attempt(self, lm: BaseLM | DeadlineLMProxy) -> None:
-        self._budget.reclassify_late_response(can_finalize=isinstance(lm, DeadlineLMProxy) and lm.can_finalize)
+    def _next_wrap_up_attempt(self, lm: Any) -> None:
+        self._budget.reclassify_late_response(can_finalize=getattr(lm, "_fleet_can_finalize", True))
 
-    def _wrap_up_required(self, inputs: Mapping[str, Any], remaining: float | None) -> bool:
+    def _wrap_up_required(self, inputs: Mapping[str, Any]) -> bool:
+        """Wrap up on the final iteration, or once exploration is exhausted."""
         return bool(
-            remaining is not None
-            and self._wrap_up_seconds > 0
-            and _iteration_is_action(inputs)
-            and (
-                remaining <= self._wrap_up_seconds
-                or self._budget.turn.exploration_exhausted()
-                or _iteration_is_final(inputs)
-            )
+            _iteration_is_action(inputs) and (self._budget.turn.exploration_exhausted() or _iteration_is_final(inputs))
         )
 
     def _with_wrap_up_directive(
         self,
         signature: type[Signature],
         inputs: Mapping[str, Any],
-        remaining: float,
         *,
         field_name: str | None = None,
     ) -> tuple[type[Signature], dict[str, Any], str]:
         directive = _budget_directive(
-            remaining,
             attempts_exhausted=self._budget.turn.exploration_exhausted(),
             final_iteration=_iteration_is_final(inputs),
         )
@@ -318,7 +288,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def __call__(
         self,
-        lm: BaseLM | DeadlineLMProxy,
+        lm: BaseLM,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         demos: list[dict[str, Any]],
@@ -374,46 +344,38 @@ class FleetJSONAdapter(dspy.JSONAdapter):
 
     def _repair_steps(
         self,
-        lm: BaseLM | DeadlineLMProxy,
+        lm: Any,
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         inputs: dict[str, Any],
     ) -> Generator[
-        tuple[BaseLM | DeadlineLMProxy, dict[str, Any], type[Signature], dict[str, Any]],
+        tuple[Any, dict[str, Any], type[Signature], dict[str, Any]],
         list[dict[str, Any]],
         list[dict[str, Any]],
     ]:
-        lm = self._lm_for_request(lm, action=False, wrap_up=False)
+        """Serve one action, applying bounded parse repair and wrap-up correction.
+
+        Wrap-up is keyed to the RLM iteration count rather than a wall-clock
+        reserve: it begins on the final iteration, or as soon as exploration
+        capacity is exhausted.
+        """
+        lm = self._lm_for_request(lm)
         attempt = 0
         base_signature, base_inputs = signature, dict(inputs)
         wrap_up = False
         request_signature, request_inputs = signature, dict(inputs)
         directive_field: str | None = None
         while True:
-            remaining = self._remaining()
             action = _iteration_is_action(base_inputs)
-            if action and self._wrap_up_required(base_inputs, remaining):
+            if action and not wrap_up and self._wrap_up_required(base_inputs):
                 wrap_up = True
-                assert remaining is not None
-                self._enter_wrap_up(remaining)
-            if wrap_up and remaining is not None:
+                self._enter_wrap_up()
+            if wrap_up:
                 request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                    request_signature, request_inputs, remaining, field_name=directive_field
+                    request_signature, request_inputs, field_name=directive_field
                 )
-            call_lm = self._lm_for_request(lm, action=action, wrap_up=wrap_up)
             try:
-                response = yield call_lm, dict(lm_kwargs), request_signature, request_inputs
-            except (LMTimeoutError, TimeoutError):
-                if not wrap_up and action and self._wrap_up_seconds > 0:
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining)
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature, request_inputs, boundary_remaining, field_name=directive_field
-                        )
-                        continue
-                raise
+                response = yield lm, dict(lm_kwargs), request_signature, request_inputs
             except AdapterParseError as exc:
                 if wrap_up:
                     if not self._budget.can_finalize():
@@ -421,23 +383,14 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                             "wrap-up finalization attempts exhausted before a parseable action"
                         ) from exc
                     self._budget.set_wrap_up_rejection("unparseable_json")
+                    # Consume a finalization slot for the correction call. DSPy
+                    # admission used to charge this implicitly; without it the
+                    # loop would re-ask the provider forever.
+                    self._next_wrap_up_attempt(lm)
                     request_signature, request_inputs = self._with_wrap_up_correction(
                         request_signature, request_inputs, reason="unparseable JSON"
                     )
                     continue
-                if action and self._wrap_up_seconds > 0:
-                    boundary_remaining = self._remaining()
-                    if boundary_remaining is not None and boundary_remaining <= self._wrap_up_seconds:
-                        wrap_up = True
-                        self._enter_wrap_up(boundary_remaining, rejection_reason="unparseable_json")
-                        self._next_wrap_up_attempt(call_lm)
-                        request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                            request_signature, request_inputs, boundary_remaining, field_name=directive_field
-                        )
-                        request_signature, request_inputs = self._with_wrap_up_correction(
-                            request_signature, request_inputs, reason="unparseable JSON"
-                        )
-                        continue
                 if not self._budget.can_repair(attempt):
                     raise
                 attempt += 1
@@ -447,26 +400,15 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 self._budget.note_parse_repair()
                 request_signature, request_inputs = _retry_call_arguments(base_signature, base_inputs, attempt, exc)
                 continue
-            if remaining is not None:
-                after_response = self._remaining()
-                if not wrap_up and action and after_response is not None and after_response <= self._wrap_up_seconds:
-                    wrap_up = True
-                    self._enter_wrap_up(after_response)
-                    self._next_wrap_up_attempt(call_lm)
-                    if is_finalization_action(_action_code(response)):
-                        return response
-                    request_signature, request_inputs, directive_field = self._with_wrap_up_directive(
-                        request_signature, request_inputs, after_response, field_name=directive_field
-                    )
-                if wrap_up and action and not is_finalization_action(_action_code(response)):
-                    self._budget.set_wrap_up_rejection("exploration_or_additional_code")
-                    if not self._budget.can_finalize():
-                        raise FinalizationExhausted("wrap-up finalization attempts exhausted before a compliant SUBMIT")
-                    request_signature, request_inputs = self._with_wrap_up_correction(
-                        request_signature, request_inputs, reason="exploration or additional code"
-                    )
-                    continue
-                return response
+            if wrap_up and action and not is_finalization_action(_action_code(response)):
+                self._budget.set_wrap_up_rejection("exploration_or_additional_code")
+                if not self._budget.can_finalize():
+                    raise FinalizationExhausted("wrap-up finalization attempts exhausted before a compliant SUBMIT")
+                self._next_wrap_up_attempt(lm)
+                request_signature, request_inputs = self._with_wrap_up_correction(
+                    request_signature, request_inputs, reason="exploration or additional code"
+                )
+                continue
             return response
 
 
@@ -1190,8 +1132,6 @@ class RLMModelBundle:
     root_lm: Any
     sub_lm: Any
     utility_lm: Any | None = None
-    deadline: float | None = field(default=None, repr=False, compare=False)
-    reserve_seconds: float = field(default=0.0, repr=False, compare=False)
     budget: TurnBudget | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -1200,415 +1140,58 @@ class RLMModelBundle:
         if self.sub_lm is None:
             raise RLMModelBundleError("sub_lm is required")
 
-    def bind_turn_deadline(
-        self, *, deadline: float, reserve_seconds: float = 0.0, budget: TurnBudget | None = None
-    ) -> RLMModelBundle:
-        if (
-            not isinstance(deadline, (int, float))
-            or isinstance(deadline, bool)
-            or (not math.isfinite(deadline) and deadline != math.inf)
-        ):
-            raise ValueError("deadline must be finite or positive infinity")
-        if (
-            not isinstance(reserve_seconds, (int, float))
-            or isinstance(reserve_seconds, bool)
-            or not math.isfinite(reserve_seconds)
-            or reserve_seconds < 0
-        ):
-            raise ValueError("reserve_seconds must be finite and nonnegative")
-        norm_reserve = float(reserve_seconds)
-        turn_budget = budget or (TurnBudget(deadline=deadline) if math.isfinite(deadline) else None)
-        root_lm = (
-            _copy_lm_for_deadline(self.root_lm, deadline=deadline, budget=turn_budget)
-            if _supports_turn_lm_copy(self.root_lm)
-            else self.root_lm
-        )
-        sub_lm = (
-            _copy_lm_for_deadline(
-                self.sub_lm,
-                deadline=deadline,
-                reserve_seconds=norm_reserve,
-                budget=turn_budget,
-                can_finalize=False,
-            )
-            if _supports_turn_lm_copy(self.sub_lm)
-            else self.sub_lm
-        )
+    def bind_turn(self, *, budget: TurnBudget | None = None) -> RLMModelBundle:
+        """Return Turn-owned copies so per-Turn history and usage stay isolated.
+
+        Only the root copy may consume finalization capacity; the sub role and
+        every child copy may not.
+        """
         return RLMModelBundle(
-            root_lm=root_lm,
-            sub_lm=sub_lm,
+            root_lm=_copy_turn_lm(self.root_lm, can_finalize=True),
+            sub_lm=_copy_turn_lm(self.sub_lm, can_finalize=False),
             utility_lm=self.utility_lm,
-            deadline=deadline,
-            reserve_seconds=norm_reserve,
-            budget=turn_budget,
+            budget=budget if budget is not None else self.budget,
         )
 
-    def fork_for_child(self, *, deadline: float) -> RLMModelBundle:
-        reserve = max(0.0, self.reserve_seconds)
+    def fork_for_child(self) -> RLMModelBundle:
+        """Return isolated child copies sharing this Turn's finalization ledger."""
         return RLMModelBundle(
-            root_lm=_copy_lm_for_deadline(
-                self.root_lm,
-                deadline=deadline,
-                error_message="recursive child LM deadline exceeded",
-                budget=self.budget,
-                can_finalize=False,
-            ),
-            sub_lm=_copy_lm_for_deadline(
-                self.sub_lm,
-                deadline=deadline,
-                reserve_seconds=reserve,
-                error_message="recursive child LM deadline exceeded",
-                budget=self.budget,
-                can_finalize=False,
-            ),
+            root_lm=_copy_turn_lm(self.root_lm, can_finalize=False),
+            sub_lm=_copy_turn_lm(self.sub_lm, can_finalize=False),
             utility_lm=self.utility_lm,
-            deadline=deadline,
-            reserve_seconds=reserve,
             budget=self.budget,
         )
 
 
-_RETRYABLE_LM_ERRORS = (LMRateLimitError, LMServerError, LMTimeoutError, LMTransportError)
+def _copy_turn_lm(lm: Any, *, can_finalize: bool) -> Any:
+    """Return an isolated copy of a role LM for one Turn or child invocation.
 
+    DSPy's managed call path owns response processing, callbacks, usage, and
+    history on the copy, and the copy is the object every provider call and span
+    is attributed to.
 
-def _supports_turn_lm_copy(lm: Any) -> bool:
+    Parameters:
+        lm (Any): The role template LM to copy.
+        can_finalize (bool): Whether a late response on this copy may consume the
+            shared finalization capacity. Only the Turn root may.
+
+    Returns:
+        Any: The isolated runtime copy.
+
+    Raises:
+        RLMModelBundleError: If the LM cannot be copied, or its copy() returns itself.
+    """
     copy_lm = getattr(lm, "copy", None)
     if not callable(copy_lm):
-        return False
-    dummy_lm = getattr(getattr(dspy, "utils", None), "DummyLM", None)
-    return not (
-        isinstance(dummy_lm, type)
-        and isinstance(lm, dummy_lm)
-        and getattr(type(lm), "copy", None) is not dspy.BaseLM.copy
-    )
-
-
-def _positive_timeout(value: object) -> float | None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    timeout = float(value)
-    return timeout if math.isfinite(timeout) and timeout > 0 else None
-
-
-def _configured_lm_timeout(lm: Any) -> float | None:
-    stored = _positive_timeout(getattr(lm, "_fleet_role_timeout", None))
-    if stored is not None:
-        return stored
-    wrapped = lm.wrapped if isinstance(lm, DeadlineLMProxy) else lm
-    return _positive_timeout(getattr(wrapped, "kwargs", {}).get("timeout"))
-
-
-def _apply_role_timeout(lm: Any, role_timeout: float | None) -> None:
-    if role_timeout is not None and isinstance(getattr(lm, "kwargs", None), dict):
-        lm.kwargs["timeout"] = role_timeout
-
-
-def _proxy_call_inputs(args: tuple[Any, ...], kwargs: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
-    """Separate DSPy's legacy prompt/messages inputs from provider options."""
-    if len(args) > 2:
-        raise TypeError("LM calls accept at most positional prompt and messages arguments")
-    provider_kwargs = dict(kwargs)
-    has_prompt = "prompt" in provider_kwargs
-    has_messages = "messages" in provider_kwargs
-    if (args and has_prompt) or (len(args) > 1 and has_messages):
-        raise TypeError("LM prompt and messages inputs cannot be passed both positionally and by keyword")
-    prompt = args[0] if args else provider_kwargs.pop("prompt", None)
-    messages = args[1] if len(args) > 1 else provider_kwargs.pop("messages", None)
-    return prompt, messages, provider_kwargs
-
-
-class DeadlineLMProxy(BaseLM):
-    """Turn-owned DSPy LM proxy with one retry owner and deadline bounding."""
-
-    _fleet_trace_identity: Any
-
-    def __init__(
-        self,
-        wrapped: Any,
-        *,
-        deadline: float | None,
-        reserve_seconds: float,
-        retries: int,
-        error_message: str,
-        budget: TurnBudget | None = None,
-        admission: ProviderAdmission | None = None,
-        can_finalize: bool = True,
-        role_timeout: float | None = None,
-    ) -> None:
-        super().__init__(
-            model=getattr(wrapped, "model", "fleet-deadline-proxy"),
-            model_type=getattr(wrapped, "model_type", "chat"),
-            cache=getattr(wrapped, "cache", True),
-            callbacks=list(getattr(wrapped, "callbacks", None) or []),
-            num_retries=0,
-        )
-        # DSPy's managed call path owns response processing, callbacks, usage,
-        # and history. Native LM retries must stay disabled here because Fleet
-        # reserves capacity separately for every physical attempt.
-        if isinstance(wrapped, dspy.LM) and wrapped.num_retries != 0:
-            wrapped = wrapped.copy(num_retries=0)
-        self.wrapped = wrapped
-        resolved_role_timeout = _positive_timeout(role_timeout) or _configured_lm_timeout(wrapped)
-        _apply_role_timeout(wrapped, resolved_role_timeout)
-        self.kwargs = dict(getattr(wrapped, "kwargs", {}))
-        self.history = getattr(wrapped, "history", [])
-        self._fleet_deadline = deadline
-        self._fleet_reserve_seconds = reserve_seconds
-        self._fleet_retry_budget = retries
-        self._deadline_error_message = error_message
-        self.budget = budget
-        self.admission = admission
-        self.can_finalize = can_finalize
-        self._fleet_role_timeout = resolved_role_timeout
-
-    def __getattr__(self, name: str) -> Any:
-        # Trace identity belongs to this Turn-scoped proxy. Wrapped LM copies
-        # may carry a prior proxy's marker through DSPy's shallow copy().
-        if name == "_fleet_trace_identity":
-            return self
-        wrapped = self.__dict__.get("wrapped")
-        if wrapped is None:
-            raise AttributeError(name)
-        return getattr(wrapped, name)
-
-    @property
-    def supports_function_calling(self) -> bool:
-        return bool(getattr(self.wrapped, "supports_function_calling", False))
-
-    @property
-    def supports_response_schema(self) -> bool:
-        return bool(getattr(self.wrapped, "supports_response_schema", False))
-
-    @property
-    def supports_reasoning(self) -> bool:
-        return bool(getattr(self.wrapped, "supports_reasoning", False))
-
-    @property
-    def supported_params(self) -> set[str]:
-        return set(getattr(self.wrapped, "supported_params", ()))
-
-    def copy(self, **kwargs: Any) -> Any:
-        kwargs["num_retries"] = 0
-        copied = type(self)(
-            self.wrapped.copy(**kwargs),
-            deadline=self._fleet_deadline,
-            reserve_seconds=self._fleet_reserve_seconds,
-            retries=self._fleet_retry_budget,
-            error_message=self._deadline_error_message,
-            budget=self.budget,
-            admission=self.admission,
-            can_finalize=self.can_finalize,
-            role_timeout=self._fleet_role_timeout,
-        )
-        if "_fleet_trace_identity" in vars(self):
-            copied._fleet_trace_identity = self._fleet_trace_identity
-        return copied
-
-    @classmethod
-    def for_adapter(cls, lm: Any, budget: AdapterBudget, *, action: bool, wrap_up: bool) -> DeadlineLMProxy:
-        if isinstance(lm, cls):
-            if lm.budget is not None and lm.budget is not budget.turn:
-                raise RLMModelBundleError("adapter and LM must share the Turn budget")
-            wrapped = lm.wrapped
-            deadline, reserve = lm._fleet_deadline, lm._fleet_reserve_seconds
-            retries, can_finalize = lm._fleet_retry_budget, lm.can_finalize
-        else:
-            wrapped = lm.copy(num_retries=0) if isinstance(lm, dspy.LM) else lm
-            deadline, reserve, retries, can_finalize = budget.deadline, 0.0, getattr(lm, "num_retries", 0), True
-        if type(retries) is not int or retries < 0:
-            retries = 0
-        view = cls(
-            wrapped,
-            deadline=deadline,
-            reserve_seconds=reserve,
-            retries=retries,
-            error_message="Turn LM deadline exceeded",
-            budget=budget.turn,
-            admission=ProviderAdmission(budget, action, wrap_up, can_finalize),
-            can_finalize=can_finalize,
-            role_timeout=_configured_lm_timeout(lm),
-        )
-        view._fleet_trace_identity = getattr(lm, "_fleet_trace_identity", lm)
-        return view
-
-    def dump_state(self) -> dict[str, Any]:
-        return self.wrapped.dump_state()
-
-    def _attempt_kwargs(
-        self,
-        kwargs: dict[str, Any],
-        *,
-        call_deadline: float | None = None,
-    ) -> tuple[dict[str, Any], float]:
-        bounded = dict(kwargs)
-        now = time.monotonic()
-        available = _remaining_lm_timeout(
-            self._fleet_deadline,
-            self,
-            bounded,
-            reserve_seconds=self._fleet_reserve_seconds,
-            error_message=self._deadline_error_message,
-            now=now,
-        )
-        if call_deadline is not None:
-            attempt_window = call_deadline - now
-            if attempt_window <= 0:
-                role_ceiling = _positive_timeout(self._fleet_role_timeout)
-                ceiling_text = f"{role_ceiling:g}s" if role_ceiling is not None else "configured"
-                raise TimeoutError(
-                    f"LM retry window exhausted: the previous attempt consumed the {ceiling_text} "
-                    "role timeout (llm.<role>.timeout_seconds), leaving no time for a retry"
-                )
-            available = min(available, attempt_window)
-        if available <= 0:
-            raise TimeoutError(self._deadline_error_message)
-        if self.admission is not None:
-            available = min(available, self.admission.reserve())
-        elif self.budget is not None:
-            available = min(available, self.budget.reserve(BudgetDimension.PROVIDER_ATTEMPTS))
-        if math.isfinite(available):
-            bounded["timeout"] = available
-        return bounded, now
-
-    def _retry_call_deadline(self, now: float, timeout: object) -> float | None:
-        bounded = _positive_timeout(timeout)
-        return now + bounded if bounded is not None else None
-
-    def __call__(self, prompt: Any = None, *, messages: Any = None, **kwargs: Any) -> Any:
-        if prompt is None:
-            return self.forward(messages=messages, **kwargs)
-        return self.forward(prompt=prompt, messages=messages, **kwargs)
-
-    async def acall(self, prompt: Any = None, *, messages: Any = None, **kwargs: Any) -> Any:
-        if prompt is None:
-            return await self.aforward(messages=messages, **kwargs)
-        return await self.aforward(prompt=prompt, messages=messages, **kwargs)
-
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
-        call_deadline: float | None = None
-        for attempt in range(self._fleet_retry_budget + 1):
-            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
-            if call_deadline is None:
-                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
-            try:
-                call_kwargs = self._wrapped_call_kwargs(bounded)
-                self._set_wrapped_trace_identity()
-                prompt, messages, provider_kwargs = _proxy_call_inputs(args, call_kwargs)
-                if prompt is None:
-                    return self.wrapped(messages=messages, **provider_kwargs)
-                return self.wrapped(prompt=prompt, messages=messages, **provider_kwargs)
-            except _RETRYABLE_LM_ERRORS:
-                if attempt == self._fleet_retry_budget:
-                    raise
-        raise AssertionError("provider retry loop exhausted")
-
-    async def aforward(self, *args: Any, **kwargs: Any) -> Any:
-        call_deadline: float | None = None
-        for attempt in range(self._fleet_retry_budget + 1):
-            bounded, now = self._attempt_kwargs(kwargs, call_deadline=call_deadline)
-            if call_deadline is None:
-                call_deadline = self._retry_call_deadline(now, bounded.get("timeout"))
-            try:
-                call_kwargs = self._wrapped_call_kwargs(bounded)
-                self._set_wrapped_trace_identity()
-                prompt, messages, provider_kwargs = _proxy_call_inputs(args, call_kwargs)
-                if prompt is None:
-                    return await self.wrapped.acall(messages=messages, **provider_kwargs)
-                return await self.wrapped.acall(prompt=prompt, messages=messages, **provider_kwargs)
-            except _RETRYABLE_LM_ERRORS:
-                if attempt == self._fleet_retry_budget:
-                    raise
-        raise AssertionError("provider retry loop exhausted")
-
-    def _wrapped_call_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        # DSPy's deterministic DummyLM is backed by a custom engine that
-        # rejects connection settings such as timeout. Fleet's admission and
-        # deadline checks still run; real provider LMs receive the bounded
-        # timeout below.
-        if isinstance(self.wrapped, dspy.utils.DummyLM):
-            return {key: value for key, value in kwargs.items() if key != "timeout"}
-        return kwargs
-
-    def _set_wrapped_trace_identity(self) -> None:
-        identity = getattr(self, "_fleet_trace_identity", self)
-        try:
-            self.wrapped._fleet_trace_identity = identity
-        except (AttributeError, TypeError):
-            return
-
-
-def _copy_lm_for_deadline(
-    lm: Any,
-    *,
-    deadline: float,
-    reserve_seconds: float = 0.0,
-    error_message: str = "Turn LM deadline exceeded",
-    budget: TurnBudget | None = None,
-    can_finalize: bool = True,
-) -> Any:
-    copy_lm = getattr(lm, "copy", None)
-    if not callable(copy_lm):
-        raise RLMModelBundleError("deadline-bound LM must support DSPy runtime copy()")
-    retry_budget = getattr(lm, "_fleet_retry_budget", getattr(lm, "num_retries", 0))
-    if not isinstance(retry_budget, int) or isinstance(retry_budget, bool) or retry_budget < 0:
-        retry_budget = 0
-    role_timeout = _configured_lm_timeout(lm)
-    copied = lm.wrapped.copy(num_retries=0) if isinstance(lm, DeadlineLMProxy) else copy_lm(num_retries=0)
+        raise RLMModelBundleError("Turn-bound LM must support DSPy runtime copy()")
+    copied = copy_lm()
     if copied is lm:
-        raise RLMModelBundleError("deadline-bound LM copy() must return an isolated runtime")
-
-    return DeadlineLMProxy(
-        copied,
-        deadline=deadline,
-        reserve_seconds=reserve_seconds,
-        retries=retry_budget,
-        error_message=error_message,
-        budget=budget if budget is not None else getattr(lm, "budget", None),
-        can_finalize=can_finalize,
-        role_timeout=role_timeout,
-    )
-
-
-def _copy_lm_for_child(lm: Any, *, deadline: float) -> Any:
-    return _copy_lm_for_deadline(
-        lm,
-        deadline=deadline,
-        error_message="recursive child LM deadline exceeded",
-    )
-
-
-def _remaining_lm_timeout(
-    deadline: float | None,
-    lm: Any,
-    call_kwargs: dict[str, Any],
-    *,
-    reserve_seconds: float = 0.0,
-    error_message: str = "Turn LM deadline exceeded",
-    now: float | None = None,
-) -> float:
-    if deadline is not None and (
-        not isinstance(deadline, (int, float))
-        or isinstance(deadline, bool)
-        or (not math.isfinite(deadline) and deadline != math.inf)
-    ):
-        raise ValueError("deadline must be finite, positive infinity, or None")
-    if (
-        not isinstance(reserve_seconds, (int, float))
-        or isinstance(reserve_seconds, bool)
-        or not math.isfinite(reserve_seconds)
-        or reserve_seconds < 0
-    ):
-        raise ValueError("reserve_seconds must be finite and nonnegative")
-    clock = time.monotonic() if now is None else now
-    remaining = math.inf if deadline is None else deadline - clock
-    available = remaining - float(reserve_seconds)
-    if available <= 0:
-        raise TimeoutError(error_message)
-    configured = _positive_timeout(call_kwargs.get("timeout")) or _configured_lm_timeout(lm)
-    role_timeout = _configured_lm_timeout(lm)
-    if role_timeout is not None:
-        configured = role_timeout if configured is None else min(configured, role_timeout)
-    return min(configured, available) if configured is not None else available
+        raise RLMModelBundleError("Turn-bound LM copy() must return an isolated runtime")
+    copied._fleet_can_finalize = can_finalize
+    # Read by _RLMTraceCallback to attribute an LM span to this Turn's role. The
+    # marker is the copy itself, so the callback's id() lookup resolves the role.
+    copied._fleet_trace_identity = copied
+    return copied
 
 
 def build_model_bundle(settings: Settings) -> RLMModelBundle:

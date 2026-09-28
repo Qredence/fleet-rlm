@@ -191,8 +191,19 @@ def build_local_inventory(
 
 
 class TestingLM:
+    """Minimal copyable role LM.
+
+    ``RLMModelBundle.bind_turn`` hands each role LM to DSPy ``copy()``, so a
+    double without one cannot be bound to a Turn.
+    """
+
     def __init__(self, name: str) -> None:
         self.model = name
+        self.history: list[Any] = []
+
+    def copy(self, **kwargs: Any) -> TestingLM:
+        del kwargs
+        return type(self)(self.model)
 
 
 class TestingInterpreter:
@@ -365,7 +376,6 @@ class DeterministicTurnPreparation:
         attachments: AttachmentLifecycle,
         skill_catalog: SkillCatalog | None = None,
         options: RLMOptions | None = None,
-        wrap_up_seconds: float = 300.0,
         max_artifact_bytes: int = 10_000_000,
         artifact_reader: ArtifactReader | None = None,
     ) -> None:
@@ -375,7 +385,6 @@ class DeterministicTurnPreparation:
             models=models,
             options=resolved_options,
             recursive_options=RecursiveRLMOptions(),
-            wrap_up_seconds=wrap_up_seconds,
             attachments=attachments,
             acquire_environment=testing_run_environment,
             capabilities=TestingCapabilityPreparer(
@@ -437,7 +446,6 @@ def build_testing_services(
             artifact_reader=storage.artifact_reader,
             skill_catalog=app.state.skill_catalog,
             options=rlm_options(settings),
-            wrap_up_seconds=settings.rlm_wrap_up_seconds,
             max_artifact_bytes=settings.max_artifact_bytes,
         ),
         program_builder=build_testing_rlm,

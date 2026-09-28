@@ -11,7 +11,7 @@ import pytest
 import fleet_rlm.rlm.execution as runtime_module
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import ChildProgress, ObservationSession, Status, ToolCompleted, ToolStarted
+from fleet_rlm.rlm.events import ChildProgress, ObservationSession, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -197,7 +197,19 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
 
 @pytest.mark.asyncio
 async def test_runner_rejects_recursive_tool_after_authority_revocation() -> None:
-    """Verify that recursive execution is rejected when run authority has been revoked before the run starts."""
+    """A revoked Run authority rejects the recursive tool at the Runner's
+    authorization fence: the Run observes ``tool.started`` then ``tool.failed``
+    for ``rlm_query`` and the child factory is never called, so no child lease
+    is ever created.
+
+    The scripted action sits on a non-final iteration so it actually reaches the
+    recursive tool instead of being intercepted by wrap-up, which is now keyed
+    to the iteration count. ``max_iters=3`` keeps the subsequent scripted-response
+    exhaustion off the final iteration too: ``DummyLM`` answers ``"No more
+    responses"`` once its list is spent, and on a final iteration that parse
+    failure would be reported as bounded finalization exhaustion (a
+    ``TimeoutError``) instead of the parse exhaustion this Turn hits.
+    """
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [{"reasoning": "delegate too late", "code": "rlm_query(task='late child request', inputs=[])['answer']"}],
@@ -242,7 +254,7 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         ),
         execution=ExecutionRuntime(
             models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iters=2, max_llm_calls=2),
+            options=RLMOptions(max_iters=3, max_llm_calls=4),
             deadline=time.monotonic() + 30,
             interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
             cancellation_requested=not_cancelled,
@@ -254,10 +266,17 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
     )
 
     stream = RLMRunner().stream(context)
-    _events = [event async for event in stream]
+    events = [event async for event in stream]
 
     assert stream.outcome is not None
     assert stream.outcome.terminal_status == "failed"
+    # The recursive tool was really attempted and then rejected; the rejection,
+    # not the tool never running, is what kept the child factory at zero.
+    assert [
+        (type(event.detail).__name__, event.detail.tool_name)
+        for event in events
+        if isinstance(event.detail, (ToolStarted, ToolFailed))
+    ] == [("ToolStarted", "rlm_query"), ("ToolFailed", "rlm_query")]
     assert created == []
 
 

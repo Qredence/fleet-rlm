@@ -33,6 +33,7 @@ from fleet_rlm.rlm.execution import (
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
+from tests.support.role_lm import placeholder_bundle
 from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
 
@@ -752,7 +753,7 @@ def _context(
             history=history,
         ),
         execution=ExecutionRuntime(
-            models=RLMModelBundle(object(), object()),
+            models=placeholder_bundle(),
             options=RLMOptions(),
             interpreter=interpreter,
             cancellation_requested=_not_cancelled,
@@ -877,7 +878,7 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
         RunIdentity,
         SessionView,
     )
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
     from fleet_rlm.sessions.models import TurnAccess
 

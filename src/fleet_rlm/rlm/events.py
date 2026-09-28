@@ -1402,11 +1402,7 @@ class ExecutionTraceAssembler:
         adapter = (
             self._adapter_factory(context)
             if self._adapter_factory is not None
-            else FleetJSONAdapter(
-                deadline=context.execution.deadline,
-                wrap_up_seconds=context.execution.wrap_up_seconds,
-                budget=getattr(context.execution.models, "budget", None),
-            )
+            else FleetJSONAdapter(budget=getattr(context.execution.models, "budget", None))
         )
 
         def adapter_summary(name: str) -> Mapping[str, Any]:

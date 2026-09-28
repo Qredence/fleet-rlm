@@ -1384,7 +1384,7 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
-        child_models = self._models.fork_for_child(deadline=self._deadline)
+        child_models = self._models.fork_for_child()
 
         def invocation_factory() -> CodeInterpreter:
             new_invocation = getattr(lease.interpreter, "new_invocation", None)
@@ -1434,11 +1434,7 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         with dspy.context(
             lm=child_models.root_lm,
-            adapter=FleetJSONAdapter(
-                deadline=self._deadline,
-                wrap_up_seconds=child_models.reserve_seconds,
-                budget=child_models.budget,
-            ),
+            adapter=FleetJSONAdapter(budget=child_models.budget),
             callbacks=dspy_turn_callbacks(
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,

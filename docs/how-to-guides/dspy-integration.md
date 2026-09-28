@@ -82,11 +82,12 @@ separate validation gates.
   learning body, provider path, or raw error; there is no dedicated memory
   event.
 - Fleet scopes `FleetJSONAdapter` to each Turn alongside the Root Model. It
-  extends DSPy's JSON adapter with deadline/budget accounting and bounded
-  corrective re-asks. Wrap-up also starts on the final native iteration
-  (`current == total`). When wrap-up is enabled (`rlm.wrap_up_seconds` > 0,
-  the production default), a wrap-up action is any number of data-only
-  `name = <value>` bindings followed by exactly one compliant `SUBMIT(...)`.
+  extends DSPy's JSON adapter with finalization-ledger accounting and bounded
+  corrective re-asks. Wrap-up is keyed to the RLM iteration count rather than
+  a wall-clock reserve: it starts on the final native iteration
+  (`current == total`), or once exploration capacity is exhausted. A wrap-up
+  action is any number of data-only `name = <value>` bindings followed by
+  exactly one compliant `SUBMIT(...)`.
   Bindings cannot call a Tool, import, or reach the provider, so shaping an
   answer is admitted while further work is not. Exhausting the finalization
   allowance on that last iteration settles the Turn as a `timeout` and reports
@@ -94,10 +95,10 @@ separate validation gates.
   action is never mistaken for an expired clock. DSPy extract fallback
   (`native_extraction_fallback`) only runs if every `generate_action` returns
   without SUBMIT, so it is unreachable.
-  Empty or reasoning-only completions use those bounded parse re-asks while
-  time and iterations remain. It retains the pinned DSPy action grammar;
-  exhausted repairs produce bounded `adapter_parse_error` failures without
-  changing process-global DSPy settings.
+  Empty or reasoning-only completions use those bounded parse re-asks within
+  the adapter's fixed repair allowance. It retains the pinned DSPy action
+  grammar; exhausted repairs produce bounded `adapter_parse_error` failures
+  without changing process-global DSPy settings.
 - The REPL `context` variable is always defined: a single utf-8 attachment
   capsule promotes it to that attachment's text, otherwise it stays `[]`.
   REPL code must treat `[]` as "no prepared context" and trust the
@@ -114,14 +115,19 @@ separate validation gates.
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
-- Fleet constructs Root, Sub, and probe LMs with DSPy's native `lm15` engine.
-  Unsupported models or request fields fail rather than falling back to
-  LiteLLM. DSPy 3.4 still installs LiteLLM as a transitive dependency.
-- The Turn-owned LM proxy reserves Fleet provider-attempt capacity before each
-  physical request, then calls the wrapped LM through DSPy's managed sync or
-  async call path. The copied native LM has internal retries disabled so every
-  retry returns through Fleet admission; DSPy owns response normalization,
-  callbacks, usage tracking, and LM history for each admitted attempt.
+- Fleet constructs its Root, Sub, and probe LMs as stock `dspy.LM` objects on
+  DSPy's native `lm15` engine; nothing wraps them. Unsupported models or
+  request fields fail rather than falling back to LiteLLM. DSPy 3.4 still
+  installs LiteLLM as a transitive dependency.
+- The per-Turn `dspy.LM` copy is the object every provider call and LM span is
+  attributed to. DSPy owns response normalization, retries through its native
+  `num_retries` and exponential backoff, caching, callbacks, usage tracking,
+  and LM history; Fleet no longer runs its own retry loop. Fleet owns
+  Turn-scoped copy isolation and trace identity: each Turn and each child gets
+  isolated LM copies, the Turn observer maps a copy to its `root` or `sub` role
+  for span attribution, and copies carry the `_fleet_can_finalize` marker that
+  keeps finalization capacity root-only. Fleet enforces no per-Turn LM deadline
+  and admits no provider attempts.
 - Fleet remains on DSPy's public program and LM call surfaces:
   `await rlm.acall(**named_inputs)`, with an invocation-scoped interpreter factory,
   delegates request and response normalization to
@@ -153,8 +159,9 @@ The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 `daytona-recursive` policy uses `12`, `32`, and `6,000` for the effective Root
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
-concurrency are separate controls. The shipped Root and Sub provider roles use
-`num_retries = 3`; omitted custom-role values inherit that shipped default.
+concurrency are separate controls. The shipped Root and Sub provider roles pass
+`num_retries = 3` to `dspy.LM`, so retries are DSPy's native retry loop with
+exponential backoff; omitted custom-role values inherit that shipped default.
 The typed settings default is also `3` when the policy omits the field from
 both defaults and the selected profile.
 `rlm.verbose` controls host logging only;

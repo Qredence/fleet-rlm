@@ -336,7 +336,6 @@ async def test_invoke_live_prediction_binds_attachment_context(tmp_path: Path) -
             kwargs,
             interpreter=interpreter,
             deadline=deadline,
-            wrap_up_seconds=30.0,
             root_lm=root_lm,
             sub_lm=sub_lm,
         )
@@ -388,7 +387,6 @@ async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) ->
             kwargs,
             interpreter=interpreter,
             deadline=deadline,
-            wrap_up_seconds=30.0,
             root_lm=root_lm,
             sub_lm=sub_lm,
         )
@@ -396,8 +394,7 @@ async def test_invoke_live_prediction_uses_fleet_json_adapter(tmp_path: Path) ->
     adapter = created[0]
     assert isinstance(adapter, FleetJSONAdapter)
     assert type(adapter) is not dspy.JSONAdapter
-    assert adapter._budget.deadline == deadline
-    assert adapter._budget.reserve_seconds == 30.0
+    assert adapter._budget.turn.deadline == deadline
 
 
 @pytest.mark.asyncio
@@ -426,7 +423,6 @@ async def test_invoke_live_prediction_skips_bundle_when_models_injected(tmp_path
             kwargs,
             interpreter=MagicMock(),
             deadline=1_000_000.0,
-            wrap_up_seconds=30.0,
             root_lm=MagicMock(),
             sub_lm=MagicMock(),
         )
@@ -454,7 +450,8 @@ async def test_invoke_live_prediction_preserves_partially_injected_model(
             self.sub_lm = sub_lm
             bundles.append((root_lm, sub_lm))
 
-        def bind_turn_deadline(self, **_kwargs: object) -> SimpleNamespace:
+        def bind_turn(self, *, budget: object = None) -> SimpleNamespace:
+            del budget
             return SimpleNamespace(root_lm=self.root_lm, sub_lm=self.sub_lm)
 
     root_lm = provided if provided_role == "root" else None
@@ -482,7 +479,6 @@ async def test_invoke_live_prediction_preserves_partially_injected_model(
             kwargs,
             interpreter=MagicMock(),
             deadline=1_000_000.0,
-            wrap_up_seconds=30.0,
             root_lm=root_lm,
             sub_lm=sub_lm,
         )
@@ -643,7 +639,7 @@ async def test_live_rows_receive_independent_deadlines_and_budgets(monkeypatch: 
             hf=True,
             model_name="fleet-test",
         ),
-        SimpleNamespace(turn_timeout_seconds=30.0, rlm_wrap_up_seconds=5.0),
+        SimpleNamespace(turn_timeout_seconds=30.0),
     )
 
     assert [deadline for deadline, _budget in observed] == [130.0, 230.0]

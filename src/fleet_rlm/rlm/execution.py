@@ -283,9 +283,6 @@ class ExecutionRuntime:
     # Composition-owned bridge for async host Tools called synchronously by
     # DSPy's worker-side interpreter.
     async_bridge: AsyncToolBridge | None = None
-    # Directly constructed test/in-process contexts opt into the reserve via
-    # preparation; the public TOML default is applied by the live composition.
-    wrap_up_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

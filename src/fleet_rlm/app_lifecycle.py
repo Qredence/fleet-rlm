@@ -837,7 +837,6 @@ def build_run_preparation(
         models=models,
         options=rlm_options(settings),
         recursive_options=recursive_rlm_options(settings),
-        wrap_up_seconds=settings.rlm_wrap_up_seconds,
         budget_limits=BudgetLimits(
             provider_attempts=settings.rlm_max_provider_attempts,
             tool_calls=settings.rlm_max_tool_calls,

@@ -266,89 +266,41 @@ class TurnBudget:
 
 
 class AdapterBudget:
-    """Invocation-local repair policy over one shared Turn admission ledger.
+    """Invocation-local repair and finalization policy for one RLM invocation.
 
-    Finalization slots count physical provider admissions, including transport
-    retries and DSPy schema fallback. A late exploration response can consume a
-    finalization slot without charging its provider attempt a second time.
+    Finalization slots are counted locally, so a late exploration response can
+    consume a slot without a second provider call. DSPy owns provider retries.
     """
 
     def __init__(
         self,
         *,
-        deadline: float | None = None,
-        reserve_seconds: float = 0.0,
         max_parse_retries: int = DEFAULT_PARSE_RETRIES,
         max_finalization_attempts: int = DEFAULT_FINALIZATION_ATTEMPTS,
         turn: TurnBudget | None = None,
     ) -> None:
-        # Existing preparation-only seams use +inf for an unbounded invocation.
         """
-        Initialize invocation-local budget and finalization policies.
+        Initialize invocation-local repair and finalization policies.
 
         Parameters:
-            deadline (float | None): Absolute deadline for the invocation; positive infinity means unbounded.
-            reserve_seconds (float): Time reserved for finalization.
             max_parse_retries (int): Maximum number of parse-repair retries.
             max_finalization_attempts (int): Maximum number of finalization attempts.
-            turn (TurnBudget | None): Shared turn budget, or a new budget when omitted.
+            turn (TurnBudget | None): Shared turn ledger, or an unbounded one when omitted.
 
         Raises:
-            ValueError: If a numeric limit is invalid, negative, non-finite where
-                prohibited, or not an integer where required.
+            ValueError: If a limit is not a nonnegative integer.
         """
-        if deadline == math.inf:
-            deadline = None
-        if deadline is not None and (
-            not isinstance(deadline, (int, float)) or isinstance(deadline, bool) or not math.isfinite(deadline)
-        ):
-            raise ValueError("deadline must be finite or None")
-        if (
-            not isinstance(reserve_seconds, (int, float))
-            or isinstance(reserve_seconds, bool)
-            or not math.isfinite(reserve_seconds)
-            or reserve_seconds < 0
-        ):
-            raise ValueError("reserve_seconds must be finite and nonnegative")
         for value in (max_parse_retries, max_finalization_attempts):
             if type(value) is not int or value < 0:
                 raise ValueError("repair attempt limits must be nonnegative integers")
-        # Without an explicitly supplied Turn ledger, finalization remains
-        # governed by this invocation-local adapter cap. A shared production
-        # ledger may opt into a global finalization ceiling via its limits.
-        self.turn = turn or TurnBudget(deadline=deadline)
-        self.deadline = deadline
-        self.reserve_seconds = reserve_seconds
+        self.turn = turn or TurnBudget(deadline=None)
         self.max_parse_retries = max_parse_retries
         self.max_finalization_attempts = max_finalization_attempts
         self._finalization_used = 0
         self._parse_repairs_used = 0
         self._wrap_up_entered = False
         self._wrap_up_rejection_reason: str | None = None
-        self._wrap_up_remaining_ms: int | None = None
         self._lock = Lock()
-
-    def remaining(self) -> float | None:
-        """
-        Determine the time remaining for the current invocation.
-
-        Returns:
-            float | None: Available time in seconds, or `None` when the deadline is unbounded.
-
-        Raises:
-            TimeoutError: If the turn or invocation deadline has expired.
-        """
-        try:
-            remaining = self.turn.remaining(finalization=True)
-        except TurnBudgetExhausted as exc:
-            if exc.dimension != BudgetDimension.DEADLINE:
-                raise
-            raise TimeoutError("Turn deadline exceeded") from exc
-        if self.deadline is not None:
-            remaining = min(remaining, self.deadline - time.monotonic())
-        if remaining <= 0:
-            raise TimeoutError("Turn deadline exceeded")
-        return remaining if math.isfinite(remaining) else None
 
     def can_repair(self, retries: int) -> bool:
         """Determine whether another parse-repair attempt is allowed.
@@ -404,23 +356,22 @@ class AdapterBudget:
             raise FinalizationExhausted("wrap-up finalization attempts exhausted before a compliant SUBMIT")
 
     def reclassify_late_response(self, *, can_finalize: bool = True) -> None:
-        """Reclassify a previously admitted response as a finalization attempt
-        without charging another provider attempt. Child invocations consume
-        their local wrap-up allowance without consuming root-only capacity.
+        """Reclassify an already-returned response as a finalization attempt.
+
+        No second provider call is charged; only the local finalization
+        allowance is consumed. Child invocations consume their local allowance
+        without consuming the root-only capacity on the shared Turn ledger.
         """
         with self._lock:
             self._check_finalization()
-            self.remaining()
             if can_finalize:
                 self.turn.reclassify_finalization()
             self._finalization_used += 1
 
-    def enter_wrap_up(self, remaining: float, *, rejection_reason: str | None = None) -> None:
+    def enter_wrap_up(self, *, rejection_reason: str | None = None) -> None:
         """Record the first wrap-up transition and any bounded rejection reason."""
         with self._lock:
-            if not self._wrap_up_entered:
-                self._wrap_up_entered = True
-                self._wrap_up_remaining_ms = max(0, round(remaining * 1000))
+            self._wrap_up_entered = True
             if rejection_reason is not None:
                 self._wrap_up_rejection_reason = rejection_reason
 
@@ -436,55 +387,4 @@ class AdapterBudget:
                 "wrap_up_entered": self._wrap_up_entered,
                 "wrap_up_attempts": self._finalization_used,
                 "wrap_up_rejection_reason": self._wrap_up_rejection_reason,
-                "wrap_up_remaining_ms": self._wrap_up_remaining_ms,
             }
-
-    def reserve_provider(self, *, action: bool, wrap_up: bool, can_finalize: bool) -> float:
-        """
-        Reserve a provider attempt for an action or finalization call.
-
-        Parameters:
-            action (bool): Whether the call performs an action.
-            wrap_up (bool): Whether the call is a wrap-up finalization call.
-            can_finalize (bool): Whether the call may use finalization capacity.
-
-        Returns:
-            float: The time available for the admitted provider call.
-
-        Raises:
-            TimeoutError: If the available time is exhausted.
-        """
-        with self._lock:
-            if wrap_up:
-                self._check_finalization()
-            remaining = self.remaining()
-            available = math.inf if remaining is None else remaining
-            if action and not wrap_up:
-                available -= self.reserve_seconds
-            if available <= 0:
-                raise TimeoutError("Turn final-answer reserve exhausted")
-            remaining_turn = self.turn.reserve(
-                BudgetDimension.PROVIDER_ATTEMPTS,
-                finalization=can_finalize and (wrap_up or not action),
-            )
-            if wrap_up:
-                self._finalization_used += 1
-            return min(available, remaining_turn)
-
-
-@dataclass(frozen=True, slots=True)
-class ProviderAdmission:
-    """An explicit call-local capability, never provider kwargs or global mode."""
-
-    budget: AdapterBudget
-    action: bool
-    wrap_up: bool
-    can_finalize: bool
-
-    def reserve(self) -> float:
-        """Reserve admission for the provider call.
-
-        Returns:
-                float: The remaining time available for the call.
-        """
-        return self.budget.reserve_provider(action=self.action, wrap_up=self.wrap_up, can_finalize=self.can_finalize)

@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 
 
@@ -13,7 +14,7 @@ from tests.support.turn_preparation import TestingRunPreparer
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -61,7 +62,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         _RunClaimToken(uuid4()),
     )
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -75,7 +76,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
 @pytest.mark.asyncio
 async def test_connection_reset_during_attachment_staging_is_unavailable() -> None:
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -118,7 +119,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         _RunClaimToken(uuid4()),
     )
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
@@ -133,7 +134,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
@@ -192,7 +193,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         _RunClaimToken(uuid4()),
     )
     preparer = TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=Environments().acquire,

@@ -180,7 +180,8 @@ required for durability.
 - [ ] On a later Turn, reload the files under the same Session authority,
   recheck source revisions and ledger integrity, and continue only pending or
   failed partitions. Never reuse a finding after its source revision changes.
-  Keep retry accounting under the current Turn budget.
+  Provider retries are DSPy-owned and are no longer charged to the Turn budget,
+  so bound repeated work with the Turn deadline and Tool-call ceilings instead.
 - [ ] Decide explicitly whether product behavior is **user-driven continuation**
   across Turns (initial implementation) or an automatically continued request.
   The latter needs a separate lifecycle/API design and must not wrap DSPy in
