@@ -128,125 +128,6 @@ def test_build_daytona_client():
         assert client == mock_daytona_cls.return_value
 
 
-def test_direct_interpreter_code_execution_stdout():
-    """Verify DaytonaCodeInterpreter directly executes Python and captures stdout."""
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-
-    mock_code_interpreter = MagicMock()
-    mock_code_interpreter.create_context.return_value = "ctx-1"
-    mock_code_interpreter.run_code.return_value = MagicMock(
-        stdout="computed result: 42\n",
-        stderr="",
-        error=None,
-    )
-    mock_sandbox = MagicMock()
-    mock_sandbox.code_interpreter = mock_code_interpreter
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    result = interpreter.execute("x = 40 + 2\nprint(f'computed result: {x}')")
-    assert "computed result: 42" in str(result)
-    mock_code_interpreter.run_code.assert_called_once()
-
-
-def test_direct_interpreter_code_execution_submit():
-    """Verify DaytonaCodeInterpreter extracts SUBMIT output as FinalOutput."""
-    from dspy import FinalOutput
-
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, final_output_frame, sandbox_backend
-
-    frame = final_output_frame({"answer": "42", "reasoning": "math"})
-    mock_code_interpreter = MagicMock()
-    mock_code_interpreter.create_context.return_value = "ctx-1"
-    mock_code_interpreter.run_code.return_value = MagicMock(
-        stdout=f"Computing...\n{frame}\n",
-        stderr="",
-        error=None,
-    )
-    mock_sandbox = MagicMock()
-    mock_sandbox.code_interpreter = mock_code_interpreter
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.output_fields = [{"name": "answer", "type": "str"}]
-    interpreter.start()
-
-    result = interpreter.execute("SUBMIT(answer='42')")
-    assert isinstance(result, FinalOutput)
-    assert result.output == {"answer": "42", "reasoning": "math"}
-
-
-def test_direct_interpreter_code_execution_error():
-    """Verify DaytonaCodeInterpreter raises CodeExecutionError on syntax or runtime error."""
-    import pytest
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-
-    mock_code_interpreter = MagicMock()
-    mock_code_interpreter.create_context.return_value = "ctx-1"
-    mock_code_interpreter.run_code.return_value = MagicMock(
-        stdout="",
-        stderr="ZeroDivisionError: division by zero",
-        error="division by zero",
-    )
-    mock_sandbox = MagicMock()
-    mock_sandbox.code_interpreter = mock_code_interpreter
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    with pytest.raises(CodeExecutionError) as exc_info:
-        interpreter.execute("1 / 0")
-    assert "division by zero" in str(exc_info.value)
-
-
-def test_direct_interpreter_via_process_code_run():
-    """Verify DaytonaCodeInterpreter executes via sandbox.process.code_run when code_interpreter is absent."""
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-
-    mock_process = MagicMock()
-    mock_process.code_run.return_value = MagicMock(
-        result="from process.code_run",
-        exit_code=0,
-    )
-    mock_sandbox = MagicMock(spec=["process"])
-    mock_sandbox.process = mock_process
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    result = interpreter.execute("print('from process.code_run')")
-    assert "from process.code_run" in str(result)
-    mock_process.code_run.assert_called_once()
-
-
-def test_direct_interpreter_via_process_exec():
-    """Verify DaytonaCodeInterpreter executes via sandbox.process.exec when code_run is absent."""
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-
-    mock_process = MagicMock(spec=["exec"])
-    mock_process.exec.return_value = MagicMock(
-        result="from process.exec",
-        exit_code=0,
-    )
-    mock_sandbox = MagicMock(spec=["process"])
-    mock_sandbox.process = mock_process
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    result = interpreter.execute("print('from process.exec')")
-    assert "from process.exec" in str(result)
-    mock_process.exec.assert_called_once()
-    assert mock_process.exec.call_args.kwargs.get("cwd") == "/workspace"
-
-
 def test_repair_category_from_multiline_traceback():
     """Verify _repair_category parses the exception name from multi-line tracebacks."""
     from fleet_rlm.daytona.interpreter import _repair_category
@@ -267,12 +148,16 @@ def test_repair_category_from_multiline_traceback():
 
 
 def test_direct_interpreter_rejects_brokerless_with_tools():
-    """Verify DaytonaCodeInterpreter raises when brokerless mode is configured but host tools are provided."""
+    """Verify brokerless mode refuses to dispatch host tools.
+
+    `broker_port=0` selects brokerless mode, which has no host-tool transport. Running
+    anyway would let generated code NameError on the first tool call, so the
+    interpreter must fail fast with a typed cause instead.
+    """
     from fleet_rlm.daytona.errors import DaytonaAdapterError
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 
-    mock_sandbox = MagicMock()
-    backend = sandbox_backend(mock_sandbox)
+    backend = sandbox_backend(MagicMock())
     interpreter = DaytonaCodeInterpreter(
         backend=backend,
         tools={"some_tool": lambda x: x},
@@ -281,4 +166,4 @@ def test_direct_interpreter_rejects_brokerless_with_tools():
     interpreter.start()
     with pytest.raises(DaytonaAdapterError) as exc_info:
         interpreter.execute("some_tool(1)")
-    assert "brokerless mode cannot dispatch host tools" in str(exc_info.value)
+    assert exc_info.value.cause_type == "BrokerlessToolDispatchError"

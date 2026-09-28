@@ -2,9 +2,9 @@
 
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
 A healthy Root Sandbox may be reused across sequential successful Turns; DSPy's
-private `REPLHistory` and Turn capabilities are fresh for every invocation. The
-current Sandbox adapter executes generated Python remotely with serializable
-variable bindings. A Sandbox-local broker dispatches authorized Fleet tools and
+private `REPLHistory`, Python namespace, and Turn capabilities are fresh for every invocation. The
+Sandbox adapter executes generated Python in a Turn-scoped broker with serializable
+variable bindings. The broker dispatches authorized Fleet tools and
 DSPy's native semantic tools to the host through Daytona's authenticated preview
 connection. Host callables and preview credentials stay on the host. The same
 broker path serves root and child invocations.
@@ -16,11 +16,10 @@ separate validation gates.
 
 ## Execution contract
 
-- One broker Root Sandbox owns the caller-provided Code-Interpreter
-  Context. Variables, imports, and functions persist across sequential clean
-  Turns while that Sandbox remains healthy. A failed,
-  cancelled, timed-out, or evicted runtime is rotated; durable History and
-  Volume-backed state are rehydrated, but arbitrary Python globals may be lost.
+- The broker keeps variables, imports, and functions across actions within one
+  Turn. Each later Turn starts a fresh broker namespace, even when it reuses
+  the healthy Root Sandbox. Session Workspace files under `/workspace` remain
+  durable across Turns and Sandbox replacement.
 - Every Turn receives the complete committed `dspy.History` for its claimed
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
@@ -38,12 +37,12 @@ separate validation gates.
   child cleanup; unresolved cleanup blocks successful Root settlement. Full
   grandchildren are unavailable.
 - A later Turn receives a fresh request/capability binding, output metadata,
-  budget, and DSPy `REPLHistory`; it may reuse the same healthy Session
-  interpreter and Sandbox after the previous Turn commits.
+  budget, DSPy `REPLHistory`, and Python namespace; it may reuse the same
+  healthy Session Sandbox after the previous Turn commits.
 - Host capabilities enter the Turn blueprint as explicit `dspy.Tool` objects.
   Fleet preserves schema validation at the callable boundary used by DSPy's
   interpreter and exposes only host-approved bounded event views.
-- `SUBMIT(...)` validates the active Signature and produces the typed
+- `SUBMIT(...)` validates the active Signature and final JSON size before producing the typed
   `dspy.Prediction`. Fleet projects that Prediction into chat text, an optional
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive

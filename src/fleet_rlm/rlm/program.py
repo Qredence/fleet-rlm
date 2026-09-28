@@ -588,7 +588,9 @@ judgment and Fleet full-child delegation, when its tool is available, only when 
 its own iterative investigation.
 Check source locations and gaps before the final ``SUBMIT``; a child finding is not verification."""
 
-REPL_RLM_INSTRUCTIONS = """Follow this order and stop as soon as the request is answered with sufficient evidence:"""
+REPL_RLM_INSTRUCTIONS = """Follow this order. Keep printed REPL results to selected findings, paths, and counts.
+Use Python variables or files for large intermediate values. Verify in the same action when possible and make the
+next action SUBMIT as soon as the request is answered with sufficient evidence."""
 
 TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic computation, search, parsing, and aggregation. Keep each
    intermediate code action concise (prefer a few thousand characters; never paste a long report or the complete

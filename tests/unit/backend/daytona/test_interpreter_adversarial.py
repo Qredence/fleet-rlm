@@ -1,4 +1,4 @@
-"""Adversarial contracts for direct Daytona SDK integration.
+"""Adversarial contracts for the Daytona broker and interpreter.
 
 Targeting:
 1. DaytonaCodeInterpreter.execute() with syntax errors, runtime exceptions,
@@ -20,10 +20,12 @@ import pytest
 from dspy import FinalOutput
 from dspy.primitives.code_interpreter import CodeExecutionError
 
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.interpreter import (
     FINAL_OUTPUT_MARKER,
     DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
     build_submit_setup_code,
     extract_final_payload,
     final_output_frame,
@@ -49,240 +51,71 @@ from tests.support.session_manager import make_daytona_runtime
 
 
 class TestInterpreterSyntaxAndExceptions:
-    """Test syntax errors, runtime exceptions, and repetition transitions."""
+    """Interpreter errors remain recoverable, with repeated failures bounded."""
 
-    def test_execute_syntax_error_classification(self) -> None:
-        """Syntax error in user code raises CodeExecutionError categorized as SyntaxError."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-syntax"
-        mock_ci.run_code.return_value = MagicMock(
-            stdout="",
-            stderr="SyntaxError: unexpected EOF while parsing (<string>, line 1)",
-            error="SyntaxError: unexpected EOF while parsing",
-        )
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
+    def test_syntax_and_runtime_categories(self) -> None:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        for code, category in [
+            ("def broken_function(", "SyntaxError"),
+            ("1 / 0", "ZeroDivisionError"),
+            ("print(undefined_var)", "NameError"),
+        ]:
+            with pytest.raises(CodeExecutionError) as error:
+                interpreter.execute(code)
+            assert error.value.category == category
 
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute("def broken_function(")
-
-        assert getattr(exc_info.value, "category", None) == "SyntaxError"
-        assert "SyntaxError" in str(exc_info.value)
-
-    def test_execute_repeated_failing_code_transitions_to_terminal_no_progress(self) -> None:
-        """Repeating the exact same failing action produces no_progress warning, then RunNoProgressError."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-repeat"
-        mock_ci.run_code.return_value = MagicMock(
-            stdout="",
-            stderr="ZeroDivisionError: division by zero",
-            error="ZeroDivisionError: division by zero",
-        )
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        code = "x = 1 / 0"
-
-        # 1st attempt: regular execution error
-        with pytest.raises(CodeExecutionError) as exc1:
-            interpreter.execute(code)
-        assert getattr(exc1.value, "category", None) == "ZeroDivisionError"
-
-        # 2nd attempt (identical): recoverable no_progress warning
-        with pytest.raises(CodeExecutionError) as exc2:
-            interpreter.execute(code)
-        assert getattr(exc2.value, "category", None) == "no_progress"
-        assert "no progress" in str(exc2.value)
-
-        # 3rd attempt (identical): terminal RunNoProgressError
+    def test_repeated_failure_becomes_terminal(self) -> None:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        with pytest.raises(CodeExecutionError):
+            interpreter.execute("1 / 0")
+        with pytest.raises(CodeExecutionError) as repeated:
+            interpreter.execute("1 / 0")
+        assert repeated.value.category == "no_progress"
         with pytest.raises(RunNoProgressError):
-            interpreter.execute(code)
-
-    @pytest.mark.parametrize(
-        ("error_msg", "expected_category"),
-        [
-            ("ZeroDivisionError: division by zero", "ZeroDivisionError"),
-            ("KeyError: 'missing_key'", "KeyError"),
-            ("IndexError: list index out of range", "IndexError"),
-            ("TypeError: unsupported operand type(s)", "TypeError"),
-            ("ValueError: invalid literal for int()", "ValueError"),
-        ],
-    )
-    def test_execute_runtime_exceptions_categorization(self, error_msg: str, expected_category: str) -> None:
-        """Standard Python runtime exceptions are preserved and categorized correctly."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-err"
-        mock_ci.run_code.return_value = MagicMock(
-            stdout="",
-            stderr=f"Traceback (most recent call last):\n  ...\n{error_msg}",
-            error=error_msg,
-        )
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute(f"# test {expected_category}")
-
-        assert getattr(exc_info.value, "category", None) == expected_category
-
-    def test_execute_fallback_process_code_run_error(self) -> None:
-        """When code_interpreter is missing, process.code_run failures are categorized correctly."""
-        mock_process = MagicMock()
-        mock_process.code_run.return_value = MagicMock(
-            result="NameError: name 'undefined_var' is not defined",
-            exit_code=1,
-        )
-        mock_sb = MagicMock(spec=["process"])
-        mock_sb.process = mock_process
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute("print(undefined_var)")
-
-        assert getattr(exc_info.value, "category", None) == "NameError"
-        assert "undefined_var" in str(exc_info.value)
-
-    def test_execute_fallback_process_exec_error(self) -> None:
-        """When process.code_run is missing, process.exec failures are categorized correctly."""
-        mock_process = MagicMock(spec=["exec"])
-        mock_process.exec.return_value = MagicMock(
-            result="ValueError: bad value",
-            exit_code=1,
-        )
-        mock_sb = MagicMock(spec=["process"])
-        mock_sb.process = mock_process
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute("raise ValueError('bad value')")
-
-        assert getattr(exc_info.value, "category", None) == "ValueError"
-
-    def test_execute_process_traceback_category_classification_finding(self) -> None:
-        """Verify multi-line traceback correctly extracts the exception type category."""
-        mock_process = MagicMock()
-        mock_process.code_run.return_value = MagicMock(
-            result="Traceback (most recent call last):\n  File 'main.py', line 1\nNameError: name 'x' is not defined",
-            exit_code=1,
-        )
-        mock_sb = MagicMock(spec=["process"])
-        mock_sb.process = mock_process
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute("print(x)")
-
-        assert getattr(exc_info.value, "category", None) == "NameError"
+            interpreter.execute("1 / 0")
 
 
 class TestInterpreterTimeoutsAndLimits:
-    """Test timeout enforcement and boundary constraints."""
+    """Broker timeout and interpreter bounds."""
 
-    def test_execute_timeout_mapped_to_daytona_adapter_error(self) -> None:
-        """TimeoutError from Daytona SDK is converted into DaytonaAdapterError."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-timeout"
-        mock_ci.run_code.side_effect = TimeoutError("Daytona execution timed out after 10.0s")
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
+    def test_broker_timeout_is_mapped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def timeout(*_args: Any, **_kwargs: Any) -> Any:
+            raise TimeoutError("Daytona execution timed out")
 
-        backend = sandbox_backend(mock_sb, timeout_s=10)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(DaytonaAdapterError) as exc_info:
-            interpreter.execute("import time; time.sleep(100)")
-
-        assert isinstance(exc_info.value, ProviderRequestError)
-        assert exc_info.value.cause_type == "TimeoutError"
-        assert "timed out" in str(exc_info.value)
+        monkeypatch.setattr(DaytonaHttpToolBroker, "execute", timeout)
+        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=10))
+        with pytest.raises(ProviderRequestError) as error:
+            interpreter.execute("print('slow')")
+        assert error.value.cause_type == "TimeoutError"
 
     @pytest.mark.parametrize("invalid_timeout", [0, -1, -60])
     def test_sandbox_backend_rejects_non_positive_timeout(self, invalid_timeout: int) -> None:
-        """Non-positive timeout_s raises DaytonaAdapterError with InterpreterConfigurationError."""
-        mock_sb = MagicMock()
-        with pytest.raises(DaytonaAdapterError) as exc_info:
-            sandbox_backend(mock_sb, timeout_s=invalid_timeout)
+        with pytest.raises(DaytonaAdapterError) as error:
+            sandbox_backend(MagicMock(), timeout_s=invalid_timeout)
+        assert error.value.cause_type == "InterpreterConfigurationError"
 
-        assert exc_info.value.cause_type == "InterpreterConfigurationError"
-        assert "must be positive" in str(exc_info.value)
+    def test_timeout_is_forwarded_to_broker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        observed: list[int] = []
 
-    def test_timeout_s_forwarded_to_sdk_calls(self) -> None:
-        """Explicit timeout_s is forwarded to code_interpreter.run_code."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-t"
-        mock_ci.run_code.return_value = MagicMock(stdout="done\n", stderr="", error=None)
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
+        def execute(_broker: Any, _code: str, _variables: Any, *, timeout_s: int) -> dict[str, Any]:
+            observed.append(timeout_s)
+            return {"stdout": "done\n"}
 
-        backend = sandbox_backend(mock_sb, timeout_s=42)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
+        monkeypatch.setattr(DaytonaHttpToolBroker, "execute", execute)
+        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=42))
+        assert interpreter.execute("print('done')") == "done\n"
+        assert observed == [42]
 
-        interpreter.execute("x = 1")
-        _, kwargs = mock_ci.run_code.call_args
-        assert kwargs.get("timeout") == 42
+    def test_empty_and_oversized_code_are_rejected(self) -> None:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), max_code_chars=100)
+        for code, category in [("  \n", "empty_code"), ("#" + "x" * 200, "code_too_large")]:
+            with pytest.raises(CodeExecutionError) as error:
+                interpreter.execute(code)
+            assert error.value.category == category
 
-    def test_execute_empty_code_rejected(self) -> None:
-        """Empty or whitespace-only code raises empty_code error."""
-        mock_sb = MagicMock()
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute("   \n\t  \n  ")
-
-        assert getattr(exc_info.value, "category", None) == "empty_code"
-
-    def test_execute_code_too_large_rejected(self) -> None:
-        """Code exceeding max_code_chars raises code_too_large error."""
-        mock_sb = MagicMock()
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend, max_code_chars=100)
-        interpreter.start()
-
-        huge_code = "# " + ("x" * 200)
-        with pytest.raises(CodeExecutionError) as exc_info:
-            interpreter.execute(huge_code)
-
-        assert getattr(exc_info.value, "category", None) == "code_too_large"
-
-    def test_execute_large_output_truncated_safely(self) -> None:
-        """Outputs exceeding execution_output_cap are truncated without crash or overflow."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-huge"
-        raw_output = "LINE_" + ("0123456789" * 5000)  # 50,005 chars
-        mock_ci.run_code.return_value = MagicMock(stdout=raw_output, stderr="", error=None)
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend, execution_output_cap=2000)
-        interpreter.start()
-
-        result = interpreter.execute("print('huge')")
+    def test_large_output_is_truncated(self) -> None:
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=2000)
+        result = interpreter.execute("_out = 'LINE_' + '0123456789' * 5000")
         assert len(result) < 3000
         assert "characters omitted" in result
         assert result.startswith("LINE_0123456789")
@@ -332,15 +165,6 @@ class TestSubmitPayloadValidation:
 
     def test_malformed_stdout_markers_do_not_produce_final_output(self) -> None:
         """Corrupted, truncated, or non-dict markers in stdout are not parsed into FinalOutput."""
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-m"
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
-
-        backend = sandbox_backend(mock_sb)
-        interpreter = DaytonaCodeInterpreter(backend=backend)
-        interpreter.start()
-
         b64_list = base64.b64encode(b"[1, 2, 3]").decode()
         b64_str = base64.b64encode(b'"hello"').decode()
         b64_dict = base64.b64encode(b'{"key": "val"}').decode()
@@ -362,16 +186,7 @@ class TestSubmitPayloadValidation:
         ]
 
         for stdout_content in test_cases:
-            mock_ci.run_code.return_value = MagicMock(
-                stdout=stdout_content,
-                stderr="",
-                error=None,
-            )
-            result = interpreter.execute("# probe malformed marker")
-            assert not isinstance(result, FinalOutput), (
-                f"Malformed marker was parsed into FinalOutput: {stdout_content!r}"
-            )
-            assert isinstance(result, str)
+            assert extract_final_payload(stdout_content) is None
 
     def test_valid_complex_submit_roundtrip(self) -> None:
         """Valid nested structures with unicode, emojis, booleans, and nulls parse correctly."""
@@ -388,22 +203,11 @@ class TestSubmitPayloadValidation:
         extracted = extract_final_payload(f"Leading stdout\n{frame}\nTrailing log")
         assert extracted == complex_payload
 
-        # Now test through interpreter
-        mock_ci = MagicMock()
-        mock_ci.create_context.return_value = "ctx-ok"
-        mock_ci.run_code.return_value = MagicMock(
-            stdout=f"Log start\n{frame}\nLog finish",
-            stderr="",
-            error=None,
-        )
-        mock_sb = MagicMock()
-        mock_sb.code_interpreter = mock_ci
-
-        backend = sandbox_backend(mock_sb)
+        backend = InProcessInterpreterBackend()
         interpreter = DaytonaCodeInterpreter(backend=backend)
         interpreter.start()
 
-        result = interpreter.execute("SUBMIT(...)")
+        result = interpreter.execute(f"SUBMIT(**{complex_payload!r})")
         assert isinstance(result, FinalOutput)
         assert result.output == complex_payload
 

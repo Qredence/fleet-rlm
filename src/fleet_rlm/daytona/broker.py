@@ -42,7 +42,7 @@ def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, sys, threading, time, uuid
+import contextlib, hmac, io, json, os, sys, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
@@ -50,6 +50,8 @@ _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
 _lock, _execution_lock = threading.Lock(), threading.Lock()
 _active_deadline = None
+if os.path.isdir("/workspace"):
+    os.chdir("/workspace")
 
 # Keep a bounded, useful conversion ceiling for legitimate high-precision
 # computations.  The default CPython limit makes the Pi canary fail before it
@@ -92,8 +94,8 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def _authorized(self): return hmac.compare_digest(self.headers.get("X-Broker-Secret", ""), _secret)
     def do_GET(self):
-        if self.path == "/health": _send(self, {"status": "ok"}); return
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
+        if self.path == "/health": _send(self, {"status": "ok"}); return
         if self.path.startswith("/pending"):
             out = []
             with _lock:
@@ -107,23 +109,6 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
         try: data = _read(self)
         except Exception: _send(self, {"error": "invalid request"}, 400); return
-        if self.path == "/reset":
-            new_secret = data.get("secret")
-            if not isinstance(new_secret, str) or len(new_secret) < 32:
-                _send(self, {"error": "invalid invocation"}, 400); return
-            if not _execution_lock.acquire(blocking=False):
-                _send(self, {"error": "execution active"}, 409); return
-            try:
-                with _lock:
-                    if _pending:
-                        _send(self, {"error": "tool calls active"}, 409); return
-                    global _secret
-                    _secret = new_secret
-                    _namespace.clear(); _namespace["__name__"] = "__fleet_rlm_repl__"
-                    _results.clear(); _completed.clear()
-            finally:
-                _execution_lock.release()
-            _send(self, {"status": "ok"}); return
         if self.path == "/execute":
             code, variables = data.get("code"), data.get("variables") or {}
             timeout_s = data.get("timeout_s", __DEFAULT_TOOL_TIMEOUT_S__)
@@ -227,24 +212,6 @@ class DaytonaHttpToolBroker:
             )
         self._tools = dict(tools)
 
-    def reset_invocation(self) -> None:
-        """Clear settled execution state and rotate the invocation credential."""
-        if self._client is None:
-            return
-        secret = secrets.token_urlsafe(32)
-        response = self._client.post("/reset", json={"secret": secret})
-        if response.status_code != 200:
-            raise DaytonaAdapterError(message="broker invocation is still active", cause_type="BrokerBindingError")
-        self._secret = secret
-        self._client.headers["X-Broker-Secret"] = secret
-        self._delivery_error = None
-
-    def rebind_tools(self, tools: Mapping[str, Callable[..., Any]]) -> None:
-        """Refresh the host registry between executions on a live broker."""
-        if self._stopped:
-            raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
-        self._tools = dict(tools)
-
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         """Bind the composition-owned bridge before broker startup."""
         if self._url is not None:
@@ -252,24 +219,6 @@ class DaytonaHttpToolBroker:
                 message="async bridge changed after broker startup", cause_type="BrokerBindingError"
             )
         self._async_bridge = async_bridge
-
-    def rebind_async_bridge(self, async_bridge: Any | None) -> None:
-        """Refresh the composition-owned bridge between executions."""
-        if self._stopped:
-            raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
-        self._async_bridge = async_bridge
-
-    def rebind_tool_outcomes(
-        self,
-        *,
-        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
-        tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
-    ) -> None:
-        """Refresh per-invocation host-tool settlement ownership."""
-        if self._stopped:
-            raise DaytonaAdapterError(message="broker is stopped", cause_type="InterpreterLifecycleError")
-        self._tool_settled = tool_settled
-        self._tool_failed = tool_failed
 
     def setup_source(self, submit_source: str) -> str:
         return (

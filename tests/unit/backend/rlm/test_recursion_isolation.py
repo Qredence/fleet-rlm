@@ -554,12 +554,16 @@ def test_child_oversized_submit_fails_at_the_child_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_root_oversized_submit_fails_with_the_same_closed_category() -> None:
-    """An oversized Root SUBMIT fails the Run at the Root result
-    boundary with the same closed too-large public category the child
-    boundary uses."""
+async def test_root_oversized_submit_can_be_shortened_in_the_next_action() -> None:
+    """An oversized SUBMIT returns actionable feedback inside the native RLM loop."""
     adapter = dspy.JSONAdapter()
-    root = dspy.utils.DummyLM([{"reasoning": "submit oversized", "code": "SUBMIT(answer='x' * 500)"}], adapter=adapter)
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "submit oversized", "code": "SUBMIT(answer='x' * 500)"},
+            {"reasoning": "shorten answer", "code": "SUBMIT(answer='short')"},
+        ],
+        adapter=adapter,
+    )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     recorder = ChildLeaseRecorder()
 
@@ -595,10 +599,9 @@ async def test_root_oversized_submit_fails_with_the_same_closed_category() -> No
 
     assert stream.outcome is not None
     projected = project_outcome_prediction(stream.outcome)
-    assert projected.terminal_status == "failed"
-    assert projected.prediction is None
-    # Same closed literal as the child boundary's too-large category.
-    assert projected.public_error_message == "Turn output is too large"
+    assert projected.terminal_status == "completed"
+    assert projected.prediction is not None
+    assert projected.prediction.outputs["answer"] == "short"
 
 
 def test_extraction_fallback_termination_parity_between_root_and_child() -> None:

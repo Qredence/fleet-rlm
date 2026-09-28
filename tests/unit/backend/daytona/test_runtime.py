@@ -11,6 +11,7 @@ import logging
 import warnings
 from importlib.metadata import version
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -19,18 +20,138 @@ from pydantic import SecretStr
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona import runtime as runtime_module
-from fleet_rlm.daytona.errors import ProviderRequestError, classify_provider_error
+from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError, classify_provider_error
 from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceTimeout,
     ChildRuntimeLease,
     DaytonaAdmission,
+    ExpectedWorkspaceMount,
     InterpreterLease,
+    LeaseRequest,
     RootSessionSpec,
     build_daytona_client,
 )
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
-from tests.support.session_manager import make_daytona_runtime
+from tests.support.session_manager import _FakeSandbox, make_daytona_runtime
+
+
+@pytest.mark.asyncio
+async def test_reused_root_probe_failure_never_replaces_the_sandbox() -> None:
+    """A probe fault on a live reused Sandbox must not be answered by deleting it.
+
+    Regression: the bound-Sandbox retry branch called `_replace_bound_sandbox`, which
+    fences the binding and *deletes* the Sandbox (`provider_action="delete"`), losing
+    session namespace for a probe that only proves `os.chdir` failed once. This drives
+    the real verification chain -- `_verify_run_layout` is not mocked -- so the failure
+    comes from the actual probe rather than a hand-built error.
+    """
+    runtime = make_daytona_runtime()
+    workspace_id = uuid4()
+    expected = ExpectedWorkspaceMount(
+        volume_id="vol-1",
+        volume_subpath="workspaces/one",
+        mount_path="/workspace",
+        workspace_id=workspace_id,
+    )
+    sandbox = _FakeSandbox(
+        "sb-live",
+        volume_id="vol-1",
+        mount_path="/workspace",
+        volume_subpath="workspaces/one",
+        labels={"workspace_id": str(workspace_id)},
+    )
+    sandbox.process.exec.return_value = SimpleNamespace(exit_code=1)
+    context = runtime_module._AcquisitionContext(expected=expected, binding=SimpleNamespace(sandbox_id="sb-live"))
+    request = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=workspace_id)
+    runtime._resolve_acquisition_context = AsyncMock(return_value=context)  # type: ignore[method-assign]
+    runtime._prepare_sandbox = AsyncMock(return_value=(sandbox, False))  # type: ignore[method-assign]
+    runtime._replace_bound_sandbox = AsyncMock()  # type: ignore[method-assign]
+    runtime._create_sandbox = AsyncMock()  # type: ignore[method-assign]
+    cleanup = AsyncMock(return_value=True)
+    runtime._cleanup_failed_acquisition = cleanup  # type: ignore[method-assign]
+
+    with pytest.raises(DaytonaAdapterError) as error:
+        await runtime._acquire_provider(request, run_id=uuid4())
+
+    assert error.value.cause_type == "ExecutionMountNotVisible"
+    runtime._replace_bound_sandbox.assert_not_awaited()
+    runtime._create_sandbox.assert_not_awaited()
+    assert cleanup.await_args.kwargs["created_sandbox"] is False
+
+
+@pytest.mark.asyncio
+async def test_volume_layout_fault_is_not_treated_as_a_probe_failure() -> None:
+    """A genuinely absent Volume must not be answered by recreating the Sandbox.
+
+    `_require_directory(create=False)` reports the missing mount from the layout step,
+    and it can fire on a Sandbox this acquisition just created. Recreating mounts the
+    same volume, so the retry cannot repair it: acquisition must fail once, with no
+    second create and no second verification pass.
+    """
+    runtime = make_daytona_runtime()
+    context = runtime_module._AcquisitionContext(expected=SimpleNamespace(), binding=SimpleNamespace(sandbox_id="old"))
+    request = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
+    runtime._resolve_acquisition_context = AsyncMock(return_value=context)  # type: ignore[method-assign]
+    runtime._prepare_sandbox = AsyncMock(  # type: ignore[method-assign]
+        return_value=(SimpleNamespace(id="old"), True)
+    )
+    runtime._verify_run_layout = AsyncMock(  # type: ignore[method-assign]
+        side_effect=DaytonaAdapterError("volume missing", cause_type="VolumeLayoutMissingMount")
+    )
+    runtime._replace_bound_sandbox = AsyncMock()  # type: ignore[method-assign]
+    runtime._create_sandbox = AsyncMock()  # type: ignore[method-assign]
+    runtime._cleanup_failed_acquisition = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+    with pytest.raises(DaytonaAdapterError) as error:
+        await runtime._acquire_provider(request, run_id=uuid4())
+
+    assert error.value.cause_type == "VolumeLayoutMissingMount"
+    runtime._verify_run_layout.assert_awaited_once()
+    runtime._replace_bound_sandbox.assert_not_awaited()
+    runtime._create_sandbox.assert_not_awaited()
+    runtime._cleanup_failed_acquisition.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_new_root_with_missing_process_mount_is_retired_before_one_retry() -> None:
+    runtime = make_daytona_runtime()
+    expected = SimpleNamespace(volume_id="vol", mount_path="/workspace", volume_subpath="workspaces/test")
+    context = runtime_module._AcquisitionContext(expected=expected, binding=None)
+    old, new = SimpleNamespace(id="old"), SimpleNamespace(id="new")
+    request = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
+    lease = object()
+    runtime._resolve_acquisition_context = AsyncMock(return_value=context)  # type: ignore[method-assign]
+    runtime._prepare_sandbox = AsyncMock(return_value=(old, True))  # type: ignore[method-assign]
+    runtime._cleanup_failed_acquisition = AsyncMock(return_value=True)  # type: ignore[method-assign]
+    runtime._create_sandbox = AsyncMock(return_value=new)  # type: ignore[method-assign]
+    missing = DaytonaAdapterError("mount missing", cause_type="ExecutionMountNotVisible")
+    runtime._verify_run_layout = AsyncMock(side_effect=[missing, None])  # type: ignore[method-assign]
+    runtime._persist_binding_and_build_lease = AsyncMock(return_value=lease)  # type: ignore[method-assign]
+
+    assert await runtime._acquire_provider(request, run_id=uuid4()) is lease
+    runtime._cleanup_failed_acquisition.assert_awaited_once()
+    runtime._create_sandbox.assert_awaited_once()
+    assert runtime._verify_run_layout.await_args_list[1].args[0] is new
+
+
+@pytest.mark.asyncio
+async def test_missing_mount_does_not_retry_when_retirement_is_unconfirmed() -> None:
+    runtime = make_daytona_runtime()
+    context = runtime_module._AcquisitionContext(expected=SimpleNamespace(), binding=None)
+    request = LeaseRequest(session_id=uuid4(), user_id=uuid4(), workspace_id=uuid4())
+    runtime._resolve_acquisition_context = AsyncMock(return_value=context)  # type: ignore[method-assign]
+    runtime._prepare_sandbox = AsyncMock(return_value=(SimpleNamespace(id="old"), True))  # type: ignore[method-assign]
+    runtime._verify_run_layout = AsyncMock(  # type: ignore[method-assign]
+        side_effect=DaytonaAdapterError("mount missing", cause_type="ExecutionMountNotVisible")
+    )
+    runtime._cleanup_failed_acquisition = AsyncMock(return_value=False)  # type: ignore[method-assign]
+    runtime._create_sandbox = AsyncMock()  # type: ignore[method-assign]
+
+    with pytest.raises(DaytonaAdapterError) as error:
+        await runtime._acquire_provider(request, run_id=uuid4())
+    assert error.value.cause_type == "SandboxRetirementUnconfirmed"
+    runtime._create_sandbox.assert_not_awaited()
 
 
 # --- Runtime lifecycle -------------------------------------------------

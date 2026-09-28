@@ -1553,7 +1553,10 @@ class RLMRunner:
                 # The retained Daytona adapter is a resource template only.
                 # Capture every Run-local binding in DSPy's zero-argument
                 # invocation factory rather than rebinding that template.
-                output_contract = FleetOutputContract.from_signature(spec.signature)
+                output_contract = FleetOutputContract.from_signature(
+                    spec.signature,
+                    max_output_chars=state_context.execution.options.max_final_output_chars,
+                )
 
                 def invocation_factory() -> Any:
                     return fresh_interpreter(
@@ -1579,7 +1582,11 @@ class RLMRunner:
                 def invocation_factory(interpreter: Any = interpreter) -> Any:
                     return interpreter
 
-            invocation_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+            invocation_factory.__dict__["execution_instructions"] = (
+                f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
+                f"The final SUBMIT JSON must fit within {state_context.execution.options.max_final_output_chars} "
+                "characters; use a concise answer or a durable Artifact for longer results."
+            )
 
             rlm = self._program_builder(
                 signature=spec.signature,
@@ -1618,6 +1625,7 @@ class RLMRunner:
                 bind_output_contract(
                     state_context.execution.interpreter,
                     getattr(rlm, "signature", None),
+                    max_output_chars=state_context.execution.options.max_final_output_chars,
                 )
             self._bind_observer(
                 rlm,
