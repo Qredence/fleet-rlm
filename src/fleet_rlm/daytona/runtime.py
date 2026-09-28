@@ -743,8 +743,8 @@ class LiveDaytonaPlatform:
         except Exception as exc:
             raise map_provider_error(exc) from exc
 
-    async def delete(self, sandbox_id: Any) -> None:
-        """Delete through Daytona's async client, treating absence as success."""
+    async def delete(self, sandbox_id: Any, *, wait: bool = False, timeout: float = 60) -> None:
+        """Delete through Daytona's async client, optionally confirming destruction."""
         try:
             target = await self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
         except Exception as exc:
@@ -752,7 +752,10 @@ class LiveDaytonaPlatform:
                 return
             raise map_provider_error(exc) from exc
         try:
-            await self._client.delete(target)
+            if wait or timeout != 60:
+                await self._client.delete(target, wait=wait, timeout=timeout)
+            else:
+                await self._client.delete(target)
         except Exception as exc:
             if is_sandbox_not_found(exc):
                 return

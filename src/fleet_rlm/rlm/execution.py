@@ -598,23 +598,6 @@ class RLMWorkerHandle(Generic[T]):
         return self._effect.caller_cancelled
 
 
-async def invoke_native_rlm(
-    rlm: Any,
-    context: RLMExecutionContext,
-    kwargs: Mapping[str, Any],
-) -> Any:
-    """
-    Invoke the RLM operation using its invocation-scoped interpreter factory.
-
-    Native DSPy creates, binds, and shuts down a fresh interpreter for this
-    invocation. The retained session adapter is only the factory template; it
-    continues to own the Sandbox lease and is never passed to ``acall``.
-    Deterministic substitute RLMs retain their ordinary keyword-only call.
-    """
-    del context
-    return await rlm.acall(**dict(kwargs))
-
-
 def start_rlm_worker(
     *,
     rlm: Any,

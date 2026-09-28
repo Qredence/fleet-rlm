@@ -11,10 +11,14 @@ sealed together.
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import math
 import os
 import re
+import subprocess
+import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +57,13 @@ _DEVELOPMENT_REFLECTION_PROMPT_TEMPLATE = (
 _PRODUCTION_SCHEMA = "fleet.phase6-gepa-campaign/v1"
 _SHA256 = set("0123456789abcdef")
 _MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
+_FACTORY_PATH = re.compile(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*:[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*$")
+_RELOAD_RESULT_PREFIX = "FLEET_GEPA_RELOAD_RESULT="
+_RELOAD_TIMEOUT_SECONDS = 30
+_CANDIDATE_STATE_MAX_BYTES = 4_000_000
+_FORBIDDEN_STATE_KEY_PATTERNS = re.compile(
+    r"(?:^|_)(?:api_?key|secret|password|passwd|credential|credentials|authorization|token)(?:$|_)"
+)
 
 
 class OptimizationPreflightError(RuntimeError):
@@ -81,7 +92,8 @@ def run_authoritative_gepa(
     evidence_root: Path,
     run_id: str,
     held_out_evaluator: Any,
-    fresh_process_reload: Any,
+    student_factory: str,
+    student_factory_kwargs: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run DSPy's production GEPA contract behind the validated strict proof.
 
@@ -89,8 +101,8 @@ def run_authoritative_gepa(
     execution and judging never move into this module's receipt writer.  The
     function intentionally requires train, selection, and held-out inputs,
     uses exactly one explicit ``max_metric_calls`` budget, tracks DSPy
-    ``detailed_results``, and requires a caller-provided fresh-process reload
-    check before returning a campaign receipt.
+    ``detailed_results``, and reconstructs the optimized candidate from a
+    state-only JSON file in a fresh Python process before held-out evaluation.
     """
     _require_live()
     if not isinstance(student, dspy.Module):
@@ -145,8 +157,9 @@ def run_authoritative_gepa(
         raise OptimizationPreflightError(
             f"production GEPA max_metric_calls must equal the bounded 8+24-round budget ({expected_budget})"
         )
-    if not callable(held_out_evaluator) or not callable(fresh_process_reload):
-        raise OptimizationPreflightError("held-out evaluation and fresh-process reload callbacks are required")
+    if not callable(held_out_evaluator):
+        raise OptimizationPreflightError("a held-out evaluator is required")
+    factory_kwargs = _validated_factory_kwargs(student_factory, student_factory_kwargs)
     if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", run_id):
         raise OptimizationPreflightError("production GEPA run_id is not a safe identifier")
 
@@ -206,11 +219,39 @@ def run_authoritative_gepa(
                 valset=list(selection_set),
             )
         detailed = _bounded_detailed_results(getattr(optimized, "detailed_results", None))
-        instruction_sha256 = _instruction_sha256(optimized)
-        reloaded_sha256 = fresh_process_reload(instruction_sha256)
-        if not isinstance(reloaded_sha256, str) or reloaded_sha256 != instruction_sha256:
-            raise OptimizationPreflightError("fresh-process instruction reload changed the candidate identity")
-        held_out = _bounded_held_out_result(held_out_evaluator(optimized, tuple(held_out_set)))
+        with tempfile.TemporaryDirectory(prefix="fleet-gepa-state-") as candidate_dir:
+            state_path = Path(candidate_dir) / "candidate-state.json"
+            expected_state_sha256 = _module_state_sha256(optimized)
+            instruction_sha256 = _instruction_sha256(optimized)
+            state_path.touch(mode=0o600)
+            state_path.chmod(0o600)
+            try:
+                optimized.save(str(state_path), save_program=False)
+            except Exception as exc:
+                raise OptimizationPreflightError("optimized candidate cannot be saved as state-only JSON") from exc
+            state_path.chmod(0o600)
+            if state_path.stat().st_size > _CANDIDATE_STATE_MAX_BYTES:
+                raise OptimizationPreflightError("optimized candidate state exceeds the bounded reload size")
+
+            process_state_sha256, process_instruction_sha256 = _fresh_process_reload(
+                state_path,
+                student_factory=student_factory,
+                factory_kwargs=factory_kwargs,
+            )
+            if process_state_sha256 != expected_state_sha256 or process_instruction_sha256 != instruction_sha256:
+                raise OptimizationPreflightError("fresh-process state reload changed the candidate identity")
+
+            reloaded = _construct_student(student_factory, factory_kwargs)
+            try:
+                reloaded.load(str(state_path), allow_pickle=False)
+            except Exception as exc:
+                raise OptimizationPreflightError("candidate state cannot be loaded into its baseline student") from exc
+            reloaded_state_sha256 = _module_state_sha256(reloaded)
+            reloaded_instruction_sha256 = _instruction_sha256(reloaded)
+            if reloaded_state_sha256 != expected_state_sha256 or reloaded_instruction_sha256 != instruction_sha256:
+                raise OptimizationPreflightError("reloaded candidate state differs from the optimized candidate")
+
+            held_out = _bounded_held_out_result(held_out_evaluator(reloaded, tuple(held_out_set)))
         unsigned = {
             "schema": _PRODUCTION_SCHEMA,
             "state": "completed",
@@ -230,7 +271,9 @@ def run_authoritative_gepa(
             "track_stats": True,
             "detailed_results": detailed,
             "instruction_sha256": instruction_sha256,
-            "fresh_process_reload_sha256": reloaded_sha256,
+            "module_state_sha256": expected_state_sha256,
+            "fresh_process_state_sha256": process_state_sha256,
+            "fresh_process_instruction_sha256": process_instruction_sha256,
             "held_out": held_out,
         }
         receipt = {**unsigned, "campaign_sha256": _canonical_digest(unsigned)}
@@ -324,6 +367,123 @@ def _instruction_sha256(program: Any) -> str:
     if not instructions:
         raise OptimizationPreflightError("optimized program contains no instructions")
     return _canonical_digest(instructions)
+
+
+def _module_state_sha256(program: Any) -> str:
+    dump_state = getattr(program, "dump_state", None)
+    if not callable(dump_state):
+        raise OptimizationPreflightError("optimized program cannot expose its named predictor state")
+    state = dump_state()
+    if not isinstance(state, Mapping) or not state:
+        raise OptimizationPreflightError("optimized program contains no named predictor state")
+    _reject_credential_state_keys(state)
+    try:
+        encoded = json.dumps(state, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise OptimizationPreflightError("optimized program state is not canonical JSON") from exc
+    if len(encoded) > _CANDIDATE_STATE_MAX_BYTES:
+        raise OptimizationPreflightError("optimized candidate state exceeds the bounded reload size")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _reject_credential_state_keys(value: Any) -> None:
+    if isinstance(value, Mapping):
+        for key, nested in value.items():
+            if isinstance(key, str) and _FORBIDDEN_STATE_KEY_PATTERNS.search(key.lower()):
+                raise OptimizationPreflightError("candidate state contains credential-shaped fields")
+            _reject_credential_state_keys(nested)
+    elif isinstance(value, (list, tuple)):
+        for nested in value:
+            _reject_credential_state_keys(nested)
+
+
+def _validated_factory_kwargs(
+    factory_path: str,
+    kwargs: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(factory_path, str) or not _FACTORY_PATH.fullmatch(factory_path):
+        raise OptimizationPreflightError("student_factory must be an importable module:qualname path")
+    if kwargs is None:
+        return {}
+    if not isinstance(kwargs, Mapping) or any(not isinstance(key, str) for key in kwargs):
+        raise OptimizationPreflightError("student factory arguments must be a JSON object")
+    _reject_credential_state_keys(kwargs)
+    try:
+        encoded = json.dumps(dict(kwargs), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise OptimizationPreflightError("student factory arguments must be JSON serializable") from exc
+    if len(encoded.encode()) > 16_384:
+        raise OptimizationPreflightError("student factory arguments exceed the bounded size")
+    return json.loads(encoded)
+
+
+def _construct_student(factory_path: str, kwargs: Mapping[str, Any]) -> dspy.Module:
+    module_name, qualname = factory_path.split(":", 1)
+    value: Any = importlib.import_module(module_name)
+    for part in qualname.split("."):
+        value = getattr(value, part)
+    if not callable(value):
+        raise OptimizationPreflightError("student factory is not callable")
+    program = value(**dict(kwargs))
+    if not isinstance(program, dspy.Module):
+        raise OptimizationPreflightError("student factory did not return a DSPy Module")
+    return program
+
+
+def _fresh_process_reload(
+    state_path: Path,
+    *,
+    student_factory: str,
+    factory_kwargs: Mapping[str, Any],
+) -> tuple[str, str]:
+    command = [
+        sys.executable,
+        "-m",
+        "fleet_rlm.optimization.reload_probe",
+        "--state",
+        str(state_path),
+        "--factory",
+        student_factory,
+    ]
+    safe_env = {
+        key: os.environ[key]
+        for key in ("PATH", "LANG", "LC_ALL", "TMPDIR", "SYSTEMROOT", "WINDIR")
+        if key in os.environ
+    }
+    safe_env.update({"PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=Path.cwd(),
+            env=safe_env,
+            text=True,
+            input=json.dumps(dict(factory_kwargs), sort_keys=True, separators=(",", ":")),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=_RELOAD_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise OptimizationPreflightError("fresh-process candidate reconstruction could not complete") from exc
+    if completed.returncode != 0:
+        raise OptimizationPreflightError("fresh-process candidate reconstruction failed")
+    result_lines = [line for line in completed.stdout.splitlines() if line.startswith(_RELOAD_RESULT_PREFIX)]
+    if len(result_lines) != 1:
+        raise OptimizationPreflightError("fresh-process candidate reconstruction returned invalid evidence")
+    try:
+        payload = json.loads(result_lines[0][len(_RELOAD_RESULT_PREFIX) :])
+    except json.JSONDecodeError as exc:
+        raise OptimizationPreflightError("fresh-process candidate reconstruction returned invalid evidence") from exc
+    state_sha256 = payload.get("state_sha256") if isinstance(payload, Mapping) else None
+    instruction_sha256 = payload.get("instruction_sha256") if isinstance(payload, Mapping) else None
+    if (
+        not isinstance(state_sha256, str)
+        or not _is_sha256(state_sha256)
+        or not isinstance(instruction_sha256, str)
+        or not _is_sha256(instruction_sha256)
+    ):
+        raise OptimizationPreflightError("fresh-process candidate reconstruction returned invalid digests")
+    return state_sha256, instruction_sha256
 
 
 def _bounded_held_out_result(value: Any) -> dict[str, Any]:

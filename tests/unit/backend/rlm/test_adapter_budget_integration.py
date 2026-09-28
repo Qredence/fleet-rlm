@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from types import SimpleNamespace
@@ -230,46 +231,248 @@ async def test_settled_budget_rejects_adapter_without_calling_provider(asynchron
 @pytest.mark.asyncio
 @pytest.mark.parametrize("asynchronous", [False, True])
 async def test_real_lm_template_is_copied_without_mutating_retries_or_history(monkeypatch, asynchronous) -> None:
-    # This fake provider is intentionally unregistered; the test covers
-    # deadline copying and not provider capability discovery.
-    from dspy.clients import capabilities
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine, LM15Engine
+    from dspy.lm15 import response_from_openai_chat
 
-    monkeypatch.setattr(
-        capabilities,
-        "_litellm_capabilities",
-        lambda *_args, **_kwargs: capabilities.Capabilities(),
-    )
-    monkeypatch.setattr(dspy.LM, "supported_params", property(lambda _instance: set()))
-    template = dspy.LM("test/template", num_retries=4, timeout=25)
     seen = []
 
-    def forward(instance, **kwargs):
-        """Record the bounded call and return one adapter-ready completion."""
-        seen.append((instance, kwargs))
-        return [{"text": GOOD}]
+    def response(request):
+        return response_from_openai_chat(
+            {
+                "id": "offline-test",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-template",
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": GOOD}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
 
-    async def aforward(instance, **kwargs):
-        """
-        Execute the adapter operation for an instance.
+    def complete(instance, request):
+        seen.append((instance, request))
+        return response(request)
 
-        Returns:
-            The operation result.
-        """
-        return forward(instance, **kwargs)
+    async def acomplete(instance, request):
+        seen.append((instance, request))
+        return response(request)
 
-    monkeypatch.setattr(dspy.LM, "forward", forward)
-    monkeypatch.setattr(dspy.LM, "aforward", aforward)
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    monkeypatch.setattr(AsyncLM15Engine, "complete", acomplete)
+    template = dspy.LM("openai/test-template", engine="lm15", num_retries=4, timeout=25)
     turn = TurnBudget(deadline=time.monotonic() + 10)
-    assert (await invoke(FleetJSONAdapter(budget=turn), template, asynchronous))[0]["code"] == "SUBMIT(answer=1)"
+    models = RLMModelBundle(template, template).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    assert models.root_lm.history is models.root_lm.wrapped.history
+    assert models.sub_lm.history is models.sub_lm.wrapped.history
+    assert models.root_lm.history is not template.history
+    assert models.sub_lm.history is not template.history
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+    with dspy.context(callbacks=[callback]):
+        result = await invoke(FleetJSONAdapter(budget=turn), models.root_lm, asynchronous)
+    assert result[0]["code"] == "SUBMIT(answer=1)"
     assert len(seen) == 1
-    copied, kwargs = seen[0]
-    assert copied is not template
-    assert copied.num_retries == 0
+    engine, _ = seen[0]
+    assert engine.config.timeouts.read <= 10
     assert template.num_retries == 4
     assert template.history == []
     assert template.kwargs["timeout"] == 25
-    assert 0 < kwargs["timeout"] <= 10
+    assert len(models.root_lm.history) == 1
+    assert callback._call_index == 1
+    assert callback._last_call["role"] == "root"
     assert turn.snapshot()["provider_attempts"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_native_lm_retries_are_reserved_once_per_physical_attempt(monkeypatch, asynchronous) -> None:
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine, LM15Engine
+    from dspy.lm15 import response_from_openai_chat
+
+    attempts = 0
+
+    def complete(_instance, request):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise LMServerError("retry")
+        return response_from_openai_chat(
+            {
+                "id": "offline-retry",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-template",
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": GOOD}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
+
+    async def acomplete(instance, request):
+        return complete(instance, request)
+
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    monkeypatch.setattr(AsyncLM15Engine, "complete", acomplete)
+    template = dspy.LM("openai/test-template", engine="lm15", num_retries=4, timeout=25)
+    turn = TurnBudget(deadline=time.monotonic() + 10)
+    models = RLMModelBundle(template, template).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+    with dspy.context(callbacks=[callback]):
+        result = await invoke(FleetJSONAdapter(budget=turn), models.root_lm, asynchronous)
+
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert attempts == turn.snapshot()["provider_attempts"] == 2
+    assert len(models.root_lm.history) == 1
+    assert callback._call_index == 2
+    assert callback._last_call["role"] == "root"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_managed_lm_cache_keeps_history_and_usage_accounting(monkeypatch, asynchronous) -> None:
+    from uuid import uuid4
+
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine, LM15Engine
+    from dspy.lm15 import response_from_openai_chat
+    from dspy.utils.usage_tracker import UsageTracker
+
+    from fleet_rlm.rlm.program import DeadlineLMProxy
+
+    provider_calls = 0
+
+    def complete(_instance, request):
+        nonlocal provider_calls
+        provider_calls += 1
+        return response_from_openai_chat(
+            {
+                "id": "offline-cache",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-cache",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "cached response"},
+                    }
+                ],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+            },
+            model=request.model,
+        )
+
+    async def acomplete(instance, request):
+        return complete(instance, request)
+
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    monkeypatch.setattr(AsyncLM15Engine, "complete", acomplete)
+    cache_key = uuid4().hex
+    template = dspy.LM(f"openai/test-cache-{cache_key}", engine="lm15", cache=True, num_retries=0, timeout=25)
+    proxy = DeadlineLMProxy(template, deadline=None, reserve_seconds=0, retries=0, error_message="expired")
+    tracker = UsageTracker()
+    request = {"messages": [{"role": "user", "content": f"cache characterization {cache_key}"}]}
+
+    with dspy.context(usage_tracker=tracker):
+        if asynchronous:
+            first = await proxy.acall(**request)
+            second = await proxy.acall(**request)
+        else:
+            first = proxy(**request)
+            second = proxy(**request)
+
+    assert first == second == ["cached response"]
+    assert provider_calls == 1
+    assert len(proxy.history) == 2
+    assert proxy.history[0]["usage"] == tracker.usage_data[template.model][0]
+    assert len(tracker.usage_data[template.model]) == 1
+    assert proxy.history[1]["usage"].get("total_tokens") in (None, 5)
+
+
+@pytest.mark.asyncio
+async def test_managed_lm_caller_cancellation_propagates_after_one_admission(monkeypatch) -> None:
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+
+    entered = asyncio.Event()
+
+    async def block_until_cancelled(_instance, _request):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(AsyncLM15Engine, "complete", block_until_cancelled)
+    template = dspy.LM("openai/test-cancel", engine="lm15", cache=False, num_retries=0, timeout=25)
+    turn = TurnBudget(deadline=time.monotonic() + 10, limits=BudgetLimits(provider_attempts=1))
+    models = RLMModelBundle(template, template).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+
+    async def call() -> list[str]:
+        with dspy.context(callbacks=[callback]):
+            return await models.root_lm.acall("cancel this native lm15 request")
+
+    task = asyncio.create_task(call())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert turn.snapshot()["provider_attempts"] == 1
+    assert callback._call_index == 1
+    assert callback._last_call["request_status"] == "failed"
+    assert models.root_lm.history == []
+
+
+@pytest.mark.asyncio
+async def test_managed_lm_concurrent_context_callbacks_remain_isolated(monkeypatch) -> None:
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+    from dspy.lm15 import response_from_openai_chat
+    from dspy.utils.callback import BaseCallback
+
+    completed_requests: list[str] = []
+
+    class Callback(BaseCallback):
+        def __init__(self) -> None:
+            self.call_ids: list[str] = []
+
+        def on_lm_start(self, call_id, instance, inputs):
+            del instance, inputs
+            self.call_ids.append(call_id)
+
+    async def complete(_instance, request):
+        text = request.messages[-1].text
+        await asyncio.sleep(0.01)
+        completed_requests.append(text)
+        return response_from_openai_chat(
+            {
+                "id": "offline-context",
+                "object": "chat.completion",
+                "created": 0,
+                "model": "test-context",
+                "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": text}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            },
+            model=request.model,
+        )
+
+    monkeypatch.setattr(AsyncLM15Engine, "complete", complete)
+    template = dspy.LM("openai/test-concurrent-context", engine="lm15", cache=False, num_retries=0, timeout=25)
+    proxy = RLMModelBundle(template, template).bind_turn_deadline(deadline=time.monotonic() + 10).root_lm
+    assert proxy.history is proxy.wrapped.history
+    assert proxy.history is not template.history
+    first_callback = Callback()
+    second_callback = Callback()
+
+    async def call(text: str, callback: Callback) -> list[str]:
+        with dspy.context(callbacks=[callback]):
+            return await proxy.acall(text)
+
+    first, second = await asyncio.gather(
+        call("first context", first_callback),
+        call("second context", second_callback),
+    )
+
+    assert first == ["first context"]
+    assert second == ["second context"]
+    assert set(completed_requests) == {"first context", "second context"}
+    assert len(first_callback.call_ids) == len(second_callback.call_ids) == 1
+    assert first_callback.call_ids[0] != second_callback.call_ids[0]
 
 
 @pytest.mark.asyncio
@@ -362,8 +565,7 @@ def test_positive_infinite_adapter_deadline_is_the_unbounded_compatibility_case(
     assert budget.remaining() is None
 
 
-@pytest.mark.parametrize("cache_hit", [False, True])
-def test_deadline_proxy_counts_only_uncached_provider_usage(cache_hit: bool) -> None:
+def test_deadline_proxy_uses_managed_dspy_usage_and_history() -> None:
     from fleet_rlm.rlm.program import DeadlineLMProxy
 
     class Provider(dspy.BaseLM):
@@ -375,7 +577,6 @@ def test_deadline_proxy_counts_only_uncached_provider_usage(cache_hit: bool) -> 
                 choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
                 usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
                 model=self.model,
-                cache_hit=cache_hit,
             )
 
     provider = Provider()
@@ -384,7 +585,7 @@ def test_deadline_proxy_counts_only_uncached_provider_usage(cache_hit: bool) -> 
     with dspy.context(usage_tracker=tracker):
         assert proxy(messages=[{"role": "user", "content": "check"}]) == ["ok"]
     assert provider.history[-1]["usage"]["total_tokens"] == 12
-    assert tracker.usage_data.get(provider.model, []) == ([] if cache_hit else [provider.history[-1]["usage"]])
+    assert tracker.usage_data.get(provider.model, []) == [provider.history[-1]["usage"]]
 
 
 @pytest.mark.parametrize("asynchronous", [False, True])

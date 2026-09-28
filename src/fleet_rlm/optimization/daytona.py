@@ -25,7 +25,7 @@ from fleet_rlm.daytona.interpreter import (
 from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
-from fleet_rlm.rlm.ownership import OwnedEffect
+from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
 from fleet_rlm.rlm.program import RLMOptions, build_native_rlm
 from fleet_rlm.rlm.result import (
     PredictionOutputError,
@@ -98,7 +98,7 @@ class OptimizationSandboxPlatform(Protocol):
         """
         ...
 
-    async def delete(self, sandbox_id: Any) -> None:
+    async def delete(self, sandbox_id: Any, *, wait: bool = False, timeout: float = 60) -> None:
         """Delete a disposable optimization sandbox identified by its provider ID."""
         ...
 
@@ -223,8 +223,8 @@ class DisposableOptimizationSandboxFactory:
         )
 
     async def delete(self, sandbox: Any) -> None:
-        """Delete the sandbox directly; lifecycle TTL is only a backstop."""
-        await self._platform.delete(sandbox)
+        """Delete and confirm destruction; lifecycle TTL is only a backstop."""
+        await self._platform.delete(sandbox, wait=True, timeout=30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,8 +305,25 @@ class StrictEvaluationResult:
     termination_mode: str
 
 
+@dataclass(slots=True)
+class _StrictEvaluatorCleanupRecord:
+    """Lifecycle-owned resources for one strict evaluator sandbox."""
+
+    sandbox_id: str
+    sandbox: Any
+    interpreter: DaytonaCodeInterpreter | None = None
+    worker: OwnedEffect[Any] | None = None
+    delete: OwnedEffect[None] | None = None
+    task: asyncio.Task[None] | None = None
+    deletion_confirmed: bool = False
+    shutdown_observed: bool = False
+    delete_cancellation_reported: bool = False
+    worker_cancellation_reported: bool = False
+    last_error: BaseException | None = None
+
+
 class StrictDaytonaEvaluationLifecycle:
-    """Own one fresh strict sandbox, RLM, validation, and direct deletion attempt."""
+    """Own each strict evaluator sandbox through worker drain and confirmed deletion."""
 
     def __init__(
         self,
@@ -360,6 +377,9 @@ class StrictDaytonaEvaluationLifecycle:
         self._execution_timeout_seconds = execution_timeout_seconds
         self._schema_id = schema_id
         self._schema_version = schema_version
+        self._cleanup_supervisor = RunCleanupSupervisor()
+        self._cleanup_records: dict[str, _StrictEvaluatorCleanupRecord] = {}
+        self._closed = False
 
     async def evaluate(self, request: StrictEvaluationRequest) -> StrictEvaluationResult:
         """
@@ -380,6 +400,9 @@ class StrictDaytonaEvaluationLifecycle:
             StrictEvaluationCleanupError: If evaluation succeeds but sandbox cleanup
                 fails.
         """
+        if self._closed:
+            raise StrictEvaluationError("strict evaluator lifecycle is closed")
+        self._cleanup_supervisor.require_capacity()
         candidate_sha256 = request.candidate_sha256
         _require_sha256(request.record.content_sha256, "record")
         curated_input = CuratedEvaluationStore(candidate=request.candidate, record=request.record)
@@ -391,8 +414,8 @@ class StrictDaytonaEvaluationLifecycle:
             candidate_sha256=candidate_sha256,
             record_id=request.record.record_id,
         )
-        interpreter: DaytonaCodeInterpreter | None = None
-        primary_error: BaseException | None = None
+        record = _StrictEvaluatorCleanupRecord(sandbox_id=_strict_sandbox_identity(sandbox), sandbox=sandbox)
+        self._cleanup_records[record.sandbox_id] = record
         try:
             loop = asyncio.get_running_loop()
             interpreter = DaytonaCodeInterpreter(
@@ -404,6 +427,7 @@ class StrictDaytonaEvaluationLifecycle:
                 tools={"read_curated_input": reader},
                 execution_output_cap=self._options.max_output_chars,
             )
+            record.interpreter = interpreter
 
             def interpreter_factory(interpreter: DaytonaCodeInterpreter = interpreter) -> DaytonaCodeInterpreter:
                 assert interpreter is not None
@@ -426,12 +450,43 @@ class StrictDaytonaEvaluationLifecycle:
             )
             kwargs = _strict_named_inputs(handle.public_value())
             started = time.perf_counter()
+            worker_task = asyncio.create_task(
+                asyncio.to_thread(
+                    _invoke_strict_rlm,
+                    rlm,
+                    interpreter_factory,
+                    kwargs,
+                    self._models.root_lm,
+                )
+            )
+            record.worker = OwnedEffect.from_task(worker_task)
             try:
-                async with asyncio.timeout(self._execution_timeout_seconds):
-                    with dspy.context(lm=self._models.root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
-                        prediction = await rlm.acall(interpreter_factory=interpreter_factory, **kwargs)
+                prediction = await asyncio.wait_for(
+                    asyncio.shield(worker_task),
+                    timeout=self._execution_timeout_seconds,
+                )
             except TimeoutError as exc:
+                if worker_task.done():
+                    raise
+                await self._start_cleanup(record)
+                cleanup, caller_cancelled = await self._wait_cleanup(record, self._execution_timeout_seconds)
+                if caller_cancelled:
+                    raise asyncio.CancelledError from exc
+                if not cleanup:
+                    raise StrictEvaluationCleanupError(
+                        f"strict evaluator cleanup remains unresolved for sandbox {record.sandbox_id}"
+                    ) from exc
                 raise StrictEvaluationError("strict evaluator execution timed out") from exc
+            except asyncio.CancelledError as exc:
+                current_task = asyncio.current_task()
+                if current_task is None or current_task.cancelling() == 0:
+                    raise
+                await self._start_cleanup(record)
+                _, cleanup_cancelled = await self._wait_cleanup(record, self._execution_timeout_seconds)
+                if cleanup_cancelled:
+                    raise asyncio.CancelledError from exc
+                raise
+
             elapsed_ms = int((time.perf_counter() - started) * 1_000)
             try:
                 validated = prediction_result(
@@ -444,7 +499,7 @@ class StrictDaytonaEvaluationLifecycle:
             except PredictionOutputError as exc:
                 raise StrictEvaluationError("strict evaluator returned invalid typed output") from exc
             usage = observed_usage(prediction, duration_ms=elapsed_ms)
-            return StrictEvaluationResult(
+            result = StrictEvaluationResult(
                 prediction=validated,
                 usage=usage,
                 elapsed_ms=elapsed_ms,
@@ -456,44 +511,145 @@ class StrictDaytonaEvaluationLifecycle:
                 curated_input_schema=curated_input.receipt.schema,
                 termination_mode=rlm_termination_mode(prediction),
             )
-        except BaseException as exc:
-            primary_error = exc
+        except BaseException:
+            # The original RLM/setup/validation error remains authoritative.
+            # Cleanup is independently retained and reported by ``aclose`` if
+            # this bounded attempt cannot confirm all three terminal conditions.
+            if record.task is None:
+                await self._finish_cleanup(record)
             raise
-        finally:
-            cleanup_error = await self._cleanup(interpreter, sandbox)
-            if primary_error is None and cleanup_error is not None:
-                raise StrictEvaluationCleanupError("strict evaluator sandbox cleanup failed") from cleanup_error
+        await self._finish_cleanup(record)
+        if record.sandbox_id in self._cleanup_records:
+            raise StrictEvaluationCleanupError(
+                f"strict evaluator cleanup remains unresolved for sandbox {record.sandbox_id}"
+            ) from record.last_error
+        return result
 
-    async def _cleanup(self, interpreter: DaytonaCodeInterpreter | None, sandbox: Any) -> BaseException | None:
-        """
-        Shut down the interpreter and delete the sandbox, retaining the first cleanup error.
-
-        Returns:
-            BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
-
-        Raises:
-            asyncio.CancelledError: If cancellation occurs while sandbox deletion is pending.
-        """
-        cleanup_error: BaseException | None = None
-        if interpreter is not None:
-            try:
-                await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
-            except BaseException as exc:
-                cleanup_error = exc
-        delete_effect = OwnedEffect.start(self._factory.delete(sandbox))
+    async def _start_cleanup(self, record: _StrictEvaluatorCleanupRecord) -> None:
+        """Start supervised cleanup, retaining the task even if supervisor submission fails."""
+        if record.sandbox_id not in self._cleanup_records:
+            return
+        if record.task is not None and not record.task.done():
+            return
+        cleanup = self._finish_cleanup(record)
         try:
-            delete_wait = await delete_effect.settle()
-        except asyncio.CancelledError as exc:
-            cleanup_error = cleanup_error or exc
-            cancelled = True
-        except Exception as exc:
-            cleanup_error = cleanup_error or exc
-            cancelled = delete_effect.caller_cancelled
+            record.task = self._cleanup_supervisor.submit(cleanup)
+        except BaseException:
+            # Capacity was checked before sandbox creation. A race or shutdown
+            # can still reject submission; retain a strong task reference here.
+            record.task = asyncio.create_task(cleanup, name=f"strict-evaluator-cleanup:{record.sandbox_id}")
+
+    async def _wait_cleanup(
+        self,
+        record: _StrictEvaluatorCleanupRecord,
+        timeout: float,
+    ) -> tuple[bool, bool]:
+        task = record.task
+        if task is None:
+            return False, False
+        effect = OwnedEffect.from_task(task)
+        try:
+            wait = await effect.settle(timeout=timeout)
+        except BaseException as exc:
+            record.last_error = record.last_error or exc
+            caller_cancelled = effect.caller_cancelled
         else:
-            cancelled = delete_wait.caller_cancelled
-        if cancelled:
-            raise asyncio.CancelledError
-        return cleanup_error
+            caller_cancelled = wait.caller_cancelled
+        return record.sandbox_id not in self._cleanup_records, caller_cancelled
+
+    async def _finish_cleanup(self, record: _StrictEvaluatorCleanupRecord) -> None:
+        """Revoke first, drain the worker, shut down, then retry failed deletion."""
+        if record.delete is None and not record.deletion_confirmed:
+            try:
+                record.delete = OwnedEffect.start(self._factory.delete(record.sandbox))
+            except BaseException as exc:
+                record.last_error = exc
+        if record.delete is not None and not record.deletion_confirmed:
+            try:
+                delete_wait = await record.delete.settle(timeout=self._execution_timeout_seconds)
+            except BaseException as exc:
+                record.last_error = exc
+                if record.delete.caller_cancelled and not record.delete_cancellation_reported:
+                    record.delete_cancellation_reported = True
+                    raise asyncio.CancelledError from exc
+            else:
+                if delete_wait.caller_cancelled and not record.delete_cancellation_reported:
+                    record.delete_cancellation_reported = True
+                    raise asyncio.CancelledError from None
+                if delete_wait.done:
+                    record.deletion_confirmed = True
+                elif delete_wait.timed_out:
+                    record.last_error = TimeoutError("sandbox deletion confirmation timed out")
+
+        if record.worker is not None:
+            try:
+                worker_wait = await record.worker.settle(timeout=self._execution_timeout_seconds)
+            except BaseException as exc:
+                record.last_error = record.last_error or exc
+                if record.worker.caller_cancelled and not record.worker_cancellation_reported:
+                    record.worker_cancellation_reported = True
+                    raise asyncio.CancelledError from exc
+            else:
+                if worker_wait.caller_cancelled and not record.worker_cancellation_reported:
+                    record.worker_cancellation_reported = True
+                    raise asyncio.CancelledError from None
+                if worker_wait.pending:
+                    await record.worker.observe_completion()
+        if record.interpreter is None:
+            record.shutdown_observed = True
+        elif not record.shutdown_observed:
+            try:
+                await asyncio.to_thread(record.interpreter.shutdown, strict_broker_cleanup=True)
+            except BaseException as exc:
+                record.last_error = exc
+            else:
+                record.shutdown_observed = True
+
+        # A timed-out delete remains owned in the record. Do not retry while
+        # that request may still be running.
+        if record.delete is not None and record.delete.done() and not record.deletion_confirmed:
+            try:
+                record.delete.result()
+            except BaseException as exc:
+                record.last_error = exc
+            else:
+                record.deletion_confirmed = True
+
+        if not record.deletion_confirmed and (record.delete is None or record.delete.done()):
+            try:
+                await self._factory.delete(record.sandbox)
+            except BaseException as exc:
+                record.last_error = exc
+            else:
+                record.deletion_confirmed = True
+
+        worker_done = record.worker is None or record.worker.done()
+        if record.deletion_confirmed and worker_done and record.shutdown_observed:
+            self._cleanup_records.pop(record.sandbox_id, None)
+
+    async def aclose(self, *, drain_seconds: float = 30) -> None:
+        """Drain owned cleanup and retry unresolved sandbox records before closing."""
+        self._closed = True
+        await self._cleanup_supervisor.shutdown(drain_seconds=drain_seconds)
+        deadline = asyncio.get_running_loop().time() + max(0, drain_seconds)
+        for record in tuple(self._cleanup_records.values()):
+            if record.task is not None and not record.task.done():
+                remaining = max(0, deadline - asyncio.get_running_loop().time())
+                try:
+                    await asyncio.wait_for(asyncio.shield(record.task), timeout=remaining)
+                except TimeoutError:
+                    continue
+                except BaseException as exc:
+                    record.last_error = record.last_error or exc
+            if record.sandbox_id in self._cleanup_records:
+                await self._start_cleanup(record)
+                remaining = max(0, deadline - asyncio.get_running_loop().time())
+                _, caller_cancelled = await self._wait_cleanup(record, remaining)
+                if caller_cancelled:
+                    raise asyncio.CancelledError
+        if self._cleanup_records:
+            unresolved = ", ".join(sorted(self._cleanup_records))
+            raise StrictEvaluationCleanupError(f"unresolved strict evaluator sandbox cleanup: {unresolved}")
 
 
 def _strict_evaluator_signature() -> type[dspy.Signature]:
@@ -525,6 +681,17 @@ def _strict_evaluator_signature() -> type[dspy.Signature]:
     return StrictCuratedEvaluationSignature
 
 
+def _invoke_strict_rlm(
+    rlm: Any,
+    interpreter_factory: Any,
+    kwargs: dict[str, Any],
+    root_lm: Any,
+) -> Any:
+    """Run DSPy's synchronous interpreter lifecycle away from the API loop."""
+    with dspy.context(lm=root_lm, adapter=dspy.JSONAdapter(), track_usage=True):
+        return rlm(interpreter_factory=interpreter_factory, **kwargs)
+
+
 def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
     """
     Expose a copied curated-input capability handle for evaluator access.
@@ -536,6 +703,16 @@ def _strict_named_inputs(handle: dict[str, str | int]) -> dict[str, Any]:
         dict[str, Any]: Mapping containing the copied handle under `curated_input_handle`.
     """
     return {"curated_input_handle": dict(handle)}
+
+
+def _strict_sandbox_identity(sandbox: Any) -> str:
+    """Return the provider identity, retaining an opaque local key if malformed."""
+    value = getattr(sandbox, "id", None)
+    if not isinstance(value, str) and isinstance(sandbox, dict):
+        value = sandbox.get("id")
+    if isinstance(value, str) and value:
+        return value
+    return f"unidentified-sandbox-{id(sandbox):x}"
 
 
 def _require_sha256(value: str, label: str) -> None:

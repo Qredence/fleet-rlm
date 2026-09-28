@@ -118,6 +118,11 @@ separate validation gates.
 - Fleet constructs Root, Sub, and probe LMs with DSPy's native `lm15` engine.
   Unsupported models or request fields fail rather than falling back to
   LiteLLM. DSPy 3.4 still installs LiteLLM as a transitive dependency.
+- The Turn-owned LM proxy reserves Fleet provider-attempt capacity before each
+  physical request, then calls the wrapped LM through DSPy's managed sync or
+  async call path. The copied native LM has internal retries disabled so every
+  retry returns through Fleet admission; DSPy owns response normalization,
+  callbacks, usage tracking, and LM history for each admitted attempt.
 - Fleet remains on DSPy's public program and LM call surfaces:
   `await rlm.acall(**named_inputs)`, with an invocation-scoped interpreter factory,
   delegates request and response normalization to
@@ -189,6 +194,13 @@ inside RLM.aforward, so async Fleet Host Tools use the composition-owned
 bridge. The rolling DSPy RLM API (https://dspy.ai/api/modules/RLM/) is useful
 for orientation; the exact pinned source and installed version remain the
 compatibility authority.
+
+The strict GEPA evaluator uses the same native RLM contract on an owned worker
+thread because the Daytona synchronous bridge is bound to the service loop.
+The evaluator deadline covers the worker wait; timeout or caller cancellation
+revokes the disposable sandbox, observes worker completion, and retains
+supervised cleanup ownership if the worker does not drain in time. An unresolved
+worker or sandbox cleanup is a failed evaluation, never successful evidence.
 
 Operator-visible progress still comes from Fleet's interpreter, Tool,
 callback, and trajectory observation boundaries instead of a second DSPy

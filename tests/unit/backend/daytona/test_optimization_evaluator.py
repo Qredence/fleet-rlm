@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import threading
+import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -11,7 +14,7 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
+from fleet_rlm.daytona.runtime import DaytonaSandboxSpec, LiveDaytonaPlatform
 from fleet_rlm.optimization import daytona as subject
 from fleet_rlm.optimization.daytona import (
     DisposableOptimizationSandboxFactory,
@@ -20,6 +23,7 @@ from fleet_rlm.optimization.daytona import (
     StrictDaytonaEvaluationLifecycle,
     StrictEvaluationCapabilityError,
     StrictEvaluationCleanupError,
+    StrictEvaluationError,
     StrictEvaluationModels,
     StrictEvaluationProof,
     StrictEvaluationRequest,
@@ -38,6 +42,7 @@ from fleet_rlm.rlm.program import RLMOptions
 class _Platform:
     creates: list[dict] = field(default_factory=list)
     deleted: list[object] = field(default_factory=list)
+    delete_options: list[dict[str, object]] = field(default_factory=list)
 
     async def create(self, **kwargs: Any) -> object:
         """
@@ -52,9 +57,10 @@ class _Platform:
         self.creates.append(kwargs)
         return {"id": f"sandbox-{len(self.creates)}"}
 
-    async def delete(self, sandbox: object) -> None:
+    async def delete(self, sandbox: object, **kwargs: object) -> None:
         """Record the sandbox scheduled for deletion."""
         self.deleted.append(sandbox)
+        self.delete_options.append(kwargs)
 
 
 @pytest.mark.asyncio
@@ -80,6 +86,7 @@ async def test_factory_creates_no_volume_ephemeral_gateway_only_sandbox() -> Non
     await factory.delete(sandbox)
 
     assert platform.deleted == [sandbox]
+    assert platform.delete_options == [{"wait": True, "timeout": 30}]
     assert platform.creates == [
         {
             "labels": {
@@ -95,6 +102,32 @@ async def test_factory_creates_no_volume_ephemeral_gateway_only_sandbox() -> Non
             "auto_stop_interval": 60,
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_live_platform_forwards_confirmed_delete_and_treats_absence_as_success() -> None:
+    class _Client:
+        def __init__(self) -> None:
+            self.deleted: list[tuple[object, dict[str, object]]] = []
+            self.present = True
+
+        async def get(self, sandbox_id: str) -> object:
+            if not self.present:
+                error = RuntimeError("not found")
+                error.status_code = 404
+                raise error
+            return SimpleNamespace(id=sandbox_id)
+
+        async def delete(self, sandbox: object, **kwargs: object) -> None:
+            self.deleted.append((sandbox, kwargs))
+
+    client = _Client()
+    platform = LiveDaytonaPlatform(client, DaytonaSandboxSpec("fleet-test-v1"))
+    await platform.delete("sandbox-1", wait=True, timeout=17)
+    client.present = False
+    await platform.delete("sandbox-1", wait=True, timeout=17)
+
+    assert client.deleted == [(SimpleNamespace(id="sandbox-1"), {"wait": True, "timeout": 17})]
 
 
 @pytest.mark.asyncio
@@ -192,10 +225,18 @@ class _Interpreter:
 
 
 class _RLM:
-    def __init__(self, prediction: object | BaseException) -> None:
+    def __init__(
+        self,
+        prediction: object | BaseException,
+        *,
+        entered: threading.Event | None = None,
+        release: threading.Event | None = None,
+    ) -> None:
         self._prediction = prediction
+        self._entered = entered
+        self._release = release
 
-    async def acall(self, **kwargs: Any) -> object:
+    def __call__(self, **kwargs: Any) -> object:
         """
         Evaluate a curated input request and provide the configured prediction.
 
@@ -216,6 +257,10 @@ class _RLM:
         assert callable(interpreter_factory)
         interpreter = interpreter_factory()
         try:
+            if self._entered is not None:
+                self._entered.set()
+            if self._release is not None:
+                assert self._release.wait(timeout=5)
             if isinstance(self._prediction, BaseException):
                 raise self._prediction
             return self._prediction
@@ -224,16 +269,29 @@ class _RLM:
 
 
 class _LifecycleFactory:
-    def __init__(self, events: list[str], *, fail_delete: bool = False) -> None:
+    def __init__(
+        self,
+        events: list[str],
+        *,
+        fail_delete: bool = False,
+        on_delete: Any | None = None,
+        delete_failures: int = 0,
+        delete_gate: asyncio.Event | None = None,
+        delete_entered: asyncio.Event | None = None,
+    ) -> None:
         self.events = events
         self.deleted: list[object] = []
         self.fail_delete = fail_delete
+        self.on_delete = on_delete
+        self.delete_failures = delete_failures
+        self.delete_gate = delete_gate
+        self.delete_entered = delete_entered
 
     async def create(self, **kwargs: Any) -> object:
         self.events.append("create")
         assert len(kwargs["candidate_sha256"]) == 64
         assert all(character in "0123456789abcdef" for character in kwargs["candidate_sha256"])
-        return object()
+        return SimpleNamespace(id=f"sandbox-{self.events.count('create')}")
 
     async def delete(self, sandbox: object) -> None:
         """Delete a sandbox and record the deletion event.
@@ -246,7 +304,15 @@ class _LifecycleFactory:
         """
         self.events.append("delete")
         self.deleted.append(sandbox)
-        if self.fail_delete:
+        if self.delete_entered is not None:
+            self.delete_entered.set()
+        if self.delete_gate is not None:
+            await self.delete_gate.wait()
+        if self.on_delete is not None:
+            self.on_delete()
+        if self.fail_delete or self.delete_failures:
+            if self.delete_failures:
+                self.delete_failures -= 1
             raise RuntimeError("delete failed")
 
 
@@ -307,7 +373,13 @@ def _proof() -> ValidatedStrictDaytonaProof:
     )
 
 
-def _lifecycle(factory: _LifecycleFactory, proof: object) -> StrictDaytonaEvaluationLifecycle:
+def _lifecycle(
+    factory: _LifecycleFactory,
+    proof: object,
+    *,
+    models: StrictEvaluationModels | None = None,
+    execution_timeout_seconds: int = 60,
+) -> StrictDaytonaEvaluationLifecycle:
     """
     Create a strict Daytona evaluation lifecycle for the fleet test policy.
 
@@ -322,8 +394,9 @@ def _lifecycle(factory: _LifecycleFactory, proof: object) -> StrictDaytonaEvalua
         factory=factory,  # type: ignore[arg-type]
         policy=OptimizationSandboxPolicy("fleet-test-v1", ("gateway.example.test",)),
         proof=proof,
-        models=StrictEvaluationModels(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
+        models=models or StrictEvaluationModels(root_lm=object(), sub_lm=object()),  # type: ignore[arg-type]
         options=RLMOptions(max_iters=2, max_llm_calls=3, max_output_chars=100),
+        execution_timeout_seconds=execution_timeout_seconds,
     )
 
 
@@ -421,7 +494,147 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
     assert len(interpreters) == len(rlms) == 2
     assert interpreters[0] is not interpreters[1]
     assert rlms[0] is not rlms[1]
-    assert events == ["create", "invocation_shutdown", "shutdown", "delete"] * 2
+    assert events == ["create", "invocation_shutdown", "delete", "shutdown"] * 2
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_runs_pinned_native_rlm_in_owned_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
+
+    events: list[str] = []
+    factory = _LifecycleFactory(events)
+    adapter = dspy.JSONAdapter()
+    root_lm = dspy.utils.DummyLM(
+        [{"reasoning": "submit the typed result", "code": "SUBMIT(answer='native answer')"}],
+        adapter=adapter,
+    )
+    models = StrictEvaluationModels(root_lm=root_lm, sub_lm=root_lm)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: InProcessInterpreterBackend())
+
+    result = await _lifecycle(factory, _proof(), models=models).evaluate(
+        StrictEvaluationRequest("a" * 64, _record(), "run-native")
+    )
+
+    assert result.prediction.display_text == "native answer"
+    assert events == ["create", "delete"]
+    assert len(root_lm.history) == 1
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_keeps_event_loop_responsive_and_revokes_timed_out_worker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    events: list[str] = []
+    factory = _LifecycleFactory(events, on_delete=release.set)
+    interpreter = _Interpreter(events)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: interpreter)
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(RuntimeError("sandbox revoked"), entered=entered, release=release),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof(), execution_timeout_seconds=1)
+
+    heartbeat = asyncio.Event()
+
+    async def mark_heartbeat() -> None:
+        await asyncio.sleep(0.05)
+        heartbeat.set()
+
+    heartbeat_task = asyncio.create_task(mark_heartbeat())
+    started = time.monotonic()
+    evaluation = asyncio.create_task(lifecycle.evaluate(StrictEvaluationRequest("a" * 64, _record(), "run-timeout")))
+    assert await asyncio.to_thread(entered.wait, 1)
+    # The evaluator is blocked in its RLM worker, but this coroutine still runs.
+    await asyncio.wait_for(heartbeat.wait(), timeout=0.5)
+    assert time.monotonic() - started < 0.5
+    await heartbeat_task
+
+    with pytest.raises(StrictEvaluationError, match="timed out"):
+        await evaluation
+
+    assert release.is_set()
+    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retains_ownership_for_late_worker_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    events: list[str] = []
+    factory = _LifecycleFactory(events)
+    interpreter = _Interpreter(events)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: interpreter)
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(RuntimeError("sandbox revoked"), entered=entered, release=release),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof(), execution_timeout_seconds=1)
+
+    evaluation = asyncio.create_task(
+        lifecycle.evaluate(StrictEvaluationRequest("a" * 64, _record(), "run-late-worker"))
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await evaluation
+
+    assert lifecycle._cleanup_supervisor.active_jobs == 1
+    assert events == ["create", "delete"]
+    release.set()
+    await lifecycle.aclose(drain_seconds=2)
+    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_cancellation_deletes_sandbox_and_observes_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    events: list[str] = []
+    factory = _LifecycleFactory(events, on_delete=release.set)
+    interpreter = _Interpreter(events)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: interpreter)
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(RuntimeError("sandbox revoked"), entered=entered, release=release),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    evaluation = asyncio.create_task(
+        _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("a" * 64, _record(), "run-cancelled"))
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+    evaluation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await evaluation
+
+    assert release.is_set()
+    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_deletes_sandbox_when_interpreter_setup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    factory = _LifecycleFactory(events)
+
+    def fail_backend(*_args, **_kwargs):
+        raise RuntimeError("interpreter setup failed")
+
+    monkeypatch.setattr(subject, "sandbox_backend", fail_backend)
+    with pytest.raises(RuntimeError, match="interpreter setup failed"):
+        await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("a" * 64, _record(), "run-setup-failed"))
+
+    assert events == ["create", "delete"]
 
 
 @pytest.mark.asyncio
@@ -437,7 +650,7 @@ async def test_lifecycle_preserves_primary_failure_when_cleanup_also_fails(monke
     with pytest.raises(RuntimeError, match="rlm failed"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "invocation_shutdown", "shutdown", "delete"]
+    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
 
 
 @pytest.mark.asyncio
@@ -457,4 +670,162 @@ async def test_lifecycle_raises_cleanup_error_without_primary_failure(monkeypatc
     with pytest.raises(StrictEvaluationCleanupError, match="cleanup"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "invocation_shutdown", "shutdown", "delete"]
+    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_retries_one_failed_delete_after_worker_drain(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    factory = _LifecycleFactory(events, delete_failures=1)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(SimpleNamespace(answer="typed answer", trajectory=[], get_lm_usage=lambda: {})),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+
+    result = await _lifecycle(factory, _proof()).evaluate(
+        StrictEvaluationRequest("candidate", _record(), "run-retry-delete")
+    )
+
+    assert result.prediction.display_text == "typed answer"
+    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_aclose_reports_sandbox_after_repeated_delete_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    factory = _LifecycleFactory(events, fail_delete=True)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(SimpleNamespace(answer="typed answer", trajectory=[], get_lm_usage=lambda: {})),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof())
+
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await lifecycle.evaluate(StrictEvaluationRequest("candidate", _record(), "run-delete-fails"))
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await lifecycle.aclose(drain_seconds=1)
+
+    assert len(factory.deleted) >= 3
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_aclose_drains_delete_that_was_only_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    delete_gate = asyncio.Event()
+    delete_entered = asyncio.Event()
+    factory = _LifecycleFactory(events, delete_gate=delete_gate, delete_entered=delete_entered)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(SimpleNamespace(answer="typed answer", trajectory=[], get_lm_usage=lambda: {})),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof(), execution_timeout_seconds=1)
+
+    evaluation = asyncio.create_task(
+        lifecycle.evaluate(StrictEvaluationRequest("candidate", _record(), "run-delete-pending"))
+    )
+    await asyncio.wait_for(delete_entered.wait(), timeout=1)
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await evaluation
+
+    delete_gate.set()
+    await lifecycle.aclose(drain_seconds=2)
+    assert events.count("delete") == 1
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_delete_wait_propagates_and_retains_cleanup(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    delete_gate = asyncio.Event()
+    delete_entered = asyncio.Event()
+    factory = _LifecycleFactory(events, delete_gate=delete_gate, delete_entered=delete_entered)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(SimpleNamespace(answer="typed answer", trajectory=[], get_lm_usage=lambda: {})),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof(), execution_timeout_seconds=2)
+
+    evaluation = asyncio.create_task(
+        lifecycle.evaluate(StrictEvaluationRequest("candidate", _record(), "run-cancel-delete"))
+    )
+    await asyncio.wait_for(delete_entered.wait(), timeout=1)
+    evaluation.cancel()
+    delete_gate.set()
+    with pytest.raises(asyncio.CancelledError):
+        await evaluation
+    await lifecycle.aclose(drain_seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_worker_drain_propagates_and_retains_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    events: list[str] = []
+    delete_entered = asyncio.Event()
+    factory = _LifecycleFactory(events, delete_entered=delete_entered)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(RuntimeError("sandbox revoked"), entered=entered, release=release),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+    lifecycle = _lifecycle(factory, _proof(), execution_timeout_seconds=3)
+
+    evaluation = asyncio.create_task(
+        lifecycle.evaluate(StrictEvaluationRequest("candidate", _record(), "run-cancel-worker"))
+    )
+    assert await asyncio.to_thread(entered.wait, 1)
+    await asyncio.wait_for(delete_entered.wait(), timeout=5)
+    await asyncio.sleep(0.05)
+    evaluation.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await evaluation
+    await lifecycle.aclose(drain_seconds=2)
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_does_not_accept_success_when_shutdown_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[str] = []
+    factory = _LifecycleFactory(events)
+    monkeypatch.setattr(subject, "sandbox_backend", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(subject, "DaytonaCodeInterpreter", lambda **_kwargs: _Interpreter(events, fail_shutdown=True))
+    monkeypatch.setattr(
+        subject,
+        "build_native_rlm",
+        lambda **_kwargs: _RLM(SimpleNamespace(answer="typed answer", trajectory=[], get_lm_usage=lambda: {})),
+    )
+    monkeypatch.setattr(subject, "_strict_named_inputs", lambda handle: {"curated_input_handle": handle})
+    monkeypatch.setattr(subject.dspy, "context", lambda **_kwargs: nullcontext())
+
+    lifecycle = _lifecycle(factory, _proof())
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await lifecycle.evaluate(StrictEvaluationRequest("candidate", _record(), "run-shutdown-failed"))
+    with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
+        await lifecycle.aclose(drain_seconds=1)
+
+    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "shutdown"]

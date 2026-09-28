@@ -582,6 +582,12 @@ class _RecordingLM:
         self.calls.append(dict(kwargs))
         return object()
 
+    def __call__(self, prompt: object = None, *, messages: object = None, **kwargs: object) -> object:
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
+    async def acall(self, prompt: object = None, *, messages: object = None, **kwargs: object) -> object:
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
 
 def test_child_receives_only_remaining_time_on_forked_lm() -> None:
     """Forked child LMs derive their per-call timeout from the

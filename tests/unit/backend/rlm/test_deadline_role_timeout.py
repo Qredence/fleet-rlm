@@ -34,6 +34,12 @@ class _DropTimeoutOnCopyLM:
     async def aforward(self, **kwargs: object) -> object:
         return self.forward(**kwargs)
 
+    def __call__(self, prompt: object = None, *, messages: object = None, **kwargs: object) -> object:
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
+    async def acall(self, prompt: object = None, *, messages: object = None, **kwargs: object) -> object:
+        return await self.aforward(prompt=prompt, messages=messages, **kwargs)
+
 
 class _TimeoutThenRetryLM(_DropTimeoutOnCopyLM):
     """Consume the whole attempt timeout, then raise a retryable provider timeout."""

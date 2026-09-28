@@ -96,6 +96,30 @@ under `.fleet-evidence/receipts/phase6/strict-gepa-proof/`; it is evaluator-
 boundary evidence only and does not authorize GEPA execution or promotion by
 itself.
 
+An authoritative GEPA run validates a compiled module by saving only its
+DSPy state as JSON in a private temporary directory outside the evidence
+store. It imports a caller-supplied baseline student factory in a fresh Python
+process, loads the state with pickle disabled, and compares digests of the
+complete named predictor state and instructions. The runner reconstructs that
+state again for held-out evaluation; only bounded metrics and digests enter the
+write-once receipt, and the temporary state file is removed when the run ends.
+Factory paths use `module:qualname` and constructor arguments must be JSON
+serializable and contain no credential-shaped fields. Production receipts
+remain `promotion_eligible: false`; this check proves reconstruction, not
+candidate quality, serving readiness, or promotion authority.
+
+Strict evaluator cleanup is owned per disposable sandbox. Daytona deletion uses
+`wait=True` with a bounded SDK timeout, so an accepted delete request is not
+treated as destruction. The evaluator retains the sandbox identity until its
+RLM worker finishes, the interpreter shutdown succeeds, and deletion is
+confirmed (including explicit not-found). Timeout and cancellation start
+deletion before draining the worker; a failed delete is retried after drain.
+Call `StrictDaytonaEvaluationLifecycle.aclose()` when the owning campaign is
+closing to drain supervised cleanup and retry unresolved sandboxes. An
+unresolved cleanup raises with the sandbox identity and cannot produce success
+evidence. Offline lifecycle tests establish this ownership behavior; they do
+not certify live Daytona deletion semantics.
+
 ## Pipeline at a glance
 
 | Step | Script | Receipt schema |

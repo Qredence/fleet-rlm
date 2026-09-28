@@ -103,6 +103,12 @@ def test_model_children_and_copies_share_budget_without_mutating_templates() -> 
             """
             return "ok"
 
+        def __call__(self, *args, **kwargs):
+            return self.forward(*args, **kwargs)
+
+        async def acall(self, *args, **kwargs):
+            return self.forward(*args, **kwargs)
+
     lm = CountingLM("test/counting")
     deadline = time.monotonic() + 60
     budget = TurnBudget(deadline=deadline, limits=BudgetLimits(provider_attempts=2))

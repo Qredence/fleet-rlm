@@ -30,6 +30,12 @@ class _CopyableLM:
         self.calls.append(dict(kwargs))
         return object()
 
+    def __call__(self, prompt=None, *, messages=None, **kwargs):
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
+    async def acall(self, prompt=None, *, messages=None, **kwargs):
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
 
 class _RetryingLM:
     """Small provider double for deadline/retry isolation contracts."""
@@ -51,6 +57,15 @@ class _RetryingLM:
         if self.failures:
             raise self.failures.pop(0)
         return object()
+
+    def __call__(self, prompt=None, *, messages=None, **kwargs):
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
+
+    async def acall(self, prompt=None, *, messages=None, **kwargs):
+        aforward = getattr(self, "aforward", None)
+        if callable(aforward):
+            return await aforward(prompt=prompt, messages=messages, **kwargs)
+        return self.forward(prompt=prompt, messages=messages, **kwargs)
 
 
 def host_echo(value: str = "ok") -> str:
