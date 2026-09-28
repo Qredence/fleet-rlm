@@ -91,9 +91,6 @@ def test_committed_policy_declares_default_maas_model_roles() -> None:
         "daytona-native-databricks",
         "daytona-recursive-databricks",
         "daytona-managed",
-        "phase4-campaign",
-        "phase4-campaign-a",
-        "phase4-campaign-b",
     }
     assert document["defaults"]["daytona"]["snapshot_env"] == "FLEET_DAYTONA_SNAPSHOT"
     assert document["defaults"]["daytona"]["child_snapshot_env"] == "FLEET_DAYTONA_CHILD_SNAPSHOT"
@@ -266,7 +263,7 @@ def test_selected_default_native_profile_resolves_maas_without_recursive_childre
     assert settings.rlm_recursion_enabled is False
 
 
-def test_explicit_phase4_profile_overrides_committed_default_without_ambient_selection(
+def test_explicit_profile_overrides_committed_default_without_ambient_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import fleet_rlm.config.loader as config
@@ -277,13 +274,11 @@ def test_explicit_phase4_profile_overrides_committed_default_without_ambient_sel
     monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
     monkeypatch.setenv("FLEET_CONFIG_PROFILE", "daytona-managed")
 
-    settings = config.load_runtime_settings(profile="phase4-campaign")
+    settings = config.load_runtime_settings(profile="daytona-recursive-databricks")
 
-    assert config.active_profile(settings) == "phase4-campaign"
-    assert settings.root_llm_max_tokens == 1_024
-    assert settings.sub_llm_max_tokens == 512
-    assert settings.rlm_max_iters == 6
-    assert settings.rlm_max_llm_calls == 8
+    assert config.active_profile(settings) == "daytona-recursive-databricks"
+    assert settings.root_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+    assert settings.sub_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
     assert settings.rlm_recursion_enabled is True
 
 

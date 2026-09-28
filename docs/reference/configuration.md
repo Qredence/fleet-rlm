@@ -177,8 +177,9 @@ not an editable policy value. Existing policies that still set
 These are non-secret policy values; `.env` and ambient process variables do not
 override them. Profiles without an explicit recursion override inherit
 `false` from `[defaults.rlm]`; `daytona-native` is the selected default profile.
-`daytona-recursive` and `phase4-campaign` explicitly enable recursion, while
-`phase4-campaign-a` and `phase4-campaign-b` explicitly disable it. The
+`daytona-recursive` and `daytona-recursive-databricks` explicitly enable
+recursion; `daytona-native`, `daytona-native-databricks` and `daytona-managed`
+inherit the disabled default. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
