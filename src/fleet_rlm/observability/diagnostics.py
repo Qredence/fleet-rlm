@@ -23,6 +23,9 @@ class FailureDiagnostic:
     cause_type: str
     provider_status_category: str
     message: str
+    # Bounded, message-free sub-cause when the classification alone is too coarse
+    # to triage (for example which output validation rejected a prediction).
+    detail: str | None = None
 
 
 _HTTP_STATUS_TEXT = re.compile(r"\b(4\d{2}|5\d{2})\b")
@@ -108,10 +111,21 @@ def _failure_status(exc: BaseException) -> int | None:
 
 def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
     """Describe a Turn preparation failure without exposing exception text."""
+    from fleet_rlm.rlm.result import PredictionOutputError, PredictionOutputTooLargeError
+
     cause = _diagnostic_cause(exc)
     if isinstance(cause, AdapterParseError):
         adapter = str(getattr(cause, "adapter_name", "") or "adapter")
         return FailureDiagnostic("adapter_parse_error", "none", f"LM response unparseable by {adapter}")
+    if isinstance(cause, PredictionOutputError):
+        return FailureDiagnostic(
+            "prediction_output_too_large"
+            if isinstance(cause, PredictionOutputTooLargeError)
+            else "prediction_output_invalid",
+            provider_status_category(_failure_status(exc)),
+            type(cause).__name__,
+            getattr(cause, "cause_type", None),
+        )
     if not isinstance(cause, DaytonaAdapterError):
         status = _failure_status(exc)
         if status == 404:
@@ -139,6 +153,7 @@ def trace_failure_category(exc: BaseException) -> str:
     """
     from fleet_rlm.daytona.errors import ChildRuntimeAuthorizationError, ChildRuntimeCleanupError
     from fleet_rlm.rlm.budget import FinalizationExhausted
+    from fleet_rlm.rlm.result import PredictionOutputError, PredictionOutputTooLargeError
 
     if isinstance(exc, ChildRuntimeAuthorizationError):
         return "unauthorized"
@@ -156,6 +171,12 @@ def trace_failure_category(exc: BaseException) -> str:
         return "timeout"
     if isinstance(exc, asyncio.CancelledError):
         return "cancelled"
+    # Closed categories, matched on the subclass first. The finer cause lives in
+    # FailureDiagnostic.detail so this stays a small set for downstream grouping.
+    if isinstance(exc, PredictionOutputTooLargeError):
+        return "prediction_output_too_large"
+    if isinstance(exc, PredictionOutputError):
+        return "prediction_output_invalid"
     return normalize_turn_failure(exc).cause_type
 
 
@@ -164,11 +185,16 @@ def trace_failure_details(exc: BaseException) -> dict[str, str]:
     cause = _diagnostic_cause(exc)
     raw_class = cause.cause_type if isinstance(cause, DaytonaAdapterError) else type(cause).__name__
     cause_class = raw_class if isinstance(raw_class, str) and _SAFE_CAUSE_CLASS.fullmatch(raw_class) else "Unknown"
-    return {
+    diagnostic = normalize_turn_failure(exc)
+    details = {
         "failure_category": trace_failure_category(exc),
         "failure_cause_class": cause_class,
-        "provider_status_category": normalize_turn_failure(exc).provider_status_category,
+        "provider_status_category": diagnostic.provider_status_category,
     }
+    if diagnostic.detail:
+        # Omitted rather than null when absent, so span outputs stay uniform.
+        details["failure_detail"] = diagnostic.detail[:64]
+    return details
 
 
 def walk_cause_chain(exc: BaseException) -> Iterator[BaseException]:

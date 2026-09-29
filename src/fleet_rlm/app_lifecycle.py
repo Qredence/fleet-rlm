@@ -28,6 +28,7 @@ from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.config.validation import CompositionError, require_daytona_settings
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.observability.turn_capture import TurnCaptureStore
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
 from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
@@ -299,6 +300,7 @@ async def build_daytona_composition(
     gateway: object | None = None
     orphan_cleanup_task: asyncio.Task[None] | None = None
     memory_outbox_task: asyncio.Task[None] | None = None
+    capture_store: TurnCaptureStore | None = None
     try:
         # Fail closed on an unreachable or non-head database, inside the
         # cleanup scope so the engine above is always disposed on failure.
@@ -474,6 +476,12 @@ async def build_daytona_composition(
         )
 
         runner = RLMRunner(verbose=resolved.rlm_verbose, _adapter_factory=_adapter_factory)
+        capture_store = TurnCaptureStore(
+            root=Path(__file__).resolve().parents[2] / resolved.data_root,
+            enabled=resolved.capture_enabled,
+            retention_days=resolved.capture_retention_days,
+            max_captures=resolved.capture_max_captures,
+        )
         coordinator = TurnRuntime(
             lifecycle=lifecycle,
             preparation=run_preparation,
@@ -483,6 +491,7 @@ async def build_daytona_composition(
             claim_loss_fence=runtime.fence_session,
             mlflow_tracing_enabled=resolved.mlflow_tracing_enabled,
             mlflow_expose_trace_id=resolved.mlflow_expose_trace_id,
+            event_capture=capture_store,
         )
         session_lifecycle = SessionLifecycle(
             session_catalog,
@@ -501,7 +510,7 @@ async def build_daytona_composition(
             daytona_runtime=runtime,
             session_task_service=task_service,
         )
-        return RuntimeInventory(
+        inventory = RuntimeInventory(
             route_services=route_services,
             daytona_runtime_owner=runtime,
             bridge_dispatcher=dispatcher,
@@ -513,8 +522,12 @@ async def build_daytona_composition(
             model_bundle=model_bundle,
             orphan_cleanup_task=orphan_cleanup_task,
             memory_outbox_task=memory_outbox_task,
+            capture_store=capture_store,
         )
+        return inventory
     except BaseException:
+        if capture_store is not None:
+            capture_store.aclose()
         await _cancel_orphan_cleanup(orphan_cleanup_task)
         await _cancel_orphan_cleanup(memory_outbox_task)
         if runtime is None and database_lifecycle is None:
@@ -630,6 +643,12 @@ async def close_daytona_services(inventory: RuntimeInventory) -> None:
             logger.warning("Daytona disposal requires its owning application loop; ownership remains retained")
     elif isinstance(dispatcher, SyncBridgeDispatcher):
         dispatcher.clear_loop(dispatcher.service_loop())
+
+    # Flush and join the Turn capture writer after the in-flight work above has
+    # settled, so a draining Turn still lands its last lines.
+    capture_store = inventory.capture_store
+    if capture_store is not None:
+        capture_store.aclose()
 
     if len(errors) == 1:
         raise errors[0]

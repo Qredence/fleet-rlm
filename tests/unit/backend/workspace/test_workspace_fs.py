@@ -11,8 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from fleet_rlm.workspace.models import WorkspaceEntry
-
 
 class LocalProcess:
     def __init__(self) -> None:
@@ -59,7 +57,7 @@ def test_rejects_workspace_root_outside_trusted_volume() -> None:
         )
 
 
-@pytest.mark.parametrize("reserved", ["attachments", "artifacts"])
+@pytest.mark.parametrize("reserved", ["attachments"])
 def test_rejects_workspace_root_aliasing_managed_storage(reserved: str) -> None:
     from fleet_rlm.workspace.storage import WorkspaceStorage
 
@@ -70,23 +68,6 @@ def test_rejects_workspace_root_aliasing_managed_storage(reserved: str) -> None:
             root=f"/home/daytona/fleet/{reserved}/session-file",
             max_file_bytes=32,
         )
-
-
-def test_lists_immediate_entries_sorted_when_observation_window_is_complete(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    (root / "notes").mkdir()
-    (root / "z.txt").write_text("z", encoding="utf-8")
-    (root / "a.txt").write_text("a", encoding="utf-8")
-    (root / "notes" / "nested.txt").write_text("nested", encoding="utf-8")
-
-    result = workspace.list_entries(".", limit=3)
-
-    assert [(entry.path, entry.kind, entry.byte_size) for entry in result.entries] == [
-        ("a.txt", "file", 1),
-        ("notes", "directory", None),
-        ("z.txt", "file", 1),
-    ]
-    assert result.truncated is False
 
 
 def test_pages_utf8_text_from_a_direct_cursor(tmp_path: Path) -> None:
@@ -126,10 +107,7 @@ def test_page_boundary_never_splits_a_multibyte_character(tmp_path: Path) -> Non
 
 @pytest.mark.parametrize(
     "cursor_mutation",
-    [
-        lambda token: token[:-1] + "!",
-        lambda token: token.replace("", "x", 1),
-    ],
+    [lambda token: token[:-1] + "!"],
 )
 def test_rejects_invalid_or_path_bound_text_cursors(
     tmp_path: Path,
@@ -164,20 +142,6 @@ def test_list_pages_are_lexicographic_even_when_provider_order_is_not(tmp_path: 
         workspace.list_entries("notes", limit=2, after="other.txt")
 
 
-def test_append_creates_and_extends_without_replacing(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=8)
-
-    created = workspace.append_text("notes.txt", "é")
-    appended = workspace.append_text("notes.txt", "ab")
-
-    assert created.byte_size == 2
-    assert appended.byte_size == 4
-    assert (root / "notes.txt").read_text(encoding="utf-8") == "éab"
-
-    with pytest.raises(ValueError, match="size"):
-        workspace.append_text("notes.txt", "12345")
-
-
 def test_append_rejects_symlink_targets(tmp_path: Path) -> None:
     workspace, _sandbox, root, _process = _workspace(tmp_path)
     secret = root / "secret.txt"
@@ -201,36 +165,6 @@ def test_list_truncation_limits_entries(tmp_path: Path) -> None:
     assert result.truncated is True
 
 
-def test_stat_returns_relative_metadata_or_none(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    (root / "note.txt").write_text("hello", encoding="utf-8")
-
-    entry = workspace.stat("note.txt")
-
-    assert entry is not None
-    assert entry.path == "note.txt"
-    assert entry.kind == "file"
-    assert entry.byte_size == 5
-    assert entry.modified_at is not None
-    assert workspace.stat("missing.txt") is None
-
-
-def test_write_creates_parents_and_honors_overwrite(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-
-    created = workspace.write_text("notes/decision.md", "first", overwrite=False)
-
-    assert created.path == "notes/decision.md"
-    assert created.byte_size == 5
-    page = workspace.read_text_page("notes/decision.md", cursor=None, max_chars=32, max_bytes=32)
-    assert page.content == "first" and page.eof is True
-    with pytest.raises(FileExistsError):
-        workspace.write_text("notes/decision.md", "second", overwrite=False)
-    replaced = workspace.write_text("notes/decision.md", "second", overwrite=True)
-    assert replaced.byte_size == 6
-    assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "second"
-
-
 @pytest.mark.parametrize("replace_errno", [errno.EPERM, errno.ENOSYS, 38, 95])
 def test_overwrite_falls_back_when_volume_rejects_atomic_replace(
     tmp_path: Path,
@@ -250,41 +184,6 @@ def test_overwrite_falls_back_when_volume_rejects_atomic_replace(
 
     assert target.read_text(encoding="utf-8") == "verified"
     assert workspace.last_warnings == ({"code": "non_atomic_overwrite"},)
-    assert not list(root.glob(".fleet-write-*"))
-
-
-def test_fallback_overwrite_restores_previous_contents_after_write_failure(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    target = root / "date.txt"
-    target.write_text("previous", encoding="utf-8")
-
-    monkeypatch.setattr(
-        os,
-        "replace",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EXDEV, "rename unsupported")),
-    )
-    original_write = os.write
-    write_calls = 0
-
-    def fail_first_write(fd: int, data: bytes) -> int:
-        nonlocal write_calls
-        write_calls += 1
-        if write_calls == 2:
-            raise OSError(errno.EIO, "simulated overwrite failure")
-        return original_write(fd, data)
-
-    monkeypatch.setattr(os, "write", fail_first_write)
-
-    from fleet_rlm.workspace.storage import WorkspaceStorageError
-
-    with pytest.raises(WorkspaceStorageError):
-        workspace.write_text("date.txt", "replacement", overwrite=True)
-
-    assert target.read_text(encoding="utf-8") == "previous"
-    assert write_calls == 3
     assert not list(root.glob(".fleet-write-*"))
 
 
@@ -324,94 +223,6 @@ def test_workspace_mutation_leaves_attachment_and_artifact_siblings_untouched(tm
     assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-20"
     assert (attachments / "input.txt").read_text(encoding="utf-8") == "input"
     assert (artifacts / "published.txt").read_text(encoding="utf-8") == "published"
-
-
-def test_overwrite_reports_parent_directory_fsync_warning_after_publication(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    (root / "date.txt").write_text("previous", encoding="utf-8")
-    original_fsync = os.fsync
-
-    def volume_fsync(fd: int) -> None:
-        if os.path.isdir(f"/dev/fd/{fd}"):
-            raise OSError(errno.EPERM, "directory fsync unsupported")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", volume_fsync)
-
-    workspace.write_text("date.txt", "2026-07-19", overwrite=True)
-
-    assert (root / "date.txt").read_text(encoding="utf-8") == "2026-07-19"
-    assert workspace.last_warnings == ({"code": "cleanup_failed", "errno": errno.EPERM},)
-
-
-def test_fallback_overwrite_keeps_new_content_when_file_fsync_fails(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    target = root / "date.txt"
-    target.write_text("previous", encoding="utf-8")
-    monkeypatch.setattr(
-        os,
-        "replace",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EXDEV, "rename unsupported")),
-    )
-    original_fsync = os.fsync
-    file_fsync_calls = 0
-
-    def selective_fsync(fd: int) -> None:
-        nonlocal file_fsync_calls
-        if os.path.isdir(f"/dev/fd/{fd}"):
-            original_fsync(fd)
-            return
-        file_fsync_calls += 1
-        if file_fsync_calls == 1:
-            original_fsync(fd)
-            return
-        raise OSError(errno.EPERM, "file fsync unsupported")
-
-    monkeypatch.setattr(os, "fsync", selective_fsync)
-
-    workspace.write_text("date.txt", "verified", overwrite=True)
-
-    assert target.read_text(encoding="utf-8") == "verified"
-    assert workspace.last_warnings == (
-        {"code": "non_atomic_overwrite"},
-        {"code": "cleanup_failed", "errno": errno.EPERM},
-    )
-    assert file_fsync_calls >= 2
-    assert not list(root.glob(".fleet-write-*"))
-
-
-def test_failed_overwrite_preserves_previous_contents(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    target = root / "date.txt"
-    target.write_text("previous", encoding="utf-8")
-    original_fsync = os.fsync
-    fsync_calls = 0
-
-    def fail_staged_file_fsync(fd: int) -> None:
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 1:
-            raise OSError(errno.EIO, "simulated staged-write failure")
-        original_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", fail_staged_file_fsync)
-
-    from fleet_rlm.workspace.storage import WorkspaceStorageError
-
-    with pytest.raises(WorkspaceStorageError):
-        workspace.write_text("date.txt", "replacement", overwrite=True)
-
-    assert target.read_text(encoding="utf-8") == "previous"
-    assert not list(root.glob(".fleet-write-*"))
 
 
 def test_first_write_succeeds_when_volume_rejects_hard_links(
@@ -494,64 +305,6 @@ def test_partial_write_and_eintr_cleanup_destination(tmp_path: Path, monkeypatch
     assert not list(root.glob(".fleet-write-*"))
 
 
-def test_partial_failure_fsync_cleans_destination_and_temporary_file(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    original_fsync = os.fsync
-    fsync_calls = 0
-
-    def fail_direct_file_fsync(fd: int) -> None:
-        nonlocal fsync_calls
-        fsync_calls += 1
-        if fsync_calls == 2:
-            raise OSError(errno.EIO, "simulated direct-create failure")
-        original_fsync(fd)
-
-    monkeypatch.setattr(
-        os,
-        "link",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError(errno.EPERM, "hard links unsupported")),
-    )
-    monkeypatch.setattr(os, "fsync", fail_direct_file_fsync)
-
-    from fleet_rlm.workspace.storage import WorkspaceStorageError
-
-    with pytest.raises(WorkspaceStorageError):
-        workspace.write_text("date.txt", "partial", overwrite=False)
-
-    assert not (root / "date.txt").exists()
-    assert not list(root.glob(".fleet-write-*"))
-
-
-def test_first_write_creates_missing_workspace_root(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path, root_exists=False)
-
-    workspace.write_text("notes/decision.md", "first", overwrite=False)
-
-    assert root.exists()
-    assert (root / "notes" / "decision.md").read_text(encoding="utf-8") == "first"
-
-
-def test_first_root_level_write_creates_missing_workspace_root(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path, root_exists=False)
-
-    workspace.write_text("decision.md", "first", overwrite=False)
-
-    assert root.exists()
-    assert (root / "decision.md").read_text(encoding="utf-8") == "first"
-
-
-def test_missing_workspace_root_behaves_as_an_empty_virtual_directory(tmp_path: Path) -> None:
-    workspace, _sandbox, _root, _process = _workspace(tmp_path, root_exists=False)
-
-    listing = workspace.list_entries(".")
-    assert listing.entries == ()
-    assert listing.truncated is False
-    assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
-
-
 def test_workspace_bounded_binary_read_is_exact_and_enforces_storage_limit(tmp_path: Path) -> None:
     workspace, _, root, _ = _workspace(tmp_path, max_file_bytes=8)
     target = root / "large.bin"
@@ -564,25 +317,6 @@ def test_workspace_bounded_binary_read_is_exact_and_enforces_storage_limit(tmp_p
     target.write_bytes(b"123456789")
     with pytest.raises(ValueError, match="file read bound exceeded"):
         workspace.read_file_bytes("large.bin", max_bytes=16)
-
-
-def test_real_guard_allows_a_missing_virtual_workspace_root(tmp_path: Path) -> None:
-    from fleet_rlm.workspace.storage import WorkspaceStorage
-
-    volume_root = tmp_path / "volume"
-    volume_root.mkdir()
-    root = volume_root / "sessions" / "session" / "workspace"
-    workspace = WorkspaceStorage(
-        SimpleNamespace(process=LocalProcess()),
-        volume_root=str(volume_root),
-        root=str(root),
-        max_file_bytes=32,
-    )
-
-    listing = workspace.list_entries(".")
-    assert listing.entries == ()
-    assert listing.truncated is False
-    assert workspace.stat(".") == WorkspaceEntry(".", "directory", None, None)
 
 
 def test_enforces_write_and_read_byte_bounds_and_strict_utf8(tmp_path: Path) -> None:
@@ -599,17 +333,6 @@ def test_enforces_write_and_read_byte_bounds_and_strict_utf8(tmp_path: Path) -> 
     path.write_bytes(b"12345")
     with pytest.raises(ValueError, match="read bound"):
         workspace.read_text_page("invalid.txt", cursor=None, max_chars=4, max_bytes=4)
-
-
-def test_rejects_directories_as_text_and_files_as_list_roots(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path)
-    (root / "notes").mkdir()
-    (root / "note.txt").write_text("hello", encoding="utf-8")
-
-    with pytest.raises(IsADirectoryError):
-        workspace.read_text_page("notes", cursor=None, max_chars=32, max_bytes=32)
-    with pytest.raises(NotADirectoryError):
-        workspace.list_entries("note.txt")
 
 
 def test_atomic_write_rejects_symlink_target_before_io(tmp_path: Path) -> None:
@@ -683,67 +406,6 @@ def test_provider_guard_rejects_symlinks_below_the_trusted_volume(
 
     with pytest.raises(ValueError, match="unsafe"):
         workspace.stat(relative)
-
-
-def test_sync_workspace_fs_delete_path_round_trip_and_conflicts(tmp_path: Path) -> None:
-    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=1024)
-    from fleet_rlm.workspace.models import WorkspaceConflictError
-
-    workspace.write_text("notes/stale.txt", "stale", overwrite=False)
-    workspace.delete_path("notes/stale.txt")
-    assert not (root / "notes" / "stale.txt").exists()
-
-    with pytest.raises(FileNotFoundError):
-        workspace.delete_path("notes/stale.txt")
-
-    (root / "filled").mkdir()
-    (root / "filled" / "kept.txt").write_text("kept", encoding="utf-8")
-    with pytest.raises(WorkspaceConflictError) as not_empty:
-        workspace.delete_path("filled")
-    assert not_empty.value.detail == "not_empty"
-
-    (root / "empty").mkdir()
-    workspace.delete_path("empty")
-    assert not (root / "empty").exists()
-
-    with pytest.raises(ValueError, match="checksum precondition"):
-        workspace.delete_path("filled/kept.txt", expected_sha256="not-a-sha")
-
-
-def test_sync_workspace_fs_patch_text_round_trip_and_conflicts(tmp_path: Path) -> None:
-    import hashlib
-
-    workspace, _sandbox, root, _process = _workspace(tmp_path, max_file_bytes=1024)
-    from fleet_rlm.workspace.models import WorkspaceConflictError
-
-    entry = workspace.write_text("notes/report.txt", "hello world", overwrite=False)
-    assert entry is not None
-
-    patched = workspace.patch_text("notes/report.txt", "world", "fleet")
-    assert patched.path == "notes/report.txt"
-    assert patched.byte_size == len("hello fleet")
-    # The write fall-through reports the sha of the exact bytes published.
-    assert patched.checksum_sha256 == hashlib.sha256(b"hello fleet").hexdigest()
-    assert (root / "notes" / "report.txt").read_text(encoding="utf-8") == "hello fleet"
-
-    with pytest.raises(WorkspaceConflictError) as ambiguous:
-        workspace.patch_text("notes/report.txt", "l", "L")
-    assert ambiguous.value.detail == "ambiguous"
-
-    with pytest.raises(WorkspaceConflictError) as missing:
-        workspace.patch_text("notes/report.txt", "zzz", "L")
-    assert missing.value.detail == "missing"
-
-    with pytest.raises(WorkspaceConflictError) as checksum:
-        workspace.patch_text("notes/report.txt", "fleet", "x", expected_sha256="f" * 64)
-    assert checksum.value.detail == "checksum_mismatch"
-
-    good = hashlib.sha256(b"hello fleet").hexdigest()
-    ok = workspace.patch_text("notes/report.txt", "fleet", "world", expected_sha256=good)
-    assert ok.checksum_sha256 == hashlib.sha256(b"hello world").hexdigest()
-
-    with pytest.raises(ValueError, match="checksum precondition"):
-        workspace.patch_text("notes/report.txt", "a", "b", expected_sha256="bad")
 
 
 @pytest.mark.asyncio

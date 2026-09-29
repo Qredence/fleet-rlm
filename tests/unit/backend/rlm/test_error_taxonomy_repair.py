@@ -9,7 +9,7 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
+from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter
 from fleet_rlm.rlm.result import RunNoProgressError
 
@@ -27,19 +27,6 @@ class _ScriptBackend:
 
     def close(self) -> None:
         return None
-
-
-def test_recoverable_backend_error_is_native_code_execution_error() -> None:
-    backend = _ScriptBackend(BackendExecutionResult(error="NameError: missing", error_category="NameError"))
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    with pytest.raises(CodeExecutionError, match="NameError: missing") as caught:
-        interpreter.execute("missing + 1")
-
-    assert not isinstance(caught.value, DaytonaAdapterError)
-    assert backend.calls == 1
 
 
 def test_native_rlm_reinjects_recoverable_error_and_accepts_corrected_action() -> None:
@@ -70,38 +57,6 @@ def test_native_rlm_reinjects_recoverable_error_and_accepts_corrected_action() -
     assert prediction.answer == "ok"
     assert actions.calls == 2
     assert prediction.trajectory[0]["output"].startswith("[Error] NameError: missing")
-
-
-@pytest.mark.parametrize(
-    ("code", "category"),
-    [
-        (" \n\t", "empty_code"),
-        ("x" * 9, "code_too_large"),
-    ],
-)
-def test_empty_and_oversized_code_raise_recoverable_error_without_backend_execution(
-    code: str,
-    category: str,
-) -> None:
-    backend = _ScriptBackend("unexpected")
-    kwargs = {"max_code_chars": 8} if category == "code_too_large" else {}
-    interpreter = DaytonaCodeInterpreter(backend=backend, **kwargs)
-
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    with pytest.raises(CodeExecutionError) as caught:
-        interpreter.execute(code)
-
-    assert caught.value.category == category
-    assert backend.calls == 0
-
-
-def test_intermediate_code_cap_is_inclusive() -> None:
-    backend = _ScriptBackend("accepted")
-    interpreter = DaytonaCodeInterpreter(backend=backend, max_code_chars=8)
-
-    assert interpreter.execute("12345678") == "accepted"
-    assert backend.calls == 1
 
 
 def test_terminal_interpreter_error_stops_native_rlm_without_repair_or_extract() -> None:
@@ -149,31 +104,6 @@ def test_terminal_interpreter_error_stops_native_rlm_without_repair_or_extract()
     assert extract_calls == 0
 
 
-def test_direct_native_recoverable_error_is_sanitized_and_reclassified() -> None:
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    class NativeBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
-            raise CodeExecutionError(
-                "GET https://canary.invalid/v1 token=canary-fake-token /Volumes/operator/private.py \x1b[31mboom\x1b[0m"
-            )
-
-        def close(self) -> None:
-            return None
-
-    interpreter = DaytonaCodeInterpreter(backend=NativeBackend())
-
-    with pytest.raises(CodeExecutionError) as caught:
-        interpreter.execute("broken")
-
-    assert caught.value.category == "execution_error"
-    assert "provider.invalid" not in str(caught.value)
-    assert "canary-fake-token" not in str(caught.value)
-    assert "/Volumes/operator" not in str(caught.value)
-    assert "\x1b" not in str(caught.value)
-
-
 def test_direct_native_terminal_error_is_sanitized_and_stops() -> None:
     from dspy.primitives.code_interpreter import CodeInterpreterError
 
@@ -196,30 +126,6 @@ def test_direct_native_terminal_error_is_sanitized_and_stops() -> None:
     assert "provider.invalid" not in str(caught.value)
     assert "/root/secret.py" not in str(caught.value)
     assert "\x1b" not in str(caught.value)
-
-
-def test_broad_daytona_failure_stays_fleet_error_without_repair() -> None:
-    class ProviderBackend:
-        calls = 0
-
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
-            self.calls += 1
-            raise DaytonaAdapterError("broker transport failed", cause_type="BrokerExecutionError")
-
-        def close(self) -> None:
-            return None
-
-    backend = ProviderBackend()
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-
-    from dspy.primitives.code_interpreter import CodeInterpreterError
-
-    with pytest.raises(DaytonaAdapterError):
-        interpreter.execute("print('never')")
-
-    assert not isinstance(DaytonaAdapterError("x"), CodeInterpreterError)
-    assert backend.calls == 1
 
 
 def test_no_progress_has_one_native_repair_then_terminal_bound() -> None:

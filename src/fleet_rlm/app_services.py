@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.observability.turn_capture import TurnCaptureStore
 
 from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.attachments import AttachmentLifecycle
@@ -132,6 +133,7 @@ class RuntimeInventory:
     # at dispose like the orphan sweep and never readiness-gating.
     memory_outbox_task: asyncio.Task[None] | None = None
     runner: RLMRunner | None = None
+    capture_store: TurnCaptureStore | None = None
 
 
 @dataclass(frozen=True, slots=True)

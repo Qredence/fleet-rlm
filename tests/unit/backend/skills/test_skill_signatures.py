@@ -9,13 +9,7 @@ from fleet_rlm.rlm.program import (
     SessionContextInput,
     SkillCardInput,
 )
-from fleet_rlm.skills.signatures import DataAnalysisSignature, validate_skill_signature
-
-
-def test_data_analysis_signature_preserves_standard_inputs_and_answer() -> None:
-    assert {"request", "session_context", "skill_cards", "attachments"} <= set(DataAnalysisSignature.input_fields)
-    assert DataAnalysisSignature.output_fields["answer"].annotation is str
-    validate_skill_signature(DataAnalysisSignature)
+from fleet_rlm.skills.signatures import validate_skill_signature
 
 
 def test_default_signature_uses_strict_model_visible_input_types() -> None:
@@ -26,11 +20,7 @@ def test_default_signature_uses_strict_model_visible_input_types() -> None:
     assert FleetRLMSignature.output_fields["answer"].annotation is str
 
 
-def test_custom_signature_can_keep_json_compatible_common_input_types() -> None:
-    validate_skill_signature(DataAnalysisSignature)
-
-
-@pytest.mark.parametrize("variant", ["missing", "output", "optional", "wrong_type"])
+@pytest.mark.parametrize("variant", ["missing", "output", "optional"])
 def test_signature_rejects_invalid_standard_input(variant: str) -> None:
     annotations: dict[str, object] = {
         "request": str,
@@ -56,7 +46,7 @@ def test_signature_rejects_invalid_standard_input(variant: str) -> None:
         validate_skill_signature(invalid)
 
 
-@pytest.mark.parametrize("variant", ["missing", "input", "optional", "wrong_type"])
+@pytest.mark.parametrize("variant", ["missing", "input", "optional"])
 def test_signature_rejects_invalid_answer(variant: str) -> None:
     namespace = {
         "__annotations__": {

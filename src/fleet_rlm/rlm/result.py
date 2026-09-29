@@ -62,14 +62,25 @@ class RunIntegrityFailureError(RunTerminalError):
     public_message = "Turn failed because a required workspace update was not completed"
 
 
+_PREDICTION_CAUSE_TYPE = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
 class PredictionOutputError(ValueError):
-    """Typed, sanitized failure for an invalid native Prediction output."""
+    """Typed, sanitized failure for an invalid native Prediction output.
+
+    ``cause_type`` names the specific validation that rejected the output. It is
+    internal observability only: ``public_message`` stays the closed literal the
+    transports already project, so no API surface changes.
+    """
 
     public_message = "Turn output is invalid"
     status = "failed"
 
-    def __init__(self) -> None:
+    def __init__(self, *, cause_type: str) -> None:
+        if not _PREDICTION_CAUSE_TYPE.fullmatch(cause_type):
+            raise ValueError(f"invalid prediction cause_type: {cause_type!r}")
         super().__init__(self.public_message)
+        self.cause_type = cause_type
 
 
 class PredictionOutputTooLargeError(PredictionOutputError):
@@ -83,7 +94,7 @@ class PredictionOutputTooLargeError(PredictionOutputError):
         output_chars: int | None = None,
         output_preview: str | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(cause_type="declared_output_too_large")
         self.output_chars = output_chars
         self.output_preview = output_preview
 
@@ -92,6 +103,12 @@ class PredictionOutputTooLargeError(PredictionOutputError):
 # Sanitization & Secret Scrubbing
 # ---------------------------------------------------------------------------
 
+# NOTE: the ``\S+`` value atom is deliberate, not sloppiness. It is the only
+# pattern covering a value that contains a delimiter before its end
+# (``token=a)b``, ``token=abc,def``, ``token=ab'cd``); the assignment patterns
+# below only cover well-formed quoted/unquoted forms. Stopping this at delimiters
+# would leak those tails, so the URL/secret ordering is fixed instead -- see the
+# sanitizer corpus test.
 _SECRETISH = re.compile(
     r"(?i)("
     r"api[_-]?key|access[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
@@ -239,16 +256,24 @@ def _sanitize_text(
     redact_prompt_markers: bool,
     redact_urls: bool,
     strip_control: bool,
+    redact_paths: bool = True,
 ) -> str:
     cleaned = _TOKENISH.sub("[redacted]", text)
     cleaned = _PROVIDER_TOKENISH.sub("[redacted]", cleaned)
+    # DSNs keep their own marker by running before the general URL pass.
+    cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
+    # URLs are redacted before the assignment patterns, because ``_SECRETISH``
+    # consumes trailing delimiters: for ``requests.get("http://h/p?token=x")`` it
+    # matches ``token=x")`` and eats the closing ``")``, mangling the text. Doing
+    # the URL first cannot reduce secret coverage -- a URL holding a secret is
+    # redacted either way, and a secret outside a URL is untouched.
+    if redact_urls:
+        cleaned = _URLISH.sub("[redacted-url]", cleaned)
     cleaned = _SECRETISH.sub("[redacted]", cleaned)
     cleaned = _QUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>\g<quote>[redacted]\g<quote>", cleaned)
     cleaned = _UNQUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>[redacted]", cleaned)
-    cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
-    cleaned = _PATHISH.sub("[path]", cleaned)
-    if redact_urls:
-        cleaned = _URLISH.sub("[redacted-url]", cleaned)
+    if redact_paths:
+        cleaned = _PATHISH.sub("[path]", cleaned)
     if redact_prompt_markers:
         cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
     if strip_control:
@@ -264,6 +289,28 @@ def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
 
 def sanitize_trace_text(text: str, *, max_len: int = 10_000) -> str:
     return _sanitize_text(text, max_len=max_len, redact_prompt_markers=False, redact_urls=True, strip_control=True)
+
+
+def sanitize_capture_text(text: str, *, max_len: int, redact_paths: bool) -> str:
+    """Sanitize one field of a captured Turn event for durable local storage.
+
+    Both bounds are required rather than defaulted, so no call site can widen
+    what lands on disk by omission: the capture writer supplies ``max_len`` and
+    ``redact_paths`` from the ``capture.*`` policy.
+
+    URLs are always redacted -- the Sandbox preview URL carries a credential.
+    Path masking is deliberately the caller's trade-off: it would otherwise
+    replace every ``/home/daytona/...`` path in generated code, which is the
+    main signal a captured Turn is read for.
+    """
+    return _sanitize_text(
+        text,
+        max_len=max_len,
+        redact_prompt_markers=False,
+        redact_urls=True,
+        strip_control=True,
+        redact_paths=redact_paths,
+    )
 
 
 def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:
@@ -323,6 +370,16 @@ def sanitize_public_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -
 
 def sanitize_trace_value(value: Any, *, max_len: int = 2_000, depth: int = 0) -> Any:
     return _sanitize_recursive(value, partial(sanitize_trace_text, max_len=max_len), max_len=max_len, depth=depth)
+
+
+def sanitize_capture_value(value: Any, *, max_len: int, redact_paths: bool) -> Any:
+    """Apply the shared bounded, key-aware policy to local capture content."""
+    return _sanitize_recursive(
+        value,
+        partial(sanitize_capture_text, max_len=max_len, redact_paths=redact_paths),
+        max_len=max_len,
+        depth=0,
+    )
 
 
 def _is_safe_placeholder(value: str) -> bool:
@@ -401,17 +458,17 @@ class TrajectoryStep:
 def normalize_prediction_trajectory(prediction: Any) -> tuple[TrajectoryStep, ...]:
     trajectory = getattr(prediction, "trajectory", None)
     if not isinstance(trajectory, Sequence) or isinstance(trajectory, (str, bytes, bytearray)):
-        raise PredictionOutputError
+        raise PredictionOutputError(cause_type="trajectory_not_a_sequence")
 
     steps: list[TrajectoryStep] = []
     for index, raw in enumerate(trajectory, start=1):
         if not isinstance(raw, Mapping) or any(not isinstance(key, str) for key in raw):
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="trajectory_step_not_mapping")
         values: dict[str, str] = {}
         for step_field in ("reasoning", "code", "output"):
             value = raw.get(step_field, "")
             if not isinstance(value, str):
-                raise PredictionOutputError
+                raise PredictionOutputError(cause_type="trajectory_step_field_not_text")
             values[step_field] = value
         steps.append(TrajectoryStep(index, values["reasoning"], values["code"], values["output"]))
     return tuple(steps)
@@ -426,10 +483,10 @@ class PredictionResult:
 
     def __post_init__(self) -> None:
         if not isinstance(self.display_text, str) or not self.display_text.strip():
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="display_text_missing")
         encoded = _strict_json(self.outputs)
         if not isinstance(encoded, Mapping):
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="outputs_not_a_mapping")
         object.__setattr__(self, "outputs", encoded)
         if (
             not isinstance(self.schema_id, str)
@@ -437,7 +494,7 @@ class PredictionResult:
             or not isinstance(self.schema_version, str)
             or not self.schema_version.strip()
         ):
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="schema_identity_missing")
 
 
 def _strict_json(value: object) -> JsonValue:
@@ -445,16 +502,16 @@ def _strict_json(value: object) -> JsonValue:
         return value
     if isinstance(value, float):
         if not isfinite(value):
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="output_float_not_finite")
         return value
     if isinstance(value, Mapping):
         if any(not isinstance(key, str) for key in value):
-            raise PredictionOutputError
+            raise PredictionOutputError(cause_type="output_key_not_text")
         encoded: dict[str, JsonValue] = {cast(str, key): _strict_json(item) for key, item in value.items()}
         return MappingProxyType(encoded)
     if isinstance(value, (list, tuple)):
         return tuple(_strict_json(item) for item in value)
-    raise PredictionOutputError
+    raise PredictionOutputError(cause_type="output_type_unsupported")
 
 
 def _plain_json(value: JsonValue) -> object:
@@ -487,12 +544,16 @@ def prediction_result(
             validated = adapter.validate_python(raw)
             encoded = adapter.dump_python(validated, mode="json")
             outputs[name] = _strict_json(encoded)
+    except PredictionOutputError:
+        # PredictionOutputError is a ValueError, so the generic handler below
+        # would otherwise swallow a more specific cause raised inside the loop.
+        raise
     except (AttributeError, TypeError, ValueError, PydanticSerializationError):
-        raise PredictionOutputError from None
+        raise PredictionOutputError(cause_type="output_field_validation_failed") from None
 
     display = outputs.get("answer")
     if not isinstance(display, str) or not display.strip():
-        raise PredictionOutputError
+        raise PredictionOutputError(cause_type="answer_missing")
     result = PredictionResult(display, outputs, schema_id, schema_version)
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
@@ -502,7 +563,7 @@ def prediction_result(
     try:
         validate_declared_public_value(result.outputs)
     except ValueError:
-        raise PredictionOutputError from None
+        raise PredictionOutputError(cause_type="declared_output_rejected") from None
     return result
 
 

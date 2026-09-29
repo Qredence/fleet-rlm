@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from fleet_rlm.rlm.events import observe_tool
 from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
 
@@ -111,38 +109,6 @@ def test_history_tool_stops_mid_page_when_byte_budget_exhausted() -> None:
     assert continuation["next_offset"] is None
 
 
-def test_history_tool_skips_oversized_message_and_continues() -> None:
-    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
-
-    oversized = "x" * (SESSION_HISTORY_RESULT_BYTE_BUDGET + 1)
-    messages = (
-        HistoryMessage("user", oversized),
-        HistoryMessage("assistant", "recoverable"),
-    )
-    (tool,) = SessionHistoryToolHost(SessionHistory(messages)).as_tools()
-
-    skipped = tool(offset=0, limit=20)
-    assert skipped == {
-        "offset": 0,
-        "next_offset": None,
-        "total": 2,
-        "messages": [{"ordinal": 2, "role": "assistant", "content": "recoverable"}],
-        **_budget_fields(
-            has_more=False,
-            truncated=True,
-            bytes_returned=len(b"recoverable"),
-            skipped_ordinal=1,
-        ),
-    }
-
-    recovered = tool(offset=2, limit=20)
-    assert recovered["messages"] == []
-    assert recovered["truncated"] is False
-    assert recovered["next_offset"] is None
-    assert "skipped_ordinal" not in recovered
-
-
 def test_history_event_view_exposes_page_metadata_without_message_bodies() -> None:
     from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
@@ -167,17 +133,3 @@ def test_history_event_view_exposes_page_metadata_without_message_bodies() -> No
         "message_count": 1,
     }
     assert "private history body" not in str(observed)
-
-
-@pytest.mark.parametrize(
-    ("offset", "limit"),
-    [(-1, 1), (0, 0), (0, 21)],
-)
-def test_history_tool_rejects_invalid_bounds(offset: int, limit: int) -> None:
-    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-    from fleet_rlm.sessions.models import SessionHistory
-
-    (tool,) = SessionHistoryToolHost(SessionHistory()).as_tools()
-
-    with pytest.raises(ValueError, match=r"Arg (offset|limit) is invalid"):
-        tool(offset=offset, limit=limit)

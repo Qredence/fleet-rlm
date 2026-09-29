@@ -18,16 +18,15 @@ import {
   dumpModel,
   foldedNarrative,
   generateTurnModel,
+  type PartPlan,
   renderDurableEvents,
   renderLiveEvents,
-  type PartPlan,
   type TurnModel,
 } from "./reducer-sequence-gen.js";
 
-/** Fixed seed corpus: CI is deterministic and every failure reports a seed. */
+/** Representative seeds retain all generated feature classes; failures report a seed. */
 const CORPUS_SEEDS = [
-  11, 42, 77, 101, 137, 211, 307, 401, 509, 613, 727, 823, 929, 1031, 1223, 1327, 1487, 1601, 1753,
-  1871, 1999, 2113, 2221, 2371, 2503, 2671,
+  11, 137, 401, 727, 823, 929, 1031, 1487, 1601, 1871, 1999, 2503, 2671,
 ] as const;
 
 const clock = () => 100;

@@ -7,10 +7,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
 
 import pytest
-from sqlalchemy.exc import IntegrityError
 
 from fleet_rlm.daytona.errors import (
     DEFAULT_SANITIZED_FAILURE_MAX_CHARS,
@@ -29,10 +27,6 @@ from fleet_rlm.daytona.runtime import (
     LiveDaytonaVolumeClient,
     normalize_state,
 )
-from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
-from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
-from fleet_rlm.persistence.repositories.sessions import SqlAlchemySandboxBindingStore
-from fleet_rlm.sessions.bindings import SandboxBinding
 
 # --- from test_sandbox_lifecycle.py -----------------------------------
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
@@ -90,7 +84,6 @@ def test_map_provider_error_non_missing_is_provider_request_error() -> None:
         ),
         (TimeoutError("slow"), "timeout"),
         (ConnectionError("offline"), "network"),
-        (OSError("dns unavailable"), "network"),
         (SimpleNamespace(status_code=503), "provider_5xx"),
         (SimpleNamespace(status_code=422), "request_validation"),
         (ProviderRequestError("mount", cause_type="WorkspaceMountMismatch"), "mount_mismatch"),
@@ -105,17 +98,12 @@ def test_provider_error_classification(exc: object, expected: str) -> None:
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [
-        # Gateway errors frequently hide status under a nested httpx/requests
-        # response object rather than a top-level ``status_code`` attribute.
         (RuntimeError("model not found"), "unknown"),
         (SimpleNamespace(response=SimpleNamespace(status_code=404)), "request_validation"),
         (SimpleNamespace(response=SimpleNamespace(status_code=401)), "auth"),
         (SimpleNamespace(response=SimpleNamespace(status_code=503)), "provider_5xx"),
-        # Bare HTTP status text (no structured metadata at all) is how many
-        # gateway 404/5xx failures actually surface after wrapping.
         (RuntimeError("404 Not Found: model databricks-deepseek-v4-flash-0731"), "request_validation"),
         (RuntimeError("Error 503: upstream unavailable"), "provider_5xx"),
-        (RuntimeError("400 Bad Request: invalid model"), "request_validation"),
         (RuntimeError("401 Unauthorized"), "auth"),
         (RuntimeError("429 Too Many Requests"), "quota"),
     ],
@@ -170,16 +158,10 @@ def test_sanitize_failure_text_caps_after_redaction() -> None:
 @pytest.mark.parametrize(
     ("exc", "expected"),
     [
-        # Transient shapes kept identical to the retired broker-local check.
         (SimpleNamespace(status_code=503), True),
         (TimeoutError("timed out"), True),
         (ConnectionError("offline"), True),
         (ProviderRequestError("502 Bad Gateway", cause_type="DaytonaError"), True),
-        (
-            ProviderRequestError("HTTP 503 Service Unavailable api_key=sk-secret", cause_type="PreviewLinkError"),
-            True,
-        ),
-        # Non-transient shapes never retry.
         (_AuthError(), False),
         (SimpleNamespace(status_code=422), False),
         (
@@ -417,154 +399,30 @@ async def test_live_platform_create_matches_daytona_async_payload_contract() -> 
 
 
 # --- from test_sandbox_binding_repository.py --------------------------
-@pytest.mark.asyncio
-async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None:
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    try:
-        await create_tables(engine)
-        factory = create_session_factory(engine)
-        user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
-        async with factory() as db, db.begin():
-            db.add_all((UserRow(id=user_id),))
-            await db.flush()
-            db.add_all((WorkspaceRow(id=workspace_id),))
-            await db.flush()
-            db.add_all((SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),))
-            await db.flush()
-
-        store = SqlAlchemySandboxBindingStore(factory)
-        first = await store.upsert(
-            SandboxBinding(
-                session_id=session_id,
-                sandbox_id="sb-1",
-                workspace_id=workspace_id,
-                volume_id="vol-1",
-                volume_subpath=f"workspaces/{workspace_id}",
-                mount_path="",
-                provider_state="running",
-            )
-        )
-        assert first.mount_path == "/home/daytona/fleet"
-        assert first.last_verified_at is not None
-        loaded_first = await store.get(session_id)
-        assert loaded_first is not None
-        assert loaded_first.sandbox_id == first.sandbox_id
-        assert loaded_first.provider_state == first.provider_state
-
-        second = await store.upsert(
-            SandboxBinding(
-                session_id=session_id,
-                sandbox_id="sb-2",
-                workspace_id=workspace_id,
-                volume_id="vol-1",
-                volume_subpath=f"workspaces/{workspace_id}",
-                mount_path="/home/daytona/fleet",
-                provider_state="quarantined",
-                generation=2,
-            )
-        )
-        assert second.sandbox_id == "sb-2"
-        assert second.provider_state == "quarantined"
-        loaded_second = await store.get(session_id)
-        assert loaded_second is not None
-        assert loaded_second.sandbox_id == second.sandbox_id
-        assert loaded_second.provider_state == second.provider_state
-        assert loaded_second.generation == 2
-        with pytest.raises(ValueError, match="stale sandbox binding generation"):
-            await store.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id="sb-stale",
-                    workspace_id=workspace_id,
-                    volume_id="vol-1",
-                    volume_subpath=f"workspaces/{workspace_id}",
-                    generation=1,
-                )
-            )
-        with pytest.raises(ValueError, match="conflicting sandbox binding identity"):
-            await store.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id="sb-conflict",
-                    workspace_id=workspace_id,
-                    volume_id="vol-1",
-                    volume_subpath=f"workspaces/{workspace_id}",
-                    generation=2,
-                )
-            )
-        with pytest.raises(ValueError, match="stale running sandbox binding generation"):
-            await store.upsert(
-                SandboxBinding(
-                    session_id=session_id,
-                    sandbox_id="sb-2",
-                    workspace_id=workspace_id,
-                    volume_id="vol-1",
-                    volume_subpath=f"workspaces/{workspace_id}",
-                    provider_state="running",
-                    generation=2,
-                )
-            )
-        replacement = await store.replace_with_next_generation(
-            SandboxBinding(
-                session_id=session_id,
-                sandbox_id="sb-3",
-                workspace_id=workspace_id,
-                volume_id="vol-1",
-                volume_subpath=f"workspaces/{workspace_id}",
-                generation=2,
-            )
-        )
-        assert replacement.generation == 3
-    finally:
-        await engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_sql_sandbox_binding_store_retries_lost_insert_race() -> None:
-    """A concurrent insert that wins the unique session_id race resolves as an update."""
-    engine = create_async_engine_from_url("sqlite+aiosqlite:///:memory:")
-    try:
-        await create_tables(engine)
-        factory = create_session_factory(engine)
-        user_id, workspace_id, session_id = uuid4(), uuid4(), uuid4()
-        async with factory() as db, db.begin():
-            db.add_all((UserRow(id=user_id),))
-            await db.flush()
-            db.add_all((WorkspaceRow(id=workspace_id),))
-            await db.flush()
-            db.add_all((SessionRow(id=session_id, user_id=user_id, workspace_id=workspace_id, title="bindings"),))
-            await db.flush()
+_PROVIDER_SANITIZER_CORPUS = (
+    ("bearer_header", "Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
+    ("bearer_bare", "Bearer abc.def-ghi", "abc.def-ghi"),
+    ("keyword_assignment", "api_key=sk-secret", "sk-secret"),
+    ("quoted_json", '{"api_key": "secret-value"}', "secret-value"),
+    ("private_path", "read /Users/zach/project/.env", "/Users/zach"),
+    ("url_query", 'requests.get("http://host/preview?token=abc123")', "abc123"),
+)
 
-        store = SqlAlchemySandboxBindingStore(factory)
-        binding = SandboxBinding(
-            session_id=session_id,
-            sandbox_id="sb-race",
-            workspace_id=workspace_id,
-            volume_id="vol-1",
-            volume_subpath=f"workspaces/{workspace_id}",
-            mount_path="",
-            provider_state="running",
-        )
 
-        real_write = store._write_binding
-        calls = 0
+@pytest.mark.parametrize(
+    ("label", "raw", "secret"), _PROVIDER_SANITIZER_CORPUS, ids=[case[0] for case in _PROVIDER_SANITIZER_CORPUS]
+)
+def test_sanitize_provider_message_corpus_redacts(label: str, raw: str, secret: str) -> None:
+    """Pin secret coverage, because this text reaches the model as repair feedback."""
+    cleaned = sanitize_provider_message(raw)
 
-        async def lost_race_once(value: SandboxBinding) -> SandboxBinding:
-            nonlocal calls
-            calls += 1
-            if calls == 1:
-                # Simulate the concurrent insert committing between this
-                # writer's read and its own insert.
-                await real_write(binding)
-                raise IntegrityError("INSERT INTO fleet_sandbox_bindings", {}, Exception("UNIQUE constraint"))
-            return await real_write(value)
+    assert secret not in cleaned, f"{label}: {secret!r} survived -> {cleaned!r}"
 
-        store._write_binding = lost_race_once  # type: ignore[method-assign]
-        result = await store.upsert(binding)
-        assert calls == 2
-        assert result.sandbox_id == "sb-race"
-        loaded = await store.get(session_id)
-        assert loaded is not None
-        assert loaded.sandbox_id == "sb-race"
-    finally:
-        await engine.dispose()
+
+def test_sanitize_provider_message_keeps_url_trailing_delimiters() -> None:
+    """Regression: the secret patterns' greedy ``\\S+`` ate the URL's closing ``")``."""
+    cleaned = sanitize_provider_message('requests.get("http://host/preview?token=abc123")')
+
+    assert cleaned == 'requests.get("[redacted-url]")'

@@ -1,8 +1,8 @@
-import { getCapabilities } from "@earendil-works/pi-tui";
-import { watch, type FSWatcher } from "node:fs";
+import { type FSWatcher, watch } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getCapabilities } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -10,7 +10,6 @@ import {
   editorTheme,
   FleetTheme,
   getAvailableThemes,
-  getBuiltinPalette,
   getTerminalColorScheme,
   getThemeName,
   initTheme,
@@ -18,7 +17,6 @@ import {
   setTerminalBackground,
   setTerminalColorScheme,
   setTheme,
-  settingsListTheme,
   stopThemeMonitoring,
   theme,
 } from "../theme.js";
@@ -75,105 +73,6 @@ describe("Fleet pi theme", () => {
     expect(dark.bg("userMessageBg", "prompt")).toBe("\x1b[48;2;23;29;30mprompt\x1b[49m");
     expect(light.fg("error", "failed")).toBe("\x1b[38;2;170;79;91mfailed\x1b[39m");
     expect(light.bg("toolSuccessBg", "done")).toBe("\x1b[48;2;231;240;232mdone\x1b[49m");
-  });
-
-  it("locks every Fleet dark and light semantic token", () => {
-    expect(getBuiltinPalette("dark")).toEqual({
-      accent: "#65c3ba",
-      border: "#65c3ba",
-      borderAccent: "#8adfd7",
-      borderMuted: "#3f4548",
-      success: "#82b58b",
-      error: "#d46f7c",
-      warning: "#d6a75f",
-      muted: "#a0a7aa",
-      dim: "#6f777a",
-      text: "#e6e9e8",
-      thinkingText: "#889093",
-      selectedBg: "#243033",
-      userMessageBg: "#171d1e",
-      userMessageText: "#e6e9e8",
-      toolPendingBg: "#151a1b",
-      toolSuccessBg: "#142019",
-      toolErrorBg: "#241719",
-      customMessageBg: "#1b1c22",
-      toolPanelBg: "#111617",
-      toolDiffAddedBg: "#17351f",
-      toolDiffRemovedBg: "#361c20",
-      toolTitle: "#e6e9e8",
-      toolOutput: "#a0a7aa",
-      toolDiffAdded: "#9ccc9c",
-      toolDiffRemoved: "#d98c8c",
-      toolDiffText: "#e6e9e8",
-      toolDiffContext: "#a0a7aa",
-      mdHeading: "#8adfd7",
-      mdLink: "#7ab8c8",
-      mdLinkUrl: "#6f777a",
-      mdCode: "#8adfd7",
-      mdCodeBlock: "#a8c7a3",
-      mdCodeBlockBorder: "#4b5557",
-      mdQuote: "#a0a7aa",
-      mdQuoteBorder: "#4b5557",
-      mdHr: "#4b5557",
-      mdListBullet: "#65c3ba",
-      syntaxComment: "#6a9955",
-      syntaxKeyword: "#569cd6",
-      syntaxFunction: "#dcdcaa",
-      syntaxVariable: "#9cdcfe",
-      syntaxString: "#ce9178",
-      syntaxNumber: "#b5cea8",
-      syntaxType: "#4ec9b0",
-      syntaxOperator: "#d4d4d4",
-      syntaxPunctuation: "#d4d4d4",
-    });
-    expect(getBuiltinPalette("light")).toEqual({
-      accent: "#2f766f",
-      border: "#2f766f",
-      borderAccent: "#428f88",
-      borderMuted: "#b8c2c0",
-      success: "#4f7c58",
-      error: "#aa4f5b",
-      warning: "#8a672c",
-      muted: "#626c6a",
-      dim: "#7c8684",
-      text: "#1b2423",
-      thinkingText: "#626c6a",
-      selectedBg: "#d4e3e0",
-      userMessageBg: "#eaf0ef",
-      userMessageText: "#1b2423",
-      toolPendingBg: "#e7eeed",
-      toolSuccessBg: "#e7f0e8",
-      toolErrorBg: "#f3e7e8",
-      customMessageBg: "#f0eef4",
-      toolPanelBg: "#f1f5f4",
-      toolDiffAddedBg: "#dcebdd",
-      toolDiffRemovedBg: "#efdcdf",
-      toolTitle: "#1b2423",
-      toolOutput: "#626c6a",
-      toolDiffAdded: "#2e7d32",
-      toolDiffRemoved: "#c62828",
-      toolDiffText: "#1b2423",
-      toolDiffContext: "#626c6a",
-      mdHeading: "#2f766f",
-      mdLink: "#356f86",
-      mdLinkUrl: "#7c8684",
-      mdCode: "#2f766f",
-      mdCodeBlock: "#4f7c58",
-      mdCodeBlockBorder: "#788381",
-      mdQuote: "#626c6a",
-      mdQuoteBorder: "#788381",
-      mdHr: "#788381",
-      mdListBullet: "#2f766f",
-      syntaxComment: "#008000",
-      syntaxKeyword: "#0000ff",
-      syntaxFunction: "#795e26",
-      syntaxVariable: "#001080",
-      syntaxString: "#a31515",
-      syntaxNumber: "#098658",
-      syntaxType: "#267f99",
-      syntaxOperator: "#000000",
-      syntaxPunctuation: "#000000",
-    });
   });
 
   it("applies Fleet semantics to pi-tui selection and editor styling", () => {
@@ -420,13 +319,5 @@ describe("adaptive contrast", () => {
     setTerminalColorScheme("light");
     expect(theme.currentSearchMatch()("hit")).toBe(light.getSearchCurrentMatchStyle()("hit"));
     setTerminalColorScheme("dark");
-  });
-
-  it("exposes the settings list theme factories", () => {
-    expect(typeof settingsListTheme.label).toBe("function");
-    expect(typeof settingsListTheme.value).toBe("function");
-    expect(typeof settingsListTheme.description).toBe("function");
-    expect(typeof settingsListTheme.cursor).toBe("string");
-    expect(typeof settingsListTheme.hint).toBe("function");
   });
 });

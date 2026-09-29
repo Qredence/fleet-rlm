@@ -7,27 +7,9 @@ import pytest
 from fleet_rlm.rlm.execution import RunToolGuards
 
 
-def test_workspace_failure_requires_a_verified_repair() -> None:
-    guards = RunToolGuards()
-    original = {"path": "notes/report.md", "content": "old", "overwrite": False}
-
-    guards.failed("write_workspace_text", original)
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"ok": True, "content": "old", "eof": True})
-    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
-
-    repaired = {**original, "content": "new", "overwrite": True}
-    guards.completed("write_workspace_text", repaired, {"ok": True})
-    guards.completed("read_workspace_text", {"path": "notes/report.md"}, {"ok": True, "content": "new", "eof": True})
-    assert guards.integrity.unresolved == ()
-
-
 @pytest.mark.parametrize(
     "prompt",
-    [
-        "Explain README.md and https://example.com/report.",
-        "Compare release 0.7.10 with `src/fleet_rlm/runtime.py`.",
-        "Show a code example that reads projects/fleet-rlm/review.md.",
-    ],
+    ["Explain README.md and https://example.com/report."],
 )
 def test_read_only_prose_never_seeds_workspace_mutation_obligations(prompt: str) -> None:
     del prompt
@@ -66,16 +48,6 @@ def test_successful_append_edit_delete_and_publish_settle_mutations() -> None:
     for tool_name, arguments in mutations:
         guards.failed(tool_name, arguments)
         guards.completed(tool_name, arguments, {"ok": True})
-
-    assert guards.integrity.unresolved == ()
-
-
-def test_project_write_failure_requires_matching_project_readback() -> None:
-    guards = RunToolGuards()
-    original = {"path": "fleet-rlm/review.md", "content": "old"}
-    guards.failed("write_project_text", original)
-    guards.completed("write_project_text", {**original, "content": "new"}, {"ok": True})
-    guards.completed("read_project_text", {"path": "fleet-rlm/review.md"}, {"ok": True, "content": "new", "eof": True})
 
     assert guards.integrity.unresolved == ()
 

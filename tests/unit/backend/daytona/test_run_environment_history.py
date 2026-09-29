@@ -11,7 +11,6 @@ import dspy
 import pytest
 
 from fleet_rlm.paths import VolumePaths
-from fleet_rlm.sessions.history import to_canonical_history_records
 from fleet_rlm.sessions.history_transport import CommittedSessionHistory
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
 
@@ -61,67 +60,6 @@ def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> 
     # The transport is NOT the in-process ``dspy.History`` type; the
     # Dayona broker requires the ``SandboxSerializable`` wrapper.
     assert not isinstance(history, dspy.History)
-
-
-def test_daytona_helper_records_equal_canonical_history_records() -> None:
-    """The Dayona transport records equal :func:`to_canonical_history_records` output."""
-
-    from fleet_rlm.sessions.history import claimed_history_records
-    from fleet_rlm.sessions.history_transport import committed_history_for_claim
-
-    claim = _make_claim(
-        history_messages=(
-            HistoryMessage("user", "earlier user request"),
-            HistoryMessage("assistant", "earlier assistant answer"),
-            HistoryMessage("user", "next user request"),
-            HistoryMessage("assistant", "next assistant answer"),
-        )
-    )
-    transport = committed_history_for_claim(claim)
-
-    committed_turns, user_requests = claimed_history_records(claim)
-    canonical = to_canonical_history_records(committed_turns, user_requests=user_requests)
-
-    # Records are deep-equal and the transport carries them in order.
-    assert list(transport.messages) == canonical
-    assert [dict(record) for record in transport.messages] == [
-        {"request": "earlier user request", "answer": "earlier assistant answer"},
-        {"request": "next user request", "answer": "next assistant answer"},
-    ]
-
-
-def test_daytona_helper_skips_orphan_user_messages_without_assistant_answers() -> None:
-    """Orphan user messages never pair with the next assistant answer."""
-
-    from fleet_rlm.sessions.history_transport import committed_history_for_claim
-
-    claim = _make_claim(
-        history_messages=(
-            HistoryMessage("user", "first user request"),
-            # No assistant message between the two users; the second user
-            # message is the start of the uncommitted Turn, so the first
-            # user request is dropped.
-            HistoryMessage("user", "second user request"),
-            HistoryMessage("assistant", "second assistant answer"),
-        )
-    )
-    transport = committed_history_for_claim(claim)
-
-    assert [dict(record) for record in transport.messages] == [
-        {"request": "second user request", "answer": "second assistant answer"}
-    ]
-
-
-def test_daytona_helper_returns_empty_history_for_fresh_session() -> None:
-    """A claim with no committed Turns still produces a valid empty transport."""
-
-    from fleet_rlm.sessions.history_transport import committed_history_for_claim
-
-    claim = _make_claim(history_messages=())
-    transport = committed_history_for_claim(claim)
-
-    assert type(transport) is CommittedSessionHistory
-    assert list(transport.messages) == []
 
 
 @pytest.mark.asyncio

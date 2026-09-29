@@ -29,8 +29,10 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.observability.tracing import _local_tracking_server_available
 from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.result import truncate_public_text
 from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.skills.catalog import stable_skill_id
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
@@ -41,18 +43,30 @@ from tests.live.backend._mvp_support import (
     _call_shapes,
     _live_settings,
     _sandbox_environment_names,
+    _semantic_tool_diagnostic,
     _sse_chunks,
     _sse_finish_diagnostic,
     _strict_cleanup,
 )
 
-pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
+# The live marker rides the live cases individually so the deterministic
+# failure-receipt cases at the end of this module run in the non-live lane.
 
 _CONTRACT_ID = "fleet.live-daytona-mvp"
 _CAPABILITY_ID = "fleet.live-daytona-mvp"
 _WORKSPACE_PATH = "notes/findings.md"
 _RECEIPT_SCHEMA = "fleet.daytona-mvp-proof/v2"
 _EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
+
+# Bounds for the failure-receipt ``diagnostic`` block: a receipt records triage
+# facts, never a stream dump. Per-string, per-collection, per-depth, and a
+# final encoded ceiling are all enforced before the payload is written. The
+# depth budget reaches the semantic-tool bound shapes (section → shapes → call →
+# argument), which is where a type-binding failure is diagnosed.
+_DIAGNOSTIC_TEXT_CHARS = 200
+_DIAGNOSTIC_MAX_ENTRIES = 12
+_DIAGNOSTIC_MAX_DEPTH = 6
+_DIAGNOSTIC_MAX_CHARS = 6_000
 
 
 class LiveDaytonaMVPResult(dspy.Signature):
@@ -307,12 +321,94 @@ def _write_receipt_if_requested(payload: dict[str, object]) -> None:
         _atomic_write_receipt(Path(raw_path).expanduser().resolve(), payload)
 
 
+def _bound_diagnostic(value: Any, *, depth: int = 0) -> Any:
+    """Recursively cap a diagnostic value so a failure receipt cannot balloon."""
+    if isinstance(value, str):
+        return truncate_public_text(value, max_len=_DIAGNOSTIC_TEXT_CHARS)
+    if depth >= _DIAGNOSTIC_MAX_DEPTH:
+        return "[truncated]"
+    if isinstance(value, dict):
+        entries = list(value.items())[:_DIAGNOSTIC_MAX_ENTRIES]
+        return {str(key): _bound_diagnostic(item, depth=depth + 1) for key, item in entries}
+    if isinstance(value, (list, tuple)):
+        return [_bound_diagnostic(item, depth=depth + 1) for item in list(value)[:_DIAGNOSTIC_MAX_ENTRIES]]
+    if isinstance(value, (set, frozenset)):
+        items = sorted(value, key=repr)[:_DIAGNOSTIC_MAX_ENTRIES]
+        return [_bound_diagnostic(item, depth=depth + 1) for item in items]
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    return truncate_public_text(str(value), max_len=_DIAGNOSTIC_TEXT_CHARS)
+
+
+def _stream_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, Any]:
+    """Bounded, metadata-only stream summary mirroring ``_sse_finish_diagnostic``.
+
+    Those facts currently reach only a pytest assertion message, so a failed live
+    run leaves nothing durable behind. The same evidence keeps the failure
+    receipt triageable: chunk histogram, finish reasons, error texts, tool
+    errors, the semantic-tool classification, and SUBMIT call shapes.
+    """
+    if not chunks:
+        return {}
+    chunk_types: dict[str, int] = {}
+    tool_names_by_call: dict[str, str] = {}
+    finish_reasons: list[str] = []
+    error_texts: list[str] = []
+    tool_errors: list[dict[str, str]] = []
+    for chunk in chunks:
+        kind = str(chunk.get("type", "?"))
+        chunk_types[kind] = chunk_types.get(kind, 0) + 1
+        if kind == "tool-input-available":
+            call_id = str(chunk.get("toolCallId", ""))
+            name = str(chunk.get("toolName", ""))
+            if call_id and name:
+                tool_names_by_call[call_id] = name
+        elif kind == "finish":
+            finish_reasons.append(str(chunk.get("finishReason", "")))
+        elif kind == "error":
+            error_texts.append(str(chunk.get("errorText", "")))
+        elif kind == "tool-output-error":
+            tool_errors.append(
+                {
+                    "toolName": tool_names_by_call.get(str(chunk.get("toolCallId", "")), "unknown"),
+                    "errorText": str(chunk.get("errorText", "")),
+                }
+            )
+    bounded: dict[str, Any] = _bound_diagnostic(
+        {
+            "chunk_types": dict(sorted(chunk_types.items())),
+            "finish_reasons": finish_reasons,
+            "error_texts": error_texts,
+            "tool_errors": tool_errors,
+            "semantic_tool": _semantic_tool_diagnostic(chunks),
+            "submit_call_shapes": _call_shapes(chunks, "SUBMIT"),
+        }
+    )
+    encoded = json.dumps(bounded, ensure_ascii=False, default=str, sort_keys=True)
+    if len(encoded) <= _DIAGNOSTIC_MAX_CHARS:
+        return bounded
+    return {
+        "truncated": True,
+        "encoded_chars": len(encoded),
+        "sections": sorted(bounded),
+        # Sorted keys lead with the histogram and the short lists, so the head
+        # keeps the highest-value triage evidence when the budget is exceeded.
+        "head": truncate_public_text(encoded, max_len=_DIAGNOSTIC_MAX_CHARS),
+    }
+
+
+def _failure_diagnostic(streams: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
+    """Per-stream diagnostics keyed by phase label; streams without chunks are omitted."""
+    return {label: _stream_diagnostic(chunks) for label, chunks in streams.items() if chunks}
+
+
 def _failure_receipt(
     *,
     candidate: dict[str, object],
     started_at: str,
     category: str,
     phase: str,
+    diagnostic: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     return {
         "schema": _RECEIPT_SCHEMA,
@@ -322,8 +418,27 @@ def _failure_receipt(
             "finished_at": datetime.now(UTC).isoformat(),
         },
         "failure": {"category": category, "phase": phase},
+        "diagnostic": diagnostic or {},
         "passed": False,
     }
+
+
+def _assert_tracking_server_reachable(tracking_uri: str) -> None:
+    """Fail closed when a lane's span-evidence precondition is unmet.
+
+    ``configure_tracing`` fails soft, so an unreachable tracking server would
+    otherwise surface only as a confusing ``len(trace_ids) == 1`` assertion — or
+    as a lane that appears to certify spans while producing none. The production
+    probe is reused so the precondition matches the real failure mode. Non-HTTP
+    URIs (SQLite, Databricks) are not socket-probed, exactly as in production.
+    """
+    if _local_tracking_server_available(tracking_uri):
+        return
+    pytest.fail(
+        f"native semantic lane requires a reachable MLflow tracking server at {tracking_uri!r} "
+        "(settings.mlflow_tracking_uri); start it or point the policy at a reachable URI, because "
+        "configure_tracing fails soft and this lane certifies one RLM.execute span"
+    )
 
 
 def _session_volume_files(sandbox: Any, session_dir: str) -> list[bytes]:
@@ -359,6 +474,8 @@ def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any
     return UUID(str(starts[0]["messageId"]))
 
 
+@pytest.mark.live_daytona
+@pytest.mark.timeout(900)
 def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(tmp_path: Path) -> None:
     settings = _live_settings(tmp_path).model_copy(
         update={
@@ -459,6 +576,8 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
     assert cleanup_failures == ()
 
 
+@pytest.mark.live_daytona
+@pytest.mark.timeout(900)
 def test_complete_daytona_mvp_through_fastapi(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
@@ -481,6 +600,7 @@ def test_complete_daytona_mvp_through_fastapi(
     sandbox_ids: set[str] = set()
     resources: Any | None = None
     phase = "composition"
+    turn_chunks: dict[str, list[dict[str, Any]]] = {}
     receipt_written = False
     scenario_passed = False
     cleanup_failures: tuple[str, ...] = ()
@@ -626,6 +746,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 )
                 assert first.status_code == 200
                 first_chunks, first_done = _sse_chunks(first)
+                turn_chunks["first_turn"] = first_chunks
                 first_run_id = _run_id_from_sse(first_chunks, label="first_turn", resources=resources)
                 assert first_delta_probe.first_delta_at is not None, _sse_finish_diagnostic(first_chunks)
                 first_delta_ms = int((first_delta_probe.first_delta_at - first_started) * 1000)
@@ -753,6 +874,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 )
                 assert second.status_code == 200
                 second_chunks, second_done = _sse_chunks(second)
+                turn_chunks["second_turn"] = second_chunks
                 second_run_id = _run_id_from_sse(second_chunks, label="second_turn", resources=resources)
                 first_stream_count, first_stream_fields = _streaming_evidence(first_chunks)
                 second_stream_count, second_stream_fields = _streaming_evidence(second_chunks)
@@ -883,6 +1005,7 @@ def test_complete_daytona_mvp_through_fastapi(
                             started_at=started_at_text,
                             category=category,
                             phase=failure_phase,
+                            diagnostic=_failure_diagnostic(turn_chunks),
                         )
                     )
                     receipt_written = True
@@ -896,11 +1019,14 @@ def test_complete_daytona_mvp_through_fastapi(
                     started_at=started_at_text,
                     category="proof_failed",
                     phase=phase,
+                    diagnostic=_failure_diagnostic(turn_chunks),
                 )
             )
         raise
 
 
+@pytest.mark.live_daytona
+@pytest.mark.timeout(900)
 def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     """Verify single and ordered batch semantic calls through the live Daytona broker."""
     settings = _live_settings(tmp_path).model_copy(
@@ -920,6 +1046,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     app = create_app(settings=settings)
     sandbox_ids: set[str] = set()
     resources: Any | None = None
+    turn_chunks: dict[str, list[dict[str, Any]]] = {}
     receipt_written = False
     scenario_passed = False
     cleanup_failures: tuple[str, ...] = ()
@@ -967,6 +1094,10 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     )
 
     try:
+        phase = "tracking_precondition"
+        _assert_tracking_server_reachable(settings.mlflow_tracking_uri)
+        # Past the precondition, failures before the Turn are composition failures.
+        phase = "composition"
         with TestClient(app) as client:
             inventory = app.state.runtime_inventory
             resources = inventory.daytona_runtime_owner
@@ -990,6 +1121,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 assert created.status_code == 201
                 session_id = UUID(created.json()["id"])
 
+                phase = "native_semantic_calls"
                 response = client.post(
                     f"/api/sessions/{session_id}/turns",
                     json={
@@ -1013,6 +1145,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 )
                 assert response.status_code == 200
                 chunks, done = _sse_chunks(response)
+                turn_chunks["native_semantic_calls"] = chunks
                 assert done == 1
                 _assert_sse_stop(chunks, label="native_semantic_calls")
                 assert sum(chunk.get("type") == "start" for chunk in chunks) == 1
@@ -1130,6 +1263,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                             started_at=started_at_text,
                             category="cleanup_failed" if cleanup_failures else "proof_failed",
                             phase="cleanup" if cleanup_failures else "native_semantic_calls",
+                            diagnostic=_failure_diagnostic(turn_chunks),
                         )
                     )
                     receipt_written = True
@@ -1142,7 +1276,145 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                     candidate=candidate,
                     started_at=started_at_text,
                     category="proof_failed",
-                    phase="composition",
+                    phase=phase,
+                    diagnostic=_failure_diagnostic(turn_chunks),
                 )
             )
         raise
+
+
+def _synthetic_failure_chunks() -> list[dict[str, Any]]:
+    """Minimal failed stream: the shape a live run produced when it failed untriageably."""
+    return [
+        {"type": "start", "messageId": "synthetic-run"},
+        {"type": "data-rlm-code", "data": {"code": "SUBMIT(answer=summary, evidence=evidence)"}},
+        {
+            "type": "tool-input-available",
+            "toolCallId": "call-1",
+            "toolName": "verify_semantic_work",
+            "input": {
+                "iteration_token": "iteration-1",
+                "single_result": "ROOT",
+                "batch_results": ["ALPHA", "BETA", "GAMMA"],
+                "accumulator": ["iteration-1", "ROOT", "ALPHA", "BETA", "GAMMA"],
+            },
+        },
+        {"type": "tool-output-error", "toolCallId": "call-1", "errorText": "semantic verification failed"},
+        {"type": "error", "errorText": "Turn output is invalid " * 40},
+        {"type": "finish", "finishReason": "error"},
+    ]
+
+
+def test_failure_receipt_renders_bounded_stream_diagnostic() -> None:
+    """A failed run persists the triage facts that otherwise reach only a pytest message."""
+    receipt = _failure_receipt(
+        candidate={"sha": "a" * 40, "branch": "work", "tracked_tree_clean": True, "models": {"root": "m"}},
+        started_at="2026-09-29T00:00:00+00:00",
+        category="proof_failed",
+        phase="native_semantic_calls",
+        diagnostic=_failure_diagnostic({"native_semantic_calls": _synthetic_failure_chunks()}),
+    )
+    assert set(receipt) == {"schema", "candidate", "timing", "failure", "diagnostic", "passed"}
+    assert receipt["schema"] == _RECEIPT_SCHEMA
+    assert receipt["failure"] == {"category": "proof_failed", "phase": "native_semantic_calls"}
+    assert receipt["passed"] is False
+    diagnostic = receipt["diagnostic"]["native_semantic_calls"]
+    assert diagnostic["chunk_types"] == {
+        "start": 1,
+        "data-rlm-code": 1,
+        "tool-input-available": 1,
+        "tool-output-error": 1,
+        "error": 1,
+        "finish": 1,
+    }
+    assert diagnostic["finish_reasons"] == ["error"]
+    assert diagnostic["tool_errors"] == [
+        {"toolName": "verify_semantic_work", "errorText": "semantic verification failed"}
+    ]
+    assert diagnostic["error_texts"][0].startswith("Turn output is invalid")
+    assert len(diagnostic["error_texts"][0]) == _DIAGNOSTIC_TEXT_CHARS
+    assert diagnostic["semantic_tool"]["classification"] == "semantic_tool_execution_failed"
+    submit_shapes = diagnostic["submit_call_shapes"]
+    assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
+    assert submit_shapes[0]["positional_count"] == 0
+    assert len(json.dumps(receipt)) <= _DIAGNOSTIC_MAX_CHARS + 1_000
+    # No captured stream still writes a well-formed receipt.
+    assert (
+        _failure_receipt(
+            candidate={"sha": "a" * 40, "branch": "work", "tracked_tree_clean": False},
+            started_at="2026-09-29T00:00:00+00:00",
+            category="proof_failed",
+            phase="composition",
+        )["diagnostic"]
+        == {}
+    )
+
+
+def test_stream_diagnostic_caps_long_strings_and_collections() -> None:
+    """Per-string and per-collection caps keep a noisy stream out of the receipt."""
+    long_text = "x" * 5_000
+    chunks: list[dict[str, Any]] = [
+        {"type": "error", "errorText": long_text},
+        {"type": "finish", "finishReason": long_text},
+        *({"type": "tool-output-error", "toolCallId": f"call-{index}", "errorText": long_text} for index in range(50)),
+    ]
+    diagnostic = _stream_diagnostic(chunks)
+    assert diagnostic["chunk_types"] == {"error": 1, "finish": 1, "tool-output-error": 50}
+    assert [len(text) for text in diagnostic["error_texts"]] == [_DIAGNOSTIC_TEXT_CHARS]
+    assert [len(text) for text in diagnostic["finish_reasons"]] == [_DIAGNOSTIC_TEXT_CHARS]
+    assert len(diagnostic["tool_errors"]) == _DIAGNOSTIC_MAX_ENTRIES
+    assert all(len(entry["errorText"]) == _DIAGNOSTIC_TEXT_CHARS for entry in diagnostic["tool_errors"])
+    assert len(json.dumps(diagnostic)) <= _DIAGNOSTIC_MAX_CHARS
+
+
+def test_stream_diagnostic_truncates_when_the_budget_is_exceeded() -> None:
+    """An adversarial stream falls back to a bounded marker instead of a stream dump."""
+    long_text = "x" * 5_000
+    chunks: list[dict[str, Any]] = [
+        *({"type": "error", "errorText": long_text} for _ in range(_DIAGNOSTIC_MAX_ENTRIES)),
+        *({"type": "finish", "finishReason": long_text} for _ in range(_DIAGNOSTIC_MAX_ENTRIES)),
+        *(
+            {"type": "tool-output-error", "toolCallId": f"call-{index}", "errorText": long_text}
+            for index in range(_DIAGNOSTIC_MAX_ENTRIES)
+        ),
+        *(
+            {
+                "type": "tool-input-available",
+                "toolCallId": f"call-{index}",
+                "toolName": "verify_semantic_work",
+                "input": {f"key-{field}": long_text for field in range(_DIAGNOSTIC_MAX_ENTRIES)},
+            }
+            for index in range(_DIAGNOSTIC_MAX_ENTRIES)
+        ),
+    ]
+    diagnostic = _stream_diagnostic(chunks)
+    assert diagnostic["truncated"] is True
+    assert diagnostic["encoded_chars"] > _DIAGNOSTIC_MAX_CHARS
+    assert diagnostic["sections"] == [
+        "chunk_types",
+        "error_texts",
+        "finish_reasons",
+        "semantic_tool",
+        "submit_call_shapes",
+        "tool_errors",
+    ]
+    assert len(diagnostic["head"]) == _DIAGNOSTIC_MAX_CHARS
+    receipt = _failure_receipt(
+        candidate={"sha": "a" * 40, "branch": "work", "tracked_tree_clean": True},
+        started_at="2026-09-29T00:00:00+00:00",
+        category="proof_failed",
+        phase="native_semantic_calls",
+        diagnostic={"native_semantic_calls": diagnostic},
+    )
+    assert len(json.dumps(receipt)) <= _DIAGNOSTIC_MAX_CHARS + 1_000
+
+
+def test_tracking_precondition_fails_closed_and_names_the_uri() -> None:
+    """A lane that certifies spans must not pass while its tracking server is dead."""
+    with pytest.raises(pytest.fail.Exception, match=r"http://127\.0\.0\.1:1"):
+        _assert_tracking_server_reachable("http://127.0.0.1:1")
+
+
+def test_tracking_precondition_accepts_non_http_tracking_uri() -> None:
+    """Non-HTTP URIs are not socket-probed, matching ``configure_tracing``."""
+    _assert_tracking_server_reachable("databricks")

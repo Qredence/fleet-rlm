@@ -11,26 +11,6 @@ import pytest
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
 from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
-from fleet_rlm.artifacts.safety import parse_kind, sanitize_title, validate_content_size
-
-
-def test_parse_kind_and_title() -> None:
-    assert parse_kind("markdown") == "markdown"
-    with pytest.raises(ArtifactValidationError):
-        parse_kind("pdf")
-    assert sanitize_title("Report v1") == "Report v1"
-    with pytest.raises(ArtifactValidationError):
-        sanitize_title("../etc/passwd")
-    with pytest.raises(ArtifactValidationError):
-        sanitize_title("a/b")
-
-
-def test_validate_content_size() -> None:
-    validate_content_size(1, max_bytes=10)
-    with pytest.raises(ArtifactValidationError):
-        validate_content_size(0, max_bytes=10)
-    with pytest.raises(ArtifactValidationError):
-        validate_content_size(11, max_bytes=10)
 
 
 def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:

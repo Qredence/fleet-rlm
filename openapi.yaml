@@ -2771,11 +2771,6 @@ components:
                   type: array
                 - type: 'null'
                 title: Affordances
-              skillId:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Skillid
             required:
             - skill_id
             - name
@@ -3110,36 +3105,16 @@ components:
                 - type: string
                 - type: 'null'
                 title: Media Type
-              mediaType:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Mediatype
               byte_size:
                 anyOf:
                 - type: integer
                 - type: 'null'
                 title: Byte Size
-              byteSize:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Bytesize
               checksum_sha256:
                 anyOf:
                 - type: string
                 - type: 'null'
                 title: Checksum Sha256
-              checksumSha256:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Checksumsha256
-              artifactId:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Artifactid
             required:
             - artifact_id
             title: ArtifactData
@@ -3204,16 +3179,6 @@ components:
                 type: string
               value:
                 title: Value
-              schemaId:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Schemaid
-              schemaVersion:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Schemaversion
             required:
             - schema_id
             - schema_version

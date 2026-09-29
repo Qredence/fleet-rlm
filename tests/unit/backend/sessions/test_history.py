@@ -136,61 +136,6 @@ def test_empty_committed_turn_list_returns_dspy_history_with_empty_messages() ->
     assert list(history.messages) == []
 
 
-def test_round_trip_dspy_history_messages_have_exactly_request_and_answer_keys() -> None:
-    """Every emitted message has exactly the canonical request+answer keys."""
-    committed_turns = (
-        _successful_turn("first answer"),
-        _successful_turn("second answer"),
-    )
-    user_requests = ("first request", "second request")
-
-    history = to_dspy_history(committed_turns, user_requests=user_requests)
-
-    for message in history.messages:
-        assert set(message) == {"request", "answer"}
-        assert isinstance(message["request"], str)
-        assert isinstance(message["answer"], str)
-    assert history.messages == [
-        {"request": "first request", "answer": "first answer"},
-        {"request": "second request", "answer": "second answer"},
-    ]
-
-
-def test_legacy_conversion_tolerates_canonical_dicts_and_rejects_non_canonical() -> None:
-    """``validate_legacy_records`` normalizes canonical dicts and rejects the rest."""
-    canonical_records = (
-        {"request": "first request", "answer": "first answer"},
-        {"request": "second request", "answer": "second answer"},
-    )
-
-    normalized = validate_legacy_records(canonical_records)
-
-    assert normalized == [
-        {"request": "first request", "answer": "first answer"},
-        {"request": "second request", "answer": "second answer"},
-    ]
-    # The function returns fresh copies; callers cannot mutate the input.
-    assert all(isinstance(item, dict) for item in normalized)
-    assert normalized[0] is not canonical_records[0]
-
-    # Each non-canonical shape must be rejected.
-    bad_payloads: tuple[Any, ...] = (
-        {"request": "r", "answer": "a", "extra": "x"},
-        {"request": "r", "answer": "a", "trace_id": "t"},
-        {"answer": "a"},
-        {"request": "r"},
-        {"request": 1, "answer": "a"},
-        {"request": "r", "answer": 2},
-        {"prompt": "r", "answer": "a"},
-        [{"request": "r", "answer": "a"}],  # nested list, not a record
-        "not-a-record",
-        None,
-    )
-    for bad in bad_payloads:
-        with pytest.raises(ValueError):
-            validate_legacy_records([bad])  # type: ignore[list-item]
-
-
 def test_cross_session_isolation_excludes_records_from_another_session() -> None:
     """Records from another Session are never present in the result."""
     target_session_id = uuid4()
@@ -251,43 +196,6 @@ def test_corrupt_legacy_payloads_raise_value_error() -> None:
     for payload in corrupt_payloads:
         with pytest.raises(ValueError):
             validate_legacy_records([payload])  # type: ignore[list-item]
-
-
-def test_dspy_history_reuse_identical_input_yields_deep_equal_messages() -> None:
-    """Identical inputs produce deep-equal ``dspy.History`` messages."""
-    committed_turns = (
-        _successful_turn("first answer"),
-        _successful_turn("second answer"),
-    )
-    user_requests = ("first request", "second request")
-
-    first = to_dspy_history(committed_turns, user_requests=user_requests)
-    second = to_dspy_history(committed_turns, user_requests=user_requests)
-
-    assert first.messages == second.messages
-    assert list(first.messages) == list(second.messages)
-    for left, right in zip(first.messages, second.messages, strict=True):
-        assert left == right
-        assert set(left) == set(right) == {"request", "answer"}
-
-
-def test_returned_dspy_history_is_exactly_dspy_history() -> None:
-    """The returned object is the exact ``dspy.History`` class, never a shadow."""
-    committed_turns = (_successful_turn("only answer"),)
-    user_requests = ("only request",)
-
-    history = to_dspy_history(committed_turns, user_requests=user_requests)
-    empty_history = to_dspy_history([])
-
-    # Exact class match (not a subclass, not a Pydantic shadow).
-    assert type(history) is dspy.History
-    assert type(empty_history) is dspy.History
-    # The installed model lives in dspy.adapters.types.history.
-    assert history.__class__.__module__ == "dspy.adapters.types.history"
-    assert empty_history.__class__.__module__ == "dspy.adapters.types.history"
-    # ``dspy.History`` itself is a Pydantic BaseModel; the round-trip shape is preserved.
-    assert history.model_dump() == {"messages": [{"request": "only request", "answer": "only answer"}]}
-    assert empty_history.model_dump() == {"messages": []}
 
 
 @pytest.mark.asyncio

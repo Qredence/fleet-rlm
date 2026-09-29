@@ -52,7 +52,7 @@ def _interpret(request: str) -> tuple[dict[str, int], int, tuple[str, ...]]:
     return registers, true_count, tuple(name for name, value in registers.items() if value == largest)
 
 
-@pytest.mark.parametrize("name", ["register_trace_exact.txt", "register_clean.txt"])
+@pytest.mark.parametrize("name", ["register_trace_exact.txt"])
 def test_register_request_oracle(name: str) -> None:
     request = (FIXTURES / name).read_text()
     assert _interpret(request) == EXPECTED

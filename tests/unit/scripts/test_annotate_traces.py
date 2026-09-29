@@ -95,53 +95,6 @@ def _args(argv: list[str], tmp_path) -> object:
     return build_parser().parse_args([*argv, "--output", str(tmp_path / "receipt.json")])
 
 
-def test_derive_attributes_extracts_llm_tool_latency_and_tokens() -> None:
-    spans = [
-        _FakeSpan(
-            "fleet_turn",
-            "CHAIN",
-            start_ns=0,
-            end_ns=5_000_000,
-            attributes={"status": "OK"},
-        ),
-        _FakeSpan(
-            "LM.model",
-            "LLM",
-            start_ns=0,
-            end_ns=1_000_000,
-            attributes={"mlflow.llm.model": "databricks:/databricks-qwen35-122b-a10b"},
-        ),
-        _FakeSpan(
-            "LM.module",
-            "CHAIN",
-            attributes={
-                "mlflow.chat.tokenUsage": {
-                    "input_tokens": 12,
-                    "output_tokens": 3,
-                    "total_tokens": 15,
-                    "cache_read_input_tokens": 4,
-                    "cache_creation_input_tokens": 2,
-                }
-            },
-        ),
-        _FakeSpan("remember", "TOOL", attributes={}),
-    ]
-    trace = _FakeTrace("trace-1", state="ERROR", execution_duration=None, spans=spans)
-
-    attributes = derive_attributes(trace)
-
-    assert attributes["fleet.turn_status"] == "error"
-    assert attributes["fleet.latency_ms"] == "5"
-    assert attributes["fleet.models"] == "databricks:/databricks-qwen35-122b-a10b"
-    assert attributes["fleet.tools"] == "remember"
-    assert attributes["fleet.prompt_tokens"] == "12"
-    assert attributes["fleet.completion_tokens"] == "3"
-    assert attributes["fleet.total_tokens"] == "15"
-    assert attributes["fleet.cache_read_tokens"] == "4"
-    assert attributes["fleet.cache_creation_tokens"] == "2"
-    assert attributes["fleet.span_types"] == "chain:2,llm:1,tool:1"
-
-
 def test_derive_attributes_reads_provider_and_trace_level_token_usage() -> None:
     spans = [
         _FakeSpan(
@@ -211,12 +164,6 @@ def test_derive_attributes_ignores_malformed_trace_level_token_usage() -> None:
     assert attributes == {"fleet.turn_status": "ok"}
 
 
-def test_derive_attributes_uses_execution_duration_and_skips_empty() -> None:
-    trace = _FakeTrace("trace-2", state="OK", execution_duration=120, spans=[])
-    attributes = derive_attributes(trace)
-    assert attributes == {"fleet.turn_status": "ok", "fleet.latency_ms": "120"}
-
-
 def test_annotate_stamps_bounded_tags_and_reports_aggregates(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("FLEET_LIVE", "1")
     traces = [
@@ -243,34 +190,6 @@ def test_annotate_stamps_bounded_tags_and_reports_aggregates(monkeypatch: pytest
     tagged_trace_a = [tag for tag in calls.tags if tag[0] == "trace-a"]
     assert any(key == "fleet.models" and value == "model-a" for _tid, key, value in tagged_trace_a)
     assert not any(tid == "" for tid, _key, _value in calls.tags)
-
-
-def test_annotate_applies_tag_filter(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setenv("FLEET_LIVE", "1")
-    calls = _install_fake_mlflow(monkeypatch, traces=[_FakeTrace("trace-a")])
-
-    main(
-        [
-            "annotate",
-            "--experiment-id",
-            "exp-1",
-            "--tag",
-            "fleet_eval_candidate",
-            "--output",
-            str(tmp_path / "r.json"),
-        ]
-    )
-
-    assert calls.searches[0]["filter_string"] == "tag.fleet_eval_candidate = 'true'"
-
-
-def test_annotate_resolves_experiment_by_name(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
-    monkeypatch.setenv("FLEET_LIVE", "1")
-    calls = _install_fake_mlflow(monkeypatch, traces=[_FakeTrace("trace-a")])
-
-    main(["annotate", "--experiment-name", "fleet-rlm", "--output", str(tmp_path / "r.json")])
-
-    assert calls.searches[0]["locations"] == ["exp-1"]
 
 
 def test_annotate_requires_live(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

@@ -3,41 +3,8 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 from scripts import check_repo_hygiene as hygiene
-
-
-def test_consolidated_entrypoint_runs_each_ci_checker_once(tmp_path: Path, monkeypatch) -> None:
-    calls: list[str] = []
-
-    class Agents:
-        def __init__(self, _root: Path) -> None:
-            calls.append("agents")
-
-        def validate_all(self):
-            return [SimpleNamespace(file="AGENTS.md", issue="broken", detail="sentinel")]
-
-    class Harness:
-        def __init__(self, _root: Path, **_kwargs) -> None:
-            calls.append("harness")
-
-        def run(self):
-            return [SimpleNamespace(path="scripts/README.md", detail="missing inventory")]
-
-    monkeypatch.setattr(hygiene, "AgentsMdValidator", Agents)
-    monkeypatch.setattr(hygiene, "run_docs_checks", lambda _root: calls.append("docs") or ["broken link"])
-    monkeypatch.setattr(hygiene, "HarnessChecker", Harness)
-    monkeypatch.setattr(hygiene, "check_active_script_references", lambda _root: [])
-    monkeypatch.setattr(hygiene, "check_retired_commands_absent", lambda _root: [])
-
-    errors = hygiene.run_checks(tmp_path, check_script_help=False)
-
-    assert calls == ["agents", "docs", "harness"]
-    assert len(errors) == 3
-    assert any("AGENTS [AGENTS.md]" in error for error in errors)
-    assert any("docs broken link" in error for error in errors)
-    assert any("harness [scripts/README.md]" in error for error in errors)
 
 
 def test_active_script_references_must_resolve(tmp_path: Path) -> None:

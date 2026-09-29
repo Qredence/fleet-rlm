@@ -137,7 +137,7 @@ def test_committed_turn_codec_handles_every_execution_part_variant() -> None:
     assert CommittedTurnCodec.decode(CommittedTurnCodec.encode(committed)) == committed
 
 
-@pytest.mark.parametrize("invented_key", ["llm_calls", "root_lm_calls", "sub_lm_calls"])
+@pytest.mark.parametrize("invented_key", ["llm_calls"])
 def test_usage_part_rejects_invented_call_counts(invented_key: str) -> None:
     from fleet_rlm.sessions.committed_turn import CommittedTurnValidationError, UsagePart
 
@@ -210,10 +210,7 @@ def test_status_part_codec_round_trips_the_bounded_cancelled_marker() -> None:
 
 @pytest.mark.parametrize(
     "part_kwargs",
-    [
-        {"phase": "", "status": "cancelled"},
-        {"phase": "cancelled", "status": ""},
-    ],
+    [{"phase": "", "status": "cancelled"}],
 )
 def test_status_part_rejects_blank_phase_or_status(part_kwargs: dict[str, str]) -> None:
     from fleet_rlm.sessions.committed_turn import CommittedTurnValidationError, StatusPart

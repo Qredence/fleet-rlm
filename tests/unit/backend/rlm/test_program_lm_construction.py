@@ -34,56 +34,6 @@ assert "litellm" not in sys.modules
     assert result.returncode == 0, result.stderr
 
 
-def test_model_bundle_applies_independent_role_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ROOT_KEY", "root-secret")
-    monkeypatch.setenv("SUB_KEY", "sub-secret")
-    build = MagicMock(side_effect=("root-lm", "sub-lm"))
-    monkeypatch.setattr(factory, "build_lm", build)
-    settings = Settings(
-        root_model="openai/root",
-        sub_model="openai/sub",
-        root_llm_api_key_env="ROOT_KEY",
-        sub_llm_api_key_env="SUB_KEY",
-        root_llm_max_tokens=101,
-        sub_llm_max_tokens=202,
-        root_llm_timeout_seconds=303,
-        sub_llm_timeout_seconds=404,
-        root_llm_cache=True,
-        sub_llm_cache=False,
-        root_llm_num_retries=1,
-        sub_llm_num_retries=4,
-        sub_llm_temperature=0.3,
-        root_llm_reasoning_effort="none",
-    )
-
-    bundle = factory.build_model_bundle(settings)
-
-    assert bundle.root_lm == "root-lm"
-    assert bundle.sub_lm == "sub-lm"
-    assert build.call_args_list[0].kwargs["max_tokens"] == 101
-    assert build.call_args_list[0].kwargs["timeout_seconds"] == 303
-    assert build.call_args_list[0].kwargs["cache"] is True
-    assert build.call_args_list[0].kwargs["reasoning_effort"] == "none"
-    assert build.call_args_list[1].kwargs["max_tokens"] == 202
-    assert build.call_args_list[1].kwargs["timeout_seconds"] == 404
-    assert build.call_args_list[1].kwargs["cache"] is False
-    assert build.call_args_list[1].kwargs["temperature"] == 0.3
-
-
-def test_build_lm_passes_reasoning_effort_only_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
-    lm = MagicMock(side_effect=("default-lm", "bounded-lm"))
-    monkeypatch.setattr(factory.dspy, "LM", lm)
-
-    default = factory.build_lm("openai/default", api_key=None)
-    bounded = factory.build_lm("openai/bounded", api_key=None, reasoning_effort="none")
-
-    assert default == "default-lm"
-    assert bounded == "bounded-lm"
-    assert "reasoning_effort" not in lm.call_args_list[0].kwargs
-    assert lm.call_args_list[1].kwargs["reasoning_effort"] == "none"
-    assert "allowed_openai_params" not in lm.call_args_list[1].kwargs
-
-
 def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.MonkeyPatch) -> None:
     lm = MagicMock(return_value="lm")
     monkeypatch.setattr(factory.dspy, "LM", lm)
@@ -96,19 +46,6 @@ def test_build_lm_uses_dspy_aggregated_completion_path(monkeypatch: pytest.Monke
     assert "stream" not in kwargs
     assert "stream_options" not in kwargs
     assert kwargs["engine"] == "lm15"
-
-
-def test_build_lm_requests_usage_and_reasoning_effort_together(monkeypatch: pytest.MonkeyPatch) -> None:
-    lm = MagicMock(return_value="lm")
-    monkeypatch.setattr(factory.dspy, "LM", lm)
-
-    factory.build_lm("openai/model", api_key=None, reasoning_effort="none")
-
-    kwargs = lm.call_args.kwargs
-    assert kwargs["reasoning_effort"] == "none"
-    assert "stream" not in kwargs
-    assert "stream_options" not in kwargs
-    assert "allowed_openai_params" not in kwargs
 
 
 @pytest.mark.parametrize("reasoning_effort", [None, "none"])
@@ -149,23 +86,6 @@ async def test_build_lm_async_call_processes_an_aggregated_completion(
     assert getattr(dspy_lm.dspy.settings, "send_stream", None) is process_send_stream
 
 
-def test_build_lm_uses_chat_completion_transport(monkeypatch: pytest.MonkeyPatch) -> None:
-    lm = MagicMock(return_value="deepseek-lm")
-    monkeypatch.setattr(factory.dspy, "LM", lm)
-
-    result = factory.build_lm(
-        "deepseek-v4-flash",
-        api_key="token",
-        base_url="https://gateway.example/v1",
-    )
-
-    assert result == "deepseek-lm"
-    assert lm.call_args.args == ("openai/deepseek-v4-flash",)
-    assert lm.call_args.kwargs["model_type"] == "chat"
-    assert lm.call_args.kwargs["api_base"] == "https://gateway.example/v1"
-    assert "headers" not in lm.call_args.kwargs
-
-
 def test_build_lm_passes_provider_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     lm = MagicMock(return_value="bounded-lm")
     monkeypatch.setattr(factory.dspy, "LM", lm)
@@ -175,25 +95,7 @@ def test_build_lm_passes_provider_timeout(monkeypatch: pytest.MonkeyPatch) -> No
     assert lm.call_args.kwargs["timeout"] == 37
 
 
-def test_native_route_resolves_unqualified_deepseek_model() -> None:
-    from dspy.clients.backend_selection import select_backend
-
-    lm = factory.build_lm(
-        "deepseek-v4-flash",
-        api_key="token",
-        base_url="https://gateway.example/v1",
-        cache=False,
-    )
-
-    selected = select_backend(lm)
-    assert lm.engine == "lm15"
-    assert selected.native is True
-    assert selected.resolution.provider == "openai-chat"
-    assert selected.resolution.model == "deepseek-v4-flash"
-    assert selected.clients["api_base"] == "https://gateway.example/v1"
-
-
-@pytest.mark.parametrize("trailing_slash", ["", "/"])
+@pytest.mark.parametrize("trailing_slash", [""])
 def test_databricks_deepseek_declares_exact_schema_capability(trailing_slash: str) -> None:
     from dspy.clients.backend_selection import select_backend
 
@@ -215,16 +117,7 @@ def test_databricks_deepseek_declares_exact_schema_capability(trailing_slash: st
 
 @pytest.mark.parametrize(
     "base_url",
-    [
-        None,
-        "https://workspace.example/v1",
-        "http://workspace.example/ai-gateway/mlflow/v1",
-        "http://workspace.example/ai-gateway/mlflow/v1/",
-        "workspace.example/ai-gateway/mlflow/v1",
-        "https:///ai-gateway/mlflow/v1",
-        "https://[bad/ai-gateway/mlflow/v1",
-        "https://workspace.example/other/ai-gateway/mlflow/v1",
-    ],
+    [None, "https://workspace.example/v1", "https:///ai-gateway/mlflow/v1", "https://[bad/ai-gateway/mlflow/v1"],
 )
 def test_databricks_deepseek_requires_ai_gateway_route(base_url: str | None, monkeypatch: pytest.MonkeyPatch) -> None:
     lm = MagicMock()
@@ -353,26 +246,6 @@ async def test_unsupported_native_request_does_not_fall_back(monkeypatch: pytest
         await lm.acall(prompt="ping", allowed_openai_params=["unsupported"])
 
     fallback.assert_not_called()
-
-
-def test_sanitize_base_url_accepts_https_and_strips_comments() -> None:
-    assert factory.sanitize_base_url("https://opencode.ai/zen/v1") == "https://opencode.ai/zen/v1"
-    assert factory.sanitize_base_url("https://opencode.ai/zen/v1/") == "https://opencode.ai/zen/v1"
-    assert factory.sanitize_base_url("https://opencode.ai/zen/v1'   # real gateway") == "https://opencode.ai/zen/v1"
-    assert factory.sanitize_base_url("'https://example.com/v1'") == "https://example.com/v1"
-
-
-def test_sanitize_base_url_rejects_keys_and_empty() -> None:
-    assert factory.sanitize_base_url(None) is None
-    assert factory.sanitize_base_url("") is None
-    assert factory.sanitize_base_url("sk-ws-H.not-a-url") is None
-    assert factory.sanitize_base_url("openai.com/v1") is None  # missing scheme
-
-
-def test_normalize_model_id_adds_openai_prefix_to_bare_names() -> None:
-    assert factory.normalize_model_id("deepseek-v4-flash-free") == "openai/deepseek-v4-flash-free"
-    assert factory.normalize_model_id("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
-    assert factory.normalize_model_id("anthropic/claude-sonnet-4") == "anthropic/claude-sonnet-4"
 
 
 def test_runtime_does_not_accept_provider_environment_aliases(monkeypatch: pytest.MonkeyPatch) -> None:

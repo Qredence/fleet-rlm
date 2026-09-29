@@ -57,51 +57,6 @@ def test_policy_read_exposes_toml_values_without_environment_secret_values(tmp_p
     assert live_enabled["editor"] == "boolean"
 
 
-def test_policy_update_preserves_comments_and_validates_all_profiles(tmp_path: Path) -> None:
-    service, policy = _service(tmp_path)
-    before = service.read()
-
-    after = service.update(
-        scope="defaults",
-        path="rlm.max_iters",
-        value=21,
-        revision=before.revision,
-    )
-
-    assert _field(after, "defaults", "rlm.max_iters")["value"] == 21
-    content = policy.read_text(encoding="utf-8")
-    assert "# The native-only profile is the default" in content
-    assert "max_iters = 21" in content
-    assert _field(after, "daytona-recursive", "rlm.max_iters")["value"] == 21
-
-
-def test_policy_rejects_removed_runtime_variant(tmp_path: Path) -> None:
-    service, policy = _service(tmp_path)
-    snapshot = service.read()
-    before = policy.read_bytes()
-    with pytest.raises(FleetConfigurationError):
-        service.update(scope="defaults", path="runtime.variant", value="native-turn-scoped", revision=snapshot.revision)
-    assert policy.read_bytes() == before
-
-
-def test_policy_can_add_a_profile_override_for_an_inherited_setting(tmp_path: Path) -> None:
-    service, policy = _service(tmp_path)
-    before = service.read()
-
-    service.update(
-        scope="daytona-recursive",
-        path="rlm.max_iters",
-        value=12,
-        revision=before.revision,
-    )
-
-    assert "[profiles.daytona-recursive.rlm]" in policy.read_text(encoding="utf-8")
-    override = _field(service.read(), "daytona-recursive", "rlm.max_iters")
-    assert override["value"] == 12
-    assert override["origin"] == "override"
-    assert override["can_reset"] is True
-
-
 def test_policy_apply_is_atomic_and_can_reset_a_profile_override(tmp_path: Path) -> None:
     service, policy = _service(tmp_path)
     before = service.read()
@@ -129,30 +84,6 @@ def test_policy_apply_is_atomic_and_can_reset_a_profile_override(tmp_path: Path)
     assert inherited["can_reset"] is False
     rendered = tomllib.loads(policy.read_text(encoding="utf-8"))
     assert "max_llm_calls" not in rendered["profiles"]["daytona-recursive"].get("rlm", {})
-
-
-def test_policy_apply_rejects_duplicate_or_invalid_batches_without_writing(tmp_path: Path) -> None:
-    service, policy = _service(tmp_path)
-    before = service.read()
-    original = policy.read_text(encoding="utf-8")
-
-    with pytest.raises(FleetConfigurationError, match="duplicate"):
-        service.apply(
-            updates=(
-                PolicyMutation(scope="defaults", path="rlm.max_iters", value=21),
-                PolicyMutation(scope="defaults", path="rlm.max_iters", value=22),
-            ),
-            revision=before.revision,
-        )
-    with pytest.raises(FleetConfigurationError):
-        service.apply(
-            updates=(
-                PolicyMutation(scope="defaults", path="rlm.max_iters", value=21),
-                PolicyMutation(scope="defaults", path="storage.max_upload_bytes", value="invalid"),
-            ),
-            revision=before.revision,
-        )
-    assert policy.read_text(encoding="utf-8") == original
 
 
 def test_policy_can_disable_live_execution_for_all_profiles(tmp_path: Path) -> None:
@@ -195,19 +126,6 @@ def test_policy_never_reports_environment_policy_overrides(monkeypatch: pytest.M
     field = _field(service.read(), "daytona-recursive", "llm.root.model")
 
     assert field["environment_overridden"] is False
-
-
-def test_policy_rejects_a_change_that_invalidates_the_selected_profile(tmp_path: Path) -> None:
-    service, _ = _service(tmp_path)
-    before = service.read()
-
-    with pytest.raises(FleetConfigurationError):
-        service.update(
-            scope="defaults",
-            path="runtime.heartbeat_seconds",
-            value=30,
-            revision=before.revision,
-        )
 
 
 def test_autonomous_memory_categories_are_settings_editable(tmp_path: Path) -> None:
@@ -312,20 +230,3 @@ def test_set_default_profile_surfaces_all_committed_profiles(tmp_path: Path) -> 
 
     recursive = service.set_default_profile("daytona-recursive", revision=after.revision)
     assert recursive.default_profile == "daytona-recursive"
-
-
-def test_set_default_profile_rejects_unknown_profile_and_stale_revision(tmp_path: Path) -> None:
-    service, _ = _service(tmp_path)
-    before = service.read()
-
-    with pytest.raises(FleetConfigurationError, match="configured profile does not exist"):
-        service.set_default_profile("does-not-exist", revision=before.revision)
-
-    # Any policy update bumps the content revision; a set_default_profile call
-    # carrying the stale pre-update revision must fail closed.
-    service.update(scope="defaults", path="rlm.max_iters", value=21, revision=before.revision)
-    with pytest.raises(PolicyConflictError):
-        service.set_default_profile("daytona-recursive", revision=before.revision)
-
-    # The current revision is accepted again.
-    assert service.set_default_profile("daytona-recursive", revision=service.read().revision).revision

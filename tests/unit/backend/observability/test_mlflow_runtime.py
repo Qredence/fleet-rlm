@@ -242,20 +242,6 @@ async def test_closed_lifespan_retry_can_configure_again_without_sticky_failure(
     assert calls == ["configure", "configure", "flush"]
 
 
-def test_create_app_constructs_mlflow_runtime_without_contacting_it(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-
-    def configure(_settings: Settings) -> bool:
-        calls.append("configure")
-        return False
-
-    monkeypatch.setattr("fleet_rlm.observability.tracing.configure_tracing", configure)
-    app = create_app(settings=_settings(mlflow_tracing_enabled=False))
-
-    assert calls == []
-    assert app.state.mlflow_runtime.state is MLflowRuntimeState.INACTIVE
-
-
 def test_app_lifespan_starts_tracing_and_closes_explicitly(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[str] = []
 

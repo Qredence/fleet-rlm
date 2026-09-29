@@ -1,6 +1,6 @@
 /**
  * REGENERATED from openapi.yaml by scripts/generate_tui_chunk_validation.py.
- * Do not hand-edit — run `make api-sync`. The dataAlternatives dual
+ * Do not hand-edit — run `make api-sync`. The dataAlternatives
  * snake_case/camelCase id tolerances are the generator's declared input.
  */
 
@@ -62,7 +62,6 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
     phase: isNullableString,
     trust: isNullableString,
     affordances: isNullableStringArray,
-    skillId: isNullableString,
   },
   "data-rlm-code": {
     code: isString,
@@ -97,12 +96,8 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
     title: isNullableString,
     name: isNullableString,
     media_type: isNullableString,
-    mediaType: isNullableString,
     byte_size: isNullableInteger,
-    byteSize: isNullableInteger,
     checksum_sha256: isNullableString,
-    checksumSha256: isNullableString,
-    artifactId: isNullableString,
   },
   "data-usage": {
     usage: isRecord,
@@ -110,8 +105,6 @@ export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
   "data-structured-result": {
     schema_id: isString,
     schema_version: isString,
-    schemaId: isNullableString,
-    schemaVersion: isNullableString,
   },
 };
 
@@ -130,10 +123,10 @@ export const dataRequiredFields: Record<string, readonly string[]> = {
 
 export const dataAlternatives: Record<string, readonly (readonly string[])[]> = {
   "data-status": [["status"], ["detail"], ["message"]],
-  "data-skill": [["skill_id"], ["skillId"]],
+  "data-skill": [["skill_id"]],
   "data-attachment": [["attachment_id"], ["attachmentId"]],
-  "data-artifact": [["artifact_id"], ["artifactId"]],
-  "data-structured-result": [["schema_id", "schema_version"], ["schemaId", "schemaVersion"]],
+  "data-artifact": [["artifact_id"]],
+  "data-structured-result": [["schema_id", "schema_version"]],
 };
 
 function isString(value: unknown): value is string {

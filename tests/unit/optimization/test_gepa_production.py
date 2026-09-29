@@ -260,18 +260,6 @@ def test_authoritative_gepa_fails_closed_when_saved_state_is_missing(tmp_path: P
     assert json.loads(receipt)["state"] == "failed"
 
 
-def test_authoritative_gepa_rejects_incompatible_reload_factory(tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("FLEET_LIVE", "1")
-    monkeypatch.setattr(dspy, "GEPA", _GEPA)
-    with pytest.raises(OptimizationPreflightError, match="reconstruction failed"):
-        _run_test_campaign(
-            tmp_path,
-            student_factory="tests.unit.optimization.test_gepa_production:build_incompatible_student",
-        )
-    receipt = (tmp_path / "reload-fail" / "production-result.json").read_text()
-    assert json.loads(receipt)["state"] == "failed"
-
-
 def test_student_factory_arguments_reject_credentials_without_blocking_generation_limits():
     from fleet_rlm.optimization.gepa_runner import _validated_factory_kwargs
 

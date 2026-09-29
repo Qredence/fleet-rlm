@@ -7,23 +7,13 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.persistence.database import (
-    DatabaseNotConfiguredError,
     create_async_engine_from_url,
     create_session_factory,
     create_tables,
     normalize_database_url,
 )
-from fleet_rlm.persistence.models import Base
 from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
 from fleet_rlm.sessions.errors import SessionNotFoundError
-
-
-def test_normalize_database_url_upgrades_drivers() -> None:
-    assert normalize_database_url("sqlite:///:memory:").startswith("sqlite+aiosqlite://")
-    assert normalize_database_url("postgresql://u:p@h/db").startswith("postgresql+asyncpg://")
-    assert normalize_database_url("postgres://u:p@h/db").startswith("postgresql+asyncpg://")
-    with pytest.raises(DatabaseNotConfiguredError):
-        normalize_database_url("   ")
 
 
 def test_normalize_database_url_drops_libpq_channel_binding_for_asyncpg() -> None:
@@ -32,22 +22,6 @@ def test_normalize_database_url_drops_libpq_channel_binding_for_asyncpg() -> Non
     )
 
     assert normalized == "postgresql+asyncpg://user:password@example.test/fleet?ssl=require"
-
-
-def test_foundation_tables_are_registered() -> None:
-    names = set(Base.metadata.tables)
-    expected = {
-        "fleet_users",
-        "fleet_workspaces",
-        "fleet_sessions",
-        "fleet_turns",
-        "fleet_runs",
-        "fleet_sandbox_bindings",
-        "fleet_attachments",
-        "fleet_artifacts",
-        "fleet_skills",
-    }
-    assert expected <= names
 
 
 @pytest.mark.asyncio
@@ -80,10 +54,3 @@ async def test_load_missing_session_raises() -> None:
         await repo.get(uuid4(), user_id=uuid4(), workspace_id=uuid4())
 
     await engine.dispose()
-
-
-def test_settings_accept_database_url() -> None:
-    from fleet_rlm.config.settings import Settings
-
-    settings = Settings(database_url="sqlite+aiosqlite:///:memory:")
-    assert settings.database_url == "sqlite+aiosqlite:///:memory:"

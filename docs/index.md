@@ -29,7 +29,9 @@ generated contracts. The [architecture](../ARCHITECTURE.md) describes durable
 ownership; the [testing strategy](how-to-guides/testing-strategy.md) states
 the limits of local and live validation. Dated plans, measurements, and
 receipts retain their original evidence scope and do not set current runtime
-policy or certify a later revision.
+policy or certify a later revision. See the [branch simplification test-pruning
+receipt](testing/branch-simplification-test-pruning-receipt.md) for its
+reduction evidence.
 
 Regenerate `openapi.yaml` and the TUI HTTP types with `make api-sync`, stream
 fixtures with `make stream-sync`, and the profile matrix with

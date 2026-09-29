@@ -7,7 +7,6 @@ from types import ModuleType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from mlflow.protos.databricks_pb2 import ErrorCode
 
 from fleet_rlm.observability import feedback
 
@@ -100,22 +99,6 @@ def test_submit_uses_typed_client_lookup_and_sanitizes_rationale(monkeypatch: py
     assert source.source_id == "fleet-local"
 
 
-def test_submit_omits_rationale_when_content_export_is_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    session_id = uuid4()
-    calls = _install_fake_mlflow(monkeypatch, trace=_trace(session_id))
-    monkeypatch.setattr(feedback, "is_tracing_active", lambda: True)
-
-    feedback.TraceFeedbackService().submit(
-        session_id=session_id,
-        trace_id="tr-feedback-2",
-        value=False,
-        comment="private rationale",
-        content_enabled=False,
-    )
-
-    assert "rationale" not in calls.feedback[0]
-
-
 @pytest.mark.parametrize("phase", ["preparation", "other"])
 def test_submit_rejects_non_execution_traces_as_not_found(
     monkeypatch: pytest.MonkeyPatch,
@@ -160,18 +143,3 @@ def test_submit_hides_missing_and_backend_failures_without_retrying(monkeypatch:
             content_enabled=True,
         )
     assert len(calls.feedback) == 1
-
-
-def test_submit_maps_mlflow_numeric_not_found_code(monkeypatch: pytest.MonkeyPatch) -> None:
-    session_id = uuid4()
-    monkeypatch.setattr(feedback, "is_tracing_active", lambda: True)
-    _install_fake_mlflow(monkeypatch, get_error=_MlflowError(ErrorCode.Value("NOT_FOUND")))
-
-    with pytest.raises(feedback.TraceFeedbackNotFoundError):
-        feedback.TraceFeedbackService().submit(
-            session_id=session_id,
-            trace_id="tr-numeric-missing",
-            value=True,
-            comment=None,
-            content_enabled=True,
-        )

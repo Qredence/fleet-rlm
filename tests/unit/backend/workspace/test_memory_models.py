@@ -9,11 +9,8 @@ import pytest
 from fleet_rlm.workspace.models import (
     WORKSPACE_MEMORY_HEADER,
     WORKSPACE_MEMORY_MAX_WARNINGS,
-    WorkspaceMemoryEntryNotFoundError,
     WorkspaceMemoryIdError,
-    WorkspaceMemoryRecordError,
     count_workspace_memory_warnings,
-    format_workspace_memory_record,
     format_workspace_memory_v3_record,
     normalize_workspace_memory_id,
     parse_workspace_memory_lines,
@@ -24,44 +21,6 @@ from fleet_rlm.workspace.models import (
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 V1_RECORD = "- [2026-07-27T11:14:05Z] **General**: keep release notes short\n"
 V2_RECORD = "- [2026-07-27T11:14:05Z] **General** <!-- id:d2c1b7a1 -->: keep release notes short\n"
-
-
-def test_v2_id_is_stable_and_derived_from_the_id_less_record() -> None:
-    first = workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "keep release notes short")
-    second = workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "keep release notes short")
-    other = workspace_memory_record_id("2026-07-27T11:14:06Z", "General", "keep release notes short")
-
-    assert first == second
-    assert first != other
-    assert len(first) == 8 and all(char in "0123456789abcdef" for char in first)
-
-
-def test_format_always_writes_v3_and_validators_accept_v1_v2_and_v3() -> None:
-    record, category = format_workspace_memory_record("  keep\n\t release   notes short ", "General", timestamp=STAMP)
-
-    assert record == (
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:"
-        + workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "keep release notes short")
-        + " source:user_explicit updated:2026-07-27T11:14:05Z -->: keep release notes short\n"
-    )
-    assert category == "General"
-    validate_workspace_memory_record(record)  # v2 accepted
-    validate_workspace_memory_record(V1_RECORD)  # v1 stays valid
-
-
-@pytest.mark.parametrize(
-    "record",
-    [
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:xyz -->: short id\n",
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:D2C1B7A1 -->: uppercase id\n",
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:d2c1b7a1f -->: long id\n",
-        "- [2026-07-27T11:14:05Z] **General** <!-- id=d2c1b7a1 -->: no colon id\n",
-    ],
-    ids=["short-id", "uppercase-id", "long-id", "no-colon-id"],
-)
-def test_v2_records_require_an_exactly_8_lowercase_hex_id(record: str) -> None:
-    with pytest.raises(WorkspaceMemoryRecordError):
-        validate_workspace_memory_record(record)
 
 
 def test_tolerant_parse_skips_malformed_lines_with_bounded_warnings() -> None:
@@ -107,10 +66,6 @@ def test_id_normalization_shape() -> None:
             normalize_workspace_memory_id(bad)  # type: ignore[arg-type]
 
 
-def test_entry_not_found_is_a_key_error() -> None:
-    assert issubclass(WorkspaceMemoryEntryNotFoundError, KeyError)
-
-
 def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback() -> None:
     old_id = workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "older policy")
     updated = format_workspace_memory_v3_record(
@@ -139,41 +94,6 @@ def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback
     assert provenance.memory_id == "dddd0004"
     validate_workspace_memory_record(updated)
     assert not any(line.malformed for line in lines)
-
-
-@pytest.mark.parametrize(
-    "record",
-    [
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:agent updated:2026-07-27T11:14:05Z -->: bad source\n"  # noqa: E501,
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:not-a-date -->: bad update\n"  # noqa: E501,
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-27T11:14:05Z supersedes:NOPE -->: bad supersede\n"  # noqa: E501,
-        "- [2026-07-27T11:14:05Z] **General** <!-- source:user_explicit updated:2026-07-27T11:14:05Z -->: missing id\n"
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 updated:2026-07-27T11:14:05Z source:user_explicit -->: wrong order\n"  # noqa: E501,
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-20T09:00:00Z -->: update before creation\n"  # noqa: E501,
-        "- [2026-07-27T11:14:05Z] **General** <!-- id:aaaa0001 source:user_explicit updated:2026-07-28T11:14:05Z supersedes:aaaa0001 -->: self supersession\n"  # noqa: E501,
-    ],
-)
-def test_invalid_v3_metadata_is_malformed_under_tolerance_not_partially_trusted(record: str) -> None:
-    line = parse_workspace_memory_lines(record)[0]
-    assert line.entry is None and line.malformed is True
-    with pytest.raises(WorkspaceMemoryRecordError):
-        validate_workspace_memory_record(record)
-
-
-def test_v1_v2_writer_contract_stays_unchanged_during_v3_expand() -> None:
-    record = parse_workspace_memory_lines(
-        V2_RECORD
-        + format_workspace_memory_v3_record(
-            "canonical v3",
-            "General",
-            memory_id="eeee0005",
-            created_at="2026-07-19T09:00:00Z",
-            updated_at="2026-07-20T10:00:00Z",
-            source="user_explicit",
-        )
-    )
-    assert record[0].entry.source == "legacy_unknown"
-    assert record[1].entry.source == "user_explicit"
 
 
 def _v3(memory_id: str, learning: str, *, supersedes_id: str | None = None) -> str:

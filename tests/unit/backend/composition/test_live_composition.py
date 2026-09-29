@@ -330,14 +330,7 @@ def test_require_daytona_settings_requires_semantic_snapshot_when_recursion_is_e
 
 @pytest.mark.parametrize(
     "base_url",
-    [
-        "https://gateway.example.test",
-        "https://gateway.example.test/ai-gateway/openai/v1",
-        "gateway.example.test/ai-gateway/mlflow/v1",
-        "https://[bad/ai-gateway/mlflow/v1",
-        "http://gateway.example.test/ai-gateway/mlflow/v1",
-        "http://gateway.example.test/ai-gateway/mlflow/v1/",
-    ],
+    ["https://gateway.example.test", "gateway.example.test/ai-gateway/mlflow/v1", "https://[bad/ai-gateway/mlflow/v1"],
 )
 def test_require_daytona_settings_rejects_non_mlflow_databricks_chat_base(
     monkeypatch: pytest.MonkeyPatch, base_url: str

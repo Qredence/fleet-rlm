@@ -110,6 +110,10 @@ data, but tracking failures do not decide execution or commit. `optimization/`
 is separate from serving. Bundled Skills provide strategy and manifested
 resources without granting tools, permissions, budgets, or scheduling authority.
 
+Optional JSONL Turn captures use one writer owned by `RuntimeInventory` and
+closed by the application lifespan. Retention excludes active captures;
+capture failures do not affect execution or establish durable commitment.
+
 Non-secret runtime policy comes from `config/fleet.toml` through typed settings
 in `config/`. The selected profile names the environment variables from which
 secrets are read. Policy changes require a restart. Runtime state such as

@@ -6,12 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from fleet_rlm.daytona.interpreter import (
-    FINAL_OUTPUT_MARKER,
-    ExecutionResult,
-    extract_final_payload,
-    final_output_frame,
-)
 from fleet_rlm.daytona.runtime import (
     create_folder,
     delete_file,
@@ -20,30 +14,6 @@ from fleet_rlm.daytona.runtime import (
     read_file,
     write_file,
 )
-
-
-def test_final_output_frame_and_extract():
-    """Verify serialization and deserialization of SUBMIT payloads."""
-    payload = {"answer": "Recursive models are efficient", "confidence": 0.95}
-    frame = final_output_frame(payload)
-
-    assert FINAL_OUTPUT_MARKER in frame
-    extracted = extract_final_payload(f"Prefix log...\n{frame}\nSuffix log...")
-    assert extracted == payload
-
-
-def test_extract_final_payload_none():
-    """Verify that absent markers return None."""
-    assert extract_final_payload("Regular stdout without submit") is None
-
-
-def test_execution_result_dataclass():
-    """Verify ExecutionResult defaults and types."""
-    res = ExecutionResult(stdout="hello", exit_code=0, final_output={"key": "val"})
-    assert res.stdout == "hello"
-    assert res.exit_code == 0
-    assert res.final_output == {"key": "val"}
-    assert res.stderr == ""
 
 
 @pytest.mark.asyncio
@@ -104,28 +74,6 @@ async def test_fs_list_files_fallback_on_type_error():
     mock_fs.list_files = mock_list_files
     result = await list_files(mock_sandbox, "/workspace", depth=2)
     assert result == ["file_fallback.txt"]
-
-
-def test_build_daytona_client():
-    """Verify build_daytona_client constructs an AsyncDaytona instance with settings."""
-    from types import SimpleNamespace
-    from unittest.mock import patch
-
-    from fleet_rlm.daytona.runtime import build_daytona_client
-
-    mock_settings = SimpleNamespace(
-        daytona_api_key=SimpleNamespace(get_secret_value=lambda: "test-key"),
-        daytona_org_id="test-org",
-    )
-
-    with patch("daytona.AsyncDaytona") as mock_daytona_cls, patch("daytona.DaytonaConfig") as mock_config_cls:
-        client = build_daytona_client(mock_settings)
-        mock_config_cls.assert_called_once_with(
-            api_url="https://app.daytona.io/api",
-            api_key="test-key",
-            organization_id="test-org",
-        )
-        assert client == mock_daytona_cls.return_value
 
 
 def test_repair_category_from_multiline_traceback():

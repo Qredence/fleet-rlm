@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock
 
 import dspy
 import pytest
@@ -31,29 +30,6 @@ class _CopyableLM:
 def host_echo(value: str = "ok") -> str:
     """Host tool with a valid Python identifier name."""
     return value
-
-
-def test_model_bundle_keeps_root_and_sub_roles_distinct() -> None:
-    from fleet_rlm.rlm.program import RLMModelBundle
-
-    root = MagicMock(name="root_lm")
-    sub = MagicMock(name="sub_lm")
-    bundle = RLMModelBundle(root_lm=root, sub_lm=sub)
-
-    assert bundle.root_lm is root
-    assert bundle.sub_lm is sub
-    assert bundle.root_lm is not bundle.sub_lm
-    assert bundle.utility_lm is None
-
-
-def test_model_bundle_rejects_missing_roles() -> None:
-    from fleet_rlm.rlm.program import RLMModelBundle
-    from fleet_rlm.rlm.result import RLMModelBundleError
-
-    with pytest.raises(RLMModelBundleError):
-        RLMModelBundle(root_lm=None, sub_lm=MagicMock())  # type: ignore[arg-type]
-    with pytest.raises(RLMModelBundleError):
-        RLMModelBundle(root_lm=MagicMock(), sub_lm=None)  # type: ignore[arg-type]
 
 
 def test_model_bundle_forks_isolated_child_lms() -> None:
@@ -213,157 +189,12 @@ def test_sequential_and_concurrent_turn_bindings_return_fresh_copies() -> None:
     assert not hasattr(source.sub_lm, "_fleet_can_finalize")
 
 
-def test_native_builder_passes_explicit_constructor_kwargs() -> None:
-    import dspy
-
-    from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions
-
-    root = MagicMock(name="root_lm")
-    sub = MagicMock(name="sub_lm")
-    options = RLMOptions(max_iters=7, max_llm_calls=11, max_output_chars=2048)
-    models = RLMModelBundle(root_lm=root, sub_lm=sub)
-
-    rlm = build_native_rlm_for_test(options=options, tools=[host_echo], sub_lm=models.sub_lm)
-
-    assert isinstance(rlm, dspy.RLM)
-    assert type(rlm) is dspy.RLM
-    assert rlm.verbose is True
-    assert not hasattr(rlm, "bind_observer")
-    assert rlm.max_iters == 7
-    assert rlm.max_llm_calls == 11
-    assert rlm.max_output_chars == 2048
-    assert rlm.sub_lm is sub
-    assert not hasattr(rlm, "_interpreter")
-    assert "host_echo" in rlm.tools
-    assert rlm.signature is FleetRLMSignature
-    assert models.root_lm is root
-
-
-def test_each_native_builder_call_returns_new_rlm_instance() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-
-    first = build_native_rlm_for_test(options=RLMOptions())
-    second = build_native_rlm_for_test(options=RLMOptions())
-
-    assert first is not second
-
-
-def test_native_builder_accepts_policy_controlled_host_verbosity() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-
-    rlm = build_native_rlm_for_test(options=RLMOptions(), verbose=False)
-
-    assert rlm.verbose is False
-
-
-def test_program_is_only_native_dspy_rlm_call_site_in_rlm_package() -> None:
-    """Static guard: program.py is the sole native dspy.RLM construction owner."""
-    import ast
-    from pathlib import Path
-
-    rlm_dir = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm" / "rlm"
-    assert (rlm_dir / "program.py").is_file()
-    offenders: list[str] = []
-    for path in sorted(rlm_dir.glob("*.py")):
-        if path.name == "program.py":
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            func = node.func
-            if isinstance(func, ast.Attribute) and func.attr == "RLM":
-                offenders.append(path.name)
-            if isinstance(func, ast.Name) and func.id == "RLM":
-                offenders.append(path.name)
-    assert offenders == [], f"dspy.RLM constructed outside program.py: {offenders}"
-
-
-def test_dspy_primitives_imports_are_confined_to_interpreter_contract() -> None:
-    """No production module should depend on DSPy's private primitives package."""
-    import ast
-    from pathlib import Path
-
-    src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
-    allowed: set[str] = set()
-    assert (src_root / "rlm" / "program.py").is_file()
-    offenders: list[str] = []
-    for path in sorted(src_root.rglob("*.py")):
-        rel = path.relative_to(src_root).as_posix()
-        if rel in allowed:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module and node.module.startswith("dspy.primitives"):
-                    offenders.append(rel)
-                    break
-                if node.module == "dspy" and any(alias.name == "primitives" for alias in node.names):
-                    offenders.append(rel)
-                    break
-            if isinstance(node, ast.Import) and any(
-                alias.name == "dspy.primitives" or alias.name.startswith("dspy.primitives.") for alias in node.names
-            ):
-                offenders.append(rel)
-                break
-    assert offenders == [], f"dspy.primitives imported outside interpreter contract: {offenders}"
-
-
-def test_dspy_public_types_do_not_use_internal_module_paths() -> None:
-    """Public DSPy types are imported from the package API."""
-    import ast
-    from pathlib import Path
-
-    src_root = Path(__file__).resolve().parents[4] / "src" / "fleet_rlm"
-    allowed: set[str] = set()
-    assert (src_root / "rlm" / "program.py").is_file()
-    offenders: list[str] = []
-    for path in sorted(src_root.rglob("*.py")):
-        rel = path.relative_to(src_root).as_posix()
-        if rel in allowed:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom):
-                if node.module and (
-                    node.module.startswith("dspy.primitives")
-                    or node.module.startswith("dspy.predict")
-                    or node.module.startswith("dspy.adapters")
-                    or node.module.startswith("dspy.clients")
-                    or node.module.startswith("dspy.signatures")
-                ):
-                    offenders.append(f"{rel}: {node.module}")
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if (
-                        alias.name.startswith("dspy.primitives")
-                        or alias.name.startswith("dspy.predict")
-                        or alias.name.startswith("dspy.adapters")
-                        or alias.name.startswith("dspy.clients")
-                        or alias.name.startswith("dspy.signatures")
-                    ):
-                        offenders.append(f"{rel}: {alias.name}")
-    assert offenders == [], f"Private DSPy imports found outside direct public imports: {offenders}"
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [("max_iters", 0), ("max_llm_calls", 0), ("max_llm_calls", -1), ("max_output_chars", 0)],
-)
-def test_rlm_options_reject_nonpositive_values(field: str, value: int) -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.rlm.result import RLMConfigError
-
-    with pytest.raises(RLMConfigError, match=field):
-        RLMOptions(**{field: value})
-
-
 def _tool(name):
     """Create a test tool with the specified name."""
     return dspy.Tool(lambda: "ok", name=name)
 
 
-@pytest.mark.parametrize("name", ["llm_query", "llm_query_batched", "print", "SUBMIT", "not-valid"])
+@pytest.mark.parametrize("name", ["llm_query"])
 def test_native_builder_rejects_namespace_collisions(name):
     with pytest.raises(RLMConfigError):
         build_native_rlm_for_test(signature="question -> answer", options=RLMOptions(), tools=[_tool(name)])

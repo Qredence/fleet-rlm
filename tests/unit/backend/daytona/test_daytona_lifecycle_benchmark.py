@@ -8,10 +8,7 @@ import pytest
 import scripts.benchmark_daytona_lifecycle as benchmark
 from fleet_rlm.daytona.runtime import VolumeConfig
 from scripts.benchmark_daytona_lifecycle import (
-    CREATE_TO_FIRST_EXECUTION_PHASES,
     benchmark_decision,
-    percentile,
-    summarize_samples,
 )
 
 
@@ -26,20 +23,8 @@ async def test_timed_awaits_async_operations() -> None:
     assert elapsed >= 0
 
 
-@pytest.mark.asyncio
-async def test_run_cycle_awaits_provider_operations_and_deletes_sandbox(monkeypatch) -> None:
-    calls: list[str] = []
-
-    class FakePlatform:
-        async def create(self, **_kwargs):
-            calls.append("create")
-            return SimpleNamespace(id="sandbox-1", state="running", region="test")
-
-        async def delete(self, _sandbox):
-            calls.append("delete")
-
-    class FakeVolumeClient:
-        pass
+def _install_cycle_collaborators(monkeypatch: pytest.MonkeyPatch, calls: list[str]) -> None:
+    """Install the non-provider collaborators one lifecycle cycle drives."""
 
     class FakeInterpreter:
         def __init__(self, **_kwargs):
@@ -75,6 +60,29 @@ async def test_run_cycle_awaits_provider_operations_and_deletes_sandbox(monkeypa
     monkeypatch.setattr(benchmark, "DaytonaCodeInterpreter", FakeInterpreter)
     monkeypatch.setattr(benchmark, "sandbox_backend", lambda *_args, **_kwargs: object())
 
+
+@pytest.mark.asyncio
+async def test_run_cycle_awaits_provider_operations_and_deletes_sandbox(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakePlatform:
+        async def create(self, **_kwargs):
+            calls.append("create")
+            return SimpleNamespace(id="sandbox-1", state="running", region="test")
+
+        async def delete(self, _sandbox):
+            calls.append("delete")
+
+        async def get(self, _sandbox_id):
+            calls.append("probe")
+            # Provider truth: the Sandbox is purged once the request settles.
+            return None
+
+    class FakeVolumeClient:
+        pass
+
+    _install_cycle_collaborators(monkeypatch, calls)
+
     sample, _, region = await benchmark._run_cycle(
         platform=FakePlatform(),
         volume_client=FakeVolumeClient(),
@@ -84,6 +92,7 @@ async def test_run_cycle_awaits_provider_operations_and_deletes_sandbox(monkeypa
     )
 
     assert region == "test"
+    # Counted only because the provider probe reported the Sandbox absent.
     assert sample["_deleted"] == 1.0
     assert calls == [
         "volume",
@@ -95,33 +104,46 @@ async def test_run_cycle_awaits_provider_operations_and_deletes_sandbox(monkeypa
         "execute",
         "shutdown",
         "delete",
+        "probe",
     ]
 
 
-def test_percentile_uses_nearest_rank_for_operator_threshold() -> None:
-    values = [float(value) for value in range(1, 21)]
+@pytest.mark.asyncio
+async def test_run_cycle_counts_deletion_only_on_provider_confirmed_absence(monkeypatch) -> None:
+    """An accepted delete request whose Sandbox stays present is not a deletion."""
+    calls: list[str] = []
+    probes = 0
 
-    assert percentile(values, 95) == 19.0
+    class FakePlatform:
+        async def create(self, **_kwargs):
+            return SimpleNamespace(id="sandbox-1", state="running", region="test")
 
+        async def delete(self, _sandbox):
+            # Acceptance only: no state transition is implied by the request.
+            calls.append("delete")
 
-def test_summary_measures_create_through_first_execution() -> None:
-    samples = [
-        {
-            "volume_readiness": 0.5,
-            "sandbox_create_running": 2.0,
-            "snapshot_mount_user_verification": 0.2,
-            "canonical_layout": 0.1,
-            "interpreter_broker_startup": 1.0,
-            "first_execution": 0.2,
-            "shutdown_and_deletion": 0.4,
-        }
-        for _ in range(20)
-    ]
+        async def get(self, _sandbox_id):
+            nonlocal probes
+            probes += 1
+            return SimpleNamespace(id="sandbox-1", state="started")
 
-    summary = summarize_samples(samples)
+    _install_cycle_collaborators(monkeypatch, calls)
+    monkeypatch.setattr(benchmark, "DELETION_CONFIRM_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(benchmark, "DELETION_CONFIRM_POLL_INTERVAL_S", 0.0)
 
-    assert summary["create_through_first_execution"]["p95_seconds"] == 4.0
-    assert set(CREATE_TO_FIRST_EXECUTION_PHASES).issubset(summary)
+    sample, _, _ = await benchmark._run_cycle(
+        platform=FakePlatform(),
+        volume_client=object(),
+        volume_config=VolumeConfig(),
+        sandbox_spec=object(),
+        workspace_id=uuid4(),
+    )
+
+    # The request was issued, the provider kept reporting the Sandbox present,
+    # so the cycle is not counted as deleted.
+    assert calls[-1] == "delete"
+    assert probes > 1
+    assert sample["_deleted"] == 0.0
 
 
 def test_decision_requires_threshold_and_complete_cleanup() -> None:

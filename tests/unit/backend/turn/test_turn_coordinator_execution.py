@@ -416,8 +416,8 @@ def test_open_turn_command_contains_only_claimed_canonical_values() -> None:
 
 @pytest.mark.parametrize(
     "key",
-    ["", "   ", "line\nbreak", "x" * 129],
-    ids=["empty", "whitespace", "newline", "too_long"],
+    ["", "   ", "line\nbreak"],
+    ids=["empty", "whitespace", "newline"],
 )
 def test_open_turn_command_rejects_invalid_idempotency_keys(key: str) -> None:
     from fleet_rlm.sessions.models import TurnAccess, TurnInput

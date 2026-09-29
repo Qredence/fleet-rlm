@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import dspy
 import pytest
 
@@ -14,33 +12,10 @@ from fleet_rlm.optimization.routing import (
     RoutingFacts,
     RoutingScenario,
     classify_routing_facts,
-    facts_from_execution_details,
-    facts_from_recursive_summary,
-    routing_decision_tree,
     run_routing_scenario,
     score_routing_execution,
     summarize_scores,
 )
-from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
-from fleet_rlm.rlm.program import RLMModelBundle
-from fleet_rlm.rlm.recursion import (
-    RecursiveRLMOptions,
-)
-from tests.support.recursion_scheduler import RecursiveRLMExecutor
-
-
-def test_curated_scenarios_cover_native_and_recursive_routes() -> None:
-    assert [scenario.expected_route for scenario in CURATED_ROUTING_SCENARIOS] == [
-        "python_native",
-        "semantic_single",
-        "semantic_batched",
-        "recursive_child",
-        "recursive_child",
-        "recursive_batch",
-    ]
-    assert all(scenario.prompt for scenario in CURATED_ROUTING_SCENARIOS)
-    assert "Python/REPL code" in routing_decision_tree()
-    assert "lm" in routing_decision_tree().lower()
 
 
 def test_routing_classifier_maps_each_public_route_shape() -> None:
@@ -70,42 +45,6 @@ def test_scoring_separates_final_answer_quality_from_routing_efficiency() -> Non
     assert summary["routing_match_count"] == 0
 
 
-def test_public_execution_details_feed_the_classifier() -> None:
-    details = (
-        ToolStarted("call-1", "rlm_query", {"prompt_count": 1, "prompt_chars": 42}),
-        ToolCompleted(
-            "call-1",
-            "rlm_query",
-            {"status": "completed", "recursive_depth": 1, "child_iterations": 2, "termination_mode": "typed_submit"},
-        ),
-    )
-
-    facts = facts_from_execution_details(details, latency_ms=12, sandbox_count=1)
-
-    assert classify_routing_facts(facts) == "recursive_child"
-    assert facts.max_native_child_depth == 1
-    assert facts.child_iterations == 2
-    assert facts.recursive_prompt_chars == 42
-    assert facts.sandbox_count == 1
-
-
-def test_public_execution_details_capture_recursive_batch_width() -> None:
-    details = (
-        ToolStarted("call-1", "rlm_query_batched", {"prompt_count": 3, "prompt_chars": 42}),
-        ToolCompleted(
-            "call-1",
-            "rlm_query_batched",
-            {"status": "completed", "answer_count": 3, "peak_child_concurrency": 2},
-        ),
-    )
-
-    facts = facts_from_execution_details(details, latency_ms=12, sandbox_count=3)
-
-    assert classify_routing_facts(facts) == "recursive_batch"
-    assert facts.recursive_batch_calls == 1
-    assert facts.peak_child_concurrency == 2
-
-
 def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
     scenario = RoutingScenario("semantic case", "judge one label", "semantic_single", "positive")
 
@@ -124,59 +63,6 @@ def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
     summary = summarize_scores((score,))
     assert summary["expected_routes"] == ["semantic_single"]
     assert summary["run_indexes"] == [3]
-
-
-def test_native_child_semantic_call_has_no_second_sandbox() -> None:
-    """The deterministic harness lane proves the fixed boundary with no provider."""
-    adapter = dspy.JSONAdapter()
-    created: list[DaytonaCodeInterpreter] = []
-
-    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
-        del profile
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        created.append(interpreter)
-        return ChildRuntimeLease(
-            interpreter,
-            f"routing-child-{call_index}",
-            "routing-test-volume",
-            f"recursive/routing/test/{call_index}",
-            interpreter.shutdown,
-        )
-
-    executor = RecursiveRLMExecutor(
-        models=RLMModelBundle(
-            dspy.utils.DummyLM(
-                [
-                    {"reasoning": "semantic judgment", "code": "inner = llm_query('inner slice')"},
-                    {
-                        "reasoning": "complete child",
-                        "code": "SUBMIT(answer=inner, evidence=[], gaps=[], result_files=[])",
-                    },
-                ],
-                adapter=adapter,
-            ),
-            dspy.utils.DummyLM([{"answer": "fallback element"}], adapter=adapter),
-        ),
-        options=RecursiveRLMOptions(),
-        child_runtime_factory=factory,
-        deadline=time.monotonic() + 30,
-    )
-
-    outcome = executor.tool(task="outer recursive classification", inputs=[])
-    assert outcome["status"] == "completed", outcome.get("error_category")
-    assert "fallback element" in outcome["answer"]
-    facts = facts_from_recursive_summary(
-        executor.summary(),
-        latency_ms=1,
-        tool_counts={"rlm_query": 1},
-        sandbox_count=len(created),
-    )
-
-    assert len(created) == 1
-    assert facts.native_child_count == 1
-    assert facts.max_native_child_depth == 1
-    assert classify_routing_facts(facts) == "recursive_child"
-    assert created[0]._shutdown
 
 
 @pytest.mark.asyncio

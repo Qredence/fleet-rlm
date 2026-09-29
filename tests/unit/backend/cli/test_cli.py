@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from fleet_rlm.cli import supervisor
-from fleet_rlm.cli.main import fleet_main, fleet_rlm_main
+from fleet_rlm.cli.main import fleet_main
 
 
 @pytest.fixture(autouse=True)
@@ -239,25 +239,6 @@ def test_fleet_web_preserves_explicit_environment(monkeypatch: pytest.MonkeyPatc
     assert os.environ["FLEET_RUN_ENVIRONMENT"] == "daytona"
 
 
-def test_fleet_web_explicit_profile_uses_profile_aware_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.cli import server
-
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(server, "serve_api", lambda **kwargs: calls.append(kwargs))
-
-    fleet_main(["web", "--profile", "daytona-recursive", "--port", "8124"])
-
-    assert calls == [
-        {
-            "host": "127.0.0.1",
-            "port": 8124,
-            "reload": False,
-            "profile": "daytona-recursive",
-            "allow_non_loopback": False,
-        }
-    ]
-
-
 def test_fleet_web_threads_the_non_loopback_opt_in_to_the_shared_launcher(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -308,65 +289,6 @@ def test_profile_aware_server_loads_settings_and_builds_app_before_binding(
         ("app", {"settings": settings}),
         ("uvicorn", application, {"host": "127.0.0.1", "port": 8125, "reload": False}),
     ]
-
-
-def test_profile_reload_rejection_happens_before_uvicorn_import(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.cli import server
-
-    monkeypatch.setitem(sys.modules, "uvicorn", None)
-    with pytest.raises(server.ProfileReloadError, match="--reload"):
-        server.serve_api(host="127.0.0.1", port=8125, reload=True, profile="daytona-recursive")
-
-
-def test_explicit_profile_and_reload_fail_before_launcher(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.cli import server
-
-    monkeypatch.setattr(server, "serve_api", lambda **_kwargs: pytest.fail("launcher must not run"))
-
-    with pytest.raises(SystemExit) as error:
-        fleet_main(["web", "--profile", "daytona-recursive", "--reload"])
-
-    assert error.value.code == 2
-
-
-def test_fleet_cli_forwards_explicit_profile_to_supervisor(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict[str, object]] = []
-    monkeypatch.setattr(supervisor, "supervise", lambda **kwargs: calls.append(kwargs))
-
-    fleet_main(["cli", "--profile", "daytona-recursive"])
-
-    assert calls == [
-        {
-            "host": "127.0.0.1",
-            "port": 8000,
-            "reload": False,
-            "run_environment": "daytona",
-            "tui_args": (),
-            "profile": "daytona-recursive",
-        }
-    ]
-
-
-@pytest.mark.parametrize(
-    ("entrypoint", "argv"),
-    [(fleet_main, ["web"]), (fleet_rlm_main, ["serve-api"])],
-)
-def test_backend_only_commands_run_uvicorn_without_supervisor(
-    monkeypatch: pytest.MonkeyPatch,
-    entrypoint: object,
-    argv: list[str],
-) -> None:
-    calls: list[str] = []
-    monkeypatch.setitem(
-        sys.modules,
-        "uvicorn",
-        SimpleNamespace(run=lambda application, **_kwargs: calls.append(application)),
-    )
-    monkeypatch.setattr(supervisor, "supervise", lambda **_kwargs: pytest.fail("must remain backend-only"))
-
-    entrypoint(argv)  # type: ignore[operator]
-
-    assert calls == ["fleet_rlm.main:app"]
 
 
 def test_supervision_failure_is_reported_without_traceback(

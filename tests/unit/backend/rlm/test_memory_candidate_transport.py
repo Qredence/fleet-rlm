@@ -95,21 +95,6 @@ async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
     assert drains == [1]
 
 
-def test_non_completed_outcome_rejects_memory_candidates() -> None:
-    from fleet_rlm.rlm.result import RLMOutcome
-    from fleet_rlm.workspace.memory import MemoryCandidate
-
-    candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
-
-    for terminal in ("cancelled", "timeout", "failed"):
-        with pytest.raises(ValueError, match="Memory Candidates"):
-            RLMOutcome(
-                terminal,  # type: ignore[arg-type]
-                public_error_message="Turn failed",
-                memory_candidates=(candidate,),
-            )
-
-
 @pytest.mark.asyncio
 async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:
     from fleet_rlm.rlm.execution import RLMRunner

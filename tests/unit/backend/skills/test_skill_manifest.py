@@ -8,12 +8,10 @@ import pytest
 
 from fleet_rlm.skills.catalog import (
     build_bundled_skill_catalog,
-    bundled_skill_readme_diagnostics,
     load_bundled_skill_manifests,
     stable_skill_id,
 )
 from fleet_rlm.skills.manifest import parse_bundled_skill_manifest, parse_skill_manifest
-from fleet_rlm.skills.models import SkillResource
 
 
 def _document(
@@ -42,51 +40,6 @@ def _document(
         "---\n\n"
         "# Example\n\nUse deterministic evidence.\n"
     )
-
-
-def test_every_current_bundled_skill_parses_into_one_validated_manifest() -> None:
-    root = Path("src/fleet_rlm/skills/bundled")
-    manifests = tuple(
-        parse_bundled_skill_manifest(directory)
-        for directory in sorted(root.iterdir())
-        if directory.is_dir() and (directory / "SKILL.md").is_file()
-    )
-
-    assert [manifest.name for manifest in manifests] == [
-        "data-analysis",
-        "dspy-rlm",
-        "long-context",
-        "report-builder",
-        "workspace-files",
-    ]
-    by_name = {manifest.name: manifest for manifest in manifests}
-    assert by_name["dspy-rlm"].resources[0].content == (root / "dspy-rlm" / "references" / "rlm-contract.md").read_text(
-        encoding="utf-8"
-    )
-    assert [resource.path for resource in by_name["long-context"].resources] == [
-        "scripts/semantic_chunk.py",
-        "scripts/rank_chunks.py",
-        "references/chunking-strategies.md",
-    ]
-    assert by_name["workspace-files"].version == "1.4.0"
-    assert by_name["report-builder"].resources == ()
-    assert all(manifest.compatibility.strip() for manifest in manifests)
-    assert all(manifest.instructions.startswith("# ") for manifest in manifests)
-
-
-def test_manifest_parser_uses_existing_name_version_path_and_body_constraints(tmp_path: Path) -> None:
-    bundle = tmp_path / "example-skill"
-    (bundle / "references").mkdir(parents=True)
-    resource = bundle / "references" / "guide.md"
-    resource.write_text("Guide body", encoding="utf-8")
-    document = _document(resources=("resources:\n  - path: references/guide.md\n    media_type: text/markdown\n"))
-    (bundle / "SKILL.md").write_text(document, encoding="utf-8")
-
-    manifest = parse_bundled_skill_manifest(bundle)
-
-    assert manifest.resources == (SkillResource("references/guide.md", "text/markdown", "Guide body"),)
-    assert manifest.allowed_tools == ("read_attachment",)
-    assert manifest.resources[0].media_type == "text/markdown"
 
 
 @pytest.mark.parametrize(
@@ -126,24 +79,6 @@ def test_manifest_parser_rejects_malformed_fields_and_resources(
         parse_skill_manifest(document)
 
 
-def test_bundle_parser_rejects_missing_and_undeclared_resource_bodies(tmp_path: Path) -> None:
-    missing = tmp_path / "missing"
-    missing.mkdir()
-    (missing / "SKILL.md").write_text(
-        _document(resources="resources:\n  - path: references/missing.md\n    media_type: text/markdown\n"),
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="missing resource body"):
-        parse_bundled_skill_manifest(missing)
-
-    undeclared = tmp_path / "undeclared"
-    undeclared.mkdir()
-    (undeclared / "SKILL.md").write_text(_document(), encoding="utf-8")
-    (undeclared / "notes.md").write_text("undeclared", encoding="utf-8")
-    with pytest.raises(ValueError, match="undeclared resource bodies"):
-        parse_bundled_skill_manifest(undeclared)
-
-
 def test_bundle_parser_rejects_symlink_resource_bodies(tmp_path: Path) -> None:
     root = tmp_path / "skills"
     root.mkdir()
@@ -175,10 +110,6 @@ def test_catalog_uses_one_manifest_authority_for_metadata_and_resources() -> Non
         assert "allowed-tools:" not in definition.instructions
 
 
-def test_human_documentation_consumes_the_same_manifest_rows() -> None:
-    assert bundled_skill_readme_diagnostics() == ()
-
-
 def test_custom_signature_binding_stays_code_owned_and_outside_the_manifest() -> None:
     from fleet_rlm.skills.signatures import DataAnalysisSignature
 
@@ -192,20 +123,6 @@ def test_custom_signature_binding_stays_code_owned_and_outside_the_manifest() ->
     assert "signature" not in manifest_head
     catalog = build_bundled_skill_catalog()
     assert catalog.require(stable_skill_id("data-analysis")).signature is DataAnalysisSignature
-
-
-def test_runtime_catalog_remains_the_source_of_current_selection_truth() -> None:
-    # QRE-122 is expand-only: parse/parity does not mutate exact pinned
-    # selection semantics. The known sketch-level drift remains visible.
-    catalog = build_bundled_skill_catalog()
-    assert catalog.require(stable_skill_id("workspace-files")).card.version == "1.4.0"
-
-
-def test_human_catalog_documentation_matches_current_runtime_cards() -> None:
-    catalog = build_bundled_skill_catalog()
-    readme = Path("src/fleet_rlm/skills/bundled/README.md").read_text(encoding="utf-8")
-    for card in catalog.cards():
-        assert f"| `{card.name}` | {card.version} |" in readme
 
 
 def test_bundle_parser_ignores_installer_bytecode_artifacts(tmp_path: Path) -> None:

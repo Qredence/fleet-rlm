@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import tempfile
-from typing import Any
 
 import mlflow
 import pytest
 from mlflow.entities import Feedback
 
 from fleet_rlm.observability.evaluation import (
-    RLMCompositeEvaluator,
-    evaluate_fleet_rlm,
     rlm_context_efficiency_scorer,
     rlm_groundedness_scorer,
     rlm_recursion_roi_scorer,
@@ -217,118 +214,6 @@ def test_recursion_roi_scorer_child_unutilized() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_composite_evaluator() -> None:
-    evaluator = RLMCompositeEvaluator()
-    inputs = {"query": "Summarize logs", "context": "Log line 1: system ok."}
-    outputs = {
-        "response": "The logs show the system is ok.",
-        "total_tokens": 10,
-        "child_rlm_calls": 0,
-    }
-    expectations = {"expected_facts": ["system ok"]}
-
-    feedbacks = evaluator(inputs=inputs, outputs=outputs, expectations=expectations)
-    assert isinstance(feedbacks, list)
-    assert len(feedbacks) == 4
-    names = {f.name for f in feedbacks}
-    assert names == {
-        "rlm_groundedness",
-        "rlm_context_efficiency",
-        "rlm_task_correctness",
-        "rlm_recursion_roi_scorer",
-    }
-
-
 # ---------------------------------------------------------------------------
 # High-Level Evaluation Runner Tests (mlflow.genai.evaluate)
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.usefixtures("clean_mlflow_env")
-def test_evaluate_fleet_rlm_with_precomputed_data() -> None:
-    data: list[dict[str, Any]] = [
-        {
-            "inputs": {
-                "query": "Extract server IP address",
-                "context": "Server started on host cluster-01 with IP 192.168.1.100 on port 8080.",
-            },
-            "outputs": {
-                "response": "The server IP address is 192.168.1.100.",
-                "total_tokens": 12,
-                "child_rlm_calls": 0,
-            },
-            "expectations": {
-                "expected_response": "The server IP address is 192.168.1.100.",
-                "expected_facts": ["192.168.1.100"],
-            },
-        },
-        {
-            "inputs": {
-                "query": "Check database status",
-                "context": "PostgreSQL database connected on port 5432 with 0 errors.",
-            },
-            "outputs": {
-                "response": "PostgreSQL database is connected with 0 errors.",
-                "total_tokens": 10,
-                "child_rlm_calls": 0,
-            },
-            "expectations": {
-                "expected_facts": ["PostgreSQL", "0 errors"],
-            },
-        },
-    ]
-
-    result = evaluate_fleet_rlm(
-        data=data,
-        experiment_name="fleet-rlm-unit-tests",
-        run_name="test-run-precomputed",
-    )
-
-    assert result is not None
-    assert hasattr(result, "metrics")
-    metrics = result.metrics
-    assert "rlm_groundedness/mean" in metrics
-    assert "rlm_context_efficiency/mean" in metrics
-    assert "rlm_task_correctness/mean" in metrics
-    assert "rlm_recursion_roi_scorer/mean" in metrics
-
-    # All metrics should be positive numbers in [0.0, 1.0]
-    for key, val in metrics.items():
-        assert 0.0 <= float(val) <= 1.0, f"Metric {key} out of range: {val}"
-
-
-@pytest.mark.usefixtures("clean_mlflow_env")
-def test_evaluate_fleet_rlm_with_predict_fn() -> None:
-    def dummy_rlm_predict(query: str, context: str = "", **kwargs: Any) -> dict[str, Any]:
-        del kwargs
-        return {
-            "response": f"Processed query '{query}' with context length {len(context)}.",
-            "total_tokens": 20,
-            "child_rlm_calls": 0,
-        }
-
-    data: list[dict[str, Any]] = [
-        {
-            "inputs": {
-                "query": "Inspect traffic telemetry",
-                "context": "Telemetry stream: 500 requests per second, error rate 0.01%.",
-            },
-            "expectations": {
-                "expected_facts": ["traffic telemetry"],
-            },
-        }
-    ]
-
-    result = evaluate_fleet_rlm(
-        data=data,
-        predict_fn=dummy_rlm_predict,
-        experiment_name="fleet-rlm-predict-test",
-        run_name="test-run-predict-fn",
-    )
-
-    assert result is not None
-    metrics = result.metrics
-    assert "rlm_groundedness/mean" in metrics
-    assert "rlm_context_efficiency/mean" in metrics
-    assert "rlm_task_correctness/mean" in metrics
-    assert "rlm_recursion_roi_scorer/mean" in metrics

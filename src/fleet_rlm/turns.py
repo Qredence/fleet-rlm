@@ -18,6 +18,7 @@ from fleet_rlm.observability.tracing import (
     turn_phase_span,
     turn_trace,
 )
+from fleet_rlm.observability.turn_capture import EventCapture, EventCaptureSource
 from fleet_rlm.rlm.events import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
@@ -64,6 +65,16 @@ from fleet_rlm.turn_preparation import (
 from fleet_rlm.turn_settlement import RunLifecycle
 
 T = TypeVar("T")
+
+
+def _mark_capture_stop(capture: EventCapture | None, reason: str) -> None:
+    """Record a non-terminal stop reason on the active Turn capture, if any."""
+    if capture is None:
+        return
+    try:
+        capture.mark_stop_reason(reason)
+    except Exception:
+        logger.warning("Turn capture stop reason failed", exc_info=True)
 
 
 @dataclass(frozen=True, slots=True)
@@ -513,6 +524,7 @@ class TurnRuntime:
         claim_loss_fence: Callable[[UUID], Awaitable[None]] | None = None,
         mlflow_tracing_enabled: bool = False,
         mlflow_expose_trace_id: bool = True,
+        event_capture: EventCaptureSource | None = None,
     ) -> None:
         """
         Initialize the TurnRuntime and its lifecycle dependencies.
@@ -527,6 +539,7 @@ class TurnRuntime:
             claim_loss_fence: Optional callback applied when claim loss requires fencing.
             mlflow_tracing_enabled: Whether MLflow tracing is enabled.
             mlflow_expose_trace_id: Whether trace IDs may be exposed.
+            event_capture: Optional source opening one capture per Run.
         """
         self._lifecycle = lifecycle
         self._preparation = preparation
@@ -537,6 +550,7 @@ class TurnRuntime:
         self._claim_loss_fence = claim_loss_fence
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
+        self._event_capture = event_capture
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         """Apply a cancellation request through the coordinator's settlement boundary."""
@@ -845,6 +859,13 @@ class TurnRuntime:
             model = getattr(lm, "model", None)
             if isinstance(model, str) and model:
                 attempt_metadata[f"fleet.{role}_model"] = model
+        source = self._event_capture
+        capture: EventCapture | None = None
+        if source is not None:
+            try:
+                capture = source.open(run.session_id, run.run_id)
+            except Exception:
+                logger.warning("Turn capture could not be opened", exc_info=True)
         with turn_trace(
             run.session_id,
             run.run_id,
@@ -858,14 +879,25 @@ class TurnRuntime:
             attempt_metadata=attempt_metadata,
         ) as handle:
             loaded_skill_versions: set[str] = set()
-            async with contextlib.aclosing(
-                self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id)
-            ) as execution_events:
-                async for event in execution_events:
-                    if isinstance(event.detail, SkillLoaded):
-                        loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
-                        annotate_turn_metadata({"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))})
-                    yield event
+            try:
+                async with contextlib.aclosing(
+                    self._execute_claimed(run, prepared, heartbeat, trace_id=handle.trace_id, capture=capture)
+                ) as execution_events:
+                    async for event in execution_events:
+                        if isinstance(event.detail, SkillLoaded):
+                            loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
+                            annotate_turn_metadata(
+                                {"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))}
+                            )
+                        if capture is not None:
+                            capture.record(event)
+                        yield event
+            finally:
+                # Unwinding order matters: closing this generator at a suspended
+                # yield runs ``aclosing.__aexit__`` first (marking the stop
+                # reason), so the capture finalizes with that reason.
+                if capture is not None:
+                    capture.finish(trace_id=handle.trace_id)
 
     async def _execute_claimed(
         self,
@@ -874,6 +906,7 @@ class TurnRuntime:
         heartbeat: ClaimHeartbeat | None,
         *,
         trace_id: str | None,
+        capture: EventCapture | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         """Drain provider events, settle the Run, and hand off owned cleanup."""
         state = _ExecutionState(
@@ -889,7 +922,7 @@ class TurnRuntime:
         try:
             state.stream = self._runner.stream(prepared.execution)
             _defer_stream_runtime(state.stream)
-            async for event in self._drain_events(run, prepared, state, trace_request, trace_id):
+            async for event in self._drain_events(run, prepared, state, trace_request, trace_id, capture=capture):
                 yield event
             if state.settled:
                 return
@@ -915,15 +948,18 @@ class TurnRuntime:
             yield terminal(state.recorder, receipt, trace_id=trace_id)
         except GeneratorExit:
             record_turn_stop_reason("client_disconnect")
+            _mark_capture_stop(capture, "client_disconnect")
             await self._settle_cancellation(run, prepared, state)
             raise
         except asyncio.CancelledError:
             record_turn_stop_reason("request_cancelled")
+            _mark_capture_stop(capture, "request_cancelled")
             await self._settle_cancellation(run, prepared, state)
             raise
         except Exception:
             if not state.settled:
                 if _heartbeat_claim_lost(state) or run.authority.revoked:
+                    _mark_capture_stop(capture, "claim_lost")
                     _mark_stream_runtime(state.stream, committed=False)
                     await self._handoff_cleanup_or_drain(
                         run,
@@ -943,6 +979,7 @@ class TurnRuntime:
                         yield state.recorder.record(RunFailed(code="unavailable", message="Turn failed"))
         except BaseException:
             if not state.settled and (_heartbeat_claim_lost(state) or run.authority.revoked):
+                _mark_capture_stop(capture, "claim_lost")
                 _mark_stream_runtime(state.stream, committed=False)
                 try:
                     await self._handoff_cleanup_or_drain(
@@ -968,6 +1005,7 @@ class TurnRuntime:
         state: _ExecutionState,
         trace_request: str,
         trace_id: str | None,
+        capture: EventCapture | None = None,
     ) -> AsyncGenerator[RuntimeEvent]:
         stream = state.stream
         assert stream is not None
@@ -981,6 +1019,7 @@ class TurnRuntime:
                     state.pending_event = None
             if isinstance(result, _ClaimLost):
                 record_turn_stop_reason("claim_lost")
+                _mark_capture_stop(capture, "claim_lost")
                 _mark_stream_runtime(state.stream, committed=False)
                 await self._handoff_cleanup_or_drain(
                     run,

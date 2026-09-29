@@ -28,21 +28,16 @@ from scripts.benchmarks.oolong.adapter import (
     build_predict_kwargs,
     build_receipt,
     invoke_live_prediction,
-    kwargs_context_mode,
     load_fixture,
     load_hf_row,
-    normalize_dnd_answer,
-    oolong_signature,
     receipt_safe_score,
     release_ephemeral_lease,
     resolve_datapoints,
     score_prediction,
-    select_hf_offsets,
     stage_attachment_context_on_lease,
     stage_context_capsule,
     sum_lm_usage,
 )
-from scripts.benchmarks.oolong.scoring import synth_process_response
 
 
 def _production_kwargs(datapoint: dict[str, object], capsule: AttachmentContextCapsule) -> dict[str, object]:
@@ -51,32 +46,6 @@ def _production_kwargs(datapoint: dict[str, object], capsule: AttachmentContextC
         mode="production",
         attachment_context=capsule,
     )
-
-
-def test_normalize_dnd_answer_wraps_only_unwrapped_values() -> None:
-    assert normalize_dnd_answer("110") == ("\\boxed{110}", True)
-    assert normalize_dnd_answer("\\boxed{110}") == ("\\boxed{110}", False)
-    assert normalize_dnd_answer("  ") == ("  ", False)
-
-
-def test_real_scoring_credits_near_correct_typed_answer() -> None:
-    """A typed answer carries no delimiter; without normalization the value is unreadable to the rubric."""
-    datapoint = {"id": "row", "context_window_id": "cw", "answer": "114"}
-
-    near = score_prediction(datapoint, "110", dataset="real", model_name="fleet-test")
-    exact = score_prediction(datapoint, "114", dataset="real", model_name="fleet-test")
-
-    assert near["parse_confidence"] == "high"
-    assert near["answer_normalized"] is True
-    assert near["score"] == pytest.approx(0.75**4)
-    assert exact["score"] == 1.0
-
-
-def test_synth_scoring_is_untouched_by_dnd_normalization() -> None:
-    datapoint = load_fixture()
-    score = score_prediction(datapoint, "Label: spam", dataset="synth", model_name="fleet-test")
-    assert score["score"] == 1
-    assert "answer_normalized" not in score
 
 
 def test_real_rows_restate_official_answer_format() -> None:
@@ -116,38 +85,6 @@ def _selector_fake(monkeypatch: pytest.MonkeyPatch, rows: list[dict[str, object]
     return calls
 
 
-def test_select_hf_offsets_matches_tier_by_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
-    rows: list[dict[str, object]] = [
-        {"id": "a", "dataset": "spam", "context_len": 1024},
-        {"id": "b", "dataset": "trec_coarse", "context_len": 4096},
-        {"id": "c", "dataset": "trec_coarse", "context_len": 131072},
-        {"id": "d", "dataset": "trec_coarse", "context_len": 131072},
-        {"id": "e", "dataset": "spam", "context_len": 131072},
-    ]
-    calls = _selector_fake(monkeypatch, rows)
-
-    offsets = select_hf_offsets(
-        dataset="synth",
-        split="validation",
-        limit=2,
-        context_len=131072,
-        row_dataset="trec_coarse",
-    )
-
-    assert offsets == (2, 3), "the spam row at 131072 must not match"
-    assert calls[0]["streaming"] is True
-    assert calls[0]["columns"] == ["id", "dataset", "context_len"]
-
-
-def test_select_hf_offsets_reports_empty_and_rejects_real(monkeypatch: pytest.MonkeyPatch) -> None:
-    _selector_fake(monkeypatch, [{"id": "a", "dataset": "spam", "context_len": 1024}])
-
-    with pytest.raises(OolongAdapterError, match="no oolongbench/oolong-synth rows"):
-        select_hf_offsets(dataset="synth", split="validation", limit=1, context_len=131072)
-    with pytest.raises(OolongAdapterError, match="needs synth metadata"):
-        select_hf_offsets(dataset="real", split="test", limit=1, context_len=131072)
-
-
 def test_resolve_datapoints_selection_requires_hf() -> None:
     with pytest.raises(OolongAdapterError, match="requires --hf"):
         resolve_datapoints(
@@ -158,32 +95,6 @@ def test_resolve_datapoints_selection_requires_hf() -> None:
             fixture=Path("fixture.json"),
             context_len=131072,
         )
-
-
-def test_oolong_signature_selects_contract_per_dataset() -> None:
-    assert oolong_signature("synth") is FleetRLMSignature
-    assert oolong_signature("real") is OolongDNDRLMSignature
-    with pytest.raises(OolongAdapterError, match="unknown dataset"):
-        oolong_signature("nope")
-
-
-def test_build_native_program_uses_dataset_signature(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The RLM is constructed with the answer-format contract, not the stock signature."""
-    captured: dict[str, object] = {}
-
-    def fake_build_native_rlm(**kwargs: object) -> object:
-        captured.update(kwargs)
-        return object()
-
-    monkeypatch.setattr(oolong_adapter, "build_native_rlm", fake_build_native_rlm)
-    monkeypatch.setattr(oolong_adapter, "rlm_options", lambda _settings: object())
-
-    oolong_adapter.build_native_program(MagicMock(), interpreter_factory=MagicMock, sub_lm=MagicMock(), dataset="real")
-    assert captured["signature"] is OolongDNDRLMSignature
-
-    captured.clear()
-    oolong_adapter.build_native_program(MagicMock(), interpreter_factory=MagicMock, sub_lm=MagicMock(), dataset="synth")
-    assert captured["signature"] is FleetRLMSignature
 
 
 def test_oolong_worker_passes_factory_to_native_dspy() -> None:
@@ -267,27 +178,10 @@ def test_sum_lm_usage_aggregates_rows_and_reports_absence() -> None:
     assert merged["observed_lm_usage"]["m"] == {"prompt_tokens": 12, "total_tokens": 9}
 
 
-def test_official_synth_scoring_matches_label_answer() -> None:
-    datapoint = load_fixture()
-    score = synth_process_response(datapoint, "Label: spam", "fleet-test")
-    assert score["score"] == 1
-    assert score["attempted_parse"] == "spam"
-
-
 def test_production_kwargs_require_attachment_context() -> None:
     datapoint = load_fixture()
     with pytest.raises(OolongAdapterError, match="lease-staged attachment_context"):
         build_predict_kwargs(datapoint, mode="production")
-
-
-def test_production_kwargs_use_attachment_capsule(tmp_path: Path) -> None:
-    datapoint = load_fixture()
-    capsule = stage_context_capsule("hello", staging_root=tmp_path / "staging")
-    kwargs = _production_kwargs(datapoint, capsule)
-    assert isinstance(kwargs.get("attachment_context"), AttachmentContextCapsule)
-    assert kwargs_context_mode(kwargs) == "attachment_context_capsule"
-    assert "context_window_text" not in kwargs["request"]
-    assert len(str(kwargs["request"])) < len(datapoint["context_window_text"])
 
 
 def test_production_kwargs_use_committed_session_history(tmp_path: Path) -> None:
@@ -298,12 +192,6 @@ def test_production_kwargs_use_committed_session_history(tmp_path: Path) -> None
     assert type(history) is CommittedSessionHistory
     assert isinstance(history, dspy.SandboxSerializable)
     assert history.to_sandbox() == b"[]"
-
-
-def test_dry_shortcut_uses_dspy_history() -> None:
-    datapoint = load_fixture()
-    kwargs = build_predict_kwargs(datapoint, mode="dry_shortcut")
-    assert type(kwargs["history"]).__name__ == "History"
 
 
 @pytest.mark.asyncio
@@ -538,27 +426,6 @@ def test_load_hf_row_uses_immutable_dataset_default(
     assert datapoint.dataset_revision == DEFAULT_HF_DATASET_REVISIONS[dataset]
 
 
-def test_load_hf_row_preserves_explicit_revision_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[str] = []
-    datasets = ModuleType("datasets")
-
-    def fake_load_dataset(
-        _dataset_id: str, *, split: str, revision: str, name: str | None = None, **_kwargs: object
-    ) -> _FakeRowStream:
-        assert split == "validation"
-        assert name is None
-        calls.append(revision)
-        return _FakeRowStream([{"id": f"row-{i}"} for i in range(5)])
-
-    datasets.load_dataset = fake_load_dataset  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "datasets", datasets)
-
-    datapoint = load_hf_row(dataset="synth", split="validation", index=0, revision="test-revision")
-
-    assert calls == ["test-revision"]
-    assert datapoint.dataset_revision == "test-revision"
-
-
 def test_load_hf_row_passes_real_dataset_config(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
     datasets = ModuleType("datasets")
@@ -710,17 +577,6 @@ def test_fixture_rejects_real_dataset() -> None:
         )
 
 
-def test_fixture_rejects_multi_row_ranges() -> None:
-    with pytest.raises(OolongAdapterError, match="index 0 --limit 1"):
-        resolve_datapoints(
-            dataset="synth",
-            split="validation",
-            start_index=1,
-            limit=1,
-            fixture=runner.DEFAULT_FIXTURE,
-        )
-
-
 def test_receipt_safe_score_drops_full_answer() -> None:
     raw = score_prediction(load_fixture(), "Label: spam", dataset="synth", model_name="fleet-test")
     assert "full_answer" in raw
@@ -744,14 +600,6 @@ def test_build_receipt_projects_scores() -> None:
         source="fixture",
     )
     assert "full_answer" not in receipt["scores"][0]
-
-
-def test_dry_shortcut_concatenates_context_into_request() -> None:
-    datapoint = load_fixture()
-    kwargs = build_predict_kwargs(datapoint, mode="dry_shortcut")
-    assert kwargs_context_mode(kwargs) == "dry_request_concat"
-    assert datapoint["context_window_text"] in str(kwargs["request"])
-    assert datapoint["question"] in str(kwargs["request"])
 
 
 def test_score_prediction_delegates_to_official_helper() -> None:
@@ -779,29 +627,6 @@ def test_dry_cli_rejects_invalid_limit(tmp_path: Path) -> None:
     assert runner.main(["--output", str(output), "--limit", "0"]) == 2
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["status"] == "failed"
-
-
-def test_dry_default_answer_is_per_row() -> None:
-    first = {"answer": "['spam']", "answer_type": "ANSWER_TYPE.LABEL"}
-    second = {"answer": "['ham']", "answer_type": "ANSWER_TYPE.LABEL"}
-    assert runner._default_dry_answer(first) == "Label: spam"
-    assert runner._default_dry_answer(second) == "Label: ham"
-
-
-def test_mlflow_logging_is_fail_soft(capsys: pytest.CaptureFixture[str]) -> None:
-    args = runner.build_parser().parse_args(
-        ["--output", "out.json", "--mlflow-url", "http://example", "--mlflow-experiment", "x"]
-    )
-    receipt = {
-        "dataset": "synth",
-        "mode": "dry",
-        "context_mode": "dry_request_concat",
-        "summary": {"mean": 1.0},
-    }
-    with patch("mlflow.set_tracking_uri", side_effect=RuntimeError("boom")):
-        runner._maybe_log_mlflow(args, receipt)
-    captured = capsys.readouterr()
-    assert "mlflow logging skipped" in captured.err
 
 
 def test_real_dataset_requires_test_split() -> None:

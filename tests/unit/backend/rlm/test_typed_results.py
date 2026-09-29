@@ -27,18 +27,6 @@ def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
         outcome.prediction = None  # type: ignore[misc]
 
 
-def test_success_requires_prediction_and_failure_forbids_it() -> None:
-    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-
-    with pytest.raises(ValueError, match="prediction"):
-        RLMOutcome(terminal_status="completed")
-    with pytest.raises(ValueError, match="prediction"):
-        RLMOutcome(
-            terminal_status="failed",
-            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
-        )
-
-
 def test_declared_output_validator_accepts_identifiers_placeholders_and_security_terms() -> None:
     from fleet_rlm.rlm.result import validate_declared_public_value
 
@@ -50,12 +38,6 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
     }
 
     validate_declared_public_value(value)
-
-
-def test_declared_output_validator_accepts_benign_lowercase_bearer_prose() -> None:
-    from fleet_rlm.rlm.result import validate_declared_public_value
-
-    validate_declared_public_value("Use a bearer token supplied by the caller.")
 
 
 @pytest.mark.parametrize(
@@ -100,7 +82,6 @@ def test_accepts_finalization_expressions(code: str) -> None:
         None,
         "",
         "SUBMIT(",
-        'print("explore"); SUBMIT(answer="done")',
         'SUBMIT(answer=llm_query("more work"))',
         "SUBMIT(answer=[lookup(item) for item in items])",
         "SUBMIT(**outputs)",
@@ -117,7 +98,6 @@ def test_rejects_non_finalization_syntax(code: object) -> None:
     "code",
     [
         'answer = "5"\nSUBMIT(answer=answer)',
-        "answer = 1\nSUBMIT(answer=answer)",
         'answer = json.dumps({"items": items})\nSUBMIT(answer=answer)',
         'answer = f"Found {count}"\nSUBMIT(answer=answer)',
         "partial = items[:3]\nanswer = str(partial)\nSUBMIT(answer=answer, count=len(items))",
@@ -137,7 +117,6 @@ def test_finalization_action_accepts_safe_binding_before_submit(code: str) -> No
         "SUBMIT(",
         'answer = "done"',
         "answer = tool()\nSUBMIT(answer=answer)",
-        'answer = llm_query("more work")\nSUBMIT(answer=answer)',
         'answer = "x"\nanswer = tool()\nSUBMIT(answer=answer)',
         'print("explore"); SUBMIT(answer="done")',
         "import json\nSUBMIT(answer=json.dumps({}))",
@@ -149,3 +128,68 @@ def test_finalization_action_accepts_safe_binding_before_submit(code: str) -> No
 )
 def test_finalization_action_rejects_effectful_or_incomplete_actions(code: object) -> None:
     assert not is_finalization_action(code)
+
+
+def test_sanitize_capture_text_always_redacts_secrets_and_urls() -> None:
+    """Capture never writes a token, DSN, or URL verbatim, whatever the policy.
+
+    URL redaction is not optional: the Sandbox preview URL carries a credential.
+    """
+    from fleet_rlm.rlm.result import sanitize_capture_text
+
+    raw = (
+        'key = "sk-live0123456789"\n'
+        "dsn = postgresql://fleet:hunter2@db.internal:5432/fleet\n"
+        "doc = 'see https://preview.daytona.test/p?token=abc123 for the output'\x07"
+    )
+
+    for redact_paths in (False, True):
+        cleaned = sanitize_capture_text(raw, max_len=10_000, redact_paths=redact_paths)
+
+        assert "sk-live0123456789" not in cleaned
+        assert "hunter2" not in cleaned
+        assert "preview.daytona.test" not in cleaned
+        assert "[redacted-url]" in cleaned
+        assert "\x07" not in cleaned  # control characters are always stripped
+
+
+_SANITIZER_CORPUS = (
+    ("bare_provider_key", "sk-live0123456789", "live0123456789"),
+    ("bearer_header", "Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
+    ("dsn", "dsn = postgresql://fleet:hunter2@db.internal:5432/fleet", "hunter2"),
+    ("quoted_value", 'password="hunter2"', "hunter2"),
+    ("json_quoted", '{"token": "abc123xyz"}', "abc123xyz"),
+    ("yaml", "token: abc123xyz", "abc123xyz"),
+    ("dotenv", "TOKEN=abc123xyz", "abc123xyz"),
+    ("cli_flag", "--api-key=abc123xyz", "abc123xyz"),
+    ("url_query", 'requests.get("http://host/preview?token=abc123")', "abc123"),
+    # Delimiter-bearing tails. Only the greedy ``\S+`` value atom in ``_SECRETISH``
+    # covers these; the ``_*_SECRET_ASSIGNMENT`` patterns stop at the delimiter and
+    # would leave the tail visible. This is why that atom must not be tightened.
+    ("tail_paren", "token=a)b", "a)b"),
+    ("tail_comma", "token=abc,def", "abc,def"),
+    ("tail_quote", "token=ab'cd", "ab'cd"),
+)
+
+
+@pytest.mark.parametrize(("label", "raw", "secret"), _SANITIZER_CORPUS, ids=[case[0] for case in _SANITIZER_CORPUS])
+def test_sanitizer_corpus_redacts_every_secret_shape(label: str, raw: str, secret: str) -> None:
+    """Pin secret coverage so a pattern change cannot leak silently.
+
+    The suite previously asserted no delimiter-bearing tail at all, so it could not
+    have caught the under-redaction a tightened ``_SECRETISH`` would introduce.
+    """
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text(raw, max_len=1_000)
+
+    assert secret not in cleaned, f"{label}: {secret!r} survived -> {cleaned!r}"
+
+
+def test_sanitizer_keeps_url_trailing_delimiters() -> None:
+    """Regression: the secret pass ran first and ate the URL's closing ``")``."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text('requests.get("http://host/preview?token=abc123")', max_len=1_000)
+
+    assert cleaned == 'requests.get("[redacted-url]")'

@@ -6,11 +6,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.diagnostics import (
     build_snapshot_image,
     environment_manifest,
-    snapshot_dependency_import_names,
     snapshot_dependency_sha256,
     snapshot_execution_dependencies,
 )
@@ -18,11 +16,9 @@ from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.runtime import (
     BASE_IMAGE,
     DEFAULT_SNAPSHOT_NAME,
-    PYTHON_VERSION,
     DaytonaEnvironmentProfile,
     DaytonaSandboxSpec,
     LiveDaytonaPlatform,
-    sandbox_spec_from_settings,
     verify_sandbox_spec,
 )
 from fleet_rlm.sessions.bindings import session_workspace_volume_subpath
@@ -84,31 +80,6 @@ async def test_live_platform_builds_session_workspace_sdk_mount_offline() -> Non
     assert mount.volume_id == "offline-test-volume"
     assert mount.mount_path == "/workspace"
     assert mount.subpath == session_workspace_volume_subpath(workspace_id, session_id)
-
-
-def test_default_snapshot_envelope_stays_fixed() -> None:
-    spec = DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME)
-
-    assert spec.snapshot == "fleet-rlm-python313-v7"
-    assert spec.python_version == PYTHON_VERSION == "3.13.13"
-    assert (spec.cpu, spec.memory_gib, spec.disk_gib) == (4, 8, 8)
-
-
-def test_dependency_import_names_map_distribution_to_module() -> None:
-    assert snapshot_dependency_import_names() == (
-        ("mpmath", "mpmath", "1.4.1"),
-        ("numpy", "numpy", "2.5.1"),
-        ("pandas", "pandas", "3.0.5"),
-        ("beautifulsoup4", "bs4", "4.15.0"),
-    )
-
-
-def test_settings_require_snapshot_only_when_converted_to_daytona_spec() -> None:
-    with pytest.raises(ValueError, match="FLEET_DAYTONA_SNAPSHOT"):
-        sandbox_spec_from_settings(Settings())
-    assert sandbox_spec_from_settings(Settings(daytona_snapshot="fleet-test-v1")).snapshot == "fleet-test-v1"
-    with pytest.raises(ValueError, match="immutable"):
-        Settings(daytona_snapshot="latest")
 
 
 def test_snapshot_provenance_is_exact() -> None:

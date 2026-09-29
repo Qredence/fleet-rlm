@@ -80,6 +80,10 @@ outputs/
 .agents/skills/analyzing-rlm-performance/*
 !.agents/skills/analyzing-rlm-performance/SKILL.md
 !.agents/skills/analyzing-rlm-performance/references/
+!.agents/skills/running-the-fleet-tui/
+.agents/skills/running-the-fleet-tui/*
+!.agents/skills/running-the-fleet-tui/SKILL.md
+!.agents/skills/running-the-fleet-tui/references/
 .worktrees/
 .codex/*
 !.codex/environments/

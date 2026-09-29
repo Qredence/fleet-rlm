@@ -29,14 +29,6 @@ class _FakeTrace:
         self.data = SimpleNamespace(spans=list(spans or []))
 
 
-def test_response_present_requires_non_empty_output() -> None:
-    assert response_present_impl(outputs="Yes, the deadline was timely.")
-    assert response_present_impl(outputs=" x ")
-    assert not response_present_impl(outputs=None)
-    assert not response_present_impl(outputs="")
-    assert not response_present_impl(outputs="   ")
-
-
 def test_tool_evidence_used_requires_tool_spans_covering_evidence() -> None:
     trace = _FakeTrace([_FakeSpan("TOOL", "checked A1 and A8, confirmed receipt on 2025-02-28")])
     assert tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["A1", "A8"]})

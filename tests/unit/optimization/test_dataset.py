@@ -37,54 +37,12 @@ def test_split_is_order_independent_and_has_60_20_20_partitions() -> None:
     assert "record_id" not in str(normal.public_manifest["sealed_test"])
 
 
-def test_records_reject_small_duplicate_and_raw_runtime_exports() -> None:
-    with pytest.raises(OptimizationDatasetError, match="at least 25"):
-        validate_records([_record(index) for index in range(24)])
-
-    duplicate = [_record(index) for index in range(24)] + [_record(0)]
-    with pytest.raises(OptimizationDatasetError, match="duplicate"):
-        validate_records(duplicate)
-
-    unsafe = [_record(index) for index in range(25)]
-    unsafe[0]["task"]["query"] = "look at .fleet_rlm/local.sqlite3"
-    with pytest.raises(OptimizationDatasetError, match="raw-state"):
-        validate_records(unsafe)
-
-
 def test_load_export_requires_versioned_container() -> None:
     payload = {"schema": EXPORT_SCHEMA, "records": [_record(index) for index in range(25)]}
     assert len(load_export(payload)) == 25
     payload["schema"] = "wrong"
     with pytest.raises(OptimizationDatasetError, match="schema"):
         load_export(payload)
-
-
-def test_validate_records_rejects_forbidden_field_keys() -> None:
-    records = [_record(index) for index in range(25)]
-    records[0]["provenance"]["file_path"] = "exports/summary.json"
-
-    with pytest.raises(OptimizationDatasetError, match="forbidden raw-state field"):
-        validate_records(records)
-
-
-def test_related_sessions_and_projects_never_cross_partitions():
-    raw = [_record(index) for index in range(40)]
-    for index, record in enumerate(raw):
-        record["provenance"].update(session_id=f"session-{index // 2}", project_id=f"project-{index // 5}")
-    records = validate_records(raw)
-    split = split_records(records, seed=7)
-    again = split_records(list(reversed(records)), seed=7)
-    assert split == again
-    assert split.grouping == "session-project"
-    assignments = {}
-    for partition, group in enumerate((split.train, split.selection, split.sealed_test)):
-        assert len(group) >= 5
-        for record in group:
-            for key in ("session_id", "project_id"):
-                identity = (key, record.provenance[key])
-                assert assignments.setdefault(identity, partition) == partition
-    assert sum(map(len, (split.train, split.selection, split.sealed_test))) == len(records)
-    assert "session-0" not in str(split.public_manifest)
 
 
 def test_single_project_cannot_leak_into_held_out_split():

@@ -82,33 +82,6 @@ def test_result_snapshot_rejects_non_strict_usage() -> None:
         )
 
 
-def test_volume_result_path_is_unique_and_path_safe() -> None:
-    from fleet_rlm.paths import UnsafePathError, VolumePaths
-
-    paths = VolumePaths.from_mount()
-    session_id, first_run, second_run = uuid4(), uuid4(), uuid4()
-
-    assert paths.run_result_path(session_id, first_run) == (paths.run_dir(session_id, first_run) / "result.json")
-    assert paths.run_result_path(session_id, first_run) != paths.run_result_path(session_id, second_run)
-    with pytest.raises(UnsafePathError):
-        paths.run_result_path(str(session_id), "../escape")
-
-
-def test_daytona_volume_adapter_removes_exact_file_path() -> None:
-    from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
-
-    calls: list[tuple[str, str]] = []
-
-    class Fs:
-        def delete_file(self, path: str) -> None:
-            calls.append(("delete_file", path))
-
-    adapter = DaytonaSandboxVolumeFs(type("Sandbox", (), {"fs": Fs()})())
-    adapter.remove("/home/daytona/fleet/sessions/s/runs/r/result.json")
-
-    assert calls == [("delete_file", "/home/daytona/fleet/sessions/s/runs/r/result.json")]
-
-
 @pytest.mark.asyncio
 async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher

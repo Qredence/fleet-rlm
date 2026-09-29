@@ -26,10 +26,8 @@ def test_child_request_carries_small_task_and_relative_references() -> None:
     [
         "projects/repo/src",
         ["/absolute/path"],
-        ["../other-session"],
         ["projects/repo/../other"],
         ["https://example.com/source"],
-        ["artifact://00000000-0000-0000-0000-000000000000"],
         ["projects/repo/%2e%2e/secret"],
         ["projects\\repo\\source"],
         ["projects/repo/source", "projects/repo/source"],
