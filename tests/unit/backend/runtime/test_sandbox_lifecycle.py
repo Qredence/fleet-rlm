@@ -568,3 +568,30 @@ async def test_sql_sandbox_binding_store_retries_lost_insert_race() -> None:
         assert loaded.sandbox_id == "sb-race"
     finally:
         await engine.dispose()
+
+
+_PROVIDER_SANITIZER_CORPUS = (
+    ("bearer_header", "Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
+    ("bearer_bare", "Bearer abc.def-ghi", "abc.def-ghi"),
+    ("keyword_assignment", "api_key=sk-secret", "sk-secret"),
+    ("quoted_json", '{"api_key": "secret-value"}', "secret-value"),
+    ("private_path", "read /Users/zach/project/.env", "/Users/zach"),
+    ("url_query", 'requests.get("http://host/preview?token=abc123")', "abc123"),
+)
+
+
+@pytest.mark.parametrize(
+    ("label", "raw", "secret"), _PROVIDER_SANITIZER_CORPUS, ids=[case[0] for case in _PROVIDER_SANITIZER_CORPUS]
+)
+def test_sanitize_provider_message_corpus_redacts(label: str, raw: str, secret: str) -> None:
+    """Pin secret coverage, because this text reaches the model as repair feedback."""
+    cleaned = sanitize_provider_message(raw)
+
+    assert secret not in cleaned, f"{label}: {secret!r} survived -> {cleaned!r}"
+
+
+def test_sanitize_provider_message_keeps_url_trailing_delimiters() -> None:
+    """Regression: the secret patterns' greedy ``\\S+`` ate the URL's closing ``")``."""
+    cleaned = sanitize_provider_message('requests.get("http://host/preview?token=abc123")')
+
+    assert cleaned == 'requests.get("[redacted-url]")'

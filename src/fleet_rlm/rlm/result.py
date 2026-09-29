@@ -103,6 +103,12 @@ class PredictionOutputTooLargeError(PredictionOutputError):
 # Sanitization & Secret Scrubbing
 # ---------------------------------------------------------------------------
 
+# NOTE: the ``\S+`` value atom is deliberate, not sloppiness. It is the only
+# pattern covering a value that contains a delimiter before its end
+# (``token=a)b``, ``token=abc,def``, ``token=ab'cd``); the assignment patterns
+# below only cover well-formed quoted/unquoted forms. Stopping this at delimiters
+# would leak those tails, so the URL/secret ordering is fixed instead -- see the
+# sanitizer corpus test.
 _SECRETISH = re.compile(
     r"(?i)("
     r"api[_-]?key|access[_-]?key|authorization|bearer\s+\S+|sk-[a-z0-9_-]+|"
@@ -250,16 +256,24 @@ def _sanitize_text(
     redact_prompt_markers: bool,
     redact_urls: bool,
     strip_control: bool,
+    redact_paths: bool = True,
 ) -> str:
     cleaned = _TOKENISH.sub("[redacted]", text)
     cleaned = _PROVIDER_TOKENISH.sub("[redacted]", cleaned)
+    # DSNs keep their own marker by running before the general URL pass.
+    cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
+    # URLs are redacted before the assignment patterns, because ``_SECRETISH``
+    # consumes trailing delimiters: for ``requests.get("http://h/p?token=x")`` it
+    # matches ``token=x")`` and eats the closing ``")``, mangling the text. Doing
+    # the URL first cannot reduce secret coverage -- a URL holding a secret is
+    # redacted either way, and a secret outside a URL is untouched.
+    if redact_urls:
+        cleaned = _URLISH.sub("[redacted-url]", cleaned)
     cleaned = _SECRETISH.sub("[redacted]", cleaned)
     cleaned = _QUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>\g<quote>[redacted]\g<quote>", cleaned)
     cleaned = _UNQUOTED_SECRET_ASSIGNMENT.sub(r"\g<prefix>[redacted]", cleaned)
-    cleaned = _DSNISH.sub("[redacted-dsn]", cleaned)
-    cleaned = _PATHISH.sub("[path]", cleaned)
-    if redact_urls:
-        cleaned = _URLISH.sub("[redacted-url]", cleaned)
+    if redact_paths:
+        cleaned = _PATHISH.sub("[path]", cleaned)
     if redact_prompt_markers:
         cleaned = _PROMPTISH.sub("[redacted-prompt]", cleaned)
     if strip_control:
@@ -275,6 +289,28 @@ def sanitize_public_text(text: str, *, max_len: int = 10_000) -> str:
 
 def sanitize_trace_text(text: str, *, max_len: int = 10_000) -> str:
     return _sanitize_text(text, max_len=max_len, redact_prompt_markers=False, redact_urls=True, strip_control=True)
+
+
+def sanitize_capture_text(text: str, *, max_len: int, redact_paths: bool) -> str:
+    """Sanitize one field of a captured Turn event for durable local storage.
+
+    Both bounds are required rather than defaulted, so no call site can widen
+    what lands on disk by omission: the capture writer supplies ``max_len`` and
+    ``redact_paths`` from the ``capture.*`` policy.
+
+    URLs are always redacted -- the Sandbox preview URL carries a credential.
+    Path masking is deliberately the caller's trade-off: it would otherwise
+    replace every ``/home/daytona/...`` path in generated code, which is the
+    main signal a captured Turn is read for.
+    """
+    return _sanitize_text(
+        text,
+        max_len=max_len,
+        redact_prompt_markers=False,
+        redact_urls=True,
+        strip_control=True,
+        redact_paths=redact_paths,
+    )
 
 
 def sanitize_repair_text(text: str, *, max_len: int = 512) -> str:

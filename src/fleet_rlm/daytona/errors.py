@@ -34,9 +34,14 @@ class ChildRuntimeNotStartedError(RuntimeError):
 
 
 _SECRET_PATTERNS = (
+    # ``bearer`` must run before the keyword pattern below. That pattern ends in a
+    # greedy ``\S+`` which stops at whitespace, so for
+    # ``Authorization: Bearer <token>`` it consumed only ``Bearer`` and left the
+    # token tail visible; once ``bearer`` was eaten the bearer pattern here could
+    # no longer match, so the credential leaked.
+    re.compile(r"(?i)bearer\s+\S+"),
     re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization)\s*[:=]\s*\S+"),
     re.compile(r"(?i)([\"'])(api[_-]?key|token|secret|password|authorization)\1\s*:\s*(?:[\"'])?[^,}\]\s]+"),
-    re.compile(r"(?i)bearer\s+\S+"),
     re.compile(r"/[^\s]*secret[^\s]*", re.IGNORECASE),
     re.compile(r"/tmp/[^\s]+"),
     re.compile(r"/home/[^\s]+"),
@@ -67,9 +72,13 @@ def _sanitized_status(exc: object) -> int | None:
 def sanitize_provider_message(raw: str) -> str:
     """Strip credentials, URLs, and control sequences from provider error text."""
     message = raw.strip() or "Daytona provider error"
+    # URL first: the secret patterns end in a greedy ``\S+``, so they would
+    # otherwise swallow a URL's trailing delimiters and mangle the text. This
+    # message reaches the model through ``sanitize_repair_text``, so a mangled
+    # tail is worse here than in a log line.
+    message = _URL_PATTERN.sub("[redacted-url]", message)
     for pattern in _SECRET_PATTERNS:
         message = pattern.sub("[redacted]", message)
-    message = _URL_PATTERN.sub("[redacted-url]", message)
     message = _ANSI_PATTERN.sub("", message)
     message = _CONTROL_PATTERN.sub(" ", message)
     return message[:DEFAULT_SANITIZED_FAILURE_MAX_CHARS]

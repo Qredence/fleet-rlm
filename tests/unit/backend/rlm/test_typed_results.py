@@ -149,3 +149,115 @@ def test_finalization_action_accepts_safe_binding_before_submit(code: str) -> No
 )
 def test_finalization_action_rejects_effectful_or_incomplete_actions(code: object) -> None:
     assert not is_finalization_action(code)
+
+
+def test_sanitize_capture_text_always_redacts_secrets_and_urls() -> None:
+    """Capture never writes a token, DSN, or URL verbatim, whatever the policy.
+
+    URL redaction is not optional: the Sandbox preview URL carries a credential.
+    """
+    from fleet_rlm.rlm.result import sanitize_capture_text
+
+    raw = (
+        'key = "sk-live0123456789"\n'
+        "dsn = postgresql://fleet:hunter2@db.internal:5432/fleet\n"
+        "doc = 'see https://preview.daytona.test/p?token=abc123 for the output'\x07"
+    )
+
+    for redact_paths in (False, True):
+        cleaned = sanitize_capture_text(raw, max_len=10_000, redact_paths=redact_paths)
+
+        assert "sk-live0123456789" not in cleaned
+        assert "hunter2" not in cleaned
+        assert "preview.daytona.test" not in cleaned
+        assert "[redacted-url]" in cleaned
+        assert "\x07" not in cleaned  # control characters are always stripped
+
+
+def test_sanitize_capture_text_path_masking_is_an_explicit_trade_off() -> None:
+    """Sandbox paths are the main debugging signal, so masking them is opt-in.
+
+    Masking is a lossy privacy trade, not a default: it replaces every
+    ``/home/daytona/...`` path in generated code with ``[path]``.
+    """
+    from fleet_rlm.rlm.result import sanitize_capture_text
+
+    code = 'note = open("/home/daytona/fleet/notes.md").read()'
+
+    preserved = sanitize_capture_text(code, max_len=10_000, redact_paths=False)
+    masked = sanitize_capture_text(code, max_len=10_000, redact_paths=True)
+
+    assert "/home/daytona/fleet/notes.md" in preserved
+    assert "[path]" not in preserved
+    assert "/home/daytona/fleet/notes.md" not in masked
+    assert "[path]" in masked
+
+
+def test_sanitize_capture_text_bounds_every_field_to_max_len() -> None:
+    """The capture supplies its own bound, so no call site can widen it by omission."""
+    from fleet_rlm.rlm.result import sanitize_capture_text
+
+    cleaned = sanitize_capture_text("x" * 500, max_len=64, redact_paths=False)
+
+    assert len(cleaned) == 64
+    assert cleaned.endswith("...")
+
+
+def test_sanitize_capture_text_differs_from_the_public_wrapper_only_on_paths() -> None:
+    """Regression guard: the shared sanitizers keep their existing behaviour."""
+    from fleet_rlm.rlm.result import sanitize_capture_text, sanitize_public_text, sanitize_trace_text
+
+    code = 'note = open("/home/daytona/fleet/notes.md").read()'
+
+    assert "[path]" in sanitize_public_text(code, max_len=10_000)
+    assert "[path]" in sanitize_trace_text(code, max_len=10_000)
+    assert sanitize_capture_text(code, max_len=10_000, redact_paths=True) == sanitize_trace_text(code, max_len=10_000)
+
+
+_SANITIZER_CORPUS = (
+    ("bare_provider_key", "sk-live0123456789", "live0123456789"),
+    ("bearer_header", "Authorization: Bearer abc.def-ghi", "abc.def-ghi"),
+    ("dsn", "dsn = postgresql://fleet:hunter2@db.internal:5432/fleet", "hunter2"),
+    ("quoted_value", 'password="hunter2"', "hunter2"),
+    ("json_quoted", '{"token": "abc123xyz"}', "abc123xyz"),
+    ("yaml", "token: abc123xyz", "abc123xyz"),
+    ("dotenv", "TOKEN=abc123xyz", "abc123xyz"),
+    ("cli_flag", "--api-key=abc123xyz", "abc123xyz"),
+    ("url_query", 'requests.get("http://host/preview?token=abc123")', "abc123"),
+    # Delimiter-bearing tails. Only the greedy ``\S+`` value atom in ``_SECRETISH``
+    # covers these; the ``_*_SECRET_ASSIGNMENT`` patterns stop at the delimiter and
+    # would leave the tail visible. This is why that atom must not be tightened.
+    ("tail_paren", "token=a)b", "a)b"),
+    ("tail_comma", "token=abc,def", "abc,def"),
+    ("tail_quote", "token=ab'cd", "ab'cd"),
+)
+
+
+@pytest.mark.parametrize(("label", "raw", "secret"), _SANITIZER_CORPUS, ids=[case[0] for case in _SANITIZER_CORPUS])
+def test_sanitizer_corpus_redacts_every_secret_shape(label: str, raw: str, secret: str) -> None:
+    """Pin secret coverage so a pattern change cannot leak silently.
+
+    The suite previously asserted no delimiter-bearing tail at all, so it could not
+    have caught the under-redaction a tightened ``_SECRETISH`` would introduce.
+    """
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text(raw, max_len=1_000)
+
+    assert secret not in cleaned, f"{label}: {secret!r} survived -> {cleaned!r}"
+
+
+def test_sanitizer_keeps_url_trailing_delimiters() -> None:
+    """Regression: the secret pass ran first and ate the URL's closing ``")``."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text('requests.get("http://host/preview?token=abc123")', max_len=1_000)
+
+    assert cleaned == 'requests.get("[redacted-url]")'
+
+
+def test_sanitizer_keeps_the_distinct_dsn_marker() -> None:
+    """DSNs still report ``[redacted-dsn]`` rather than collapsing to a generic URL."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    assert sanitize_trace_text("dsn = postgresql://u:p@h/db", max_len=1_000) == "dsn = [redacted-dsn]"
