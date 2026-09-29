@@ -1553,3 +1553,112 @@ def test_lm_telemetry_preserves_counts_with_null_optional_usage_details() -> Non
     )
     usage = _latest_lm_telemetry(lm, 0, outputs)
     assert _mlflow_token_usage(usage) == {"input_tokens": 38, "output_tokens": 43, "total_tokens": 81}
+
+
+def _raise_prediction_output_failure(case: str) -> None:
+    """Raise the ``PredictionOutputError`` for one named validation site."""
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        _strict_json,
+        normalize_prediction_trajectory,
+    )
+
+    builders = {
+        "trajectory_not_a_sequence": lambda: normalize_prediction_trajectory(SimpleNamespace(trajectory=123)),
+        "trajectory_step_not_mapping": lambda: normalize_prediction_trajectory(SimpleNamespace(trajectory=["nope"])),
+        "trajectory_step_field_not_text": lambda: normalize_prediction_trajectory(
+            SimpleNamespace(trajectory=[{"reasoning": 1}])
+        ),
+        "display_text_missing": lambda: PredictionResult("   ", {"answer": "y"}, "schema", "1"),
+        "outputs_not_a_mapping": lambda: PredictionResult("x", ["not-a-mapping"], "schema", "1"),
+        "schema_identity_missing": lambda: PredictionResult("x", {"answer": "y"}, "", "1"),
+        "output_float_not_finite": lambda: _strict_json(float("inf")),
+        "output_key_not_text": lambda: _strict_json({1: "x"}),
+        "output_type_unsupported": lambda: _strict_json(object()),
+    }
+    builders[case]()
+
+
+@pytest.mark.parametrize(
+    "case",
+    (
+        "trajectory_not_a_sequence",
+        "trajectory_step_not_mapping",
+        "trajectory_step_field_not_text",
+        "display_text_missing",
+        "outputs_not_a_mapping",
+        "schema_identity_missing",
+        "output_float_not_finite",
+        "output_key_not_text",
+        "output_type_unsupported",
+    ),
+)
+def test_prediction_output_error_names_the_failing_validation(case: str) -> None:
+    """Every rejection site reports a distinguishable internal cause.
+
+    The public message is a single closed literal, so without ``cause_type`` all
+    of these collapse into one opaque string and a failed live run cannot be
+    triaged without reproducing it.
+    """
+    from fleet_rlm.rlm.result import PredictionOutputError
+
+    with pytest.raises(PredictionOutputError) as raised:
+        _raise_prediction_output_failure(case)
+
+    assert raised.value.cause_type == case
+    # The public contract stays frozen regardless of the internal cause.
+    assert raised.value.public_message == "Turn output is invalid"
+    assert str(raised.value) == "Turn output is invalid"
+    assert raised.value.status == "failed"
+
+
+def test_prediction_result_reports_fine_grained_causes_through_the_public_path() -> None:
+    """Namely causes survive ``prediction_result`` rather than being relabelled.
+
+    ``PredictionOutputError`` is a ``ValueError``, so a generic handler around the
+    output-validation loop would otherwise swallow a specific cause.
+    """
+    from fleet_rlm.rlm.result import PredictionOutputError, prediction_result
+
+    class Report(dspy.Signature):
+        answer: str = dspy.OutputField()
+        metadata: dict[str, str] = dspy.OutputField()
+
+    with pytest.raises(PredictionOutputError) as empty_answer:
+        prediction_result(dspy.Prediction(answer="   ", metadata={}), Report)
+    assert empty_answer.value.cause_type == "answer_missing"
+
+    with pytest.raises(PredictionOutputError) as unsafe:
+        prediction_result(
+            dspy.Prediction(answer="done", metadata={"token": "secret-value"}),
+            Report,
+            max_output_chars=1_000,
+        )
+    assert unsafe.value.cause_type == "declared_output_rejected"
+
+
+def test_prediction_output_failure_category_is_bounded_and_detail_reaches_traces() -> None:
+    """MLflow metadata carries a closed category plus the fine-grained detail."""
+    from fleet_rlm.observability.diagnostics import trace_failure_category, trace_failure_details
+    from fleet_rlm.rlm.result import PredictionOutputError, PredictionOutputTooLargeError
+
+    invalid = PredictionOutputError(cause_type="display_text_missing")
+    too_large = PredictionOutputTooLargeError(output_chars=9_999, output_preview="preview")
+
+    assert trace_failure_category(invalid) == "prediction_output_invalid"
+    assert trace_failure_category(too_large) == "prediction_output_too_large"
+    assert trace_failure_details(invalid)["failure_detail"] == "display_text_missing"
+
+    # No cause means no detail key, so span outputs stay uniform.
+    assert "failure_detail" not in trace_failure_details(RuntimeError("boom"))
+
+
+def test_prediction_output_cause_type_rejects_unbounded_labels() -> None:
+    """The cause vocabulary is bounded so failure telemetry cannot drift."""
+    from fleet_rlm.rlm.result import PredictionOutputError
+
+    with pytest.raises(ValueError, match="invalid prediction cause_type"):
+        PredictionOutputError(cause_type="NotSnakeCase")
+
+    with pytest.raises(TypeError):
+        PredictionOutputError()  # type: ignore[call-arg]  # cause_type is required

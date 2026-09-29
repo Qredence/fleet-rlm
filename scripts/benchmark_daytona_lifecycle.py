@@ -26,10 +26,13 @@ from uuid import uuid4
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend, sync_sandbox
 from fleet_rlm.daytona.runtime import (
+    DEFAULT_CONFIRM_TIMEOUT_S,
+    DEFAULT_POLL_INTERVAL_S,
     ExpectedWorkspaceMount,
     LiveDaytonaPlatform,
     LiveDaytonaVolumeClient,
     build_daytona_client,
+    confirm_absence,
     ensure_volume_layout,
     get_or_create_volume_id,
     sandbox_spec_from_settings,
@@ -40,10 +43,15 @@ from fleet_rlm.daytona.runtime import (
     volume_mount_spec,
 )
 
-RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v2"
+RECEIPT_SCHEMA = "fleet.daytona-lifecycle-benchmark/v3"
 WARMUP_CYCLES = 3
 MEASURED_CYCLES = 20
 PER_TURN_P95_SECONDS = 10.0
+# A measured cycle counts as deleted only when the provider reports the
+# Sandbox absent, so the probe uses the production confirmation budget.
+DELETION_CRITERION = "provider_confirmed_absence"
+DELETION_CONFIRM_TIMEOUT_S = DEFAULT_CONFIRM_TIMEOUT_S
+DELETION_CONFIRM_POLL_INTERVAL_S = DEFAULT_POLL_INTERVAL_S
 CREATE_TO_FIRST_EXECUTION_PHASES = (
     "volume_readiness",
     "sandbox_create_running",
@@ -137,6 +145,35 @@ def _expected_mount(volume_config: Any, volume_id: str, workspace_id: Any) -> Ex
     )
 
 
+async def _delete_and_confirm_absence(platform: LiveDaytonaPlatform, sandbox: Any) -> bool:
+    """Delete one Sandbox and report provider-confirmed absence.
+
+    ``platform.delete`` returns when the provider accepts the request, which is
+    not absence. Poll the same production probe the deletion-lifecycle tests
+    use (``confirm_absence`` over ``platform.get``) and count the cycle as
+    deleted only once the provider reports the Sandbox absent. A delete request
+    that fails is still probed, matching the production cleanup path: the probe,
+    not the request outcome, decides.
+    """
+    sandbox_id = _bounded(getattr(sandbox, "id", None))
+    if sandbox_id is None:
+        return False
+    # A rejected request can still settle remotely; the bounded probe below is
+    # what decides, and it must not disturb an error already raised by the cycle.
+    with contextlib.suppress(Exception):
+        await platform.delete(sandbox)
+    try:
+        outcome = await confirm_absence(
+            probe=platform.get,
+            sandbox_id=sandbox_id,
+            timeout_s=DELETION_CONFIRM_TIMEOUT_S,
+            poll_interval_s=DELETION_CONFIRM_POLL_INTERVAL_S,
+        )
+    except Exception:
+        return False
+    return bool(getattr(outcome, "absent", False))
+
+
 async def _run_cycle(
     *,
     platform: LiveDaytonaPlatform,
@@ -216,11 +253,7 @@ async def _run_cycle(
             with contextlib.suppress(Exception):
                 interpreter.shutdown()
         if sandbox is not None:
-            try:
-                await platform.delete(sandbox)
-                deleted = True
-            except Exception:
-                deleted = False
+            deleted = await _delete_and_confirm_absence(platform, sandbox)
         sample["shutdown_and_deletion"] = time.perf_counter() - cleanup_started
         sample["_deleted"] = 1.0 if deleted else 0.0
 
@@ -285,6 +318,7 @@ async def run_benchmark(settings: Any) -> dict[str, object]:
                 "measured_required": MEASURED_CYCLES,
                 "measured_completed": len(measured),
                 "deleted_successfully": deleted,
+                "deletion_criterion": DELETION_CRITERION,
             },
             "threshold": {
                 "create_through_first_execution_p95_seconds": PER_TURN_P95_SECONDS,

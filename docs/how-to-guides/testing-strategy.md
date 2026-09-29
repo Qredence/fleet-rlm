@@ -197,7 +197,7 @@ accounting in individual pytest modules.
 | --- | --- | --- |
 | Context containment and whole-Sandbox deletion | `test_daytona_containment.py`, `test_daytona_deletion_lifecycle.py`; explicitly requested bounded evidence | Provider process survival and deletion observation cannot be inferred from fake responses. |
 | Snapshot image package and import contract | `scripts/daytona_snapshot.py verify-runtime`; disposable Sandbox result | The selected immutable image must expose its baked Python and dependency contract in Daytona. This does not exercise Fleet's API or RLM path. |
-| Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The receipt includes cleanup evidence and does not certify recursion or containment. |
+| Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The native lane enables MLflow tracing, so it also requires a reachable tracking server at the configured `mlflow.tracking_uri` (the default profile uses `http://127.0.0.1:5001`) and fails, rather than skips, when that server is down: a lane certifying one `RLM.execute` span must not pass with none. The receipt includes cleanup evidence and does not certify recursion or containment. |
 | Recursive two-child batch canary | `scripts/live_recursive_batch_canary.py`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
 | Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
@@ -226,7 +226,11 @@ FLEET_LIVE=1 uv run pytest tests/live/backend/test_attachment_artifact_durabilit
 The lifecycle benchmark always runs three warmups and twenty measured cycles
 against the configured immutable Snapshot and Workspace-scoped Volume mount.
 Only a create-through-first-execution p95 at or below ten seconds with all
-twenty measured Sandboxes deleted selects per-Turn lifecycle. A missing,
+twenty measured Sandboxes confirmed absent selects per-Turn lifecycle. A
+Sandbox counts as deleted only once `confirm_absence` over the provider probe
+reports it absent, so delete-request acceptance is not a deletion: this
+criterion is stricter than a delete call that did not raise, and a run that
+previously reported `per_turn` may now report `retained_session`. A missing,
 partial, slower, or cleanup-failing receipt retains Session Sandboxes.
 
 The native verifier loads `.env` with `override=False`, so existing process
