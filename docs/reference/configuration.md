@@ -152,10 +152,14 @@ constructor fallback values for Root are `20`, `50`, and `10000`; the shipped
 `daytona-recursive` policy deliberately lowers the effective Root values to
 `12`, `32`, and `6000`. Its child values remain `8`, `12`, and `4000`.
 `max_execution_output_chars`, `max_execution_output_bytes`, the Turn deadline,
-provider-attempt, Tool-call, finalization, and recursive call/concurrency limits
-are separate Fleet controls. `max_provider_attempts` counts physical provider
-admissions, including retries and adapter repairs; `max_tool_calls` and
-`max_execution_output_bytes` are Turn-wide ceilings. There is no configurable
+Tool-call, finalization, and recursive call/concurrency limits are separate
+Fleet controls. `rlm.max_provider_attempts` is still a validated policy key,
+but it no longer bounds provider spend: Fleet admits no provider attempts, and
+DSPy's native `num_retries` owns retry count. `max_tool_calls` and
+`max_execution_output_bytes` are Turn-wide ceilings. `rlm.wrap_up_seconds`
+still maps to `BudgetLimits.finalization_seconds`: it holds that much of the
+Turn deadline back from non-finalization reservations. It no longer gates
+wrap-up, which is keyed to the RLM iteration count. There is no configurable
 recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
 
@@ -173,8 +177,9 @@ not an editable policy value. Existing policies that still set
 These are non-secret policy values; `.env` and ambient process variables do not
 override them. Profiles without an explicit recursion override inherit
 `false` from `[defaults.rlm]`; `daytona-native` is the selected default profile.
-`daytona-recursive` and `phase4-campaign` explicitly enable recursion, while
-`phase4-campaign-a` and `phase4-campaign-b` explicitly disable it. The
+`daytona-recursive` and `daytona-recursive-databricks` explicitly enable
+recursion; `daytona-native`, `daytona-native-databricks` and `daytona-managed`
+inherit the disabled default. The
 managed profile's database URL policy is enforced while loading that profile;
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/lakebase_preflight.py` before traffic moves.
@@ -202,17 +207,18 @@ override, and LM caching disabled. `FLEET_MAAS_BASE_URL` must be the DashScope
 `FleetJSONAdapter` requests the endpoint's verified `json_object` mode for
 this exact model and route. The endpoint rejected `json_schema`, so Fleet
 does not request a schema there; strict object parsing and bounded re-asks
-still apply. The `num_retries = 3` policy lets the client back off provider
-429s. The `max_tokens = 16384` ceiling and Fleet's character-level output caps are
-independent policy bounds. The pinned `daytona-managed` profile instead uses
+still apply. The `num_retries = 3` policy is passed to `dspy.LM`, so DSPy's
+native retry loop backs off provider 429s. The `max_tokens = 16384` ceiling and
+Fleet's character-level output caps are independent policy bounds. The pinned
+`daytona-managed` profile instead uses
 `uscentral.ai_gateway.deepseek-v4-1-flash-service` with `DATABRICKS_TOKEN` and
 `FLEET_LLM_BASE_URL`, where the base must be the `/ai-gateway/mlflow/v1` base.
 For this exact Databricks model, Fleet registers DSPy's native `lm15` schema
 capability so the JSON action adapter requests `response_format`. Fleet still
 requires an object with `reasoning` and `code`, and malformed actions exhaust
-the existing two corrective re-asks without executing code. The
-[dated live gate](../testing/root-action-protocol-gate-2026-09-27.md) confirms
-format and answer behavior for the opt-in local profiles; reported cost remains
+the existing two corrective re-asks without executing code. A dated
+live gate (2026-09-27) confirmed format and answer behavior for the opt-in local
+profiles; reported cost remains
 unavailable, so default promotion is still gated. The managed profile's
 Lakebase and managed-MLflow lifecycle was not exercised by those local Turns.
 
@@ -232,11 +238,11 @@ the preparation root, and disabled tracing records none. The execution root
 additionally carries the bounded one-way `fleet.preparation_trace_id` tag;
 preparation traces never reference the execution trace.
 
-The shipped Root and Sub LLM roles set `num_retries = 3`. This is a committed
-runtime policy choice, not a change to DSPy's generic constructor defaults;
-custom profiles that omit the field inherit the shipped default of `3`. The
-typed settings default is also `3` when both the defaults and selected profile
-omit the field.
+The shipped Root and Sub LLM roles set `num_retries = 3`. The value is passed
+through to stock `dspy.LM`, where it selects DSPy's own retry loop, so it is
+that LM's retry budget rather than a Fleet-owned retry layer; custom profiles
+that omit the field inherit the shipped default of `3`. The typed settings
+default is also `3` when both the defaults and selected profile omit the field.
 
 ## Local terminal editing
 

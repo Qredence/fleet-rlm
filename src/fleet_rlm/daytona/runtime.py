@@ -463,6 +463,25 @@ async def ensure_execution_layout(sandbox: Any, *, run_id: UUID) -> None:
     await _ensure_directories(fs, ("/tmp/fleet", f"/tmp/fleet/{run_id}"))
 
 
+async def verify_execution_mount(sandbox: Any) -> None:
+    """Check the mount from the Python process used for RLM execution."""
+    process = getattr(sandbox, "process", None)
+    if process is None or not callable(getattr(process, "exec", None)):
+        raise DaytonaAdapterError(
+            message="Sandbox process cannot verify the Workspace mount",
+            cause_type="InterpreterConfigurationError",
+        )
+    check = await process.exec(
+        f"python -c 'import os; os.chdir(\"{EXECUTION_MOUNT_PATH}\")'",
+        timeout=10,
+    )
+    if getattr(check, "exit_code", None) != 0:
+        raise DaytonaAdapterError(
+            message="Workspace Volume mount is unavailable to Python execution",
+            cause_type="ExecutionMountNotVisible",
+        )
+
+
 def _mount_field(mount: Any, key: str) -> str | None:
     value = mount.get(key) if isinstance(mount, dict) else getattr(mount, key, None)
     return None if value is None else str(value)
@@ -743,8 +762,8 @@ class LiveDaytonaPlatform:
         except Exception as exc:
             raise map_provider_error(exc) from exc
 
-    async def delete(self, sandbox_id: Any) -> None:
-        """Delete through Daytona's async client, treating absence as success."""
+    async def delete(self, sandbox_id: Any, *, wait: bool = False, timeout: float = 60) -> None:
+        """Delete through Daytona's async client, optionally confirming destruction."""
         try:
             target = await self._client.get(sandbox_id) if isinstance(sandbox_id, str) else sandbox_id
         except Exception as exc:
@@ -752,7 +771,10 @@ class LiveDaytonaPlatform:
                 return
             raise map_provider_error(exc) from exc
         try:
-            await self._client.delete(target)
+            if wait or timeout != 60:
+                await self._client.delete(target, wait=wait, timeout=timeout)
+            else:
+                await self._client.delete(target)
         except Exception as exc:
             if is_sandbox_not_found(exc):
                 return
@@ -4708,9 +4730,40 @@ class DaytonaRuntime:
                 deadline=deadline,
                 force_new=force_new,
             )
-            await self._verify_run_layout(
-                sandbox, context.expected, request.session_id, run_id, created_sandbox, deadline=deadline
-            )
+            try:
+                await self._verify_run_layout(
+                    sandbox, context.expected, request.session_id, run_id, created_sandbox, deadline=deadline
+                )
+            except DaytonaAdapterError as exc:
+                if exc.cause_type != "ExecutionMountNotVisible":
+                    raise
+                if not created_sandbox:
+                    raise
+                failed_sandbox = sandbox
+                sandbox = None
+                retired = await self._cleanup_failed_acquisition(
+                    request,
+                    failed_sandbox,
+                    created_sandbox=True,
+                    deadline=deadline,
+                    binding=context.persisted_binding,
+                )
+                if not retired:
+                    raise DaytonaAdapterError(
+                        message="Sandbox with missing Workspace mount could not be retired",
+                        cause_type="SandboxRetirementUnconfirmed",
+                    ) from exc
+                sandbox = await self._create_sandbox(
+                    volume_id=context.expected.volume_id,
+                    mount_path=context.expected.mount_path,
+                    volume_subpath=context.expected.volume_subpath,
+                    request=request,
+                    deadline=deadline,
+                )
+                created_sandbox = True
+                await self._verify_run_layout(
+                    sandbox, context.expected, request.session_id, run_id, created_sandbox, deadline=deadline
+                )
             return await self._persist_binding_and_build_lease(
                 request,
                 run_id,
@@ -4888,6 +4941,7 @@ class DaytonaRuntime:
         async def verify_and_layout() -> None:
             verify_sandbox_workspace_mount(sandbox, expected)
             verify_sandbox_spec(sandbox, self._sandbox_spec)
+            await verify_execution_mount(sandbox)
             if expected.session_id is not None:
                 await ensure_execution_layout(sandbox, run_id=run_id)
             else:
@@ -4913,7 +4967,7 @@ class DaytonaRuntime:
         created_sandbox: bool,
         deadline: float | None = None,
         binding: SandboxBinding | None = None,
-    ) -> None:
+    ) -> bool:
         sandbox_id = _sandbox_id(sandbox)
         candidate = binding
         durable_read_failed = False
@@ -4981,9 +5035,11 @@ class DaytonaRuntime:
             if not receipt.clean:
                 with contextlib.suppress(BaseException):
                     await cleanup.wait_ownership()
+            return receipt.clean
         except BaseException:
             with contextlib.suppress(BaseException):
                 await cleanup.wait_ownership()
+            return False
 
     async def _persist_binding_and_build_lease(
         self,

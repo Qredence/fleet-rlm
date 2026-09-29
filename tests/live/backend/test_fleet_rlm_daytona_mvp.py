@@ -672,7 +672,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert first_page.status_code == 200
                 first_assistant = _assistant_messages(first_page.json())[-1]
                 first_structured = _structured_part(first_assistant)
-                assert first_structured["data"]["schemaId"] == _CONTRACT_ID
+                assert first_structured["data"]["schema_id"] == _CONTRACT_ID
                 assert first_structured["data"]["value"] == structured_chunks[0]["data"]["value"]
 
                 phase = "first_durability"
@@ -1050,7 +1050,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
                 structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
                 assert len(structured) == 1
-                assert structured[0].get("data", {}).get("schemaId") == _CONTRACT_ID
+                assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
 
                 trace_ids = {
                     metadata["traceId"]

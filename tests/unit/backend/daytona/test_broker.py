@@ -50,7 +50,7 @@ def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
     try:
         for _ in range(50):
             try:
-                if httpx.get(f"{base_url}/health", timeout=0.2).status_code == 200:
+                if httpx.get(f"{base_url}/health", headers=headers, timeout=0.2).status_code == 200:
                     break
             except httpx.HTTPError:
                 time.sleep(0.02)
@@ -174,7 +174,24 @@ def test_tool_call_uses_execution_deadline(
     assert time.monotonic() - started < 1
 
 
-def test_retained_backend_resets_invocation_but_preserves_state_between_actions(
+def test_health_probe_requires_the_invocation_secret(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    """A surviving broker must not be able to answer the next invocation's startup probe.
+
+    `_ensure_started` treats a 200 from `/health` as proof that *its own* server came up.
+    If health were unauthenticated, a stale server still holding the previous Turn's
+    secret would satisfy that probe while the new server died on the already-bound port;
+    the host would then talk to the stale namespace and every later call would 401 for
+    the rest of the Sandbox's life.
+    """
+    base_url, headers = embedded_server
+    assert httpx.get(f"{base_url}/health", headers=headers, timeout=2).status_code == 200
+    assert httpx.get(f"{base_url}/health", headers={"X-Broker-Secret": "x" * 32}, timeout=2).status_code == 401
+    assert httpx.get(f"{base_url}/health", timeout=2).status_code == 401
+
+
+def test_broker_persists_state_between_actions_and_rejects_rebinding(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
     from fleet_rlm.daytona.interpreter import sandbox_backend
@@ -182,21 +199,27 @@ def test_retained_backend_resets_invocation_but_preserves_state_between_actions(
     base_url, headers = embedded_server
     broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
     broker._secret = headers["X-Broker-Secret"]
-    broker._url = base_url
     backend = sandbox_backend(object())
+    backend.bind_async_bridge(None)
+    backend.bind_host_tools({"tool": lambda value: value + 1})
+    broker.bind_tools(backend._bound_tools)
+    broker._url = base_url
     backend._broker = broker
     with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
         broker._client = client
-        backend.bind_async_bridge(None)
-        backend.bind_host_tools({"tool": lambda value: value + 1})
         assert backend.run("value = 40").error is None
         assert backend.run("value = tool(value)").error is None
         assert backend.run("print(value + 1)").stdout == "42\n"
-        old_secret = broker._secret
-        backend.bind_async_bridge(None)
-        backend.bind_host_tools({"tool": lambda value: value + 10})
-        assert backend.run("print('value' in globals()); print(tool(1))").stdout == "False\n11\n"
-        assert client.post("/execute", headers={"X-Broker-Secret": old_secret}, json={}).status_code == 401
+        with pytest.raises(DaytonaAdapterError, match="tool bindings changed"):
+            backend.bind_host_tools({"tool": lambda value: value + 10})
+        with pytest.raises(DaytonaAdapterError, match="tool outcomes changed"):
+            backend.bind_tool_outcomes(tool_settled=None, tool_failed=None)
+        with pytest.raises(DaytonaAdapterError, match="async bridge changed"):
+            backend.bind_async_bridge(None)
+        with pytest.raises(DaytonaAdapterError, match="output contract changed"):
+            backend.ensure_submit([{"name": "answer"}], 100)
+        assert backend._output_fields is None
+        assert client.post("/reset", json={}).status_code == 404
 
 
 def test_settled_broker_rejects_new_calls_and_unknown_results(

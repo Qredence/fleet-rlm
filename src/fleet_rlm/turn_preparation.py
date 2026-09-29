@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -267,11 +266,7 @@ class TurnPreparationPlan:
     capabilities: CapabilityPreparer
     task_service: SessionTaskService | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
-    wrap_up_seconds: float = 300.0
     budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "wrap_up_seconds", max(0.0, float(self.wrap_up_seconds)))
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         return await prepare_turn(self, run, deadline=deadline)
@@ -414,15 +409,8 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
     assert capabilities is not None
     resources = _build_resources()
     try:
-        turn_budget = TurnBudget(
-            deadline=deadline if math.isfinite(deadline) else None,
-            limits=plan.budget_limits,
-        )
-        turn_models = plan.models.bind_turn_deadline(
-            deadline=deadline,
-            reserve_seconds=plan.wrap_up_seconds,
-            budget=turn_budget,
-        )
+        turn_budget = TurnBudget(deadline=None, limits=plan.budget_limits)
+        turn_models = plan.models.bind_turn(budget=turn_budget)
     except BaseException:
         await asyncio.shield(resources.aclose())
         raise
@@ -467,7 +455,6 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
             interpreter=environment.interpreter,
             cancellation_requested=run.cancellation_requested,
             deadline=deadline,
-            wrap_up_seconds=plan.wrap_up_seconds,
             environment_release=environment_release,
             async_bridge=environment.async_bridge,
         ),

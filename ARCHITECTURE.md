@@ -58,11 +58,13 @@ coordination, not a substitute for Turn Commit.
 
 ## Reasoning and execution
 
-`rlm/program.py` constructs pinned native `dspy.RLM` and `dspy.LM` instances;
-`rlm/execution.py` owns invocation and observation, and `rlm/recursion.py`
-owns Fleet child policy and admission. DSPy owns its loop, `REPLHistory`, and
-trajectory semantics. Fleet supplies Turn-scoped tools, deadlines, and the
-shared budget. There is no second planner or model router.
+`rlm/program.py` constructs pinned native `dspy.RLM` and stock `dspy.LM`
+instances; `rlm/execution.py` owns invocation and observation, and
+`rlm/recursion.py` owns Fleet child policy and admission. DSPy owns its loop,
+`REPLHistory`, trajectory semantics, and provider retries. Fleet supplies
+Turn-scoped tools, per-Turn LM copy isolation with trace identity, and the
+shared finalization ledger; nothing wraps the LMs, and Fleet enforces no
+per-Turn LM deadline. There is no second planner or model router.
 
 `RLMRunner` retains non-cancellable work through `WorkerOwnership`. If a Turn
 ends while that worker is still running, its execution trace stays open until

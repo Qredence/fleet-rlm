@@ -33,6 +33,7 @@ from fleet_rlm.daytona.errors import (
     ChildRuntimeCleanupError,
     ChildRuntimeNotStartedError,
 )
+from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, start_turn_span
@@ -1383,20 +1384,29 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
-        child_models = self._models.fork_for_child(deadline=self._deadline)
+        child_models = self._models.fork_for_child()
 
         def invocation_factory() -> CodeInterpreter:
             new_invocation = getattr(lease.interpreter, "new_invocation", None)
             if not callable(new_invocation):
                 raise RLMConfigError("recursive child requires an invocation-scoped interpreter factory")
             interpreter = new_invocation(turn_budget=child_models.budget, turn_request=None)
-            bind_output_contract(interpreter, RecursiveSubtaskSignature)
+            bind_output_contract(
+                interpreter,
+                RecursiveSubtaskSignature,
+                max_output_chars=self._options.child_max_output_chars,
+            )
             if self._parent_run_id is not None:
                 bind_scratch = getattr(interpreter, "bind_run_scratch", None)
                 if not callable(bind_scratch):
                     raise RLMConfigError("recursive child cannot bind its private scratch")
                 bind_scratch(self._parent_run_id, call_index=call.call_index)
             return interpreter
+
+        invocation_factory.__dict__["execution_instructions"] = (
+            f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
+            f"Keep the final SUBMIT JSON within {self._options.child_max_output_chars} characters."
+        )
 
         child_prompt_payload = json.loads(request.render())
         child_prompt_payload["source_manifest"] = source_manifest
@@ -1424,11 +1434,7 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled)
         with dspy.context(
             lm=child_models.root_lm,
-            adapter=FleetJSONAdapter(
-                deadline=self._deadline,
-                wrap_up_seconds=child_models.reserve_seconds,
-                budget=child_models.budget,
-            ),
+            adapter=FleetJSONAdapter(budget=child_models.budget),
             callbacks=dspy_turn_callbacks(
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,

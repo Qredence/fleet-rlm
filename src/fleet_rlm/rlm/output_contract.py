@@ -19,9 +19,10 @@ class OutputField:
 @dataclass(frozen=True, slots=True)
 class FleetOutputContract:
     fields: tuple[OutputField, ...]
+    max_output_chars: int | None = None
 
     @classmethod
-    def from_signature(cls, signature: Any) -> FleetOutputContract:
+    def from_signature(cls, signature: Any, *, max_output_chars: int | None = None) -> FleetOutputContract:
         """
         Build an output contract from a signature's output fields.
 
@@ -40,7 +41,7 @@ class FleetOutputContract:
                     default = cast(Callable[[], Any], field.default_factory)()
                 default_json = strict_json_dumps(default)
             fields.append(OutputField(name, field.is_required(), default_json))
-        return cls(tuple(fields))
+        return cls(tuple(fields), max_output_chars=max_output_chars)
 
     def merge(self, native_fields: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Merge Fleet-required and default metadata into native output fields while preserving their other metadata.
@@ -67,10 +68,10 @@ class FleetOutputContract:
         return result
 
 
-def bind_output_contract(interpreter: Any, signature: Any) -> None:
+def bind_output_contract(interpreter: Any, signature: Any, *, max_output_chars: int | None = None) -> None:
     """Bind the signature's output contract through a compatible interpreter adapter."""
     if signature is None or not hasattr(signature, "output_fields"):
         return
     bind = getattr(interpreter, "bind_output_contract", None)
     if callable(bind):
-        bind(FleetOutputContract.from_signature(signature))
+        bind(FleetOutputContract.from_signature(signature, max_output_chars=max_output_chars))

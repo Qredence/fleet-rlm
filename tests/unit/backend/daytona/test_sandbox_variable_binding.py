@@ -1,255 +1,117 @@
-"""Preamble-source contracts for the live Sandbox interpreter.
-
-The Sandbox backend receives Python source, not objects, so Fleet materializes
-each RLM input field and the SUBMIT contract into the preamble. That generated
-source must be valid Python: JSON literals such as ``true``/``false``/``null``
-are valid identifiers and therefore runtime ``NameError``s, not syntax errors,
-which silently poisons every action in the Turn because the preamble is
-replayed per execution.
-"""
+"""The Daytona broker is the only live Python namespace for a Turn."""
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import io
 import json
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
-from uuid import UUID
 
 import pytest
 
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import extract_final_payload, final_output_frame, sandbox_backend
-from fleet_rlm.rlm.program import WorkspaceCapabilityMetadata, build_session_context_payload
-from fleet_rlm.sessions.context import SessionContextManifest, TurnPreview
-
-_OUTPUT_FIELDS = [{"name": "answer", "type": "str", "required": True}]
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop, sandbox_backend
 
 
-def _sandbox_backend(*, stdout: str = "", stderr: str = "", error: str | None = None) -> Any:
-    """A Sandbox backend whose remote execution returns the given result."""
-    code_interpreter = MagicMock()
-    code_interpreter.create_context.return_value = "ctx"
-    code_interpreter.run_code.return_value = MagicMock(stdout=stdout, stderr=stderr, error=error)
-    sandbox = MagicMock()
-    sandbox.code_interpreter = code_interpreter
+class _LocalBroker:
+    """Exercise the backend protocol with JSON transport and a persistent namespace."""
 
-    backend = sandbox_backend(sandbox)
-    backend.ensure_submit(_OUTPUT_FIELDS)
-    return backend
+    instances: ClassVar[list[_LocalBroker]] = []
+
+    def __init__(self, _sandbox: Any, *, port: int, **_kwargs: Any) -> None:
+        assert port > 0
+        self.namespace: dict[str, Any] = {}
+        self.calls: list[str] = []
+        self.closed = False
+        self.instances.append(self)
+
+    def bind_tools(self, tools: dict[str, Any]) -> None:
+        self.tools = tools
+
+    def bind_async_bridge(self, _bridge: Any) -> None:
+        pass
+
+    def setup_source(self, source: str) -> str:
+        return source
+
+    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
+        assert timeout_s > 0
+        self.calls.append(code)
+        self.namespace.update(json.loads(json.dumps(variables, ensure_ascii=False, allow_nan=False)))
+        stdout = io.StringIO()
+        error = None
+        final = None
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exec(compile(code, "<broker-test>", "exec"), self.namespace, self.namespace)
+        except BaseException as exc:
+            if type(exc).__name__ == "FleetFinalOutputError":
+                final = exc.value
+            else:
+                error = str(exc)
+        return {"stdout": stdout.getvalue(), "stderr": "", "error": error, "final": final}
+
+    def stop(self, *, strict: bool) -> None:
+        assert strict
+        self.closed = True
 
 
-def _emitted_sandbox_source(*, code: str = "pass", variables: dict[str, Any] | None = None) -> str:
-    """Return the exact source the Sandbox backend would execute for one action."""
-    backend = _sandbox_backend()
-    backend.run(code, variables=variables)
-
-    return backend.sandbox.code_interpreter.run_code.call_args[0][0]
-
-
-def _exec_source(source: str) -> dict[str, Any]:
-    namespace: dict[str, Any] = {}
-    exec(compile(source, "<sandbox>", "exec"), namespace, namespace)
-    return namespace
-
-
-def _production_session_context() -> dict[str, Any]:
-    """The exact Session context payload shape that broke trace tr-07d7a175."""
-    return build_session_context_payload(
-        session_context=SessionContextManifest(
-            session_id=UUID("d3b155d7-028c-435b-9e40-43e758f29d12"),
-            checkpoint_version=3,
-            message_count=2,
-            recent=(
-                TurnPreview(ordinal=1, role="user", preview="ADD A 5"),
-                TurnPreview(ordinal=2, role="assistant", preview="working"),
-            ),
-        ),
-        workspace=WorkspaceCapabilityMetadata(available=True, root=".", instructions="use /workspace"),
+def test_broker_namespace_persists_within_turn_and_resets_for_next_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    root = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()))
+    first = root.new_invocation()
+    first.execute(
+        "cached = session_context['workspace']['available']", {"session_context": {"workspace": {"available": True}}}
     )
+    assert first.execute("print(cached)") == "True\n"
+    assert len(_LocalBroker.instances) == 1
+
+    second = root.new_invocation()
+    with pytest.raises(Exception, match="cached"):
+        second.execute("print(cached)")
+    assert len(_LocalBroker.instances) == 2
+    first.shutdown()
+    second.shutdown()
+    assert all(broker.closed for broker in _LocalBroker.instances)
 
 
-def test_json_booleans_and_null_are_bound_without_name_error() -> None:
-    """``true``/``false``/``null`` must be decoded, not executed as Python names."""
-    variables = {"flag_on": True, "flag_off": False, "empty": None}
-
-    namespace = _exec_source(_emitted_sandbox_source(variables=variables))
-
-    assert namespace["flag_on"] is True
-    assert namespace["flag_off"] is False
-    assert namespace["empty"] is None
-
-
-def test_production_session_context_payload_round_trips_exactly() -> None:
-    """Regression: tr-07d7a175 died on ``session_context.workspace.available == true``."""
-    session_context = _production_session_context()
-    assert session_context["workspace"]["available"] is True
-
-    source = _emitted_sandbox_source(variables={"request": "print(request)", "session_context": session_context})
-    namespace = _exec_source(source)
-
-    assert namespace["session_context"] == session_context
-    assert namespace["request"] == "print(request)"
-    assert "_fleet_bindings_json.loads(" in source
+def test_broker_receives_typed_submit_and_rejects_unserializable_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    backend = sandbox_backend(MagicMock())
+    backend.ensure_submit([{"name": "answer", "type": "str", "required": True}])
+    result = backend.run("SUBMIT(answer=note)", {"note": "café"})
+    assert result.final == {"answer": "café"}
+    assert "SUBMIT(answer=note)" in _LocalBroker.instances[0].calls[0]
+    with pytest.raises(DaytonaAdapterError, match="binding 'opaque' contains unsupported type"):
+        backend.run("pass", {"opaque": object()})
+    backend.close()
 
 
-def test_bound_inputs_are_readable_by_model_code_in_same_execution() -> None:
-    """The preamble must not abort before the model's own action runs."""
-    session_context = _production_session_context()
+def test_broker_submit_size_failure_is_recoverable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    backend = sandbox_backend(MagicMock())
+    backend.ensure_submit([{"name": "answer", "type": "str", "required": True}], max_output_chars=20)
 
-    namespace = _exec_source(
-        _emitted_sandbox_source(
-            code="observed = sorted(session_context['workspace'].keys())",
-            variables={"request": "hi", "session_context": session_context},
-        )
-    )
-
-    assert namespace["observed"] == ["available", "instructions", "root"]
-
-
-def test_nested_containers_and_non_ascii_round_trip() -> None:
-    """Nested values keep identity, container types, and non-ASCII content."""
-    variables = {
-        "skill_cards": [{"id": "s1", "resources_available": True, "affordances": ["run", "read"]}],
-        "attachments": [{"id": "a1", "byte_size": 12, "content_type": None}],
-        "note": "caf\u00e9 na\u00efve" + chr(0x2028) + " line separator",
-        "counts": {"ints": [1, 2], "floats": [1.5, -0.25]},
-    }
-
-    namespace = _exec_source(_emitted_sandbox_source(variables=variables))
-
-    for key, value in variables.items():
-        assert namespace[key] == value, key
-
-
-def test_non_finite_floats_are_bound_without_name_error() -> None:
-    """``NaN``/``Infinity`` are likewise not Python names in generated source."""
-    namespace = _exec_source(_emitted_sandbox_source(variables={"score": float("nan"), "cap": float("inf")}))
-
-    assert namespace["score"] != namespace["score"]  # NaN is never equal to itself
-    assert namespace["cap"] == float("inf")
-
-
-def test_empty_variable_mapping_emits_no_binding_import() -> None:
-    """An action without bound inputs must not carry a dangling import or stubs."""
-    source = _emitted_sandbox_source(code="x = 1", variables={})
-
-    assert "_fleet_bindings_json" not in source
-    assert _exec_source(source)["x"] == 1
-
-
-def test_sandbox_preamble_defines_the_submit_exception_it_raises() -> None:
-    """Regression: live ``SUBMIT`` printed its frame, then died on an undefined name."""
-    namespace = _exec_source(_emitted_sandbox_source(variables={"request": "hi"}))
-
-    assert "FleetFinalOutputError" in namespace
-
-
-def test_submit_aborts_with_the_preamble_defined_exception() -> None:
-    """``SUBMIT`` must stop execution with a real exception carrying the payload."""
-    namespace = _exec_source(_emitted_sandbox_source(variables={"request": "hi"}))
-
-    with pytest.raises(namespace["FleetFinalOutputError"]) as exc_info:
-        namespace["SUBMIT"](answer="hello")
-
-    assert exc_info.value.value == {"answer": "hello"}
-
-
-def test_submit_frame_survives_the_abort(capsys: pytest.CaptureFixture[str]) -> None:
-    """The stdout frame is the transport, so it must be emitted before the abort."""
-    namespace = _exec_source(_emitted_sandbox_source(variables={"request": "hi"}))
-
-    with pytest.raises(namespace["FleetFinalOutputError"]):
-        namespace["SUBMIT"](answer="hello")
-
-    assert extract_final_payload(capsys.readouterr().out) == {"answer": "hello"}
-
-
-def test_declared_variables_all_reach_the_sandbox() -> None:
-    """Telemetry counts declared variables, so none may be dropped in silence."""
-    variables: dict[str, Any] = {
-        "a": 1,
-        "b": "two",
-        "c": True,
-        "d": None,
-        "e": [1, 2],
-        "f": {"g": 1},
-        "h": (1, 2),
-    }
-
-    namespace = _exec_source(_emitted_sandbox_source(variables=variables))
-
-    assert {name for name in variables if name in namespace} == set(variables)
-    assert namespace["h"] == [1, 2]
-
-
-def test_unrepresentable_binding_fails_closed_naming_the_variable() -> None:
-    """An input the transport cannot carry is a host contract error, not a NameError."""
-    with pytest.raises(DaytonaAdapterError, match=r"binding 'opaque' of type object"):
-        _emitted_sandbox_source(variables={"request": "hi", "opaque": object()})
-
-
-def test_nested_unrepresentable_binding_fails_closed() -> None:
-    """Representability is decided by JSON itself, including nested values."""
-    with pytest.raises(DaytonaAdapterError, match=r"binding 'session_context' of type dict"):
-        _emitted_sandbox_source(
-            variables={"session_context": {"workspace": {"handle": object()}}},
-        )
-
-
-def test_tool_enabled_action_never_uses_the_direct_interpreter(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Host tools are brokered while model-authored source remains remote."""
-    calls: list[dict[str, Any]] = []
-
-    class _Broker:
-        def __init__(self, _sandbox: Any, *, port: int, **_kwargs: Any) -> None:
-            assert port > 0
-
-        def bind_tools(self, tools: dict[str, Any]) -> None:
-            assert set(tools) == {"host_tool"}
-
-        def setup_source(self, source: str) -> str:
-            return source
-
-        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
-            calls.append({"code": code, "variables": variables, "timeout_s": timeout_s})
-            return {"stdout": "", "stderr": "", "final": {"answer": "remote"}}
-
-        def stop(self, *, strict: bool) -> None:
-            assert strict
-
-    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _Broker)
-    backend = _sandbox_backend()
-    backend.bind_host_tools({"host_tool": lambda: "host"})
-
-    result = backend.run("host_tool()\nSUBMIT(answer='remote')", {"flag": True})
-
-    assert result.final == {"answer": "remote"}
-    assert len(calls) == 1
-    assert "host_tool()" in calls[0]["code"]
-    assert backend.sandbox.code_interpreter.run_code.call_count == 0
-
-
-def test_submit_abort_is_not_reported_as_an_execution_error() -> None:
-    """The frame is the transport, so the trailing abort must not fail the step."""
-    backend = _sandbox_backend(
-        stdout=final_output_frame({"answer": "hello"}),
-        stderr="FleetFinalOutputError: Final output submitted",
-        error="FleetFinalOutputError: Final output submitted",
-    )
-
-    result = backend.run("SUBMIT(answer='hello')")
-
-    assert result.final == {"answer": "hello"}
-    assert result.error is None
+    oversized = backend.run("SUBMIT(answer='x' * 30)")
+    assert oversized.final is None
+    assert "SUBMIT output is too large" in str(oversized.error)
+    assert backend.run("SUBMIT(answer='short')").final == {"answer": "short"}
+    backend.close()
 
 
 @pytest.mark.asyncio
 async def test_broker_resolves_awaitable_tools_and_returns_structured_failure() -> None:
-    """Broker polling must not turn host-tool failures into opaque HTTP 500s."""
-    import asyncio
-
-    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
+    """Broker polling keeps host-tool failures structured."""
 
     class _Response:
         def __init__(self, body: dict[str, object]) -> None:
@@ -291,47 +153,3 @@ async def test_broker_resolves_awaitable_tools_and_returns_structured_failure() 
     assert isinstance(failure, dict)
     assert failure["category"] == "KeyError"
     assert failure["call_id"] == "bad-1"
-
-
-def test_native_stdout_is_forwarded_before_execution_returns() -> None:
-    from types import SimpleNamespace
-
-    backend = _sandbox_backend(stdout="first\nsecond\n")
-    chunks: list[str] = []
-
-    def run_code(_code: str, **kwargs: Any) -> Any:
-        kwargs["on_stdout"](SimpleNamespace(output="first\n"))
-        assert chunks == ["first\n"]
-        kwargs["on_stdout"](SimpleNamespace(output="second\n"))
-        return SimpleNamespace(stdout="first\nsecond\n", stderr="", error=None)
-
-    backend.sandbox.code_interpreter.run_code.side_effect = run_code
-    backend.run("print('first'); print('second')", on_stdout=chunks.append)
-    assert chunks == ["first\n", "second\n"]
-
-
-@pytest.mark.parametrize("method", ["exec", "code_run"])
-def test_empty_nonzero_process_result_is_an_error(method: str) -> None:
-    from types import SimpleNamespace
-
-    process = SimpleNamespace(**{method: lambda *_args, **_kwargs: SimpleNamespace(result="", exit_code=1)})
-    backend = sandbox_backend(SimpleNamespace(process=process))
-    assert backend.run("raise SystemExit(1)").error
-
-
-def test_process_exec_quotes_python_for_the_shell() -> None:
-    import shlex
-    from types import SimpleNamespace
-
-    commands: list[str] = []
-
-    def execute(command: str, **_kwargs: Any) -> Any:
-        commands.append(command)
-        return SimpleNamespace(result="", exit_code=0)
-
-    backend = sandbox_backend(SimpleNamespace(process=SimpleNamespace(exec=execute)))
-    source = 'value = "$(echo should_not_run)"\nprint(value)'
-    backend.run(source)
-    arguments = shlex.split(commands[0])
-    assert arguments[:2] == ["python3", "-c"]
-    assert arguments[2].endswith(source)

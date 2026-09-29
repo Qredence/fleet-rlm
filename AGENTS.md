@@ -34,7 +34,10 @@ behavior and tests define what the system does.
   needs iterative investigation. These tools serve different needs.
 - Full child recursion is bounded to one level. `daytona-native` is the
   configured default; `daytona-recursive` opts into Fleet children. Preserve
-  the shared Turn budget, bounded admission, and ordered partial outcomes.
+  the shared Turn finalization ledger, the bounded admission of Tool calls,
+  recursive children, and execution output, and ordered partial outcomes.
+  Provider-attempt admission and per-Turn LM deadlines are not preserved:
+  Fleet's LMs are stock `dspy.LM`, and DSPy owns their retries.
 - Resolve child inputs under Session authority. The active `semantic-child`
   path stages bounded copies in private scratch, validates outputs before
   cleanup, and stays Volume-less. The separate `workspace-child` profile

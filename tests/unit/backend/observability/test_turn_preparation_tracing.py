@@ -11,6 +11,7 @@ from uuid import uuid4
 
 import pytest
 
+from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 
 
@@ -78,7 +79,7 @@ def _make_turn() -> Any:
 def _make_preparer(*, environments: Any = None) -> Any:
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
-    from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+    from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.turn_preparation import RunEnvironment
 
     class Sink:
@@ -124,7 +125,7 @@ def _make_preparer(*, environments: Any = None) -> Any:
             return RunEnvironment(SimpleNamespace(), sink, sink, release)
 
     return TestingRunPreparer(
-        models=RLMModelBundle(object(), object()),
+        models=placeholder_bundle(),
         options=RLMOptions(),
         attachments=Attachments(),
         acquire_environment=(environments if environments is not None else Environments()).acquire,

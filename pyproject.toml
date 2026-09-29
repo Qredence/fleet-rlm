@@ -191,6 +191,18 @@ markers = [
     "live_llm: tests that require a live configured LM / LiteLLM backend",
     "live_daytona: tests that require a live Daytona backend and explicit opt-in",
 ]
+# DSPy 3.4 deprecates the two legacy LM interfaces this repository migrated off;
+# both are removed in DSPy 3.5. Promote exactly those two to errors so a
+# reintroduced `dspy.BaseLM` subclass or an OpenAI-style `messages=` call fails
+# the lane instead of warning quietly. The filters are message-scoped (not a
+# blanket `error::DeprecationWarning`) because dspy attributes the warning to
+# the caller's frame via `stacklevel`, and because mlflow/pandas deprecations
+# must stay tolerated. A filter's message field is a regex matched at the start
+# of the warning text, and later entries take precedence.
+filterwarnings = [
+    "error:Implementing custom LMs through BaseLM.forward:DeprecationWarning",
+    "error:Passing OpenAI-style message dictionaries:DeprecationWarning",
+]
 
 [tool.coverage.run]
 branch = true

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import tomllib
 from pathlib import Path
@@ -18,6 +19,7 @@ from fleet_rlm.daytona.interpreter import (
     sandbox_backend,
 )
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+from fleet_rlm.rlm.output_contract import FleetOutputContract, OutputField
 
 
 def test_large_stdout_is_head_tail_capped_with_marker() -> None:
@@ -49,6 +51,43 @@ def test_final_output_is_never_capped() -> None:
 
     assert isinstance(result, FinalOutput)
     assert result.output["answer"] == "x" * 5000
+
+
+def test_typed_submit_size_feedback_is_recoverable_and_matches_declared_json() -> None:
+    answer = "é" * 4
+    limit = len(json.dumps({"answer": answer}, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        output_fields=[{"name": "answer", "type": "str"}],
+    )
+    interpreter.bind_output_contract(FleetOutputContract((OutputField("answer", True),), limit))
+
+    with pytest.raises(CodeExecutionError, match=f"{limit + 1} > {limit} characters") as error:
+        interpreter.execute(f"SUBMIT(answer={answer + 'é'!r})")
+    assert answer not in str(error.value)
+
+    result = interpreter.execute(f"SUBMIT(answer={answer!r})")
+    assert isinstance(result, FinalOutput)
+    assert result.output == {"answer": answer}
+
+
+def test_typed_submit_size_includes_optional_defaults() -> None:
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        output_fields=[
+            {"name": "answer", "type": "str"},
+            {"name": "evidence", "type": "list[str]"},
+        ],
+    )
+    interpreter.bind_output_contract(
+        FleetOutputContract(
+            (OutputField("answer", True), OutputField("evidence", False, '["source"]')),
+            len('{"answer":"ok","evidence":[]}'),
+        )
+    )
+
+    with pytest.raises(CodeExecutionError, match="SUBMIT output is too large"):
+        interpreter.execute("SUBMIT(answer='ok')")
 
 
 def test_turn_output_budget_is_shared_and_fail_closed() -> None:

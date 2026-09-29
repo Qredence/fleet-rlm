@@ -12,13 +12,18 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.runtime import (
+    EXECUTION_MOUNT_PATH,
     ensure_volume_layout,
     required_volume_directories,
+    verify_execution_mount,
 )
 from fleet_rlm.paths import VolumePaths
 
@@ -69,6 +74,19 @@ def _paths() -> VolumePaths:
 
 def _dirs_of(fs: _FakeFs, op: str) -> list[str]:
     return [path for name, path in fs.calls if name == op]
+
+
+@pytest.mark.asyncio
+async def test_execution_mount_must_be_visible_to_python() -> None:
+    process = SimpleNamespace(exec=AsyncMock(return_value=SimpleNamespace(exit_code=2)))
+    with pytest.raises(DaytonaAdapterError) as error:
+        await verify_execution_mount(SimpleNamespace(process=process))
+    assert error.value.cause_type == "ExecutionMountNotVisible"
+    process.exec.assert_awaited_once()
+    assert EXECUTION_MOUNT_PATH in process.exec.await_args.args[0]
+
+    process.exec.return_value = SimpleNamespace(exit_code=0)
+    await verify_execution_mount(SimpleNamespace(process=process))
 
 
 @pytest.mark.asyncio

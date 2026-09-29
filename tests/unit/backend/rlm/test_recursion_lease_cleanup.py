@@ -512,20 +512,21 @@ def test_expired_deadline_performs_no_allocation() -> None:
 def test_one_absolute_deadline_covers_fork_and_batch_join(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The model fork and the batch join both receive the one
-    absolute Root deadline; a blocked batch reports the deadline error within
-    a bounded tolerance and the retained child still settles."""
+    """The model fork and the batch join both sit under the one absolute Root
+    deadline; a blocked batch reports the deadline error within a bounded
+    tolerance and the retained child still settles."""
     import fleet_rlm.rlm.recursion as recursive_calls
 
     started = threading.Event()
     release = threading.Event()
     recorder = _Recorder()
-    fork_deadlines: list[float] = []
+    forks = 0
     real_fork = RLMModelBundle.fork_for_child
 
-    def spy_fork(self: RLMModelBundle, *, deadline: float) -> RLMModelBundle:
-        fork_deadlines.append(deadline)
-        return real_fork(self, deadline=deadline)
+    def spy_fork(self: RLMModelBundle) -> RLMModelBundle:
+        nonlocal forks
+        forks += 1
+        return real_fork(self)
 
     monkeypatch.setattr(RLMModelBundle, "fork_for_child", spy_fork)
 
@@ -555,8 +556,8 @@ def test_one_absolute_deadline_covers_fork_and_batch_join(
     assert started.is_set()
     # Bounded by the one absolute deadline, with a small tolerance.
     assert 0.05 <= elapsed < 3.0
-    # The child's model fork received exactly the Root deadline.
-    assert fork_deadlines == [deadline]
+    # The child's model fork happened exactly once, under that same deadline.
+    assert forks == 1
 
     release.set()
     executor.wait_owned()
@@ -565,38 +566,34 @@ def test_one_absolute_deadline_covers_fork_and_batch_join(
 
 
 class _RecordingLM:
-    """Minimal copyable LM double that records the kwargs of every call."""
+    """Minimal copyable role-LM double whose history is per-instance."""
 
     def __init__(self) -> None:
         self.history: list[object] = []
-        self.kwargs: dict[str, object] = {}
-        self.calls: list[dict[str, object]] = []
-        self.num_retries: int | None = None
 
-    def copy(self, **kwargs: object) -> _RecordingLM:
-        copied = _RecordingLM()
-        copied.num_retries = kwargs.get("num_retries")  # type: ignore[assignment]
-        return copied
-
-    def forward(self, **kwargs: object) -> object:
-        self.calls.append(dict(kwargs))
-        return object()
+    def copy(self) -> _RecordingLM:
+        return _RecordingLM()
 
 
-def test_child_receives_only_remaining_time_on_forked_lm() -> None:
-    """Forked child LMs derive their per-call timeout from the
-    same absolute deadline and reject calls once it has expired."""
-    deadline = time.monotonic() + 5
-    child = RLMModelBundle(_RecordingLM(), _RecordingLM()).fork_for_child(deadline=deadline)
+def test_forked_child_lms_are_isolated_and_cannot_finalize() -> None:
+    """Child copies share the Turn's finalization ledger but never its history,
+    and may never consume root-only finalization capacity."""
+    root = _RecordingLM()
+    sub = _RecordingLM()
+    turn = RLMModelBundle(root, sub)
+    child = turn.fork_for_child()
 
-    child.root_lm.forward(prompt="bounded")
-    timeout = child.root_lm.calls[-1]["timeout"]
-    assert isinstance(timeout, float)
-    assert 0 < timeout <= 5
-
-    expired = RLMModelBundle(_RecordingLM(), _RecordingLM()).fork_for_child(deadline=time.monotonic() - 1)
-    with pytest.raises(TimeoutError, match="recursive child LM deadline exceeded"):
-        expired.root_lm.forward(prompt="late")
+    assert child is not turn
+    assert child.root_lm is not root
+    assert child.sub_lm is not sub
+    assert child.root_lm.history is not root.history
+    assert child.sub_lm.history is not sub.history
+    assert child.root_lm._fleet_can_finalize is False
+    assert child.sub_lm._fleet_can_finalize is False
+    assert child.budget is turn.budget
+    # Forking must leave the Turn's own templates pristine.
+    assert not hasattr(root, "_fleet_can_finalize")
+    assert not hasattr(sub, "_fleet_can_finalize")
 
 
 @pytest.mark.parametrize(

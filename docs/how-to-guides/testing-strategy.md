@@ -6,11 +6,12 @@ database lanes remain explicit.
 
 ## Suite inventory
 
-The [Phase 3 consolidation ledger](../testing/phase3-consolidation-ledger.md)
-records the pre-move ownership inventory, scenario dispositions, and validation.
-The [consolidation ledger](../testing/consolidation-ledger.md) records the
-2026-09-20 reorganization: the behavior-owner sub-package layout, the merges
-that removed single-scenario files, and the layout rule this gate now enforces.
+The behavior-owner sub-package layout comes from the 2026-09-20
+reorganization, which merged away single-scenario files and established the
+layout rule this gate now enforces. The consolidation ledgers that recorded the
+pre-move ownership inventory and that reorganization were removed once the
+reorganization they described had landed; the rule itself remains in force and
+is enforced by the gate below.
 
 Add regressions to the existing behavior-owning test file by default. Create a
 new file only for a distinct contract, fixture/process boundary, generated-contract

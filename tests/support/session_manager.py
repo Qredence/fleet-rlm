@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
@@ -100,6 +102,7 @@ class _FakeSandbox:
         self.labels = labels or {}
         self.snapshot = snapshot
         self.fs = _FakeFilesystem(mount_path)
+        self.process = SimpleNamespace(exec=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
         self.volumes = (
             [
                 {

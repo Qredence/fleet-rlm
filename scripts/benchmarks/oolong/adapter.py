@@ -660,7 +660,6 @@ async def invoke_live_prediction(
     *,
     interpreter: Any,
     deadline: float,
-    wrap_up_seconds: float,
     turn_budget: Any | None = None,
     root_lm: Any | None = None,
     sub_lm: Any | None = None,
@@ -680,11 +679,7 @@ async def invoke_live_prediction(
     else:
         resolved_root = root_lm
         resolved_sub = sub_lm
-    turn_models = RLMModelBundle(root_lm=resolved_root, sub_lm=resolved_sub).bind_turn_deadline(
-        deadline=deadline,
-        reserve_seconds=wrap_up_seconds,
-        budget=budget,
-    )
+    turn_models = RLMModelBundle(root_lm=resolved_root, sub_lm=resolved_sub).bind_turn(budget=budget)
     resolved_root = turn_models.root_lm
     resolved_sub = turn_models.sub_lm
     capsule = kwargs.get("attachment_context")
@@ -700,11 +695,7 @@ async def invoke_live_prediction(
 
     rlm = build_native_program(settings, interpreter_factory=interpreter_factory, sub_lm=resolved_sub, dataset=dataset)
     invoke_kwargs = {key: value for key, value in kwargs.items() if key != "attachment_context"}
-    adapter = FleetJSONAdapter(
-        deadline=deadline,
-        wrap_up_seconds=wrap_up_seconds,
-        budget=budget,
-    )
+    adapter = FleetJSONAdapter(budget=budget)
     started = time.perf_counter()
     effect = OwnedEffect.start(
         asyncio.to_thread(

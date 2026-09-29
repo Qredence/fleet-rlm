@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -85,6 +87,7 @@ class _FakeSandbox:
         self.labels = labels
         self.snapshot = _SPEC.snapshot
         self.fs = _FakeFilesystem(mount_path)
+        self.process = SimpleNamespace(exec=AsyncMock(return_value=SimpleNamespace(exit_code=0)))
         self.volumes = [
             {
                 "volume_id": volume_id,

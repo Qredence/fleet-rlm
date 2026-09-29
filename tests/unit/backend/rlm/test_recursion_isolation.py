@@ -214,24 +214,43 @@ def test_sequential_children_report_independent_completion_evidence() -> None:
     executor.raise_if_cleanup_failed()
 
 
-class RecordingLM(dspy.utils.DummyLM):
-    """Records every rendered prompt so the lane can attribute invocations
-    to Root/Sub roles by content."""
+class _LMCallRecorder(dspy.utils.callback.BaseCallback):
+    """Record the rendered request text of every LM call a double serves."""
 
-    def __init__(self, answers: Any, adapter: Any) -> None:
-        super().__init__(answers, adapter=adapter)
+    def __init__(self) -> None:
         self.calls: list[str] = []
 
-    def forward(self, prompt: Any = None, messages: Any = None, **kwargs: Any) -> Any:
+    def on_lm_start(self, call_id: Any, instance: Any, inputs: dict[str, Any]) -> None:
+        del call_id, instance
         parts: list[str] = []
+        prompt = inputs.get("prompt")
         if isinstance(prompt, str):
             parts.append(prompt)
-        for message in messages or []:
-            content = message.get("content")
+        for message in inputs.get("messages") or []:
+            content = message.get("content") if isinstance(message, dict) else getattr(message, "text", None)
             if isinstance(content, str):
                 parts.append(content)
         self.calls.append("\n".join(parts))
-        return super().forward(prompt=prompt, messages=messages, **kwargs)
+
+
+class RecordingLM(dspy.utils.DummyLM):
+    """DummyLM that records every rendered request so the lane can attribute
+    invocations to Root/Sub roles by content.
+
+    Recording goes through a DSPy LM callback rather than a ``forward``
+    override: overriding ``forward`` marks the LM as a legacy custom LM, which
+    DSPy 3.4 deprecates. ``BaseLM.copy`` carries the callback list onto Turn and
+    child copies, so one recorder observes every copy's calls.
+    """
+
+    def __init__(self, answers: Any, adapter: Any) -> None:
+        super().__init__(answers, adapter=adapter)
+        self.recorder = _LMCallRecorder()
+        self.callbacks = [*self.callbacks, self.recorder]
+
+    @property
+    def calls(self) -> list[str]:
+        return self.recorder.calls
 
 
 @pytest.mark.asyncio
@@ -554,12 +573,16 @@ def test_child_oversized_submit_fails_at_the_child_boundary() -> None:
 
 
 @pytest.mark.asyncio
-async def test_root_oversized_submit_fails_with_the_same_closed_category() -> None:
-    """An oversized Root SUBMIT fails the Run at the Root result
-    boundary with the same closed too-large public category the child
-    boundary uses."""
+async def test_root_oversized_submit_can_be_shortened_in_the_next_action() -> None:
+    """An oversized SUBMIT returns actionable feedback inside the native RLM loop."""
     adapter = dspy.JSONAdapter()
-    root = dspy.utils.DummyLM([{"reasoning": "submit oversized", "code": "SUBMIT(answer='x' * 500)"}], adapter=adapter)
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "submit oversized", "code": "SUBMIT(answer='x' * 500)"},
+            {"reasoning": "shorten answer", "code": "SUBMIT(answer='short')"},
+        ],
+        adapter=adapter,
+    )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     recorder = ChildLeaseRecorder()
 
@@ -595,23 +618,24 @@ async def test_root_oversized_submit_fails_with_the_same_closed_category() -> No
 
     assert stream.outcome is not None
     projected = project_outcome_prediction(stream.outcome)
-    assert projected.terminal_status == "failed"
-    assert projected.prediction is None
-    # Same closed literal as the child boundary's too-large category.
-    assert projected.public_error_message == "Turn output is too large"
+    assert projected.terminal_status == "completed"
+    assert projected.prediction is not None
+    assert projected.prediction.outputs["answer"] == "short"
 
 
-def test_extraction_fallback_termination_parity_between_root_and_child() -> None:
-    """An RLM that never submits terminates through the same
-    certified extraction fallback at Root and child scope: the child's
-    recorded termination mode matches the Root RLM's classified mode."""
+def test_root_extracts_while_child_final_iteration_is_forced_to_finalize() -> None:
+    """Child scope runs the Fleet adapter, whose wrap-up is keyed to the
+    iteration count: the child's only (final) iteration demands a compliant
+    SUBMIT, so an exploring action is rejected and the correction re-ask must
+    finalize. Root scope runs a plain JSON adapter, where a never-submitting
+    RLM still terminates through the certified extraction fallback."""
     recorder = ChildLeaseRecorder()
-    # Child scope: the child never submits within its single iteration, so
-    # the forced extraction fallback answers from the next scripted entry.
+    # Child scope: the first action explores instead of finalizing, so it is
+    # rejected and the next scripted entry must answer through SUBMIT.
     root = _lm(
         [
             {"reasoning": "child work", "code": "print('plain work only')"},
-            {"answer": "extracted-child", "evidence": [], "gaps": [], "result_files": []},
+            {"reasoning": "final", "code": "SUBMIT(answer='forced-child', evidence=[], gaps=[], result_files=[])"},
         ]
     )
     sub = _lm([{"answer": "unused"}])
@@ -622,10 +646,14 @@ def test_extraction_fallback_termination_parity_between_root_and_child() -> None
         options=RecursiveRLMOptions(child_max_iters=1, child_max_llm_calls=3),
     )
 
-    assert executor.tool(task="extraction parity", inputs=[])["answer"] == "extracted-child"
-    assert executor.summary().termination_modes == ("native_extraction_fallback",)
+    assert executor.tool(task="forced finalization", inputs=[])["answer"] == "forced-child"
+    assert executor.summary().termination_modes == ("typed_submit",)
+    # Two child Root-LM calls: the rejected exploration, then the SUBMIT the
+    # wrap-up correction demanded.
+    assert executor.summary().delegation_metrics.child_root_lm_calls_depth_1 == 2
 
-    # Root scope: the same never-submitting behavior yields the same mode.
+    # Root scope: the same never-submitting behavior yields the same certified
+    # extraction fallback as any plain-adapter native RLM.
     async def bare_root() -> Any:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
         rlm = build_native_rlm_for_test(

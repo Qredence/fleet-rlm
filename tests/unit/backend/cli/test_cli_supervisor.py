@@ -370,7 +370,7 @@ def test_selected_runtime_policy_reports_removed_profile(
 def test_selected_runtime_policy_forwards_explicit_profile(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    settings = SimpleNamespace(run_environment="daytona", _active_profile="phase4-campaign")
+    settings = SimpleNamespace(run_environment="daytona", _active_profile="daytona-recursive")
     calls: list[str | None] = []
 
     def load_settings(*, profile: str | None = None) -> SimpleNamespace:
@@ -378,10 +378,10 @@ def test_selected_runtime_policy_forwards_explicit_profile(
         return settings
 
     monkeypatch.setattr(supervisor, "load_runtime_settings", load_settings)
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "phase4-campaign")
+    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "daytona-recursive")
 
-    assert _SELECTED_RUNTIME_POLICY("daytona", profile="phase4-campaign") is settings
-    assert calls == ["phase4-campaign"]
+    assert _SELECTED_RUNTIME_POLICY("daytona", profile="daytona-recursive") is settings
+    assert calls == ["daytona-recursive"]
 
 
 def test_supervisor_rejects_profile_reload_combination(
@@ -402,7 +402,7 @@ def test_supervisor_rejects_profile_reload_combination(
             port=8123,
             reload=True,
             run_environment="daytona",
-            profile="phase4-campaign",
+            profile="daytona-recursive",
             repo_root=tmp_path,
         )
 

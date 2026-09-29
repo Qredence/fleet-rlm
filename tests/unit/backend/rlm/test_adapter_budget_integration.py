@@ -1,14 +1,22 @@
-"""Real DSPy adapter calls must enter the Turn's provider admission ledger."""
+"""Real DSPy adapter calls consume the Turn's shared finalization ledger.
+
+Fleet LMs are stock ``dspy.LM`` copies owned by one Turn. Provider-attempt
+admission, the per-Turn LM deadline, and the Fleet-owned provider retry loop
+were retired: DSPy owns retries through ``num_retries``. What remains real, and
+is covered here, is parse-repair accounting, the root-only finalization ledger
+shared through ``AdapterBudget.turn``, iteration-keyed wrap-up, Turn/child copy
+isolation, and the trace callback's role and usage attribution.
+"""
 
 from __future__ import annotations
 
-import math
-import time
+import asyncio
+import inspect
 from types import SimpleNamespace
+from typing import Any
 
 import dspy
 import pytest
-from dspy.utils.exceptions import LMServerError
 from dspy.utils.usage_tracker import UsageTracker
 
 from fleet_rlm.rlm.budget import (
@@ -19,11 +27,12 @@ from fleet_rlm.rlm.budget import (
     TurnBudget,
     TurnBudgetExhausted,
 )
-from fleet_rlm.rlm.events import _RLMTraceCallback
+from fleet_rlm.rlm.events import _lm_max_tokens, _RLMTraceCallback
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
 GOOD = '{"reasoning":"done","code":"SUBMIT(answer=1)"}'
+NON_FINAL_ACTION = '{"reasoning":"explore","code":"x = 1"}'
 
 
 async def invoke(adapter, lm, asynchronous):
@@ -40,407 +49,32 @@ async def invoke(adapter, lm, asynchronous):
     return await adapter.acall(*args) if asynchronous else adapter(*args)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("limit", [1, 2])
-async def test_corrective_reask_shares_turn_admission(asynchronous: bool, limit: int) -> None:
-    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=limit))
-    source = _ScriptedLM(["", GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
-    adapter = FleetJSONAdapter(budget=turn)
-    if limit == 1:
-        with pytest.raises(TurnBudgetExhausted):
-            await invoke(adapter, models.root_lm, asynchronous)
-    else:
-        result = await invoke(adapter, models.root_lm, asynchronous)
-        assert result[0]["code"] == "SUBMIT(answer=1)"
-    assert len(models.root_lm.wrapped.calls) == limit
-    assert turn.snapshot()["provider_attempts"] == limit
-    assert "budget" not in vars(source)
-    assert "forward" not in vars(source)
+def _patch_offline_lm15(monkeypatch: pytest.MonkeyPatch, complete):
+    """Route native lm15 provider calls to an offline ``complete`` implementation."""
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine, LM15Engine
+
+    async def acomplete(instance, request):
+        response = complete(instance, request)
+        return await response if inspect.isawaitable(response) else response
+
+    monkeypatch.setattr(LM15Engine, "complete", complete)
+    monkeypatch.setattr(AsyncLM15Engine, "complete", acomplete)
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_schema_fallback_cannot_bypass_global_admission(asynchronous: bool) -> None:
-    class StructuredLM(_ScriptedLM):
-        @property
-        def supported_params(self):
-            """
-            Identify the parameters supported by the adapter.
+def _offline_response(content: str, model: str):
+    from dspy.lm15 import response_from_openai_chat
 
-            Returns:
-                set[str]: The supported parameter names.
-            """
-            return {"response_format"}
-
-        @property
-        def supports_response_schema(self):
-            """
-            Indicate that response schemas are supported.
-
-            Returns:
-                bool: `True` because response schemas are supported.
-            """
-            return True
-
-    source = StructuredLM(["", GOOD])
-    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=1))
-    adapter = FleetJSONAdapter(budget=turn)
-    with pytest.raises(TurnBudgetExhausted):
-        await invoke(adapter, source, asynchronous)
-    assert len(source.calls) == turn.snapshot()["provider_attempts"] == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_provider_retry_and_parse_correction_share_finalization_slots(asynchronous: bool) -> None:
-    class RetryOnceLM(_ScriptedLM):
-        def forward(self, **kwargs):
-            if not self.calls:
-                self.calls.append(kwargs)
-                raise LMServerError("retry")
-            return super().forward(**kwargs)
-
-    source = RetryOnceLM(["unused", "", GOOD])
-    source.num_retries = 3
-    turn = TurnBudget(deadline=time.monotonic() + 30)
-    adapter = FleetJSONAdapter(deadline=turn.deadline, wrap_up_seconds=60, budget=turn)
-    with pytest.raises(FinalizationExhausted):
-        await invoke(adapter, source, asynchronous)
-    assert len(source.calls) == turn.snapshot()["provider_attempts"] == 2
-    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_reserved_attempts_are_root_only_and_independent_of_time(asynchronous: bool) -> None:
-    source = _ScriptedLM([GOOD])
-    turn = TurnBudget(
-        deadline=time.monotonic() + 30,
-        limits=BudgetLimits(provider_attempts=3, finalization_attempts=2),
+    return response_from_openai_chat(
+        {
+            "id": "offline-test",
+            "object": "chat.completion",
+            "created": 0,
+            "model": model,
+            "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        },
+        model=model,
     )
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
-    turn.reserve(BudgetDimension.PROVIDER_ATTEMPTS)
-    child = models.fork_for_child(deadline=turn.deadline)
-    with pytest.raises(TurnBudgetExhausted):
-        await invoke(FleetJSONAdapter(wrap_up_seconds=1, budget=turn), child.root_lm, asynchronous)
-    assert turn.snapshot()["provider_attempts"] == 1
-    adapter = FleetJSONAdapter(wrap_up_seconds=1, budget=turn)
-    assert (await invoke(adapter, models.root_lm, asynchronous))[0]["code"] == "SUBMIT(answer=1)"
-    assert adapter.wrap_up_summary()["wrap_up_entered"]
-    assert turn.snapshot()["provider_attempts"] == 2
-
-
-def test_late_response_reclassification_consumes_global_finalization_capacity() -> None:
-    turn = TurnBudget(
-        deadline=time.monotonic() + 30,
-        limits=BudgetLimits(finalization_attempts=2),
-    )
-    adapter = AdapterBudget(turn=turn, max_finalization_attempts=10)
-    turn.reserve(BudgetDimension.PROVIDER_ATTEMPTS)
-    adapter.reclassify_late_response()
-    adapter.reclassify_late_response()
-    with pytest.raises(TurnBudgetExhausted):
-        adapter.reclassify_late_response()
-    assert turn.snapshot()["provider_attempts"] == 1
-    assert adapter.finalization_used == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.parametrize("first_response, attempts", [(GOOD, 1), ("", 2)])
-async def test_late_child_response_preserves_root_finalization_reserve(
-    monkeypatch, asynchronous, first_response, attempts
-) -> None:
-    clock = [100.0]
-    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: clock[0])
-
-    class LateLM(_ScriptedLM):
-        def forward(self, **kwargs):
-            clock[0] = 126.0
-            return super().forward(**kwargs)
-
-    source = LateLM([first_response, GOOD])
-    turn = TurnBudget(deadline=130.0, limits=BudgetLimits(provider_attempts=3, finalization_attempts=1))
-    root = RLMModelBundle(source, source).bind_turn_deadline(deadline=130.0, budget=turn)
-    child = root.fork_for_child(deadline=130.0)
-    adapter = FleetJSONAdapter(deadline=130.0, wrap_up_seconds=5, budget=turn)
-    result = await invoke(adapter, child.root_lm, asynchronous)
-    assert result[0]["code"] == "SUBMIT(answer=1)"
-    assert adapter.wrap_up_summary()["wrap_up_attempts"] == attempts
-    assert turn.snapshot()["provider_attempts"] == attempts
-    turn.reserve(BudgetDimension.PROVIDER_ATTEMPTS, finalization=True)
-    assert turn.snapshot()["provider_attempts"] == attempts + 1
-
-
-def test_late_child_response_cannot_bypass_settlement_or_local_wrap_up_limit() -> None:
-    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=0))
-    child = AdapterBudget(turn=turn, max_finalization_attempts=1)
-    child.reclassify_late_response(can_finalize=False)
-    with pytest.raises(TimeoutError, match="wrap-up"):
-        child.reclassify_late_response(can_finalize=False)
-    other = AdapterBudget(turn=turn)
-    turn.settle()
-    with pytest.raises(TurnBudgetExhausted) as failure:
-        other.reclassify_late_response(can_finalize=False)
-    assert failure.value.dimension == BudgetDimension.SETTLED
-    assert other.finalization_used == 0
-
-
-def test_finalization_time_and_attempt_reserves_are_independently_enforced(monkeypatch) -> None:
-    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 99.0)
-    turn = TurnBudget(deadline=100.0, limits=BudgetLimits(provider_attempts=3, finalization_attempts=2))
-    budget = AdapterBudget(deadline=100.0, reserve_seconds=2.0, turn=turn)
-    with pytest.raises(TimeoutError, match="reserve"):
-        budget.reserve_provider(action=True, wrap_up=False, can_finalize=True)
-    assert turn.snapshot()["provider_attempts"] == 0
-    assert budget.reserve_provider(action=True, wrap_up=True, can_finalize=True) == 1.0
-    assert budget.reserve_provider(action=True, wrap_up=True, can_finalize=True) == 1.0
-    with pytest.raises(TimeoutError, match="wrap-up"):
-        budget.reserve_provider(action=True, wrap_up=True, can_finalize=True)
-    assert turn.snapshot()["provider_attempts"] == 2
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_call_local_proxy_preserves_role_and_usage_visibility(asynchronous: bool) -> None:
-    source = _ScriptedLM([GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=time.monotonic() + 30)
-    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
-    with dspy.context(callbacks=[callback]):
-        await invoke(FleetJSONAdapter(budget=models.budget), models.root_lm, asynchronous)
-    assert callback._last_call["role"] == "root"
-    assert models.root_lm.history[-1]["usage"]["total_tokens"] == 2
-    assert len(models.root_lm.history) == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_settled_budget_rejects_adapter_without_calling_provider(asynchronous: bool) -> None:
-    turn = TurnBudget(deadline=time.monotonic() + 30)
-    turn.settle()
-    lm = _ScriptedLM([GOOD])
-    with pytest.raises(TurnBudgetExhausted) as raised:
-        await invoke(FleetJSONAdapter(budget=turn), lm, asynchronous)
-    assert raised.value.dimension == BudgetDimension.SETTLED
-    assert not lm.calls
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_real_lm_template_is_copied_without_mutating_retries_or_history(monkeypatch, asynchronous) -> None:
-    # This fake provider is intentionally unregistered; the test covers
-    # deadline copying and not provider capability discovery.
-    from dspy.clients import capabilities
-
-    monkeypatch.setattr(
-        capabilities,
-        "_litellm_capabilities",
-        lambda *_args, **_kwargs: capabilities.Capabilities(),
-    )
-    monkeypatch.setattr(dspy.LM, "supported_params", property(lambda _instance: set()))
-    template = dspy.LM("test/template", num_retries=4, timeout=25)
-    seen = []
-
-    def forward(instance, **kwargs):
-        """Record the bounded call and return one adapter-ready completion."""
-        seen.append((instance, kwargs))
-        return [{"text": GOOD}]
-
-    async def aforward(instance, **kwargs):
-        """
-        Execute the adapter operation for an instance.
-
-        Returns:
-            The operation result.
-        """
-        return forward(instance, **kwargs)
-
-    monkeypatch.setattr(dspy.LM, "forward", forward)
-    monkeypatch.setattr(dspy.LM, "aforward", aforward)
-    turn = TurnBudget(deadline=time.monotonic() + 10)
-    assert (await invoke(FleetJSONAdapter(budget=turn), template, asynchronous))[0]["code"] == "SUBMIT(answer=1)"
-    assert len(seen) == 1
-    copied, kwargs = seen[0]
-    assert copied is not template
-    assert copied.num_retries == 0
-    assert template.num_retries == 4
-    assert template.history == []
-    assert template.kwargs["timeout"] == 25
-    assert 0 < kwargs["timeout"] <= 10
-    assert turn.snapshot()["provider_attempts"] == 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("asynchronous", [False, True])
-async def test_schema_fallback_consumes_finalization_ceiling(asynchronous) -> None:
-    class StructuredLM(_ScriptedLM):
-        @property
-        def supported_params(self):
-            """
-            Identify the parameters supported by the adapter.
-
-            Returns:
-                set[str]: The supported parameter names.
-            """
-            return {"response_format"}
-
-        @property
-        def supports_response_schema(self):
-            """
-            Indicate that response schemas are supported.
-
-            Returns:
-                bool: `True` because response schemas are supported.
-            """
-            return True
-
-    source = StructuredLM(["", "", GOOD])
-    turn = TurnBudget(deadline=time.monotonic() + 30)
-    adapter = FleetJSONAdapter(budget=turn, wrap_up_seconds=60)
-    with pytest.raises(FinalizationExhausted):
-        await invoke(adapter, source, asynchronous)
-    assert len(source.calls) == turn.snapshot()["provider_attempts"] == 2
-    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 2
-
-
-@pytest.mark.asyncio
-async def test_adapter_rejects_mismatched_turn_ledger() -> None:
-    source = _ScriptedLM([GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=time.monotonic() + 10)
-    other = TurnBudget(deadline=time.monotonic() + 10)
-    with pytest.raises(ValueError, match="switch Turn budgets"):
-        await invoke(FleetJSONAdapter(budget=other), models.root_lm, True)
-    assert not source.calls
-    assert not any(other.snapshot().values())
-    assert not any(models.budget.snapshot().values())
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"deadline": "invalid"},
-        {"deadline": math.nan},
-        {"deadline": -math.inf},
-        {"deadline": False},
-        {"reserve_seconds": "invalid"},
-        {"reserve_seconds": math.nan},
-        {"reserve_seconds": math.inf},
-        {"max_parse_retries": True},
-        {"max_parse_retries": -1},
-        {"max_finalization_attempts": True},
-        {"max_finalization_attempts": -1},
-    ],
-)
-def test_adapter_budget_rejects_invalid_policy(kwargs):
-    with pytest.raises(ValueError):
-        AdapterBudget(**kwargs)
-
-
-@pytest.mark.asyncio
-async def test_copy_of_call_view_retains_admission_and_trace_identity() -> None:
-    from fleet_rlm.rlm.program import DeadlineLMProxy
-
-    source = _ScriptedLM([GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=time.monotonic() + 10)
-    scope = AdapterBudget(turn=models.budget)
-    view = DeadlineLMProxy.for_adapter(models.root_lm, scope, action=True, wrap_up=True)
-    copied = view.copy()
-    assert copied.admission is view.admission
-    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
-    with dspy.context(callbacks=[callback]):
-        await invoke(dspy.JSONAdapter(), copied, True)
-    assert callback._last_call["role"] == "root"
-    assert scope.finalization_used == 1
-    assert models.budget.snapshot()["provider_attempts"] == 1
-
-
-def test_positive_infinite_adapter_deadline_is_the_unbounded_compatibility_case() -> None:
-    budget = AdapterBudget(deadline=math.inf)
-    assert budget.deadline is None
-    assert budget.remaining() is None
-
-
-@pytest.mark.parametrize("cache_hit", [False, True])
-def test_deadline_proxy_counts_only_uncached_provider_usage(cache_hit: bool) -> None:
-    from fleet_rlm.rlm.program import DeadlineLMProxy
-
-    class Provider(dspy.BaseLM):
-        def __init__(self) -> None:
-            super().__init__(model="test/cached")
-
-        def forward(self, **_kwargs):
-            return SimpleNamespace(
-                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
-                usage={"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12},
-                model=self.model,
-                cache_hit=cache_hit,
-            )
-
-    provider = Provider()
-    proxy = DeadlineLMProxy(provider, deadline=None, reserve_seconds=0, retries=0, error_message="expired")
-    tracker = UsageTracker()
-    with dspy.context(usage_tracker=tracker):
-        assert proxy(messages=[{"role": "user", "content": "check"}]) == ["ok"]
-    assert provider.history[-1]["usage"]["total_tokens"] == 12
-    assert tracker.usage_data.get(provider.model, []) == ([] if cache_hit else [provider.history[-1]["usage"]])
-
-
-@pytest.mark.parametrize("asynchronous", [False, True])
-@pytest.mark.asyncio
-async def test_deadline_proxy_records_dspy_global_and_calling_module_history(asynchronous: bool) -> None:
-    from dspy.clients.base_lm import GLOBAL_HISTORY
-
-    from fleet_rlm.rlm.program import DeadlineLMProxy
-
-    provider = _ScriptedLM([GOOD])
-    proxy = DeadlineLMProxy(provider, deadline=None, reserve_seconds=0, retries=0, error_message="expired")
-    caller = dspy.Predict(_IterationActionSignature)
-    global_before = len(GLOBAL_HISTORY)
-    with dspy.context(caller_modules=[caller]):
-        if asynchronous:
-            await proxy.acall(messages=[{"role": "user", "content": "check"}])
-        else:
-            proxy(messages=[{"role": "user", "content": "check"}])
-    entry = provider.history[-1]
-    assert len(GLOBAL_HISTORY) == global_before + 1
-    assert GLOBAL_HISTORY[-1] is entry
-    assert caller.history[-1] is entry
-
-
-def test_concurrent_finalization_admissions_do_not_overdraw():
-    from concurrent.futures import ThreadPoolExecutor
-
-    scope = AdapterBudget(deadline=time.monotonic() + 10)
-
-    def attempt(_):
-        """
-        Attempts to reserve provider and finalization capacity for the current scope.
-
-        Returns:
-            `true` if capacity is reserved successfully, `false` if the reservation times out.
-        """
-        try:
-            scope.reserve_provider(action=True, wrap_up=True, can_finalize=True)
-            return True
-        except TimeoutError:
-            return False
-
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        assert sum(executor.map(attempt, range(10))) == 2
-    assert scope.finalization_used == scope.turn.snapshot()["provider_attempts"] == 2
-
-
-def test_truncated_flag_set_when_output_hits_configured_max() -> None:
-    from fleet_rlm.rlm.events import _lm_max_tokens
-
-    class FakeLM:
-        def __init__(self) -> None:
-            self.kwargs = {"max_tokens": 16384}
-
-    assert _lm_max_tokens(FakeLM()) == 16384
-    assert _lm_max_tokens(object()) is None
 
 
 @pytest.mark.asyncio
@@ -451,26 +85,365 @@ async def test_parse_repair_is_counted_for_turn_telemetry() -> None:
     Without this counter that recovery is invisible except as an unexplained
     second LM child span on one action.
     """
-    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=4))
+    turn = TurnBudget(deadline=None)
     source = _ScriptedLM(["", GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    models = RLMModelBundle(source, source).bind_turn(budget=turn)
     adapter = FleetJSONAdapter(budget=turn)
 
     result = await invoke(adapter, models.root_lm, asynchronous=True)
 
     assert result[0]["code"] == "SUBMIT(answer=1)"
     assert adapter.repair_summary()["parse_repairs_used"] == 1
+    assert len(source.calls) == 2
 
 
 @pytest.mark.asyncio
 async def test_parse_repair_counter_stays_zero_without_a_reask() -> None:
     """A well-formed first response must not report a repair."""
-    turn = TurnBudget(deadline=time.monotonic() + 30, limits=BudgetLimits(provider_attempts=4))
+    turn = TurnBudget(deadline=None)
     source = _ScriptedLM([GOOD])
-    models = RLMModelBundle(source, source).bind_turn_deadline(deadline=turn.deadline, budget=turn)
+    models = RLMModelBundle(source, source).bind_turn(budget=turn)
     adapter = FleetJSONAdapter(budget=turn)
 
     result = await invoke(adapter, models.root_lm, asynchronous=True)
 
     assert result[0]["code"] == "SUBMIT(answer=1)"
     assert adapter.repair_summary()["parse_repairs_used"] == 0
+
+
+def test_wrap_up_summary_reports_only_the_live_wrap_up_fields() -> None:
+    """The time-based wrap-up reserve is retired, so its clock field is gone."""
+    summary = AdapterBudget().wrap_up_summary()
+
+    assert set(summary) == {"wrap_up_entered", "wrap_up_attempts", "wrap_up_rejection_reason"}
+    assert summary["wrap_up_entered"] is False
+    assert summary["wrap_up_attempts"] == 0
+    assert summary["wrap_up_rejection_reason"] is None
+
+
+@pytest.mark.parametrize(
+    ("limits", "iteration", "wrap_up_expected"),
+    [
+        (BudgetLimits(provider_attempts=2, finalization_attempts=1), "1/3", False),
+        # Nothing reserves provider attempts any more, so the wrap-up trigger is
+        # purely config-driven: a profile whose finalization reserve swallows the
+        # provider-attempt limit has no exploration headroom from the first action.
+        (BudgetLimits(provider_attempts=1, finalization_attempts=1), "1/3", True),
+        (None, "2/3", False),
+        (None, "3/3", True),
+    ],
+)
+@pytest.mark.asyncio
+async def test_wrap_up_is_keyed_to_iteration_and_exploration_capacity(
+    limits: BudgetLimits | None, iteration: str, wrap_up_expected: bool
+) -> None:
+    """Wrap-up begins on the final RLM iteration or once exploration capacity is spent.
+
+    The retired wall-clock reserve trigger is gone: a mid-iteration action with
+    exploration headroom must not enter wrap-up.
+    """
+    turn = TurnBudget(deadline=None, limits=limits)
+    source = _ScriptedLM([GOOD])
+    adapter = FleetJSONAdapter(budget=turn)
+
+    result = adapter(source, {}, _IterationActionSignature, [], {"iteration": iteration})
+
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert adapter.wrap_up_summary()["wrap_up_entered"] is wrap_up_expected
+
+
+@pytest.mark.asyncio
+async def test_wrap_up_finalization_ceiling_is_enforced_before_a_compliant_submit() -> None:
+    """Wrap-up stops at the finalization ceiling instead of re-asking forever."""
+    turn = TurnBudget(deadline=None)
+    source = _ScriptedLM([NON_FINAL_ACTION])
+    adapter = FleetJSONAdapter(budget=turn)
+
+    with pytest.raises(FinalizationExhausted):
+        adapter(source, {}, _IterationActionSignature, [], {"iteration": "1/1"})
+
+    assert len(source.calls) == 3
+    assert adapter.wrap_up_summary() == {
+        "wrap_up_entered": True,
+        "wrap_up_attempts": 2,
+        "wrap_up_rejection_reason": "exploration_or_additional_code",
+    }
+
+
+@pytest.mark.asyncio
+async def test_real_lm_template_is_copied_without_mutating_retries_or_history(monkeypatch) -> None:
+    from uuid import uuid4
+
+    seen: list[tuple[Any, Any]] = []
+
+    def complete(instance, request):
+        seen.append((instance, request))
+        return _offline_response(GOOD, request.model)
+
+    _patch_offline_lm15(monkeypatch, complete)
+    # A unique model id keeps a warm DSPy response cache from serving the request
+    # and hiding the provider call this test is about.
+    template = dspy.LM(f"openai/test-template-{uuid4().hex}", engine="lm15", num_retries=4, timeout=25)
+    turn = TurnBudget(deadline=None)
+    models = RLMModelBundle(template, template).bind_turn(budget=turn)
+
+    assert models.root_lm is not template
+    assert models.sub_lm is not template
+    assert models.root_lm.history is not template.history
+    assert models.sub_lm.history is not template.history
+    assert models.root_lm._fleet_can_finalize is True
+    assert models.sub_lm._fleet_can_finalize is False
+
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+    with dspy.context(callbacks=[callback]):
+        result = await invoke(FleetJSONAdapter(budget=turn), models.root_lm, asynchronous=False)
+
+    assert result[0]["code"] == "SUBMIT(answer=1)"
+    assert len(seen) == 1
+    assert template.num_retries == 4
+    assert template.history == []
+    assert template.kwargs["timeout"] == 25
+    assert len(models.root_lm.history) == 1
+    assert callback._call_index == 1
+    assert callback._last_call["role"] == "root"
+    # Provider-attempt admission is retired: a real adapter call never charges it.
+    assert turn.snapshot()["provider_attempts"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_turn_copy_keeps_dspy_cache_and_usage_accounting(monkeypatch, asynchronous) -> None:
+    """A Turn copy keeps DSPy's own cache, history, and usage accounting."""
+    from uuid import uuid4
+
+    provider_calls = 0
+
+    def complete(_instance, request):
+        nonlocal provider_calls
+        provider_calls += 1
+        return _offline_response("cached response", request.model)
+
+    _patch_offline_lm15(monkeypatch, complete)
+    cache_key = uuid4().hex
+    template = dspy.LM(f"openai/test-cache-{cache_key}", engine="lm15", cache=True, num_retries=0, timeout=25)
+    turn_lm = RLMModelBundle(template, template).bind_turn().root_lm
+    tracker = UsageTracker()
+    prompt = f"cache characterization {cache_key}"
+
+    with dspy.context(usage_tracker=tracker):
+        if asynchronous:
+            first = await turn_lm.acall(prompt)
+            second = await turn_lm.acall(prompt)
+        else:
+            first = turn_lm(prompt)
+            second = turn_lm(prompt)
+
+    assert first == second == ["cached response"]
+    assert provider_calls == 1
+    assert len(turn_lm.history) == 2
+    assert turn_lm.history[0]["usage"] == tracker.usage_data[template.model][0]
+    assert len(tracker.usage_data[template.model]) == 1
+    assert turn_lm.history[1]["usage"].get("total_tokens") in (None, 5)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_turn_lm_call_is_reported_as_failed(monkeypatch) -> None:
+    from dspy.clients.engines.lm15_engine import AsyncLM15Engine
+
+    entered = asyncio.Event()
+
+    async def block_until_cancelled(_instance, _request):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(AsyncLM15Engine, "complete", block_until_cancelled)
+    template = dspy.LM("openai/test-cancel", engine="lm15", cache=False, num_retries=0, timeout=25)
+    models = RLMModelBundle(template, template).bind_turn(budget=TurnBudget(deadline=None))
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+
+    async def call() -> list[str]:
+        with dspy.context(callbacks=[callback]):
+            return await models.root_lm.acall("cancel this native lm15 request")
+
+    task = asyncio.create_task(call())
+    await asyncio.wait_for(entered.wait(), timeout=2)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert callback._call_index == 1
+    assert callback._last_call["role"] == "root"
+    assert callback._last_call["request_status"] == "failed"
+    assert models.root_lm.history == []
+
+
+@pytest.mark.asyncio
+async def test_turn_copies_isolate_concurrent_context_callbacks(monkeypatch) -> None:
+    from dspy.utils.callback import BaseCallback
+
+    completed_requests: list[str] = []
+
+    class Callback(BaseCallback):
+        def __init__(self) -> None:
+            self.call_ids: list[str] = []
+
+        def on_lm_start(self, call_id, instance, inputs):
+            del instance, inputs
+            self.call_ids.append(call_id)
+
+    async def complete(_instance, request):
+        text = request.messages[-1].text
+        await asyncio.sleep(0.01)
+        completed_requests.append(text)
+        return _offline_response(text, request.model)
+
+    _patch_offline_lm15(monkeypatch, complete)
+    template = dspy.LM("openai/test-concurrent-context", engine="lm15", cache=False, num_retries=0, timeout=25)
+    turn_lm = RLMModelBundle(template, template).bind_turn().root_lm
+    assert turn_lm.history is not template.history
+    first_callback = Callback()
+    second_callback = Callback()
+
+    async def call(text: str, callback: Callback) -> list[str]:
+        with dspy.context(callbacks=[callback]):
+            return await turn_lm.acall(text)
+
+    first, second = await asyncio.gather(
+        call("first context", first_callback),
+        call("second context", second_callback),
+    )
+
+    assert first == ["first context"]
+    assert second == ["second context"]
+    assert set(completed_requests) == {"first context", "second context"}
+    assert len(first_callback.call_ids) == len(second_callback.call_ids) == 1
+    assert first_callback.call_ids[0] != second_callback.call_ids[0]
+
+
+@pytest.mark.asyncio
+async def test_turn_copy_preserves_role_and_usage_visibility() -> None:
+    turn = TurnBudget(deadline=None)
+    source = _ScriptedLM([GOOD])
+    models = RLMModelBundle(source, source).bind_turn(budget=turn)
+    callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
+
+    with dspy.context(callbacks=[callback]):
+        await invoke(FleetJSONAdapter(budget=models.budget), models.root_lm, asynchronous=True)
+
+    assert callback._last_call["role"] == "root"
+    assert models.root_lm.history[-1]["usage"]["total_tokens"] == 2
+    assert len(models.root_lm.history) == 1
+
+
+def test_turn_binding_marks_only_the_root_copy_as_finalization_capable() -> None:
+    """Only the Turn root may spend the shared ledger's finalization capacity."""
+    source = _ScriptedLM([GOOD])
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=1))
+    models = RLMModelBundle(source, source).bind_turn(budget=turn)
+    child = models.fork_for_child()
+
+    assert models.root_lm._fleet_can_finalize is True
+    assert models.sub_lm._fleet_can_finalize is False
+    assert child.root_lm._fleet_can_finalize is False
+    assert child.sub_lm._fleet_can_finalize is False
+
+    child_scope = AdapterBudget(turn=turn, max_finalization_attempts=2)
+    child_scope.reclassify_late_response(can_finalize=child.root_lm._fleet_can_finalize)
+    # The child's late response consumed only its local allowance, so the Turn's
+    # single reserved finalization slot is still there for the root.
+    root_scope = AdapterBudget(turn=turn, max_finalization_attempts=2)
+    root_scope.reclassify_late_response(can_finalize=models.root_lm._fleet_can_finalize)
+    with pytest.raises(TurnBudgetExhausted):
+        root_scope.reclassify_late_response(can_finalize=True)
+
+    assert child_scope.finalization_used == 1
+    assert root_scope.finalization_used == 1
+
+
+def test_late_response_reclassification_consumes_shared_finalization_capacity() -> None:
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=2))
+    scope = AdapterBudget(turn=turn, max_finalization_attempts=10)
+
+    scope.reclassify_late_response()
+    scope.reclassify_late_response()
+    with pytest.raises(TurnBudgetExhausted) as error:
+        scope.reclassify_late_response()
+
+    assert error.value.dimension == BudgetDimension.PROVIDER_ATTEMPTS
+    assert scope.finalization_used == 2
+    assert turn.snapshot()["provider_attempts"] == 0
+
+
+def test_late_child_response_cannot_exceed_its_local_wrap_up_limit() -> None:
+    """A child's late response consumes only its local allowance."""
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=0))
+    child = AdapterBudget(turn=turn, max_finalization_attempts=1)
+
+    child.reclassify_late_response(can_finalize=False)
+    with pytest.raises(TimeoutError, match="wrap-up"):
+        child.reclassify_late_response(can_finalize=False)
+
+    assert child.finalization_used == 1
+
+
+def test_settlement_closes_shared_finalization_capacity() -> None:
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=2))
+    root = AdapterBudget(turn=turn)
+    root.reclassify_late_response()
+
+    turn.settle()
+    with pytest.raises(TurnBudgetExhausted) as failure:
+        root.reclassify_late_response()
+
+    assert failure.value.dimension == BudgetDimension.SETTLED
+    assert root.finalization_used == 1
+
+
+def test_concurrent_finalization_admissions_do_not_overdraw() -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=2))
+    scope = AdapterBudget(turn=turn, max_finalization_attempts=10)
+
+    def attempt(_):
+        """
+        Attempt finalization capacity for the current scope.
+
+        Returns:
+            `true` if the shared ledger admitted the reclassification, `false` otherwise.
+        """
+        try:
+            scope.reclassify_late_response()
+            return True
+        except TurnBudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        assert sum(executor.map(attempt, range(10))) == 2
+    assert scope.finalization_used == 2
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"max_parse_retries": True},
+        {"max_parse_retries": -1},
+        {"max_parse_retries": 1.5},
+        {"max_finalization_attempts": True},
+        {"max_finalization_attempts": -1},
+        {"max_finalization_attempts": 1.5},
+    ],
+)
+def test_adapter_budget_rejects_invalid_policy(kwargs):
+    with pytest.raises(ValueError):
+        AdapterBudget(**kwargs)
+
+
+def test_truncated_flag_set_when_output_hits_configured_max() -> None:
+    class FakeLM:
+        def __init__(self) -> None:
+            self.kwargs = {"max_tokens": 16384}
+
+    assert _lm_max_tokens(FakeLM()) == 16384
+    assert _lm_max_tokens(object()) is None
+    assert _lm_max_tokens(SimpleNamespace(kwargs={"max_tokens": True})) is None

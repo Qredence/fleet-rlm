@@ -98,16 +98,13 @@ async def test_run_trace_fails_closed_without_current_handle_identity(certificat
     def no_phase(*_args, **_kwargs):
         yield None
 
-    class _Proxy:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
+    class _LM:
         async def acall(self, *_args, **_kwargs):
             return "ok"
 
     monkeypatch.setattr(certification, "turn_trace", no_trace)
     monkeypatch.setattr(certification, "turn_phase_span", no_phase)
-    monkeypatch.setattr(certification, "DeadlineLMProxy", _Proxy)
+    monkeypatch.setattr(certification, "_certification_lm", _LM)
     monkeypatch.setattr(certification, "annotate_trace_io", lambda **_kwargs: None)
     monkeypatch.setattr(certification, "flush_tracing", lambda: None)
 

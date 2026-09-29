@@ -30,6 +30,21 @@ from tests.support.turn_settlement import TestingRunSettlement
 from tests.support.workspace_storage import InMemoryDaytonaWorkspaceGateway
 
 
+class _CopyableLM:
+    """Minimal copyable LM double standing in for a Turn-bindable role LM."""
+
+    def __init__(self) -> None:
+        self.history: list[object] = []
+
+    def copy(self) -> _CopyableLM:
+        return _CopyableLM()
+
+
+def _test_models() -> RLMModelBundle:
+    """Return a bundle whose role LMs support the Turn-binding copy contract."""
+    return RLMModelBundle(_CopyableLM(), _CopyableLM())
+
+
 def _daytona_workspace_gateway(mount_path: str) -> InMemoryDaytonaWorkspaceGateway:
     """Return a test gateway whose file-info records match the Daytona SDK model."""
     gateway = InMemoryDaytonaWorkspaceGateway(mount_path)
@@ -198,7 +213,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
         sandbox_spec=DaytonaSandboxSpec(snapshot="test-snapshot-v1"),
         root_provider=RootProvider(),
         platform=SimpleNamespace(get=AsyncMock(return_value=workspace_gateway.sandbox)),
-        models=RLMModelBundle(object(), object()),
+        models=_test_models(),
         track_sandbox=lambda _sandbox_id: None,
         daytona_admission=DaytonaAdmission(max_active_leases=2),
         volume_config=SimpleNamespace(mount_path=str(paths.mount_path)),
@@ -232,7 +247,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
             attachment_lifecycle=Attachments(),
             skill_catalog=skill_catalog,
             settings=resources.settings,
-            models=RLMModelBundle(object(), object()),
+            models=_test_models(),
         ),
         turn,
         deadline=float("inf"),
@@ -441,7 +456,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
             attachment_lifecycle=NoAttachments(),
             skill_catalog=skill_catalog,
             settings=resources.settings,
-            models=RLMModelBundle(object(), object()),
+            models=_test_models(),
         ),
         turn2,
         deadline=float("inf"),
@@ -477,7 +492,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
             attachment_lifecycle=NoAttachments(),
             skill_catalog=skill_catalog,
             settings=resources.settings,
-            models=RLMModelBundle(object(), object()),
+            models=_test_models(),
         ),
         turn3,
         deadline=float("inf"),
@@ -524,7 +539,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
         platform=SimpleNamespace(get=AsyncMock(return_value=object())),
         daytona_admission=DaytonaAdmission(max_active_leases=2),
         volume_config=SimpleNamespace(mount_path=settings.volume_mount_path),
-        models=RLMModelBundle(object(), object()),
+        models=_test_models(),
     )
 
     resources.runtime = _test_runtime(resources)
@@ -555,7 +570,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
                 attachment_lifecycle=Attachments(),
                 skill_catalog=SkillCatalog(()),
                 settings=resources.settings,
-                models=RLMModelBundle(object(), object()),
+                models=_test_models(),
             ),
             turn,
             deadline=float("inf"),
@@ -634,7 +649,7 @@ async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None
         attachment_lifecycle=object(),
         skill_catalog=SkillCatalog(()),
         settings=resources.settings,
-        models=RLMModelBundle(object(), object()),
+        models=_test_models(),
     )
     acquisition = asyncio.create_task(preparation.acquire_environment(turn, deadline=deadline))
     assert await asyncio.to_thread(entered.wait, 2)

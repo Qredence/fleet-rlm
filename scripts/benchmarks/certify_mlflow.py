@@ -2,8 +2,9 @@
 """Run the bounded MLflow 3.16 certification lane.
 
 The command is deliberately separate from the normal tracing smoke test.  It
-exercises Fleet's turn trace, DSPy autolog, the deadline LM proxy, feedback,
-privacy projection, concurrent/repeated lifecycles, and fresh-process sampling.
+exercises Fleet's turn trace, DSPy autolog, the certification LM engine,
+feedback, privacy projection, concurrent/repeated lifecycles, and
+fresh-process sampling.
 With ``--fault-checks`` it runs existing behavior-owned SDK/lifecycle fault
 tests in an isolated subprocess, recording their evidence scope separately.  A receipt is
 write-once and never contains a tracking URI, credential, prompt, or trace
@@ -26,18 +27,18 @@ import socket
 import subprocess
 import sys
 import tempfile
-import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, cast
 from uuid import UUID, uuid4
 
 import dspy
 from dotenv import load_dotenv
+from dspy.clients.engines.base import validate_request
+from dspy.lm15 import Request, Response, response_from_openai_chat, response_to_events
 
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.observability.feedback import TraceFeedbackNotFoundError, TraceFeedbackService
@@ -51,7 +52,6 @@ from fleet_rlm.observability.tracing import (
     turn_trace,
 )
 from fleet_rlm.rlm.events import _RLMTraceCallback
-from fleet_rlm.rlm.program import DeadlineLMProxy
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
@@ -65,31 +65,70 @@ _SCHEMA = "fleet.mlflow-certification/v1"
 _MAX_RECEIPT_BYTES = 256 * 1024
 _SENTINEL = "fleet-certification-secret-sentinel"
 _SENTINEL_INPUT = f"AWS_SECRET_ACCESS_KEY={_SENTINEL}"
+_CERTIFICATION_MODEL = "fleet/certification"
+# MLflow's DSPy autolog names the provider span after the LM class, and Fleet's
+# own root-role diagnostic span after the role. Both must appear for the
+# autolog lane to prove LM traffic was traced, not merely the Turn span.
+_MLFLOW_LM_SPAN = "LM.__call__"
+_ROOT_LM_SPAN = "RLM.root_lm"
 
 
 class CertificationError(RuntimeError):
     """Raised when a requested certification lane cannot run safely."""
 
 
-class _CertificationLM(dspy.BaseLM):
+class _CertificationEngine:
     """Deterministic completion source used to exercise DSPy autolog safely."""
 
-    def __init__(self) -> None:
-        super().__init__(model="fleet/certification")
-        self.kwargs: dict[str, object] = {}
-
-    def _response(self) -> SimpleNamespace:
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content="certification-ok"))],
-            usage={"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
-            model="fleet/certification",
+    def complete(self, request: Request) -> Response:
+        validate_request(request)
+        return response_from_openai_chat(
+            {
+                "model": _CERTIFICATION_MODEL,
+                "choices": [{"message": {"role": "assistant", "content": "certification-ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 2, "total_tokens": 5},
+            }
         )
 
-    def forward(self, *_args: object, **_kwargs: object) -> SimpleNamespace:
-        return self._response()
+    def stream(self, request: Request) -> Iterator[Any]:
+        return response_to_events(self.complete(request))
 
-    async def aforward(self, *_args: object, **_kwargs: object) -> SimpleNamespace:
-        return self._response()
+    def close(self) -> None:
+        pass
+
+
+class _AsyncCertificationEngine:
+    """Async counterpart of :class:`_CertificationEngine`."""
+
+    def __init__(self, sync: _CertificationEngine) -> None:
+        self.sync = sync
+
+    async def complete(self, request: Request) -> Response:
+        return self.sync.complete(request)
+
+    async def stream(self, request: Request) -> AsyncIterator[Any]:
+        for event in self.sync.stream(request):
+            yield event
+
+    async def aclose(self) -> None:
+        pass
+
+
+def _certification_lm() -> dspy.LM:
+    """A stock DSPy LM over the deterministic certification engine.
+
+    It is a plain ``dspy.LM`` so the MLflow autolog LM span is named
+    ``LM.__call__`` and its token usage is attributed exactly as production
+    LMs are.
+    """
+    engine = _CertificationEngine()
+    return dspy.LM(
+        _CERTIFICATION_MODEL,
+        model_type="chat",
+        cache=False,
+        engine=engine,
+        async_engine=_AsyncCertificationEngine(engine),
+    )
 
 
 def _require_live() -> None:
@@ -239,22 +278,19 @@ async def _run_trace() -> dict[str, object]:
 
     session_id = uuid4()
     run_id = uuid4()
-    proxy = DeadlineLMProxy(
-        _CertificationLM(),
-        deadline=time.monotonic() + 30,
-        reserve_seconds=0,
-        retries=0,
-        error_message="certification deadline exceeded",
-    )
+    lm = _certification_lm()
 
-    callback = _RLMTraceCallback(root_lm=proxy, sub_lm=object())
+    # A stand-in for the unused sub role, kept referenced so its id cannot be
+    # recycled while the callback's role table holds it.
+    sub_lm = object()
+    callback = _RLMTraceCallback(root_lm=lm, sub_lm=sub_lm)
 
     async def child(index: int) -> object:
         with (
             turn_phase_span("certification_child", inputs={"child_index": index}),
             dspy.context(callbacks=[*dspy.settings.callbacks, callback]),
         ):
-            return await proxy.acall(f"child-{index}")
+            return await lm.acall(f"child-{index}")
 
     with turn_trace(session_id, run_id, enabled=True, trace_phase="execution") as handle:
         values = await asyncio.gather(child(0), child(1))
@@ -288,7 +324,8 @@ async def _run_trace() -> dict[str, object]:
         "span_count": len(span_names),
         "span_names": sorted(span_names),
         "child_count": sum(name == "certification_child" for name in span_names),
-        "proxy_span_present": any("DeadlineLMProxy" in name for name in span_names),
+        "autolog_lm_span_present": _MLFLOW_LM_SPAN in span_names,
+        "root_lm_span_present": _ROOT_LM_SPAN in span_names,
         "async_results": len(values) == 2,
         "sentinel_redacted": _SENTINEL not in payload,
         "token_usage": token_usage if isinstance(token_usage, dict) else None,
@@ -604,7 +641,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         repeated = _run_repeated_lifespans(settings)
         unreachable = _run_unreachable_backend(settings)
         linkage = cast(dict[str, bool], trace_result["trace_linkage"])
-        proxy_ok = bool(trace_result["proxy_span_present"])
+        lm_span_ok = bool(trace_result["autolog_lm_span_present"] and trace_result["root_lm_span_present"])
         async_root_child_ok = (
             trace_result["trace_status"] == "OK"
             and trace_result["child_count"] == 2
@@ -613,7 +650,11 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         linkage_ok = all(linkage.values())
         scenarios = {
             "backend_activation": _scenario("passed"),
-            "dspy_autolog_deadline_proxy": _scenario("passed" if proxy_ok else "failed", proxy_span=proxy_ok),
+            "dspy_autolog_lm_span": _scenario(
+                "passed" if lm_span_ok else "failed",
+                autolog_lm_span=trace_result["autolog_lm_span_present"],
+                root_lm_span=trace_result["root_lm_span_present"],
+            ),
             "async_root_child": _scenario(
                 "passed" if async_root_child_ok else "failed",
                 root_status=trace_result["trace_status"],

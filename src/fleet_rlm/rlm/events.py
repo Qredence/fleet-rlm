@@ -1235,16 +1235,6 @@ def reconcile_trajectory(
 # ---------------------------------------------------------------------------
 
 
-async def invoke_native_rlm(
-    rlm: Any,
-    context: RLMExecutionContext,
-    kwargs: Mapping[str, Any],
-) -> Any:
-    """Invoke native DSPy through its factory, which owns one fresh adapter."""
-    del context
-    return await rlm.acall(**dict(kwargs))
-
-
 def recursive_summary(executor: RecursiveRLMExecutor | None, metrics: Any | None = None) -> RecursiveCallSummary:
     """
     Summarize recursive execution metrics for an executor or metrics collector.
@@ -1412,11 +1402,7 @@ class ExecutionTraceAssembler:
         adapter = (
             self._adapter_factory(context)
             if self._adapter_factory is not None
-            else FleetJSONAdapter(
-                deadline=context.execution.deadline,
-                wrap_up_seconds=context.execution.wrap_up_seconds,
-                budget=getattr(context.execution.models, "budget", None),
-            )
+            else FleetJSONAdapter(budget=getattr(context.execution.models, "budget", None))
         )
 
         def adapter_summary(name: str) -> Mapping[str, Any]:
@@ -1457,7 +1443,7 @@ class ExecutionTraceAssembler:
             ),
         ):
             try:
-                prediction = await invoke_native_rlm(rlm, context, kwargs)
+                prediction = await rlm.acall(**dict(kwargs))
                 if self.recursive_executor is not None:
                     self.recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
@@ -1849,7 +1835,6 @@ __all__ = [
     "WorkerMonitor",
     "bound_event_text",
     "has_reasoning",
-    "invoke_native_rlm",
     "observe_tool",
     "reconcile_trajectory",
     "record_phase_failure",

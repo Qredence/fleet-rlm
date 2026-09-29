@@ -4,6 +4,39 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **Change:** Removed `DeadlineLMProxy` and the deprecated
+  `dspy.BaseLM.forward`/`aforward` and OpenAI-style `messages=` interfaces it
+  relied on, ahead of their removal in DSPy 3.5. Fleet's role LMs are now stock
+  `dspy.LM` instances on the native `lm15` engine, copied per Turn so history and
+  usage stay Turn-scoped.
+  **Outcome:** No deprecated DSPy LM interface remains, and message-scoped
+  deprecation filters plus an AST guard keep them from returning. This retires
+  per-Turn LM wall-clock deadlines, `TurnBudget` provider-attempt admission, and
+  the `llm.<role>.timeout_seconds` role-timeout ceiling: `turn_timeout_seconds`
+  is now the only wall-clock bound on a Turn, and `rlm.max_provider_attempts` is
+  still a validated key but no longer bounds provider spend. Turn-scoped trace
+  identity and the shared finalization ledger, including root-only finalization
+  capacity, are preserved.
+- **Change:** Removed the `phase4-campaign`, `phase4-campaign-a` and
+  `phase4-campaign-b` profiles, whose benchmark scripts had already been retired,
+  and regenerated the profile matrix.
+  **Outcome:** Five profiles remain. The removal also drops the only committed
+  policy in which `max_provider_attempts` (2) did not exceed
+  `finalization_attempts` (2), which had made the adapter's exploration-exhaustion
+  check true from the first action of every Turn under that profile.
+
+### Changed
+
+- **Change:** Provider retries are now owned by DSPy's native `num_retries` with
+  exponential backoff rather than Fleet's immediate-retry loop, and the adapter's
+  wrap-up directive is keyed to the RLM iteration count rather than a wall-clock
+  reserve.
+  **Outcome:** `wrap_up_summary` no longer reports `wrap_up_remaining_ms`, and
+  parse repair and wrap-up correction are separate, mutually exclusive attempt
+  ceilings rather than one shared ceiling.
+
 ## [0.7.10] - 2026-09-27
 
 Fleet RLM 0.7.10 updates its execution stack to native DSPy 3.4 and Daytona's

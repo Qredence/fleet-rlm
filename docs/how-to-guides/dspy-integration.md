@@ -2,9 +2,9 @@
 
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
 A healthy Root Sandbox may be reused across sequential successful Turns; DSPy's
-private `REPLHistory` and Turn capabilities are fresh for every invocation. The
-current Sandbox adapter executes generated Python remotely with serializable
-variable bindings. A Sandbox-local broker dispatches authorized Fleet tools and
+private `REPLHistory`, Python namespace, and Turn capabilities are fresh for every invocation. The
+Sandbox adapter executes generated Python in a Turn-scoped broker with serializable
+variable bindings. The broker dispatches authorized Fleet tools and
 DSPy's native semantic tools to the host through Daytona's authenticated preview
 connection. Host callables and preview credentials stay on the host. The same
 broker path serves root and child invocations.
@@ -16,11 +16,10 @@ separate validation gates.
 
 ## Execution contract
 
-- One broker Root Sandbox owns the caller-provided Code-Interpreter
-  Context. Variables, imports, and functions persist across sequential clean
-  Turns while that Sandbox remains healthy. A failed,
-  cancelled, timed-out, or evicted runtime is rotated; durable History and
-  Volume-backed state are rehydrated, but arbitrary Python globals may be lost.
+- The broker keeps variables, imports, and functions across actions within one
+  Turn. Each later Turn starts a fresh broker namespace, even when it reuses
+  the healthy Root Sandbox. Session Workspace files under `/workspace` remain
+  durable across Turns and Sandbox replacement.
 - Every Turn receives the complete committed `dspy.History` for its claimed
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
@@ -38,12 +37,12 @@ separate validation gates.
   child cleanup; unresolved cleanup blocks successful Root settlement. Full
   grandchildren are unavailable.
 - A later Turn receives a fresh request/capability binding, output metadata,
-  budget, and DSPy `REPLHistory`; it may reuse the same healthy Session
-  interpreter and Sandbox after the previous Turn commits.
+  budget, DSPy `REPLHistory`, and Python namespace; it may reuse the same
+  healthy Session Sandbox after the previous Turn commits.
 - Host capabilities enter the Turn blueprint as explicit `dspy.Tool` objects.
   Fleet preserves schema validation at the callable boundary used by DSPy's
   interpreter and exposes only host-approved bounded event views.
-- `SUBMIT(...)` validates the active Signature and produces the typed
+- `SUBMIT(...)` validates the active Signature and final JSON size before producing the typed
   `dspy.Prediction`. Fleet projects that Prediction into chat text, an optional
   structured result, and a commit-gated private `result.json` snapshot.
 - Session Workspace files are immediate private Volume state. They survive
@@ -83,11 +82,12 @@ separate validation gates.
   learning body, provider path, or raw error; there is no dedicated memory
   event.
 - Fleet scopes `FleetJSONAdapter` to each Turn alongside the Root Model. It
-  extends DSPy's JSON adapter with deadline/budget accounting and bounded
-  corrective re-asks. Wrap-up also starts on the final native iteration
-  (`current == total`). When wrap-up is enabled (`rlm.wrap_up_seconds` > 0,
-  the production default), a wrap-up action is any number of data-only
-  `name = <value>` bindings followed by exactly one compliant `SUBMIT(...)`.
+  extends DSPy's JSON adapter with finalization-ledger accounting and bounded
+  corrective re-asks. Wrap-up is keyed to the RLM iteration count rather than
+  a wall-clock reserve: it starts on the final native iteration
+  (`current == total`), or once exploration capacity is exhausted. A wrap-up
+  action is any number of data-only `name = <value>` bindings followed by
+  exactly one compliant `SUBMIT(...)`.
   Bindings cannot call a Tool, import, or reach the provider, so shaping an
   answer is admitted while further work is not. Exhausting the finalization
   allowance on that last iteration settles the Turn as a `timeout` and reports
@@ -95,10 +95,10 @@ separate validation gates.
   action is never mistaken for an expired clock. DSPy extract fallback
   (`native_extraction_fallback`) only runs if every `generate_action` returns
   without SUBMIT, so it is unreachable.
-  Empty or reasoning-only completions use those bounded parse re-asks while
-  time and iterations remain. It retains the pinned DSPy action grammar;
-  exhausted repairs produce bounded `adapter_parse_error` failures without
-  changing process-global DSPy settings.
+  Empty or reasoning-only completions use those bounded parse re-asks within
+  the adapter's fixed repair allowance. It retains the pinned DSPy action
+  grammar; exhausted repairs produce bounded `adapter_parse_error` failures
+  without changing process-global DSPy settings.
 - The REPL `context` variable is always defined: a single utf-8 attachment
   capsule promotes it to that attachment's text, otherwise it stays `[]`.
   REPL code must treat `[]` as "no prepared context" and trust the
@@ -115,9 +115,19 @@ separate validation gates.
   matrix](../reference/profile-matrix.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
-- Fleet constructs Root, Sub, and probe LMs with DSPy's native `lm15` engine.
-  Unsupported models or request fields fail rather than falling back to
-  LiteLLM. DSPy 3.4 still installs LiteLLM as a transitive dependency.
+- Fleet constructs its Root, Sub, and probe LMs as stock `dspy.LM` objects on
+  DSPy's native `lm15` engine; nothing wraps them. Unsupported models or
+  request fields fail rather than falling back to LiteLLM. DSPy 3.4 still
+  installs LiteLLM as a transitive dependency.
+- The per-Turn `dspy.LM` copy is the object every provider call and LM span is
+  attributed to. DSPy owns response normalization, retries through its native
+  `num_retries` and exponential backoff, caching, callbacks, usage tracking,
+  and LM history; Fleet no longer runs its own retry loop. Fleet owns
+  Turn-scoped copy isolation and trace identity: each Turn and each child gets
+  isolated LM copies, the Turn observer maps a copy to its `root` or `sub` role
+  for span attribution, and copies carry the `_fleet_can_finalize` marker that
+  keeps finalization capacity root-only. Fleet enforces no per-Turn LM deadline
+  and admits no provider attempts.
 - Fleet remains on DSPy's public program and LM call surfaces:
   `await rlm.acall(**named_inputs)`, with an invocation-scoped interpreter factory,
   delegates request and response normalization to
@@ -149,8 +159,9 @@ The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 `daytona-recursive` policy uses `12`, `32`, and `6,000` for the effective Root
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
-concurrency are separate controls. The shipped Root and Sub provider roles use
-`num_retries = 3`; omitted custom-role values inherit that shipped default.
+concurrency are separate controls. The shipped Root and Sub provider roles pass
+`num_retries = 3` to `dspy.LM`, so retries are DSPy's native retry loop with
+exponential backoff; omitted custom-role values inherit that shipped default.
 The typed settings default is also `3` when the policy omits the field from
 both defaults and the selected profile.
 `rlm.verbose` controls host logging only;
@@ -189,6 +200,13 @@ inside RLM.aforward, so async Fleet Host Tools use the composition-owned
 bridge. The rolling DSPy RLM API (https://dspy.ai/api/modules/RLM/) is useful
 for orientation; the exact pinned source and installed version remain the
 compatibility authority.
+
+The strict GEPA evaluator uses the same native RLM contract on an owned worker
+thread because the Daytona synchronous bridge is bound to the service loop.
+The evaluator deadline covers the worker wait; timeout or caller cancellation
+revokes the disposable sandbox, observes worker completion, and retains
+supervised cleanup ownership if the worker does not drain in time. An unresolved
+worker or sandbox cleanup is a failed evaluation, never successful evidence.
 
 Operator-visible progress still comes from Fleet's interpreter, Tool,
 callback, and trajectory observation boundaries instead of a second DSPy

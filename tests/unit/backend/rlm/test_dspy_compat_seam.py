@@ -68,10 +68,10 @@ async def test_explicit_interpreter_factory_owns_lifecycle_and_prompt_metadata()
 def test_daytona_action_prompt_contains_each_runtime_fact_once() -> None:
     prompt = str(_rlm().generate_action.signature.instructions)
     facts = (
-        "isolated Python",
-        "namespace persists across actions in one invocation",
+        "Python runs in the Daytona Sandbox",
+        "Variables persist across actions in this Turn",
+        "Print only short findings",
         "Host Tools are callable Python functions",
-        "ordinary stdout is observable",
         "typed keyword `SUBMIT`",
     )
 

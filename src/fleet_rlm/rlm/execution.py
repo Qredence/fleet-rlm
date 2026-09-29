@@ -283,9 +283,6 @@ class ExecutionRuntime:
     # Composition-owned bridge for async host Tools called synchronously by
     # DSPy's worker-side interpreter.
     async_bridge: AsyncToolBridge | None = None
-    # Directly constructed test/in-process contexts opt into the reserve via
-    # preparation; the public TOML default is applied by the live composition.
-    wrap_up_seconds: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -596,23 +593,6 @@ class RLMWorkerHandle(Generic[T]):
         except _WORKER_SETTLE_EXCEPTIONS:
             self.consume_exception()
         return self._effect.caller_cancelled
-
-
-async def invoke_native_rlm(
-    rlm: Any,
-    context: RLMExecutionContext,
-    kwargs: Mapping[str, Any],
-) -> Any:
-    """
-    Invoke the RLM operation using its invocation-scoped interpreter factory.
-
-    Native DSPy creates, binds, and shuts down a fresh interpreter for this
-    invocation. The retained session adapter is only the factory template; it
-    continues to own the Sandbox lease and is never passed to ``acall``.
-    Deterministic substitute RLMs retain their ordinary keyword-only call.
-    """
-    del context
-    return await rlm.acall(**dict(kwargs))
 
 
 def start_rlm_worker(
@@ -1570,7 +1550,10 @@ class RLMRunner:
                 # The retained Daytona adapter is a resource template only.
                 # Capture every Run-local binding in DSPy's zero-argument
                 # invocation factory rather than rebinding that template.
-                output_contract = FleetOutputContract.from_signature(spec.signature)
+                output_contract = FleetOutputContract.from_signature(
+                    spec.signature,
+                    max_output_chars=state_context.execution.options.max_final_output_chars,
+                )
 
                 def invocation_factory() -> Any:
                     return fresh_interpreter(
@@ -1596,7 +1579,11 @@ class RLMRunner:
                 def invocation_factory(interpreter: Any = interpreter) -> Any:
                     return interpreter
 
-            invocation_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
+            invocation_factory.__dict__["execution_instructions"] = (
+                f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
+                f"The final SUBMIT JSON must fit within {state_context.execution.options.max_final_output_chars} "
+                "characters; use a concise answer or a durable Artifact for longer results."
+            )
 
             rlm = self._program_builder(
                 signature=spec.signature,
@@ -1635,6 +1622,7 @@ class RLMRunner:
                 bind_output_contract(
                     state_context.execution.interpreter,
                     getattr(rlm, "signature", None),
+                    max_output_chars=state_context.execution.options.max_final_output_chars,
                 )
             self._bind_observer(
                 rlm,

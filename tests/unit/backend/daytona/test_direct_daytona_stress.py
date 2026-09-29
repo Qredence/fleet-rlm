@@ -19,17 +19,14 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from dspy import FinalOutput
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
     FINAL_OUTPUT_MARKER,
-    DaytonaCodeInterpreter,
     SyncBridgeDispatcher,
     _sync_await,
     extract_final_payload,
     final_output_frame,
-    sandbox_backend,
     sync_sandbox,
     validate_json_value,
 )
@@ -438,31 +435,6 @@ def test_extract_final_payload_prefixed_marker_flaw() -> None:
     assert extracted == {"answer": "42"}, "Hardened extractor must recover the valid payload"
 
 
-def test_interpreter_code_execution_when_code_prints_marker() -> None:
-    """Verify that when executed code prints the marker before SUBMIT(), final output is parsed."""
-    mock_code_interpreter = MagicMock()
-    mock_code_interpreter.create_context.return_value = "ctx-1"
-
-    valid_frame = final_output_frame({"answer": "42"})
-    # Simulated stdout where user script logged something mentioning the marker name
-    stdout_with_log = f"DEBUG: Setting up {FINAL_OUTPUT_MARKER} handler\n{valid_frame}\n"
-    mock_code_interpreter.run_code.return_value = MagicMock(
-        stdout=stdout_with_log,
-        stderr="",
-        error=None,
-    )
-    mock_sandbox = MagicMock()
-    mock_sandbox.code_interpreter = mock_code_interpreter
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    res = interpreter.execute("print('__FLEET_FINAL_OUTPUT__')\nSUBMIT(answer='42')")
-    assert isinstance(res, FinalOutput), "Result must be FinalOutput"
-    assert getattr(res, "output", {}).get("answer") == "42"
-
-
 # ============================================================================
 # Section 3: Leak-Free Sandbox Cleanup & Absence Confirmation
 # ============================================================================
@@ -638,33 +610,3 @@ async def test_child_runtime_cleanup_leak_free_on_failure() -> None:
     assert permit._released is False
     assert admission._semaphore._value == 0
     permit.release()
-
-
-def test_interpreter_context_and_sandbox_tombstoning_on_close() -> None:
-    """Verify DaytonaCodeInterpreter deletes context and tombstones sync sandbox on close."""
-    mock_code_interpreter = MagicMock()
-    mock_code_interpreter.create_context.return_value = "ctx-to-delete"
-    mock_code_interpreter.delete_context = MagicMock()
-    mock_code_interpreter.run_code.return_value = MagicMock(stdout="ok", stderr="", error=None)
-
-    mock_sandbox = MagicMock()
-    mock_sandbox.code_interpreter = mock_code_interpreter
-
-    backend = sandbox_backend(mock_sandbox)
-    interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter.start()
-
-    interpreter.execute("print('test')")
-    assert backend._interpreter_context == "ctx-to-delete"
-
-    # Close interpreter
-    interpreter.shutdown()
-
-    # Verify delete_context was called
-    mock_code_interpreter.delete_context.assert_called_once_with("ctx-to-delete")
-    assert backend._interpreter_context is None
-
-    # Verify executing again fails fast
-    with pytest.raises(DaytonaAdapterError) as exc_info:
-        interpreter.execute("print('after close')")
-    assert "shut down" in str(exc_info.value)

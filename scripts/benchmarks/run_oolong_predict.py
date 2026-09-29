@@ -193,7 +193,6 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
     )
     loop = asyncio.get_running_loop()
     turn_timeout = float(getattr(settings, "turn_timeout_seconds", 1800))
-    wrap_up_seconds = float(getattr(settings, "rlm_wrap_up_seconds", 0))
     rows: list[dict[str, object]] = []
     scores: list[dict[str, object]] = []
     usages: list[Mapping[str, object] | None] = []
@@ -223,7 +222,6 @@ async def _run_live_async(args: argparse.Namespace, settings: Any) -> dict[str, 
                 kwargs,
                 interpreter=lease.interpreter,
                 deadline=deadline,
-                wrap_up_seconds=wrap_up_seconds,
                 turn_budget=turn_budget,
                 dataset=args.dataset,
             )
