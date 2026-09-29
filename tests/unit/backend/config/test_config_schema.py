@@ -237,6 +237,9 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ),
     ("daytona.child_snapshot_env", "Daytona", "SemanticChild snapshot environment variable", "text", (), None),
     ("mlflow.experiment_purpose", "MLflow", "Experiment purpose", "text", (), "mlflow_experiment_purpose"),
+    ("capture.enabled", "Capture", "Turn capture enabled", "boolean", (), "capture_enabled"),
+    ("capture.retention_days", "Capture", "Capture retention (days)", "number", (), "capture_retention_days"),
+    ("capture.max_captures", "Capture", "Retained capture files", "number", (), "capture_max_captures"),
 )
 
 

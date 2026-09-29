@@ -938,6 +938,35 @@ class Settings(BaseModel):
         default=None,
         description="PostHog ingestion host selected by the Fleet policy",
     )
+    capture_enabled: Annotated[
+        bool,
+        FleetFieldPolicy(
+            toml_path="capture.enabled", group="Capture", label="Turn capture enabled", editor="boolean", rank=118
+        ),
+    ] = Field(
+        default=True,
+        description="Retain one durable local Runtime Event capture file per Run",
+    )
+    capture_retention_days: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="capture.retention_days",
+            group="Capture",
+            label="Capture retention (days)",
+            editor="number",
+            rank=119,
+        ),
+    ] = Field(default=14, ge=1)
+    capture_max_captures: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="capture.max_captures",
+            group="Capture",
+            label="Retained capture files",
+            editor="number",
+            rank=120,
+        ),
+    ] = Field(default=500, ge=1)
 
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
     _active_profile: str | None = PrivateAttr(default=None)

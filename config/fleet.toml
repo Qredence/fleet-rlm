@@ -100,6 +100,14 @@ enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
 
+# One durable local Runtime Event capture file per Run, so a Turn's streamed
+# events survive a client disconnect. Capture is observation, never execution
+# authority; its size and event bounds are module constants, not policy.
+[defaults.capture]
+enabled = true
+retention_days = 14
+max_captures = 500
+
 # The default local/disposable profile inherits the base policy: native DSPy
 # RLM tools, local MLflow tracing, and the Root/Sub model pair above.
 [profiles.daytona-native]

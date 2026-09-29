@@ -2,8 +2,10 @@
 
 ``diagnostics`` owns Turn-failure classification, ``tracing`` owns fail-soft
 MLflow tracing configuration and per-Turn spans, ``mlflow`` owns the MLflow
-lifespan runtime, ``posthog`` owns the fail-soft product-analytics client, and
-``evaluation`` owns the MLflow 3 GenAI evaluation suite and custom RLM scorers.
+lifespan runtime, ``posthog`` owns the fail-soft product-analytics client,
+``turn_capture`` owns the fail-soft per-Turn RuntimeEvent capture written under
+the data root, and ``evaluation`` owns the MLflow 3 GenAI evaluation suite and
+custom RLM scorers.
 Observability never affects Turn outcomes.
 """
 

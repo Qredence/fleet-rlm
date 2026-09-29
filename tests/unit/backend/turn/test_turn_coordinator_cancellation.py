@@ -3,12 +3,141 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from pathlib import Path
 from typing import ClassVar
 from uuid import uuid4
 
 import pytest
 
 from tests.support.turn_settlement import TestingRunSettlement
+
+
+@pytest.mark.asyncio
+async def test_turn_capture_finalizes_as_client_disconnect_on_stream_close(tmp_path: Path) -> None:
+    """Closing a suspended Turn stream after three events ends the capture as a disconnect."""
+    from fleet_rlm.observability.turn_capture import TurnCaptureStore
+    from fleet_rlm.rlm.events import EventRecorder, Status
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("capture"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        async def begin(self, request):
+            del request
+            return turn
+
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            return FailedRunReceipt(
+                claimed.run_id,
+                failure.terminal_status,
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+        async def heartbeat(self, claimed):
+            del claimed
+
+    class Prepared:
+        execution = object()
+        artifact_sink = None
+        result_snapshot_sink = None
+        post_commit_memory_promotion = None
+
+        async def aclose(self):
+            return None
+
+    class Preparation:
+        async def prepare(self, claimed, *, deadline):
+            del claimed, deadline
+            return Prepared()
+
+    recorder = EventRecorder(run_id, session_id)
+
+    class Stream:
+        outcome = None
+
+        def __init__(self) -> None:
+            self.emitted = 0
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self.emitted >= 3:
+                # Suspend mid-Turn so the client close is the only stop site.
+                await asyncio.Event().wait()
+            self.emitted += 1
+            return recorder.record(Status("execution", "running", f"step {self.emitted}"))
+
+        async def aclose(self):
+            return None
+
+    class Runner:
+        def stream(self, execution):
+            del execution
+            return Stream()
+
+    capture_store = TurnCaptureStore(root=tmp_path, enabled=True, retention_days=14, max_captures=10)
+    coordinator = TurnRuntime(
+        lifecycle=TestingRunSettlement(Store(), max_artifact_bytes=1024),
+        preparation=Preparation(),
+        runner=Runner(),
+        event_capture=capture_store,
+    )
+
+    owner = await coordinator.open(OpenTurnCommand(access, session_id, TurnInput("capture"), "key", run_id))
+    seen = []
+    async for event in owner:
+        seen.append(event)
+        if len(seen) == 3:
+            break
+    await owner.aclose()
+    capture_store.aclose()
+
+    assert len(seen) == 3
+    path = capture_store.captures_root / str(session_id) / f"{run_id}.jsonl"
+    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    assert lines[0]["record"] == "capture_opened"
+    assert len(lines) == 5
+    assert [line["kind"] for line in lines[1:-1]] == ["status", "status", "status"]
+    assert [line["sequence"] for line in lines[1:-1]] == [1, 2, 3]
+    assert lines[-1]["record"] == "capture_closed"
+    assert lines[-1]["stop_reason"] == "client_disconnect"
+    assert lines[-1]["complete"] is False
+    assert lines[-1]["truncated"] is False
+    assert lines[-1]["event_count"] == 3
 
 
 @pytest.mark.asyncio
