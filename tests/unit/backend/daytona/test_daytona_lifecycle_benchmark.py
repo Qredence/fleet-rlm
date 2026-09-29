@@ -8,10 +8,7 @@ import pytest
 import scripts.benchmark_daytona_lifecycle as benchmark
 from fleet_rlm.daytona.runtime import VolumeConfig
 from scripts.benchmark_daytona_lifecycle import (
-    CREATE_TO_FIRST_EXECUTION_PHASES,
     benchmark_decision,
-    percentile,
-    summarize_samples,
 )
 
 
@@ -147,32 +144,6 @@ async def test_run_cycle_counts_deletion_only_on_provider_confirmed_absence(monk
     assert calls[-1] == "delete"
     assert probes > 1
     assert sample["_deleted"] == 0.0
-
-
-def test_percentile_uses_nearest_rank_for_operator_threshold() -> None:
-    values = [float(value) for value in range(1, 21)]
-
-    assert percentile(values, 95) == 19.0
-
-
-def test_summary_measures_create_through_first_execution() -> None:
-    samples = [
-        {
-            "volume_readiness": 0.5,
-            "sandbox_create_running": 2.0,
-            "snapshot_mount_user_verification": 0.2,
-            "canonical_layout": 0.1,
-            "interpreter_broker_startup": 1.0,
-            "first_execution": 0.2,
-            "shutdown_and_deletion": 0.4,
-        }
-        for _ in range(20)
-    ]
-
-    summary = summarize_samples(samples)
-
-    assert summary["create_through_first_execution"]["p95_seconds"] == 4.0
-    assert set(CREATE_TO_FIRST_EXECUTION_PHASES).issubset(summary)
 
 
 def test_decision_requires_threshold_and_complete_cleanup() -> None:

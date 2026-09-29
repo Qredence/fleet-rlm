@@ -21,11 +21,13 @@ from fleet_rlm.observability import turn_capture
 from fleet_rlm.observability.turn_capture import NullEventCapture, TurnCaptureStore
 from fleet_rlm.rlm.events import (
     EventRecorder,
+    RLMOutput,
     RunCompleted,
     RunStarted,
     SkillLoaded,
     Status,
     StructuredResult,
+    ToolStarted,
     Usage,
 )
 from fleet_rlm.rlm.result import empty_rlm_usage
@@ -207,9 +209,116 @@ def test_store_prunes_expired_and_excess_captures(tmp_path: Path) -> None:
         staged.append(path)
 
     store = _store(tmp_path, max_captures=2)
-    _opened_capture(store)
+    capture, _session_id, _run_id, _recorder = _opened_capture(store)
+    capture.finish()
     store.aclose()
 
     assert not expired.exists()
     assert not staged[2].exists()
-    assert staged[0].exists() and staged[1].exists()
+    assert staged[0].exists() and not staged[1].exists()
+
+
+def test_retention_is_enforced_across_sequential_captures(tmp_path: Path) -> None:
+    store = _store(tmp_path, max_captures=2)
+    runs = []
+    for _ in range(5):
+        capture, session_id, run_id, recorder = _opened_capture(store)
+        runs.append(_capture_path(store, session_id, run_id))
+        capture.record(recorder.record(RunCompleted(checkpoint_version=1, delivery="live")))
+        capture.finish()
+    store.aclose()
+
+    assert set(store.captures_root.glob("*/*.jsonl")) == set(runs[-2:])
+    assert all(_read_lines(path)[-1]["complete"] is True for path in runs[-2:])
+
+
+def test_retention_protects_expired_active_capture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _store(tmp_path, max_captures=1)
+    opened = threading.Event()
+    write = store._write
+
+    def observed_write(job: turn_capture._Job) -> None:
+        write(job)
+        if isinstance(job, turn_capture._OpenedJob):
+            opened.set()
+
+    monkeypatch.setattr(store, "_write", observed_write)
+    capture, session_id, run_id, recorder = _opened_capture(store)
+    assert opened.wait(timeout=2)
+    active = _capture_path(store, session_id, run_id)
+    expired = time.time() - 20 * _SECONDS_PER_DAY
+    os.utime(active, (expired, expired))
+    other, _other_session, _other_run, _other_recorder = _opened_capture(store)
+    other.finish()
+    # Shutdown drains the other capture's pruning while this one remains active.
+    store.aclose()
+
+    assert active.exists()
+    assert list(store.captures_root.glob("*/*.jsonl")) == [active]
+    assert _read_lines(active)[0]["record"] == "capture_opened"
+    del capture, recorder
+
+
+@pytest.mark.parametrize("failure", ["encoding", "rendering"])
+def test_failed_event_write_cannot_be_followed_by_complete_footer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    render = turn_capture._render
+
+    def failing_render(job: turn_capture._Job) -> dict[str, object]:
+        if failure == "rendering" and isinstance(job, turn_capture._EventJob):
+            raise ValueError("synthetic serialization failure")
+        return render(job)
+
+    monkeypatch.setattr(turn_capture, "_render", failing_render)
+    store = _store(tmp_path)
+    capture, session_id, run_id, recorder = _opened_capture(store)
+    capture.record(recorder.record(RLMOutput("\ud800" if failure == "encoding" else "output")))
+    capture.record(recorder.record(RunCompleted(checkpoint_version=1, delivery="live")))
+    capture.finish()
+    store.aclose()
+
+    lines = _read_lines(_capture_path(store, session_id, run_id))
+    assert [line.get("record") for line in lines] == ["capture_opened"]
+    assert not store._disabled
+
+
+def test_capture_redacts_nested_sensitive_fields_without_masking_sandbox_paths(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    capture, session_id, run_id, recorder = _opened_capture(store)
+    capture.record(
+        recorder.record(
+            ToolStarted(
+                "call",
+                "example",
+                {
+                    "nested": [{"password": "synthetic-private-value", "apiKey": "opaque-value"}],
+                    "path": "/home/daytona/fleet/notes.md",
+                },
+            )
+        )
+    )
+    capture.finish()
+    store.aclose()
+
+    payload = _read_lines(_capture_path(store, session_id, run_id))[1]["detail"]["input"]
+    assert payload == {
+        "nested": [{"password": "[redacted]", "apiKey": "[redacted]"}],
+        "path": "/home/daytona/fleet/notes.md",
+    }
+
+
+def test_capture_uses_shared_collection_and_nesting_bounds(tmp_path: Path) -> None:
+    nested: object = "leaf"
+    for _ in range(12):
+        nested = {"child": nested}
+    store = _store(tmp_path)
+    capture, session_id, run_id, recorder = _opened_capture(store)
+    capture.record(recorder.record(StructuredResult("answer", "1", {"items": list(range(100)), "nested": nested})))
+    capture.finish()
+    store.aclose()
+
+    value = _read_lines(_capture_path(store, session_id, run_id))[1]["detail"]["value"]
+    assert value["items"] == list(range(50))
+    assert "[truncated]" in json.dumps(value["nested"])
+    assert "leaf" not in json.dumps(value["nested"])

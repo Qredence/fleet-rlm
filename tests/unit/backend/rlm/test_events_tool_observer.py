@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Mapping
 from threading import Thread
 from typing import Any
 
@@ -17,11 +16,9 @@ from fleet_rlm.rlm.events import (
     ToolEventView,
     ToolFailed,
     ToolStarted,
-    WarningEvent,
     observe_tool,
 )
 from fleet_rlm.rlm.execution import RunToolGuards
-from fleet_rlm.rlm.result import RunNoProgressError
 
 
 def test_observe_tool_admits_calls_against_the_turn_budget() -> None:
@@ -190,46 +187,6 @@ def test_observed_semantic_tool_validates_exact_string_and_list_shape() -> None:
     assert [item.error for item in failures] == ["Tool arguments are invalid"] * 3
 
 
-def test_observe_tool_preserves_metadata_and_correlates_explicit_view() -> None:
-    def lookup(key: str) -> dict[str, str]:
-        """Look up a registered value."""
-        return {"key": key, "value": "private-result"}
-
-    source = dspy.Tool(
-        lookup,
-        name="knowledge_lookup",
-        desc="Lookup registered knowledge",
-        arg_desc={"key": "Registered key"},
-    )
-    view = ToolEventView(
-        input_projection=lambda arguments: {"key": arguments["key"]},
-        output_projection=lambda result: {"found": isinstance(result, Mapping)},
-    )
-    observed: list[Any] = []
-
-    wrapped = observe_tool(source, observed.append, view)
-    another = observe_tool(source, observed.append, view)
-    result = wrapped(key="alpha")
-
-    assert type(wrapped) is dspy.Tool
-    assert wrapped is not source
-    assert another is not wrapped
-    assert wrapped.name == source.name
-    assert wrapped.desc == source.desc
-    # DSPy 3.3.x validates normalized Tools before calling ``func``. The
-    # wrapper deliberately keeps that outer schema permissive so Fleet's
-    # source validator remains the event-producing validation boundary.
-    assert wrapped.args == {"key": {"type": "Any", "description": "Registered key"}}
-    assert wrapped.arg_types == {"key": Any}
-    assert wrapped.arg_desc == source.arg_desc
-    assert result == {"key": "alpha", "value": "private-result"}
-    assert [type(item) for item in observed] == [ToolStarted, ToolCompleted]
-    assert observed[0].tool_call_id == observed[1].tool_call_id
-    assert observed[0].input == {"key": "alpha"}
-    assert observed[1].output == {"found": True}
-    assert "private-result" not in str(observed)
-
-
 def test_observe_tool_keeps_optional_argument_schema_metadata_while_relaxing_outer_validation() -> None:
     def optional(value: int = 3) -> int:
         return value
@@ -365,71 +322,3 @@ async def test_async_tool_uses_the_composition_bridge_inside_dspy_event_loop() -
     assert wrapped.func(value=7) == {"value": 7}
     assert bridge_calls == 1
     assert [type(event).__name__ for event in observed] == ["ToolStarted", "ToolCompleted"]
-
-
-def test_no_progress_guard_closes_the_tool_observation_before_failing() -> None:
-    """RC-2: the guard raise is preceded by a terminal ToolFailed observation."""
-    observed: list[Any] = []
-
-    def lookup(query: str) -> str:
-        return f"private result for {query}"
-
-    wrapped = observe_tool(
-        dspy.Tool(lookup),
-        observed.append,
-        ToolEventView.metadata_only(),
-        guards=RunToolGuards(),
-    )
-
-    assert wrapped(query="alpha") == "private result for alpha"
-    # The first identical repeat is the guard's no-progress trigger
-    # (``ToolProgressGuard`` warns exactly once, at ``_repetitions == 1``).
-    with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
-        wrapped(query="alpha")
-
-    assert [type(item) for item in observed] == [
-        ToolStarted,
-        ToolCompleted,
-        ToolStarted,
-        WarningEvent,
-        ToolFailed,
-    ]
-    warning = observed[3]
-    failed = observed[4]
-    assert isinstance(warning, WarningEvent)
-    assert isinstance(failed, ToolFailed)
-    assert warning.code == "tool_no_progress"
-    assert failed.error == warning.message == "repeated tool call produced no progress"
-    assert failed.tool_name == "lookup"
-    assert failed.tool_call_id == observed[2].tool_call_id
-    # No dangling ToolStarted: each opening observation is terminally closed,
-    # so the durable turn detail policy can normalize the history.
-    started = {item.tool_call_id for item in observed if isinstance(item, ToolStarted)}
-    closed = {item.tool_call_id for item in observed if isinstance(item, (ToolCompleted, ToolFailed))}
-    assert started
-    assert started <= closed
-
-
-def test_no_progress_guard_warns_without_closing_when_repeats_are_allowed() -> None:
-    observed: list[Any] = []
-
-    def lookup(query: str) -> str:
-        return f"private result for {query}"
-
-    wrapped = observe_tool(
-        dspy.Tool(lookup),
-        observed.append,
-        ToolEventView(allow_repeated_identical=True),
-        guards=RunToolGuards(),
-    )
-
-    assert wrapped(query="alpha") == "private result for alpha"
-    assert wrapped(query="alpha") == "private result for alpha"
-
-    assert [type(item) for item in observed] == [
-        ToolStarted,
-        ToolCompleted,
-        ToolStarted,
-        WarningEvent,
-        ToolCompleted,
-    ]

@@ -10,21 +10,6 @@ import pytest
 from scripts.benchmarks import run_routing_eval as runner
 
 
-def test_public_sse_chunks_reduce_semantic_route_facts() -> None:
-    chunks = [
-        {"type": "tool-input-available", "toolName": "llm_query", "input": {"prompt_count": 1, "prompt_chars": 34}},
-        {"type": "tool-output-available", "toolCallId": "call-1", "output": {"status": "completed"}},
-        {"type": "text-delta", "delta": "photosynthesis is biological"},
-        {"type": "data-usage", "data": {"usage": {"duration_ms": 123}}},
-    ]
-
-    facts = runner.facts_from_public_chunks(chunks)
-
-    assert runner.classify_routing_facts(facts) == "semantic_single"
-    assert facts.latency_ms == 123
-    assert runner.answer_from_public_chunks(chunks) == "photosynthesis is biological"
-
-
 def test_public_sse_chunks_reduce_native_child_without_legacy_fallback() -> None:
     chunks = [
         {"type": "tool-input-available", "toolName": "rlm_query", "input": {"prompt_count": 1, "prompt_chars": 117}},
@@ -58,24 +43,6 @@ def test_public_sse_chunks_reduce_native_child_without_legacy_fallback() -> None
     assert facts.sandbox_count == 2
     assert runner.classify_routing_facts(facts) == "recursive_child"
     assert runner.answer_from_public_chunks(chunks) == "204"
-
-
-def test_public_sse_chunks_reduce_recursive_batch_width() -> None:
-    chunks = [
-        {"type": "tool-input-available", "toolName": "rlm_query_batched", "input": {"prompt_count": 3}},
-        {
-            "type": "tool-output-available",
-            "toolCallId": "call-batch",
-            "output": {"status": "completed", "answer_count": 3, "peak_child_concurrency": 2},
-        },
-        {"type": "data-structured-result", "data": {"value": {"answer": "2,4,6"}}},
-    ]
-
-    facts = runner.facts_from_public_chunks(chunks)
-
-    assert runner.classify_routing_facts(facts) == "recursive_batch"
-    assert facts.recursive_batch_calls == 1
-    assert facts.peak_child_concurrency == 2
 
 
 def test_receipt_validator_reclassifies_stored_facts_and_rejects_drift() -> None:

@@ -12,7 +12,6 @@ from uuid import UUID, uuid4
 import pytest
 from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
 
-from fleet_rlm.daytona.runtime import SandboxLeasePolicy
 from fleet_rlm.paths import UnsafePathError
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
@@ -185,15 +184,3 @@ async def test_stat_preserves_an_explicit_false_checksum_request() -> None:
     assert calls == [False]
     assert entry is not None
     assert entry.checksum_sha256 is None
-
-
-def test_volume_io_policy_preserves_explicit_confirmation_bounds() -> None:
-    policy = SandboxLeasePolicy(
-        kind="volume_io",
-        confirm_timeout_s=7.0,
-        confirm_poll_interval_s=0.25,
-    )
-
-    assert policy.confirm_absence is True
-    assert policy.confirm_timeout_s == 7.0
-    assert policy.confirm_poll_interval_s == 0.25

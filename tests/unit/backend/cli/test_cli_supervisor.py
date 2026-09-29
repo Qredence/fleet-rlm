@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import socket
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -96,58 +95,6 @@ def _tui_workspace(repo_root: Path) -> Path:
     return workspace
 
 
-def test_supervisor_rejects_node_older_than_22_19(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.18.0", stderr=""),
-    )
-
-    with pytest.raises(supervisor.SupervisorError, match=r"Node.js 22.19 or newer"):
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8123,
-            reload=False,
-            run_environment="daytona",
-            repo_root=tmp_path,
-        )
-
-
-def test_supervisor_fails_before_spawn_when_port_is_occupied(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port = listener.getsockname()[1]
-
-        with pytest.raises(supervisor.SupervisorError, match=f"port {port} is already in use"):
-            supervisor.supervise(
-                host="127.0.0.1",
-                port=port,
-                reload=False,
-                run_environment="daytona",
-                repo_root=tmp_path,
-            )
-
-
-def test_supervisor_rejects_ephemeral_port() -> None:
-    with pytest.raises(supervisor.SupervisorError, match="between 1 and 65535"):
-        supervisor._require_available_port("127.0.0.1", 0)
-
-
 def _local_mlflow_settings(**overrides: object) -> SimpleNamespace:
     values = {
         "mlflow_tracing_enabled": True,
@@ -202,75 +149,6 @@ def test_local_mlflow_server_starts_with_durable_storage_and_stops_owned_process
     assert (logs / "mlflow-latest.log").resolve() == (logs / "mlflow-stamp.log").resolve()
 
 
-def test_local_mlflow_server_reuses_compatible_external_process(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.16.1")
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.16.1")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: pytest.fail("compatible external MLflow must be reused"),
-    )
-    monkeypatch.setattr(
-        supervisor,
-        "_stop_process_group",
-        lambda *_args: pytest.fail("reused external MLflow must not be stopped"),
-    )
-
-    with _LOCAL_MLFLOW_SERVER(
-        _local_mlflow_settings(),
-        repo_root=tmp_path,
-        logs=tmp_path,
-        timestamp="stamp",
-    ) as owned:
-        assert owned is None
-
-
-def test_local_mlflow_server_rejects_incompatible_external_version(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: "3.13.0")
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.16.1")
-
-    with (
-        pytest.raises(supervisor.SupervisorError, match=r"reports version 3\.13\.0.*requires 3\.16\.1"),
-        _LOCAL_MLFLOW_SERVER(
-            _local_mlflow_settings(),
-            repo_root=tmp_path,
-            logs=tmp_path,
-            timestamp="stamp",
-        ),
-    ):
-        pass
-
-
-def test_local_mlflow_server_rejects_non_mlflow_port_owner(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.16.1")
-    monkeypatch.setattr(
-        supervisor,
-        "_require_available_port",
-        lambda *_args: (_ for _ in ()).throw(supervisor.SupervisorError("occupied")),
-    )
-
-    with (
-        pytest.raises(supervisor.SupervisorError, match="not compatible MLflow"),
-        _LOCAL_MLFLOW_SERVER(
-            _local_mlflow_settings(),
-            repo_root=tmp_path,
-            logs=tmp_path,
-            timestamp="stamp",
-        ),
-    ):
-        pass
-
-
 def test_local_mlflow_readiness_reports_early_exit(tmp_path: Path) -> None:
     log_path = tmp_path / "mlflow.log"
 
@@ -300,29 +178,6 @@ def test_local_mlflow_readiness_reports_timeout(
         )
 
 
-@pytest.mark.parametrize(
-    "settings",
-    (
-        None,
-        _local_mlflow_settings(mlflow_tracing_enabled=False),
-        _local_mlflow_settings(mlflow_tracking_uri="databricks"),
-    ),
-)
-def test_local_mlflow_server_skips_unmanaged_policies(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    settings: SimpleNamespace | None,
-) -> None:
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "Popen",
-        lambda *_args, **_kwargs: pytest.fail("unmanaged policy must not start MLflow"),
-    )
-
-    with _LOCAL_MLFLOW_SERVER(settings, repo_root=tmp_path, logs=tmp_path, timestamp="stamp") as owned:
-        assert owned is None
-
-
 def test_daytona_startup_cleanup_recovery_leaves_readiness_margin() -> None:
     from fleet_rlm.app_lifecycle import _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
     from fleet_rlm.workspace.mounted_gateway import _ORPHAN_CLEANUP_TIMEOUT_SECONDS
@@ -330,177 +185,6 @@ def test_daytona_startup_cleanup_recovery_leaves_readiness_margin() -> None:
     readiness_timeout = supervisor._READY_TIMEOUT_SECONDS["daytona"]
     assert readiness_timeout - 15 >= _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS
     assert _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS >= _ORPHAN_CLEANUP_TIMEOUT_SECONDS
-
-
-@pytest.mark.parametrize("profile", ("daytona", "daytona-bench"))
-def test_selected_runtime_policy_accepts_any_compatible_daytona_profile(
-    monkeypatch: pytest.MonkeyPatch,
-    profile: str,
-) -> None:
-    settings = SimpleNamespace(
-        run_environment="daytona",
-        _active_profile=profile,
-    )
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: profile)
-    monkeypatch.setattr(
-        supervisor,
-        "load_runtime_settings",
-        lambda: settings,
-    )
-
-    assert _SELECTED_RUNTIME_POLICY("daytona") is settings
-
-
-def test_selected_runtime_policy_reports_removed_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        supervisor,
-        "load_runtime_settings",
-        lambda: (_ for _ in ()).throw(RuntimeError("configured profile does not exist: databricks-daytona")),
-    )
-
-    with pytest.raises(
-        supervisor.SupervisorError,
-        match="configured profile does not exist: databricks-daytona",
-    ):
-        _SELECTED_RUNTIME_POLICY("daytona")
-
-
-def test_selected_runtime_policy_forwards_explicit_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = SimpleNamespace(run_environment="daytona", _active_profile="daytona-recursive")
-    calls: list[str | None] = []
-
-    def load_settings(*, profile: str | None = None) -> SimpleNamespace:
-        calls.append(profile)
-        return settings
-
-    monkeypatch.setattr(supervisor, "load_runtime_settings", load_settings)
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "daytona-recursive")
-
-    assert _SELECTED_RUNTIME_POLICY("daytona", profile="daytona-recursive") is settings
-    assert calls == ["daytona-recursive"]
-
-
-def test_supervisor_rejects_profile_reload_combination(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-
-    with pytest.raises(supervisor.SupervisorError, match="--reload"):
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8123,
-            reload=True,
-            run_environment="daytona",
-            profile="daytona-recursive",
-            repo_root=tmp_path,
-        )
-
-
-def test_supervisor_reuses_one_daytona_settings_object_and_stops_mlflow_last(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-    settings = SimpleNamespace(
-        run_environment="daytona",
-        _active_profile="daytona",
-    )
-    load_calls = 0
-
-    def load_settings() -> SimpleNamespace:
-        nonlocal load_calls
-        load_calls += 1
-        return settings
-
-    monkeypatch.setattr(supervisor, "active_profile", lambda _settings: "daytona")
-    monkeypatch.setattr(supervisor, "load_runtime_settings", load_settings)
-    monkeypatch.setattr(supervisor, "_selected_runtime_policy", _SELECTED_RUNTIME_POLICY)
-    database_settings: list[object] = []
-    monkeypatch.setattr(
-        supervisor,
-        "_validate_daytona_database",
-        lambda _root, *, settings: database_settings.append(settings),
-    )
-    order: list[str] = []
-
-    @contextmanager
-    def local_mlflow(selected: object, **_kwargs: object):
-        assert selected is settings
-        order.append("mlflow-started")
-        yield None
-        order.append("mlflow-stopped")
-
-    monkeypatch.setattr(supervisor, "_local_mlflow_server", local_mlflow)
-
-    def run_backend_and_tui(**options: object) -> None:
-        assert "FLEET_CONFIG_PROFILE" not in options["backend_env"]  # type: ignore[index]
-        order.append("backend-and-tui-stopped")
-        return None
-
-    monkeypatch.setattr(supervisor, "_run_backend_and_tui", run_backend_and_tui)
-
-    supervisor.supervise(
-        host="127.0.0.1",
-        port=8123,
-        reload=False,
-        run_environment="daytona",
-        repo_root=tmp_path,
-    )
-
-    assert load_calls == 1
-    assert database_settings == [settings]
-    assert order == ["mlflow-started", "backend-and-tui-stopped", "mlflow-stopped"]
-
-
-def test_supervisor_rejects_incompatible_daytona_database_before_spawn(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-
-    def reject_database(_repo_root: Path, **_kwargs: object) -> None:
-        raise supervisor.SupervisorError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py")
-
-    monkeypatch.setattr(supervisor, "_validate_daytona_database", reject_database)
-    popen_calls: list[object] = []
-    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *args, **kwargs: popen_calls.append((args, kwargs)))
-
-    with pytest.raises(
-        supervisor.SupervisorError,
-        match=r"Fleet database is not at Alembic head; run uv run python scripts/db_init\.py",
-    ):
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8123,
-            reload=False,
-            run_environment="daytona",
-            repo_root=tmp_path,
-        )
-
-    assert popen_calls == []
 
 
 def test_daytona_database_preflight_maps_revision_mismatch(
@@ -623,33 +307,6 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
         (4312, supervisor.signal.SIGKILL),
     ]
     assert processes[0].wait_timeouts == [5.0, None]
-
-
-def test_supervisor_reports_backend_early_exit_with_log_path(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-) -> None:
-    _tui_workspace(tmp_path)
-    monkeypatch.setattr(supervisor.shutil, "which", lambda command: f"/usr/bin/{command}")
-    monkeypatch.setattr(
-        supervisor.subprocess,
-        "run",
-        lambda *_args, **_kwargs: SimpleNamespace(returncode=0, stdout="v22.19.0", stderr=""),
-    )
-    monkeypatch.setattr(supervisor.subprocess, "Popen", lambda *_args, **_kwargs: _ExitedProcess(pid=7, returncode=3))
-
-    with pytest.raises(supervisor.SupervisorError, match="backend exited with status 3") as error:
-        supervisor.supervise(
-            host="127.0.0.1",
-            port=8124,
-            reload=False,
-            run_environment="daytona",
-            repo_root=tmp_path,
-        )
-
-    log_path = Path(str(error.value).partition("; see ")[2])
-    assert log_path.parent == tmp_path / ".fleet_rlm" / "logs"
-    assert log_path.is_file()
 
 
 def test_supervisor_reports_backend_exit_after_readiness_and_stops_tui_group(

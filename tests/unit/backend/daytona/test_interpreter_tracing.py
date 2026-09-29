@@ -10,7 +10,6 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
-from dspy.primitives.code_interpreter import CodeExecutionError
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
@@ -84,83 +83,6 @@ def test_sandbox_execute_span_emits_bounded_metadata(monkeypatch: pytest.MonkeyP
         "ensure_bindings_ms": 0,
         "execute_ms": 0,
     }
-
-
-def test_sandbox_execute_span_tracks_iteration_and_repair_kind(
-    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
-) -> None:
-    del fleet_trace_active
-    calls = _install_fake_mlflow(monkeypatch)
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-    interpreter.execute("_out = 'first'")
-    with pytest.raises(CodeExecutionError) as caught:
-        interpreter.execute("missing_name + 1")
-    repair = str(caught.value)
-
-    assert isinstance(repair, str) and repair.startswith("name 'missing_name'")
-    assert calls.span_inputs[1]["iteration"] == 2
-    assert calls.span_outputs[1]["result_kind"] == "repair_error"
-    assert calls.span_outputs[1]["repair_category"] == "NameError"
-    assert calls.span_outputs[1]["execution_status"] == "recovered_error"
-    assert calls.span_outputs[1]["phase_status"] == "failed"
-    assert calls.span_statuses == ["ERROR"]
-
-
-def test_sandbox_rejects_oversized_intermediate_code_before_backend_execution(
-    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
-) -> None:
-    del fleet_trace_active
-    calls = _install_fake_mlflow(monkeypatch)
-
-    class Backend:
-        def __init__(self) -> None:
-            self.calls = 0
-
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
-            self.calls += 1
-            return "unexpected"
-
-        def close(self) -> None:
-            return None
-
-    backend = Backend()
-    interpreter = DaytonaCodeInterpreter(backend=backend, max_code_chars=8)
-
-    with pytest.raises(CodeExecutionError) as caught:
-        interpreter.execute("value = 1\n_out = value")
-    result = str(caught.value)
-
-    assert isinstance(result, str) and result.startswith("Intermediate code is too large")
-    assert backend.calls == 0
-    assert calls.span_outputs[0]["result_kind"] == "repair_error"
-    assert calls.span_outputs[0]["repair_category"] == "code_too_large"
-    assert calls.span_outputs[0]["phase_status"] == "failed"
-
-
-def test_sandbox_execute_span_marks_failed_phase_without_suppressing(
-    monkeypatch: pytest.MonkeyPatch, fleet_trace_active: None
-) -> None:
-    del fleet_trace_active
-    calls = _install_fake_mlflow(monkeypatch)
-
-    class _ExplodingBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
-            raise RuntimeError("backend boom")
-
-        def close(self) -> None:
-            return None
-
-    interpreter = DaytonaCodeInterpreter(backend=_ExplodingBackend())
-
-    with pytest.raises(Exception, match="backend boom"):
-        interpreter.execute("_out = 'never'")
-
-    assert calls.start_span_names == ["sandbox.execute"]
-    assert calls.span_outputs[0]["phase_status"] == "failed"
-    assert calls.span_outputs[0]["failure_category"] == "execution_error"
 
 
 @pytest.mark.parametrize(

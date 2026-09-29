@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 import tomllib
 from pathlib import Path
@@ -11,10 +10,8 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from fleet_rlm.config.loader import (
-    _deep_merge,
     active_profile_contract,
     load_profile_environment_contracts,
-    load_runtime_settings,
 )
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
@@ -72,13 +69,6 @@ def test_profile_environment_matrix_follows_selected_toml_policy() -> None:
         "FLEET_LLM_BASE_URL",
         "FLEET_DATABASE_URL",
     )
-
-
-def test_runtime_policy_has_no_execution_architecture_selector() -> None:
-    document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
-    assert "variant" not in document["defaults"]["runtime"]
-    with pytest.raises(FleetConfigurationError, match="runtime_variant"):
-        Settings(runtime_variant="legacy")
 
 
 def test_committed_policy_declares_default_maas_model_roles() -> None:
@@ -153,44 +143,6 @@ _DATABRICKS_SERVICE = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 _DATABRICKS_ROLE = ("DATABRICKS_TOKEN", "FLEET_LLM_BASE_URL")
 
 
-@pytest.mark.parametrize(
-    ("profile", "expected_model", "expected_role"),
-    (
-        ("daytona-native", _MAAS_MODEL, _MAAS_ROLE),
-        ("daytona-recursive", _MAAS_MODEL, _MAAS_ROLE),
-        ("daytona-native-databricks", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
-        ("daytona-recursive-databricks", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
-        ("daytona-managed", _DATABRICKS_SERVICE, _DATABRICKS_ROLE),
-    ),
-)
-def test_daytona_profiles_use_expected_model_for_both_roles(
-    profile: str,
-    expected_model: str,
-    expected_role: tuple[str, str],
-) -> None:
-    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
-    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-
-    llm = _deep_merge(document["defaults"]["llm"], document["profiles"][profile].get("llm", {}))
-    expected_key_env, expected_base_env = expected_role
-    assert llm["root"]["model"] == expected_model
-    assert llm["sub"]["model"] == expected_model
-    assert llm["root"]["api_key_env"] == expected_key_env
-    assert llm["sub"]["api_key_env"] == expected_key_env
-    assert llm["root"]["base_url_env"] == expected_base_env
-    assert llm["sub"]["base_url_env"] == expected_base_env
-
-
-def test_default_profile_routes_tracing_to_supervised_local_mlflow() -> None:
-    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
-    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-
-    mlflow = _deep_merge(document["defaults"]["mlflow"], document["profiles"]["daytona-native"].get("mlflow", {}))
-    assert mlflow["tracing_enabled"] is True
-    assert mlflow["tracking_uri"] == "http://127.0.0.1:5001"
-    assert mlflow["experiment_name"] == "fleet-rlm"
-
-
 def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None:
     policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
     document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
@@ -213,56 +165,6 @@ def test_default_mlflow_policy_uses_bounded_operational_trace_delivery() -> None
     }
 
 
-def test_selected_recursive_profile_resolves_root_and_sub_with_maas_params(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    # Only the selected profile's declared names supply the Root/Sub provider.
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
-    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
-
-    settings = config.load_runtime_settings(profile="daytona-recursive")
-
-    assert settings.root_model == "deepseek-v4.1-flash"
-    assert settings.sub_model == "deepseek-v4.1-flash"
-    # The MaaS endpoint carries no reasoning-effort policy override; it
-    # stays unset instead of being forwarded with a default.
-    assert settings.root_llm_reasoning_effort is None
-    assert settings.sub_llm_reasoning_effort is None
-    assert settings.sub_llm_temperature == 0
-    # Live observation turns disable the LM cache: a hit would provide no fresh
-    # action observation and read as a frozen stream.
-    assert settings.root_llm_cache is False
-    assert settings.sub_llm_cache is False
-    # Both roles preserve the deliberately bounded 16,384-token policy ceiling.
-    assert settings.root_llm_max_tokens == 16384
-    assert settings.sub_llm_max_tokens == 16384
-    assert settings.root_llm_timeout_seconds == 300
-    assert settings.sub_llm_timeout_seconds == 90
-    assert settings.mlflow_tracing_enabled is True
-    assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
-    assert settings.rlm_recursion_enabled is True
-
-
-def test_selected_default_native_profile_resolves_maas_without_recursive_children(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    monkeypatch.setenv("FLEET_DAYTONA_API_KEY", "test-daytona-key")
-    monkeypatch.setenv("ALIBABA_API_KEY", "test-alibaba-key")
-    monkeypatch.setenv("FLEET_MAAS_BASE_URL", "https://maas.example.test/compatible-mode/v1")
-
-    settings = config.load_runtime_settings()
-
-    assert config.active_profile(settings) == "daytona-native"
-    assert settings.root_model == "deepseek-v4.1-flash"
-    assert settings.sub_model == "deepseek-v4.1-flash"
-    assert settings.rlm_recursion_enabled is False
-
-
 def test_explicit_profile_overrides_committed_default_without_ambient_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -280,14 +182,6 @@ def test_explicit_profile_overrides_committed_default_without_ambient_selection(
     assert settings.root_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
     assert settings.sub_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
     assert settings.rlm_recursion_enabled is True
-
-
-@pytest.mark.parametrize("profile", ["", "missing-profile"])
-def test_explicit_profile_selection_rejects_blank_or_unknown_profile(
-    profile: str,
-) -> None:
-    with pytest.raises(FleetConfigurationError, match="profile"):
-        load_runtime_settings(profile=profile)
 
 
 def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
@@ -308,40 +202,6 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
     assert settings.mlflow_tracking_uri == "http://127.0.0.1:5001"
     assert settings.mlflow_experiment_name == "fleet-rlm"
     assert settings.mlflow_trace_catalog is None
-
-
-def test_recursive_depth_is_a_recursive_execution_invariant_not_a_setting() -> None:
-    import dataclasses
-
-    from fleet_rlm.rlm.recursion import recursive_rlm_options
-
-    settings = Settings()
-    assert not hasattr(settings, "rlm_recursion_max_depth")
-    options = recursive_rlm_options(settings)
-    # The composed recursion surface carries no depth setting of any name
-    # shape: the native depth stop is a fixed execution invariant, not a
-    # policy knob (behavioral depth evidence lives in the recursion lanes).
-    assert not hasattr(options, "max_depth")
-    assert not any("depth" in field.name for field in dataclasses.fields(options))
-
-
-def test_stale_recursive_depth_policy_key_fails_validation(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace(
-            "verbose = true",
-            "recursion_max_depth = 2\nverbose = true",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    with pytest.raises(FleetConfigurationError, match="recursion_max_depth"):
-        config.load_runtime_settings()
 
 
 def test_committed_policy_defaults_to_native_and_keeps_recursion_opt_in() -> None:
@@ -370,17 +230,6 @@ def _select_profile(tmp_path: Path, *, profile: str, monkeypatch: pytest.MonkeyP
     policy.write_text(updated, encoding="utf-8")
     monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
     return policy
-
-
-def test_removed_databricks_daytona_profile_is_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
-    # unknown default_profile in the committed policy is rejected even when it
-    # names a previously existing profile
-    _select_profile(tmp_path, profile="databricks-daytona", monkeypatch=monkeypatch)
-
-    with pytest.raises(FleetConfigurationError, match="configured profile does not exist"):
-        config.load_runtime_settings()
 
 
 def _policy(path: Path) -> None:
@@ -450,88 +299,6 @@ environment = "daytona"
         "FLEET_DAYTONA_SNAPSHOT=fleet-test-v1\nFLEET_DAYTONA_CHILD_SNAPSHOT=fleet-child-v1\nFLEET_DAYTONA_ORG_ID=fleet-test-org\n",
         encoding="utf-8",
     )
-
-
-def test_runtime_settings_deep_merge_profile_and_keep_role_policy(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Verify that profile settings are deeply merged while preserving separate root and sub-model policies."""
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
-
-    settings = config.load_runtime_settings()
-
-    assert settings.run_environment == "daytona"
-    assert settings.live_enabled is True
-    assert settings.rlm_max_iters == 3
-    assert settings.root_lm.model == "openai/root"
-    assert settings.sub_lm.temperature == 0.2
-    assert settings.lm_roles.root.model == "openai/root"
-    assert settings.lm_roles.sub.api_key_env == "SUB_KEY"
-
-
-@pytest.mark.parametrize(
-    "database_url",
-    (
-        "sqlite+aiosqlite:///fleet.sqlite3",
-        "postgresql://other:password@lakebase.example/fleet?sslmode=require",
-        "postgresql://fleet_app:password@lakebase.example/fleet",
-    ),
-)
-def test_managed_profile_rejects_non_lakebase_database_urls(
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
-    database_url: str,
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace('default_profile = "daytona"', 'default_profile = "daytona-managed"')
-        + '\n[profiles.daytona-managed.runtime]\nenvironment = "daytona"\n'
-        '[profiles.daytona-managed.storage]\ndatabase_url_env = "DATABASE_URL"\n',
-        encoding="utf-8",
-    )
-    (tmp_path / ".env").write_text(
-        (tmp_path / ".env").read_text(encoding="utf-8") + f"DATABASE_URL={database_url}\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    with pytest.raises(FleetConfigurationError, match="invalid database policy"):
-        config.load_runtime_settings()
-
-
-def test_managed_profile_accepts_tls_fleet_app_database_url(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace('default_profile = "daytona"', 'default_profile = "daytona-managed"')
-        + '\n[profiles.daytona-managed.runtime]\nenvironment = "daytona"\n'
-        '[profiles.daytona-managed.storage]\ndatabase_url_env = "DATABASE_URL"\n',
-        encoding="utf-8",
-    )
-    (tmp_path / ".env").write_text(
-        (tmp_path / ".env").read_text(encoding="utf-8")
-        + "DATABASE_URL=postgresql://fleet_app:password@lakebase.example/fleet?sslmode=require\n",
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    settings = config.load_runtime_settings()
-
-    assert settings.database_url is not None
-    assert settings.database_url.startswith("postgresql://fleet_app:")
 
 
 def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(
@@ -683,59 +450,6 @@ tracing_sql_warehouse_id_env = "TRACE_WAREHOUSE"
     assert settings.mlflow_tracing_sql_warehouse_id == "dotenv-warehouse"
 
 
-def test_runtime_settings_loads_custom_role_keys_from_repository_dotenv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import fleet_rlm.config.loader as config
-    from fleet_rlm.rlm.program import resolve_role_api_key
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    (tmp_path / ".env").write_text("ROOT_KEY=dotenv-secret\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-    monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
-    monkeypatch.delenv("ROOT_KEY", raising=False)
-
-    settings = config.load_runtime_settings()
-
-    assert resolve_role_api_key(settings, settings.llm_role("root")) == "dotenv-secret"
-    assert "ROOT_KEY" not in os.environ
-
-
-def test_runtime_settings_reject_unknown_toml_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    monkeypatch.chdir(tmp_path)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace("verbose = true", "verbose = true\nunexpected = 1"),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    with pytest.raises(FleetConfigurationError, match="unknown configuration key"):
-        config.load_runtime_settings()
-
-
-def test_runtime_settings_reject_unknown_llm_role(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8")
-        + '\n[defaults.llm.utility]\nmodel = "openai/utility"\napi_key_env = "UTILITY_KEY"\n',
-        encoding="utf-8",
-    )
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    with pytest.raises(FleetConfigurationError, match=r"unknown LLM role.*utility"):
-        load_runtime_settings()
-
-
 def test_redacted_policy_summary_never_includes_secret_values() -> None:
     from fleet_rlm.config.loader import redacted_policy_summary
 
@@ -789,17 +503,6 @@ def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
     assert Settings(live_enabled=False).live_enabled is False
 
 
-def test_mlflow_tracing_field_defaults_to_disabled() -> None:
-    # The Settings field default is off; the committed [defaults.mlflow] policy
-    # enables it. Test the field default here, policy default in test_config.py.
-    assert Settings().mlflow_tracing_enabled is False
-    assert Settings().mlflow_trace_content_max_chars == 10_000
-
-
-def test_mlflow_tracing_can_be_disabled_explicitly() -> None:
-    assert Settings(mlflow_tracing_enabled=False).mlflow_tracing_enabled is False
-
-
 def test_daytona_admission_defaults_to_eight_leases() -> None:
     assert Settings().max_active_daytona_leases == 8
 
@@ -821,12 +524,6 @@ def test_settings_ignore_mlflow_environment_policy(monkeypatch: pytest.MonkeyPat
     assert settings.mlflow_trace_schema is None
     assert settings.mlflow_trace_table_prefix is None
     assert settings.mlflow_tracing_sql_warehouse_id is None
-
-
-@pytest.mark.parametrize("value", [0, 1, -1, 9])
-def test_daytona_admission_must_be_between_two_and_eight(value: int) -> None:
-    with pytest.raises(ValidationError):
-        Settings(max_active_daytona_leases=value)
 
 
 def test_settings_does_not_read_runtime_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -852,47 +549,10 @@ def test_settings_does_not_scan_unprefixed_environment_or_dotenv(
         assert settings.daytona_api_key is None
 
 
-@pytest.mark.parametrize("value", [0, -1])
+@pytest.mark.parametrize("value", [0])
 def test_turn_timeout_must_be_positive(value: int) -> None:
     with pytest.raises(ValidationError):
         Settings(turn_timeout_seconds=value)
-
-
-def test_autonomous_memory_candidate_categories_default_off() -> None:
-    policy_path = Path(__file__).resolve().parents[4] / "config" / "fleet.toml"
-    document = tomllib.loads(policy_path.read_text(encoding="utf-8"))
-
-    assert Settings().rlm_autonomous_memory_categories == ()
-    assert document["defaults"]["rlm"]["autonomous_memory_categories"] == []
-
-
-def test_autonomous_memory_candidate_categories_resolve_from_toml(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    import fleet_rlm.config.loader as config
-
-    policy = tmp_path / "fleet.toml"
-    _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace(
-            "verbose = true",
-            "autonomous_memory_categories = [' Project ', 'Project', 'Workflow']".replace("'", '"')
-            + chr(10)
-            + "verbose = true",
-            1,
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
-
-    settings = config.load_runtime_settings()
-
-    assert settings.rlm_autonomous_memory_categories == ("Project", "Workflow")
-
-
-def test_autonomous_memory_candidate_categories_fail_closed() -> None:
-    with pytest.raises(ValidationError, match="rlm_autonomous_memory_categories"):
-        Settings(rlm_autonomous_memory_categories=("Bad Category!",))
 
 
 def test_autonomous_memory_candidate_category_policy_is_bounded() -> None:

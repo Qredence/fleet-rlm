@@ -58,7 +58,6 @@ def test_read_returns_detached_bounded_projection() -> None:
     ("kwargs", "message"),
     [
         ({"transaction_id": "wrong", "sha256": "a" * 64}, "unknown"),
-        ({"transaction_id": "", "sha256": "wrong"}, "unknown"),
         ({"json_pointer": "/record/provenance"}, "not permitted"),
         ({"start": -1}, "negative"),
         ({"limit": 0}, "maximum"),

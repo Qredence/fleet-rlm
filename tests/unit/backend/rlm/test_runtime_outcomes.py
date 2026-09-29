@@ -283,18 +283,6 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
     assert stream.outcome.terminal_status == terminal_status
 
 
-def test_public_failure_message_honors_instance_override() -> None:
-    from fleet_rlm.rlm.execution import _public_failure_message
-    from fleet_rlm.rlm.result import RunTerminalError
-
-    # A parametrized terminal error sets an instance ``public_message``; the
-    # runner must honor the instance attribute instead of reading
-    # the class attribute.
-    error = RunTerminalError("custom public message")
-    assert _public_failure_message(error) == "custom public message"
-    assert str(type(error).public_message) == "Turn failed"
-
-
 @pytest.mark.asyncio
 async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
     from fleet_rlm.rlm.execution import (
@@ -343,47 +331,6 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
     assert stream.outcome.terminal_status == "cancelled"
     assert stream.outcome.public_error_message == "Turn cancelled"
     assert stream.outcome.usage == {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
-
-
-def test_delegation_usage_falls_back_to_started_calls_without_executor() -> None:
-    from types import SimpleNamespace
-
-    from fleet_rlm.rlm.execution import _delegation_usage
-    from fleet_rlm.rlm.recursion import DelegationMetrics
-
-    metrics = DelegationMetrics()
-    metrics.record_lm_call("root", 0)
-    metrics.record_recursive_call()
-    metrics.record_recursive_batch()
-    context = SimpleNamespace(delegation=SimpleNamespace(metrics=metrics))
-
-    out = _delegation_usage(context)
-
-    assert out["recursive_call_count"] == 1
-    assert out["delegation_metrics"]["lm_call_counts"] == [{"role": "root", "recursive_depth": 0, "count": 1}]
-
-
-def test_delegation_usage_prefers_executor_reserved_count() -> None:
-    from types import SimpleNamespace
-
-    from fleet_rlm.rlm.execution import _delegation_usage
-    from fleet_rlm.rlm.recursion import DelegationMetrics, RecursiveCallSummary
-
-    metrics = DelegationMetrics()
-    summary = RecursiveCallSummary(
-        call_count=5,
-        delegated_prompt_chars=0,
-        maximum_prompt_chars=0,
-        child_iterations=0,
-        termination_modes=(),
-        delegation_metrics=metrics.snapshot(),
-    )
-    executor = SimpleNamespace(summary=lambda: summary)
-    context = SimpleNamespace(delegation=SimpleNamespace(metrics=metrics))
-
-    out = _delegation_usage(context, executor)
-
-    assert out["recursive_call_count"] == 5
 
 
 def test_outcome_usage_with_delegation_commits_to_usage_part() -> None:

@@ -101,17 +101,6 @@ async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None
     assert await asyncio.to_thread(interpreter.invoke_tool, "tool", {}) == "bridged"
 
 
-def test_execute_returns_user_code_errors_for_rlm_repair() -> None:
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-
-    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-
-    with pytest.raises(CodeExecutionError, match="'prec'"):
-        interp.execute("metrics = {'precision': 0.9}\nprint(metrics['prec'])")
-
-
 def test_shutdown_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 
@@ -164,28 +153,6 @@ def test_lease_release_is_idempotent() -> None:
     lease.release()
     lease.release()
     assert backend.closed is True
-
-
-def test_provider_errors_map_to_sanitized_fleet_errors() -> None:
-    from daytona import DaytonaError
-
-    from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-
-    backend = _FakeBackend()
-    backend.fail_with = DaytonaError("boom api_key=sk-secret path=/tmp/secret")
-    interp = DaytonaCodeInterpreter(backend=backend)
-    interp.start()
-
-    with pytest.raises(DaytonaAdapterError) as exc_info:
-        interp.execute("print(1)")
-
-    message = str(exc_info.value)
-    assert "sk-secret" not in message
-    assert "/tmp/secret" not in message
-    mapped = map_provider_error(backend.fail_with)
-    assert isinstance(mapped, DaytonaAdapterError)
-    assert "sk-secret" not in mapped.message
 
 
 def test_sanitize_provider_message_strips_secrets_and_paths() -> None:

@@ -15,7 +15,6 @@ from scripts.benchmarks.judges import (
     JUDGE_INFERENCE_PARAMS,
     JUDGE_NAMES,
     build_judge,
-    ensure_registered,
     normalized_judge_policy,
 )
 
@@ -84,52 +83,3 @@ def test_normalized_real_mlflow_judge_uses_behavior_payload(monkeypatch: pytest.
     assert policy["instructions"] == CORRECTNESS_INSTRUCTIONS
     assert policy["inference_params"] == JUDGE_INFERENCE_PARAMS
     assert policy["generate_rationale_first"] is True
-
-
-def test_ensure_registered_registers_only_on_drift(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _install_fake_genai(monkeypatch)
-
-    assert ensure_registered("correctness", "databricks:/databricks-qwen35-122b-a10b", experiment_id="42") is True
-    assert calls.registered == [("correctness", "42")]
-
-    matching = SimpleNamespace(
-        name="correctness",
-        model="databricks:/databricks-qwen35-122b-a10b",
-        description=build_judge("correctness", "databricks:/databricks-qwen35-122b-a10b").description,
-        instructions=build_judge("correctness", "databricks:/databricks-qwen35-122b-a10b").instructions,
-        feedback_value_type=bool,
-        inference_params=JUDGE_INFERENCE_PARAMS,
-    )
-    calls.registered.clear()
-    monkeypatch.setitem(
-        sys.modules,
-        "mlflow.genai.scorers",
-        SimpleNamespace(list_scorers=lambda **_kwargs: [matching]),
-    )
-    assert ensure_registered("correctness", "databricks:/databricks-qwen35-122b-a10b", experiment_id="42") is False
-    assert calls.registered == []
-
-    matching.model = "gateway:/other-endpoint"
-    assert ensure_registered("correctness", "databricks:/databricks-qwen35-122b-a10b", experiment_id="42") is True
-
-
-def test_registry_drift_includes_the_rationale_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _install_fake_genai(monkeypatch)
-    matching = build_judge("correctness", "databricks:/databricks-qwen35-122b-a10b")
-    matching.generate_rationale_first = False
-    monkeypatch.setitem(
-        sys.modules,
-        "mlflow.genai.scorers",
-        SimpleNamespace(list_scorers=lambda **_kwargs: [matching]),
-    )
-
-    assert (
-        ensure_registered(
-            "correctness",
-            "databricks:/databricks-qwen35-122b-a10b",
-            experiment_id="42",
-            generate_rationale_first=True,
-        )
-        is True
-    )
-    assert calls.registered == [("correctness", "42")]

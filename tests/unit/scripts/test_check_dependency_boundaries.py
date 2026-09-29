@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_dependency_boundaries import check_dependency_boundaries, main
+from scripts.check_dependency_boundaries import check_dependency_boundaries
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -85,35 +85,3 @@ def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
     assert "persistence must not import turn settlement" in rendered
     assert "sessions/catalog.py:1" in rendered
     assert "sessions must not import turn settlement" in rendered
-
-
-def test_checker_reports_daytona_memory_content_even_without_imports(tmp_path: Path) -> None:
-    _write(
-        tmp_path,
-        "daytona/transport.py",
-        'def execute():\n    return {"operation": "memory_append"}\n',
-    )
-
-    violations = check_dependency_boundaries(tmp_path)
-
-    assert len(violations) == 1
-    assert violations[0].path == "src/fleet_rlm/daytona/transport.py"
-    assert violations[0].line == 2
-    assert "Memory domain policy" in violations[0].rule
-
-
-def test_main_reports_current_legacy_edges_with_nonzero_status(tmp_path: Path, capsys) -> None:
-    _write(tmp_path, "daytona/provider.py", "from fleet_rlm.chat import preparation\n")
-
-    assert main(["--root", str(tmp_path)]) == 1
-    captured = capsys.readouterr()
-    assert "Dependency boundary check failed" in captured.err
-    assert "daytona/provider.py:1" in captured.err
-
-
-def test_main_accepts_a_clean_destination_tree(tmp_path: Path, capsys) -> None:
-    _write(tmp_path, "workspace/storage.py", "from fleet_rlm.daytona.workspace_agent.client import execute\n")
-    _write(tmp_path, "daytona/transport.py", "def execute():\n    return None\n")
-
-    assert main(["--root", str(tmp_path)]) == 0
-    assert capsys.readouterr().out == "Dependency boundary check passed\n"

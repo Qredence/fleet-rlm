@@ -372,6 +372,16 @@ def sanitize_trace_value(value: Any, *, max_len: int = 2_000, depth: int = 0) ->
     return _sanitize_recursive(value, partial(sanitize_trace_text, max_len=max_len), max_len=max_len, depth=depth)
 
 
+def sanitize_capture_value(value: Any, *, max_len: int, redact_paths: bool) -> Any:
+    """Apply the shared bounded, key-aware policy to local capture content."""
+    return _sanitize_recursive(
+        value,
+        partial(sanitize_capture_text, max_len=max_len, redact_paths=redact_paths),
+        max_len=max_len,
+        depth=0,
+    )
+
+
 def _is_safe_placeholder(value: str) -> bool:
     raw_candidate = value.strip().strip("\"'").strip()
     candidate = raw_candidate.lower()

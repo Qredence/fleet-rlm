@@ -23,7 +23,6 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
@@ -146,26 +145,13 @@ def _fields(value: Any) -> dict[str, Any]:
     return {field.name: getattr(value, field.name, None) for field in fields(value)}
 
 
-def _sanitize(value: Any) -> Any:
-    """Recursively sanitize captured strings, mappings, sequences, and dataclasses."""
-    if isinstance(value, str):
-        return _sanitize_capture_text(value)
-    if isinstance(value, Mapping):
-        return {str(key): _sanitize(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set, frozenset)):
-        return [_sanitize(item) for item in value]
-    if is_dataclass(value) and not isinstance(value, type):
-        return _sanitize(_fields(value))
-    if value is None or isinstance(value, (bool, int, float)):
-        return value
-    return _sanitize(str(value))
-
-
 def _detail_fields(detail: object) -> Any:
     """Return the sanitized public fields of one detail dataclass."""
+    from fleet_rlm.rlm.result import sanitize_capture_value
+
     if not is_dataclass(detail) or isinstance(detail, type):
         return {}
-    return _sanitize(_fields(detail))
+    return sanitize_capture_value(_fields(detail), max_len=_MAX_CHARS, redact_paths=False)
 
 
 def _render(job: _Job) -> dict[str, Any]:
@@ -275,6 +261,7 @@ class TurnCaptureStore:
         self._thread: threading.Thread | None = None
         self._closed = False
         self._disabled: set[Path] = set()
+        self._active: set[Path] = set()
 
     @property
     def captures_root(self) -> Path:
@@ -340,12 +327,21 @@ class TurnCaptureStore:
         self._prune()
         while True:
             try:
-                job = self._queue.get()
+                job = self._queue.get(timeout=60)
+            except queue.Empty:
+                self._prune()
+                continue
             except Exception:
                 return
             if isinstance(job, _Stop):
                 return
+            if isinstance(job, _OpenedJob):
+                self._active.add(job.path)
             self._write(job)
+            if isinstance(job, _ClosedJob):
+                self._active.discard(job.path)
+                self._disabled.discard(job.path)
+                self._prune()
 
     def _write(self, job: _Job) -> None:
         if job.path in self._disabled:
@@ -355,11 +351,9 @@ class TurnCaptureStore:
             job.path.parent.mkdir(parents=True, exist_ok=True)
             with job.path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{line}\n")
-        except OSError:
+        except Exception:
             self._disabled.add(job.path)
             logger.warning("Turn capture disabled after a write failure", exc_info=True)
-        except Exception:
-            logger.warning("Turn capture line could not be written", exc_info=True)
 
     def _prune(self) -> None:
         """Delete captures past retention, then keep only the newest ones."""
@@ -370,6 +364,8 @@ class TurnCaptureStore:
             cutoff = time.time() - self._retention_days * _SECONDS_PER_DAY
             kept: list[tuple[float, Path]] = []
             for path in root.glob("*/*.jsonl"):
+                if path in self._active:
+                    continue
                 try:
                     modified = path.stat().st_mtime
                 except OSError:
@@ -379,7 +375,8 @@ class TurnCaptureStore:
                     continue
                 kept.append((modified, path))
             kept.sort(key=lambda item: item[0], reverse=True)
-            for _modified, path in kept[self._max_captures :]:
+            retained = max(0, self._max_captures - len(self._active))
+            for _modified, path in kept[retained:]:
                 _remove(path)
         except Exception:
             logger.warning("Turn capture pruning failed", exc_info=True)

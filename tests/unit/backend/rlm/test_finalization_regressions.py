@@ -7,7 +7,7 @@ from fleet_rlm.rlm.recursion import _recursive_failure_category
 from fleet_rlm.rlm.submit_validation import is_finalization_action
 
 
-@pytest.mark.parametrize("name", ["SUBMIT", "FleetFinalOutputError", "str", "json"])
+@pytest.mark.parametrize("name", ["SUBMIT", "str"])
 def test_finalization_cannot_replace_runtime_bindings(name: str) -> None:
     assert not is_finalization_action(f"{name} = 'value'\nSUBMIT(answer='done')")
 

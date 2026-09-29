@@ -57,9 +57,6 @@ _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS = 60.0
 _COMPOSITION_DISPOSAL_TASKS: set[asyncio.Task[Any]] = set()
 _COMPOSITION_DISPOSAL_OWNERS: dict[int, RuntimeInventory] = {}
-# Turn capture stores are owned by the composition that built them and closed by
-# the same close path, keyed like the disposal owners above.
-_COMPOSITION_CAPTURE_STORES: dict[int, TurnCaptureStore] = {}
 
 
 async def _cleanup_scratch_before_releasing_invocation(
@@ -525,9 +522,8 @@ async def build_daytona_composition(
             model_bundle=model_bundle,
             orphan_cleanup_task=orphan_cleanup_task,
             memory_outbox_task=memory_outbox_task,
+            capture_store=capture_store,
         )
-        if capture_store is not None:
-            _COMPOSITION_CAPTURE_STORES[id(inventory)] = capture_store
         return inventory
     except BaseException:
         if capture_store is not None:
@@ -650,7 +646,7 @@ async def close_daytona_services(inventory: RuntimeInventory) -> None:
 
     # Flush and join the Turn capture writer after the in-flight work above has
     # settled, so a draining Turn still lands its last lines.
-    capture_store = _COMPOSITION_CAPTURE_STORES.pop(id(inventory), None)
+    capture_store = inventory.capture_store
     if capture_store is not None:
         capture_store.aclose()
 

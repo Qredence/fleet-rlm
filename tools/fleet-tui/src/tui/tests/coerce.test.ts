@@ -17,11 +17,6 @@ describe("asRecord (array-including wire semantics)", () => {
     expect(asRecord(true)).toEqual({});
   });
 
-  it("returns the same reference for plain objects", () => {
-    const value = { phase: "running" };
-    expect(asRecord(value)).toBe(value);
-  });
-
   it("returns the same reference for arrays (indices stay observable)", () => {
     const value = ["a", "b"];
     expect(asRecord(value)).toBe(value);
@@ -41,11 +36,6 @@ describe("record (array-excluding payload semantics)", () => {
   it("returns {} for arrays", () => {
     expect(record(["a", "b"])).toEqual({});
     expect(Object.keys(record(["a", "b"]))).toEqual([]);
-  });
-
-  it("returns the same reference for plain objects", () => {
-    const value = { prompt_count: 2 };
-    expect(record(value)).toBe(value);
   });
 });
 

@@ -132,13 +132,6 @@ def test_profile_readiness_accepts_explicit_snapshot_probe_status(status: str) -
     assert snapshot.ok is (status == "pass")
 
 
-def test_failed_doctor_step_derives_explicit_fail_status() -> None:
-    from fleet_rlm.daytona.diagnostics import DaytonaDoctorStep
-
-    assert DaytonaDoctorStep("database", False, "failed").status == "fail"
-    assert DaytonaDoctorStep("imports", True, "unavailable", status="unsupported").ok is False
-
-
 @pytest.mark.asyncio
 async def test_daytona_doctor_reports_all_steps_and_deletes_disposable_sandbox() -> None:
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor

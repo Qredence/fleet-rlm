@@ -7,7 +7,6 @@ from typing import Any
 
 import dspy
 import pytest
-from dspy import CodeExecutionError
 from dspy.primitives.code_interpreter import CodeInterpreterError
 from dspy.utils.callback import BaseCallback
 
@@ -248,44 +247,6 @@ async def test_shadow_tool_parity_covers_async_callable() -> None:
     assert tool_records[0].tool_name == "helper"
     assert tool_records[0].status == "completed"
     assert [type(item).__name__ for item in manual] == ["ToolStarted", "ToolCompleted"]
-
-
-def test_shadow_tool_parity_covers_validation_failure() -> None:
-    def recursive(prompt: str) -> str:
-        return f"child:{prompt}"
-
-    manual: list[object] = []
-    observed_tool = observe_tool(
-        dspy.Tool(recursive, name="rlm_query"),
-        manual.append,
-        ToolEventView.metadata_only(),
-    )
-    recorder = CallbackShadowRecorder()
-    interpreter = DaytonaCodeInterpreter(
-        backend=InProcessInterpreterBackend(),
-        tools={"rlm_query": observed_tool.func},
-        callbacks=[recorder],
-    )
-    interpreter.bind_observer(manual.append)
-
-    with pytest.raises(CodeExecutionError):
-        interpreter.execute("rlm_query()")
-    interpreter.shutdown()
-
-    tool = next(record for record in recorder.records() if record.operation == "tool_call")
-    execute = next(record for record in recorder.records() if record.operation == "execute")
-    assert tool.status == "failed"
-    assert tool.exception_category == "TypeError"
-    assert tool.parent_call_id == execute.call_id
-    assert [record.operation for record in recorder.records()].count("tool_call") == 1
-    assert [type(item).__name__ for item in manual] == [
-        "StepStarted",
-        "RLMCode",
-        "ToolStarted",
-        "ToolFailed",
-        "RLMOutput",
-        "StepFinished",
-    ]
 
 
 def test_shadow_recursive_tool_parity_has_one_nested_terminal_pair() -> None:

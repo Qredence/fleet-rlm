@@ -7,7 +7,7 @@ import contextlib
 import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, replace
-from typing import Any, Protocol, Self, TypeAlias, TypeVar, cast
+from typing import Any, Protocol, Self, TypeAlias, TypeVar
 from uuid import UUID
 
 from fleet_rlm.observability.tracing import (
@@ -524,7 +524,7 @@ class TurnRuntime:
         claim_loss_fence: Callable[[UUID], Awaitable[None]] | None = None,
         mlflow_tracing_enabled: bool = False,
         mlflow_expose_trace_id: bool = True,
-        event_capture: EventCapture | EventCaptureSource | None = None,
+        event_capture: EventCaptureSource | None = None,
     ) -> None:
         """
         Initialize the TurnRuntime and its lifecycle dependencies.
@@ -539,9 +539,7 @@ class TurnRuntime:
             claim_loss_fence: Optional callback applied when claim loss requires fencing.
             mlflow_tracing_enabled: Whether MLflow tracing is enabled.
             mlflow_expose_trace_id: Whether trace IDs may be exposed.
-            event_capture: Optional Turn capture source. A ``TurnCaptureStore``
-                opens one capture per Run; a plain ``EventCapture`` is used as
-                given. ``None`` reproduces the uncaptured object graph exactly.
+            event_capture: Optional source opening one capture per Run.
         """
         self._lifecycle = lifecycle
         self._preparation = preparation
@@ -861,20 +859,13 @@ class TurnRuntime:
             model = getattr(lm, "model", None)
             if isinstance(model, str) and model:
                 attempt_metadata[f"fleet.{role}_model"] = model
-        # Capture is observation: the source opens one capture per Run (a
-        # TurnCaptureStore) or is used as given, and stays absent otherwise.
         source = self._event_capture
         capture: EventCapture | None = None
         if source is not None:
-            opener = getattr(source, "open", None)
-            if callable(opener):
-                try:
-                    capture = opener(run.session_id, run.run_id)
-                except Exception:
-                    logger.warning("Turn capture could not be opened", exc_info=True)
-                    capture = None
-            else:
-                capture = cast("EventCapture", source)
+            try:
+                capture = source.open(run.session_id, run.run_id)
+            except Exception:
+                logger.warning("Turn capture could not be opened", exc_info=True)
         with turn_trace(
             run.session_id,
             run.run_id,

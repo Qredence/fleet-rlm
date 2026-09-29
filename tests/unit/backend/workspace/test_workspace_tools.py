@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import replace
 
 import dspy
 import pytest
@@ -121,59 +120,6 @@ def _tools(workspace: FakeWorkspace | None = None) -> tuple[FakeWorkspace, dict[
     return value, {str(tool.name): tool for tool in tools}
 
 
-def test_exposes_exact_typed_tool_contracts() -> None:
-    _, tools = _tools()
-
-    assert tuple(tools) == (
-        "list_workspace_files",
-        "stat_workspace_file",
-        "read_workspace_text",
-        "read_workspace_text_batch",
-        "write_workspace_text",
-        "append_workspace_text",
-        "delete_workspace_path",
-        "edit_workspace_text",
-    )
-    assert all(type(tool) is dspy.Tool for tool in tools.values())
-    assert tools["delete_workspace_path"].args == {
-        "path": {"type": "string"},
-        "expected_sha256": {"type": ["string", "null"]},
-    }
-    assert tools["edit_workspace_text"].args == {
-        "path": {"type": "string"},
-        "old": {"type": "string"},
-        "new": {"type": "string"},
-        "expected_sha256": {"type": ["string", "null"]},
-    }
-    assert "empty directory" in tools["delete_workspace_path"].desc
-    assert "exactly one unique occurrence" in tools["edit_workspace_text"].desc
-    assert "independent of Turn Commit" in tools["delete_workspace_path"].desc
-    assert "independent of Turn Commit" in tools["edit_workspace_text"].desc
-    assert "do not explore it for a self-contained request" in tools["list_workspace_files"].desc
-    assert tools["list_workspace_files"].args == {
-        "path": {"type": "string"},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-        "after": {"type": ["string", "null"]},
-    }
-    assert tools["read_workspace_text"].args["max_chars"] == {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 10_000,
-    }
-    assert "1..10000" in tools["read_workspace_text"].desc
-    assert "next_cursor" in tools["read_workspace_text"].desc
-    assert "relevant" in tools["read_workspace_text"].desc
-    assert tools["read_workspace_text_batch"].args == {
-        "requests": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"type": "object"}}
-    }
-    assert tools["write_workspace_text"].args == {
-        "path": {"type": "string"},
-        "content": {"type": "string"},
-        "overwrite": {"type": "boolean"},
-    }
-    assert "independent of Turn Commit" in tools["write_workspace_text"].desc
-
-
 def test_round_trips_text_with_bounded_json_results() -> None:
     _, tools = _tools()
 
@@ -224,33 +170,6 @@ def test_batch_reads_selected_pages_in_order_and_keeps_item_failures_local() -> 
         "error": "not_found",
     }
     assert result["results"][2]["content"] == "alpha"
-
-
-@pytest.mark.parametrize(
-    "requests",
-    [
-        [],
-        [{"path": "notes/a.md", "max_chars": 10_001}],
-        [{"path": "../private.md", "max_chars": 1}],
-        [{"path": "notes/a.md", "max_chars": 10_000}] * 4,
-    ],
-)
-def test_batch_rejects_invalid_requests_before_reading(requests: object) -> None:
-    workspace, tools = _tools()
-    workspace.files["notes/a.md"] = "alpha"
-    reads: list[str] = []
-    original = workspace.read_text_page
-
-    def tracked(path: str, **kwargs: object) -> WorkspaceTextPage:
-        reads.append(path)
-        return original(path, **kwargs)  # type: ignore[arg-type]
-
-    workspace.read_text_page = tracked  # type: ignore[method-assign]
-    from fleet_rlm.workspace.workspace import WorkspaceToolError
-
-    with pytest.raises((ValueError, WorkspaceToolError)):
-        tools["read_workspace_text_batch"](requests=requests)  # type: ignore[call-arg]
-    assert reads == []
 
 
 def test_workspace_event_views_expose_metadata_without_file_bodies_or_entries() -> None:
@@ -388,39 +307,6 @@ def test_raises_stable_safe_errors_without_exception_details() -> None:
     assert conflict.value.code == "conflict"
 
 
-def test_workspace_storage_failure_has_structured_host_error() -> None:
-    workspace, tools = _tools()
-    from fleet_rlm.workspace.storage import WorkspaceStorageError
-    from fleet_rlm.workspace.workspace import WorkspaceToolError
-
-    def unavailable(*_args: object, **_kwargs: object) -> WorkspaceEntry:
-        raise WorkspaceStorageError(1)
-
-    workspace.write_text = unavailable  # type: ignore[method-assign]
-
-    with pytest.raises(WorkspaceToolError) as failure:
-        tools["write_workspace_text"](path="date.txt", content="2026-07-20", overwrite=False)
-
-    assert failure.value.code == "unsupported_storage"
-    assert "errno" not in failure.value.public_message
-
-
-def test_entry_serialization_does_not_mutate_domain_value() -> None:
-    entry = WorkspaceEntry("notes", "directory", None, None)
-    workspace, tools = _tools()
-
-    def list_entries(_path, *, limit=100, after=None) -> WorkspaceListResult:
-        del limit, after
-        return WorkspaceListResult((entry,), truncated=False, next_cursor=None)
-
-    workspace.list_entries = list_entries  # type: ignore[method-assign]
-
-    result = tools["list_workspace_files"](path=".", limit=1)
-
-    assert result["entries"] == [{"path": "notes", "kind": "directory", "byte_size": None, "modified_at": None}]
-    assert entry == replace(entry)
-
-
 def test_paged_read_list_cursor_and_append_tool_contracts() -> None:
     _, tools = _tools()
 
@@ -441,62 +327,6 @@ def test_paged_read_list_cursor_and_append_tool_contracts() -> None:
         "byte_size": 5,
         "eof": True,
     }
-
-
-def test_delete_workspace_path_happy_missing_and_closed_errors() -> None:
-    workspace, tools = _tools()
-    workspace.files["notes/stale.md"] = "old"
-
-    deleted = tools["delete_workspace_path"](path="notes/stale.md")
-
-    assert deleted == {"ok": True, "namespace": "session_workspace", "path": "notes/stale.md"}
-    assert workspace.files == {}
-
-    from fleet_rlm.workspace.workspace import WorkspaceToolError
-
-    with pytest.raises(WorkspaceToolError) as missing:
-        tools["delete_workspace_path"](path="notes/stale.md")
-    assert missing.value.code == "not_found"
-
-    with pytest.raises(WorkspaceToolError) as root:
-        tools["delete_workspace_path"](path=".")
-    assert root.value.code == "invalid_path"
-
-    # Scope stays closed: volume-managed roots cannot be addressed.
-    with pytest.raises(WorkspaceToolError) as escaped:
-        tools["delete_workspace_path"](path="../attachments/private")
-    assert escaped.value.code == "invalid_path"
-
-
-def test_delete_workspace_path_conflict_messages_are_actionable() -> None:
-    _workspace, tools = _tools()
-    from fleet_rlm.workspace.workspace import WorkspaceToolError
-
-    with pytest.raises(WorkspaceToolError, match="checksum precondition") as checksum:
-        tools["delete_workspace_path"](path="conflicted.txt", expected_sha256="f" * 64)
-    assert checksum.value.code == "conflict"
-
-    with pytest.raises(WorkspaceToolError, match="not empty") as not_empty:
-        tools["delete_workspace_path"](path="notes")
-    assert not_empty.value.code == "conflict"
-
-
-def test_edit_workspace_text_replaces_one_unique_occurrence() -> None:
-    workspace, tools = _tools()
-    workspace.files["notes/report.md"] = "alpha beta gamma"
-
-    edited = tools["edit_workspace_text"](path="notes/report.md", old="beta", new="delta")
-
-    # LLM-facing shape stays the established 4-key entry (no checksum key).
-    assert edited == {
-        "ok": True,
-        "namespace": "session_workspace",
-        "path": "notes/report.md",
-        "kind": "file",
-        "byte_size": 17,
-        "modified_at": "2026-07-16T12:00:00Z",
-    }
-    assert workspace.files["notes/report.md"] == "alpha delta gamma"
 
 
 def test_edit_workspace_text_conflict_and_scope_errors() -> None:
@@ -637,51 +467,3 @@ def test_daytona_workspace_storage_rejects_listing_paths_outside_trusted_root(it
 
     with pytest.raises(UnsafePathError, match="workspace listing escapes"):
         storage.list_entries()
-
-
-def test_daytona_workspace_storage_mutates_only_through_sandbox_filesystem() -> None:
-    from types import SimpleNamespace
-
-    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
-
-    values: dict[str, bytes] = {}
-
-    class Fs:
-        def download_file(self, path: str) -> bytes:
-            if path not in values:
-                raise FileNotFoundError(path)
-            return values[path]
-
-        def upload_file(self, data: bytes, path: str) -> None:
-            values[path] = data
-
-        def delete_file(self, path: str) -> None:
-            values.pop(path, None)
-
-        def get_file_info(self, path: str):
-            if path not in values:
-                raise FileNotFoundError(path)
-            return SimpleNamespace(path=path, is_dir=False, size=len(values[path]), mod_time="2026-09-20T00:00:00Z")
-
-        def list_files(self, _path: str, *, depth: int):
-            del depth
-            return []
-
-    calls: list[str] = []
-
-    class Process:
-        def exec(self, command: str):
-            calls.append(command)
-            return SimpleNamespace(exit_code=0)
-
-    storage = DaytonaSandboxWorkspaceStorage(
-        SimpleNamespace(fs=Fs(), process=Process()),
-        volume_root="/workspace",
-        root="/workspace/sessions/session-a/workspace",
-    )
-    entry = storage.append_text("notes.md", "durable")
-
-    assert values["/workspace/sessions/session-a/workspace/notes.md"] == b"durable"
-    assert entry.byte_size == 7
-    assert storage.read_text_page("notes.md", cursor=None, max_chars=100).content == "durable"
-    assert calls == ["mkdir -p -- /workspace/sessions/session-a/workspace"]

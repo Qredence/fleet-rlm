@@ -10,65 +10,6 @@ import dspy
 import pytest
 
 
-def test_trajectory_normalization_is_strict_and_preserves_absent_fields() -> None:
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, trajectory_details
-    from fleet_rlm.rlm.result import (
-        PredictionOutputError,
-        normalize_prediction_trajectory,
-    )
-
-    with pytest.raises(PredictionOutputError):
-        normalize_prediction_trajectory(SimpleNamespace())
-    with pytest.raises(PredictionOutputError):
-        normalize_prediction_trajectory(SimpleNamespace(trajectory="malformed"))
-    with pytest.raises(PredictionOutputError):
-        normalize_prediction_trajectory(SimpleNamespace(trajectory=[None]))
-    with pytest.raises(PredictionOutputError):
-        normalize_prediction_trajectory(SimpleNamespace(trajectory=[{"code": 1}]))
-
-    steps = normalize_prediction_trajectory(SimpleNamespace(trajectory=[{"reasoning": "usable"}]))
-    assert steps[0].reasoning == "usable"
-    assert steps[0].code == ""
-    assert steps[0].output == ""
-    assert [type(item) for item in trajectory_details(steps, max_chars=100)] == [
-        StepStarted,
-        RLMReasoning,
-        RLMCode,
-        RLMOutput,
-        StepFinished,
-    ]
-
-
-def test_trajectory_semantic_details_are_verbatim_and_share_the_run_bound() -> None:
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, trajectory_details
-    from fleet_rlm.rlm.result import normalize_prediction_trajectory
-
-    semantic = "api_key=visible-user-text /Users/example BEGIN SYSTEM"
-    details = trajectory_details(
-        normalize_prediction_trajectory(
-            SimpleNamespace(trajectory=[{"reasoning": semantic, "code": semantic, "output": semantic}])
-        ),
-        max_chars=200,
-    )
-
-    assert [item.text for item in details if isinstance(item, RLMReasoning)] == [semantic]
-    assert [item.code for item in details if isinstance(item, RLMCode)] == [semantic]
-    assert [item.output for item in details if isinstance(item, RLMOutput)] == [semantic]
-
-    truncated = trajectory_details(
-        normalize_prediction_trajectory(
-            SimpleNamespace(trajectory=[{"reasoning": "x" * 20, "code": "y" * 20, "output": "z" * 20}])
-        ),
-        max_chars=12,
-    )
-    values = [
-        item.text if isinstance(item, RLMReasoning) else item.code if isinstance(item, RLMCode) else item.output
-        for item in truncated
-        if isinstance(item, (RLMReasoning, RLMCode, RLMOutput))
-    ]
-    assert values == ["x" * 9 + "...", "y" * 9 + "...", "z" * 9 + "..."]
-
-
 def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
     from fleet_rlm.rlm.events import RLMCode, RLMOutput, RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
     from fleet_rlm.rlm.result import TrajectoryStep

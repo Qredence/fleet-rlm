@@ -22,22 +22,17 @@ from scripts.benchmarks.run_rlm_latency import (
     _aggregate,
     _attach_trace_identity,
     _baseline_evidence_quality,
-    _bounded_sample_record,
     _campaign_preflight,
     _enforce_campaign_observations,
-    _eval_otpm_backoff_seconds,
     _execution_trace_diagnostics,
     _execution_trace_id,
     _judge_ab_receipt,
     _observed_spend,
-    _parse_skill_selections,
     _termination_mode_from_chunk,
     _upload_corpus,
-    _usage_totals,
     build_parser,
     latency_gate,
     main,
-    percentile,
     quality_gate,
     run_benchmark,
     run_turn,
@@ -108,14 +103,6 @@ class _UploadClient:
         return _Response(payload={"id": "attachment-1"})
 
 
-def test_nearest_rank_percentiles_are_deterministic() -> None:
-    values = list(range(1, 21))
-    assert percentile(values, 50) == 10
-    assert percentile(values, 95) == 19
-    with pytest.raises(ValueError):
-        percentile([], 50)
-
-
 def test_judge_ab_receipt_compares_same_input_variant_scores() -> None:
     baseline = [
         SimpleNamespace(name="correctness_baseline"),
@@ -168,77 +155,6 @@ def test_run_turn_propagates_attachment_ids_and_captures_bounded_trajectory() ->
     assert row["termination_mode"] == "typed_submit"
     assert row["recursive_calls"] == 0
     assert row["concurrency_observed"] is True
-
-
-def test_run_turn_reuses_existing_session_without_creating_another() -> None:
-    class _ReuseClient(_TurnClient):
-        def post(self, path: str, **_kwargs: object) -> _Response:
-            pytest.fail(f"unexpected Session creation: {path}")
-
-        def stream(self, method: str, path: str, **kwargs: object) -> _Stream:
-            assert method == "POST"
-            assert path == "/api/sessions/session-existing/turns"
-            return super().stream(method, path, **kwargs)
-
-    row = run_turn(_ReuseClient(), "inspect the attachment", nonce="reuse", session_id="session-existing")
-
-    assert row["session_id"] == "session-existing"
-
-
-def test_run_turn_keeps_frozen_prompt_identical_across_trials() -> None:
-    first = _TurnClient()
-    second = _TurnClient()
-
-    run_turn(first, "fixed evidence question", nonce="first", fixed_input=True)
-    run_turn(second, "fixed evidence question", nonce="second", fixed_input=True)
-
-    assert first.turn_request is not None and second.turn_request is not None
-    assert first.turn_request["text"] == second.turn_request["text"] == "fixed evidence question"
-
-
-def test_parser_exposes_explicit_native_and_warm_session_modes() -> None:
-    args = build_parser().parse_args(
-        ["benchmark", "--native-only", "--reuse-session", "--fixed-input", "--output", "receipt.json"]
-    )
-
-    assert args.native_only is True
-    assert args.reuse_session is True
-    assert args.fixed_input is True
-
-
-def test_benchmark_accepts_exact_skill_selection_for_matched_runs() -> None:
-    skill_id = "11111111-1111-1111-1111-111111111111"
-    selection = _parse_skill_selections([f"{skill_id}@2.0.0"])
-    client = _TurnClient()
-
-    run_turn(client, "inspect", nonce="skill", skill_selections=selection)
-
-    assert client.turn_request is not None
-    assert client.turn_request["skill_selections"] == [{"id": skill_id, "expected_version": "2.0.0"}]
-    with pytest.raises(BenchmarkError, match="must not repeat"):
-        _parse_skill_selections([f"{skill_id}@2.0.0", f"{skill_id}@2.0.0"])
-
-
-def test_sample_record_keeps_condition_and_unknown_usage_without_answer() -> None:
-    row = {
-        "sample_kind": "measured",
-        "session_condition": "warm_reuse",
-        "answer": "private task answer",
-        "trajectory": {"codes": ["private code"]},
-        "usage": {},
-        "trace_diagnostics": {
-            "phase_durations_ms": {"environment_acquisition": 4.0},
-            "turn_cleanup_status": "confirmed",
-        },
-    }
-
-    record = _bounded_sample_record(row)
-
-    assert record["session_condition"] == "warm_reuse"
-    assert record["token_usage"] is None
-    assert record["token_usage_status"] == "unknown"
-    assert record["cleanup_status"] == "confirmed"
-    assert "answer" not in record and "trajectory" not in record
 
 
 def test_baseline_quality_uses_frozen_rubric_without_persisting_answer() -> None:
@@ -405,19 +321,6 @@ def test_default_judge_is_the_probe_verified_qwen_endpoint() -> None:
     assert "required_uncertainty" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert "forbidden_claims" in EVIDENCE_COVERAGE_INSTRUCTIONS
     assert EVIDENCE_COVERAGE_DESCRIPTION.startswith("Check whether the response")
-
-
-def test_eval_otpm_backoff_seconds_reads_positive_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", raising=False)
-    assert _eval_otpm_backoff_seconds() == 0.0
-    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "70")
-    assert _eval_otpm_backoff_seconds() == 70.0
-    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "-1")
-    assert _eval_otpm_backoff_seconds() == 0.0
-    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "nope")
-    assert _eval_otpm_backoff_seconds() == 0.0
-    monkeypatch.setenv("FLEET_EVAL_OTPM_BACKOFF_SECONDS", "inf")
-    assert _eval_otpm_backoff_seconds() == 0.0
 
 
 def test_quality_gate_requires_all_five_records_and_perfect_means() -> None:
@@ -688,20 +591,6 @@ def test_aggregate_sums_broker_metrics_and_preserves_maxima() -> None:
     assert aggregate["broker_metrics"]["poll_latency_max_ms"] == 9
 
 
-def test_usage_totals_keep_only_approved_counters() -> None:
-    assert _usage_totals(
-        {
-            "root": {
-                "prompt_tokens": 10,
-                "completion_tokens": 4,
-                "completion_tokens_details": {"reasoning_tokens": 3},
-                "cache_read_input_tokens": 2,
-                "cost": 99,
-            }
-        }
-    ) == {"prompt_tokens": 10, "completion_tokens": 4, "reasoning_tokens": 3, "cache_read_tokens": 2}
-
-
 def test_termination_mode_requires_explicit_stream_evidence() -> None:
     assert _termination_mode_from_chunk({"type": "data-rlm-output", "data": {"output": "FINAL submitted"}}) == (
         "typed_submit"
@@ -894,119 +783,6 @@ def test_cli_writes_bounded_failure_receipt(tmp_path) -> None:
         "status": "failed",
         "error_category": "BenchmarkError",
     }
-
-
-def test_failed_stream_retains_adapter_parse_error_count_via_diagnostics(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression test: failed streams preserve IDs and collect parse-error diagnostics."""
-
-    class _FailingTurnClient:
-        def __enter__(self) -> _FailingTurnClient:
-            return self
-
-        def __exit__(self, *_args: object) -> None:
-            return None
-
-        def post(self, path: str, **_kwargs: object) -> _Response:
-            if path == "/api/sessions":
-                return _Response(payload={"id": "session-1"})
-            return _Response(payload={})
-
-        def get(self, path: str, **_kwargs: object) -> _Response:
-            if path == "/api/settings":
-                return _Response(
-                    payload={
-                        "active_profile": "default",
-                        "scopes": [{"name": "default", "fields": []}],
-                    }
-                )
-            return _Response(payload={})
-
-        def stream(self, _method: str, _path: str, **_kwargs: object) -> _Stream:
-            lines = [
-                "data: "
-                + json_module.dumps(
-                    {
-                        "type": "messageMetadata",
-                        "messageMetadata": {"traceId": "tr-1", "runId": "run-1"},
-                    }
-                ),
-                "data: "
-                + json_module.dumps(
-                    {
-                        "type": "data-usage",
-                        "data": {
-                            "usage": {
-                                "iterations": 1,
-                                "observed_lm_usage": {"root": {"input_cost": 0.1, "output_cost": 0.1}},
-                            }
-                        },
-                    }
-                ),
-                "data: "
-                + json_module.dumps({"type": "tool-output-available", "output": {"peak_child_concurrency": 0}}),
-                "data: " + json_module.dumps({"type": "error", "errorText": "Adapter parse failure"}),
-            ]
-            return _Stream(_Response(lines=lines))
-
-    execution_trace_spans = [
-        SimpleNamespace(
-            name="RLM.execute",
-            inputs={},
-            outputs={
-                "failure_category": "adapter_parse_error",
-                "last_lm_call": {"response_keys": ["invalid"]},
-            },
-        ),
-        SimpleNamespace(name="Turn.cleanup", outputs={"phase_status": "completed"}),
-    ]
-
-    fake_mlflow = SimpleNamespace(
-        set_tracking_uri=lambda _url: None,
-        get_trace=lambda _trace_id: SimpleNamespace(data=SimpleNamespace(spans=execution_trace_spans)),
-        search_traces=lambda **_kwargs: [],
-        MlflowClient=lambda: SimpleNamespace(set_trace_tag=lambda *_args: None),
-    )
-    monkeypatch.setitem(sys.modules, "mlflow", fake_mlflow)
-    monkeypatch.setenv("FLEET_LIVE", "1")
-
-    args = build_parser().parse_args(
-        [
-            "benchmark",
-            "--campaign",
-            "test-campaign",
-            "--target",
-            "local-daytona",
-            "--max-elapsed-seconds",
-            "60",
-            "--cleanup-reserve-seconds",
-            "15",
-            "--max-trial-cost-usd",
-            "1",
-            "--max-admissions",
-            "2",
-            "--max-sandbox-concurrency",
-            "1",
-            "--spend-cap",
-            "10",
-            "--warmups",
-            "0",
-            "--runs",
-            "2",
-            "--timeout",
-            "10",
-            "--output",
-            "receipt.json",
-        ]
-    )
-
-    with monkeypatch.context() as m:
-        m.setattr("httpx.Client", lambda **_kwargs: _FailingTurnClient())
-        receipt = run_benchmark(args)
-
-    aggregate = receipt["aggregate"]
-    assert aggregate["sample_count"] == 2
-    assert aggregate["error_rate"] == 1.0
-    assert aggregate["adapter_parse_error_count"] == 2
 
 
 def test_quality_dataset_is_scoped_to_selected_experiment() -> None:

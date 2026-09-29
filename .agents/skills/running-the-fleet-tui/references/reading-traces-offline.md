@@ -52,8 +52,9 @@ compare it with the outcome the client reported and with
   the iteration count the client reported. One call per iteration is healthy; a
   large multiple means adapter retries or a retry storm, and `FleetJSONAdapter`
   span counts show how much of it was salvage rather than reasoning.
-- **Settlement.** `Turn.settlement` and `database.commit` present means the Turn
-  committed; absent means the trace ended before settlement did.
+- **Settlement.** Check successful outcomes on `Turn.settlement` and
+  `database.commit`, then reconcile them with the durable Run state. Span
+  presence alone records an attempt and can also accompany a failed commit.
 - **Cleanup.** `Turn.cleanup` present means the lifecycle reached teardown. It is
   evidence that cleanup ran, not that the provider confirmed deletion.
 

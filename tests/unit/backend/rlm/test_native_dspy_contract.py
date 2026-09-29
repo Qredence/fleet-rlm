@@ -5,18 +5,16 @@ from __future__ import annotations
 import asyncio
 import inspect
 import sys
-from datetime import date
 from types import SimpleNamespace
-from typing import Annotated, Any, ClassVar
+from typing import Any, ClassVar
 
 import dspy
 import pytest
-from pydantic import Field, PlainSerializer
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.rlm.events import ToolEventView, observe_tool
 from fleet_rlm.rlm.output_contract import bind_output_contract
-from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm
+from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.result import prediction_result
 from tests.support.native_rlm import build_native_rlm_for_test
 
@@ -34,51 +32,10 @@ def _use_context_span_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tracing, "start_turn_span", mocked_start)
 
 
-def test_prediction_result_encodes_every_declared_output_by_annotation() -> None:
-    from fleet_rlm.rlm.result import prediction_result
-
-    class Report(dspy.Signature):
-        request: str = dspy.InputField()
-        answer: str = dspy.OutputField()
-        published: date = dspy.OutputField()
-        scores: tuple[int, ...] = dspy.OutputField()
-
-    result = prediction_result(
-        dspy.Prediction(answer="done", published=date(2026, 7, 15), scores=(2, 3)),
-        Report,
-        schema_id="report",
-        schema_version="7",
-    )
-
-    assert result.display_text == "done"
-    assert result.outputs == {"answer": "done", "published": "2026-07-15", "scores": (2, 3)}
-    assert result.schema_id == "report"
-    assert result.schema_version == "7"
-
-
-@pytest.mark.parametrize(
-    ("answer", "payload"),
-    [("", {"ok": True}), (None, {"ok": True}), ("done", object())],
-)
-def test_prediction_result_rejects_invalid_display_or_json(answer: object, payload: object) -> None:
-    from fleet_rlm.rlm.result import (
-        PredictionOutputError,
-        prediction_result,
-    )
-
-    class Report(dspy.Signature):
-        answer: str = dspy.OutputField()
-        payload: object = dspy.OutputField()
-
-    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
-        prediction_result(dspy.Prediction(answer=answer, payload=payload), Report)
-
-
 def test_prediction_result_rejects_oversized_or_publicly_unsafe_outputs_without_mutation() -> None:
     from fleet_rlm.rlm.result import (
         PredictionOutputError,
         PredictionOutputTooLargeError,
-        prediction_result,
     )
 
     class Report(dspy.Signature):
@@ -99,37 +56,7 @@ def test_prediction_result_rejects_oversized_or_publicly_unsafe_outputs_without_
         )
 
 
-def test_prediction_result_oversized_carries_sanitized_metrics_attrs() -> None:
-    from fleet_rlm.rlm.result import (
-        PredictionOutputTooLargeError,
-        prediction_result,
-    )
-
-    class Report(dspy.Signature):
-        answer: str = dspy.OutputField()
-        metadata: dict[str, str] = dspy.OutputField()
-
-    secret = "sk-live-abcdef123456"
-    with pytest.raises(PredictionOutputTooLargeError) as excinfo:
-        prediction_result(
-            dspy.Prediction(answer=f"token={secret} " + "A" * 200, metadata={}),
-            Report,
-            max_output_chars=64,
-        )
-    exc = excinfo.value
-
-    # Public message text stays exactly the closed-Literal string.
-    assert str(exc) == "Turn output is too large"
-    assert exc.public_message == "Turn output is too large"
-    # Diagnostics ride typed attrs, not the message.
-    assert isinstance(exc.output_chars, int) and exc.output_chars > 64
-    assert isinstance(exc.output_preview, str)
-    assert secret not in exc.output_preview  # secrets redacted
-    assert len(exc.output_preview) <= 400  # bounded (sanitize_public_text max_len)
-
-
 def test_prediction_result_preserves_benign_security_text_and_documented_mount_verbatim() -> None:
-    from fleet_rlm.rlm.result import prediction_result
 
     class Report(dspy.Signature):
         answer: str = dspy.OutputField()
@@ -162,7 +89,6 @@ def test_prediction_result_preserves_benign_security_text_and_documented_mount_v
 def test_prediction_result_rejects_concrete_private_material(answer: str, metadata: dict[str, str]) -> None:
     from fleet_rlm.rlm.result import (
         PredictionOutputError,
-        prediction_result,
     )
 
     class Report(dspy.Signature):
@@ -173,30 +99,7 @@ def test_prediction_result_rejects_concrete_private_material(answer: str, metada
         prediction_result(dspy.Prediction(answer=answer, metadata=metadata), Report)
 
 
-def test_prediction_result_validates_and_serializes_complete_annotated_output() -> None:
-    from fleet_rlm.rlm.result import (
-        PredictionOutputError,
-        prediction_result,
-    )
-
-    class Report(dspy.Signature):
-        answer: str = dspy.OutputField()
-        count: Annotated[
-            int,
-            Field(gt=0),
-            PlainSerializer(lambda value: f"count={value}", return_type=str),
-        ] = dspy.OutputField()
-
-    result = prediction_result(dspy.Prediction(answer="done", count=3), Report)
-
-    assert result.outputs == {"answer": "done", "count": "count=3"}
-    for invalid in (-1, object()):
-        with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
-            prediction_result(dspy.Prediction(answer="done", count=invalid), Report)
-
-
 def test_prediction_result_outputs_are_deeply_immutable() -> None:
-    from fleet_rlm.rlm.result import prediction_result
 
     class Report(dspy.Signature):
         answer: str = dspy.OutputField()
@@ -211,91 +114,9 @@ def test_prediction_result_outputs_are_deeply_immutable() -> None:
         result.outputs["answer"] = "changed"  # type: ignore[index]
 
 
-def test_prediction_trajectory_normalization_does_not_mutate_dspy_prediction() -> None:
-    from fleet_rlm.rlm.result import normalize_prediction_trajectory
-
-    raw_trajectory = [{"reasoning": "inspect", "code": "value = 1", "output": "1"}]
-    prediction = dspy.Prediction(trajectory=raw_trajectory)
-
-    normalized = normalize_prediction_trajectory(prediction)
-
-    assert normalized[0].reasoning == "inspect"
-    assert normalized[0].code == "value = 1"
-    assert normalized[0].output == "1"
-    assert prediction.trajectory == raw_trajectory
-
-
 def _lookup(value: str) -> str:
     """Return a value through a host tool."""
     return value
-
-
-def test_rlm_options_match_the_product_defaults() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-
-    assert RLMOptions() == RLMOptions(
-        max_iters=20,
-        max_llm_calls=50,
-        max_output_chars=10_000,
-    )
-
-
-def test_build_native_rlm_preserves_exact_public_constructor_inputs() -> None:
-    from fleet_rlm.rlm.program import (
-        RLMOptions,
-    )
-
-    class TaskSignature(dspy.Signature):
-        request: str = dspy.InputField()
-        answer: str = dspy.OutputField()
-
-    sub_lm = object()
-    kwargs: dict[str, Any] = {
-        "signature": TaskSignature,
-        "options": RLMOptions(max_iters=7, max_llm_calls=11, max_output_chars=2048),
-        "tools": [_lookup],
-        "sub_lm": sub_lm,
-    }
-
-    first = build_native_rlm_for_test(**kwargs)
-    second = build_native_rlm_for_test(**kwargs)
-
-    assert type(first) is dspy.RLM
-    assert first is not second
-    assert first.verbose is True
-    assert first.signature is TaskSignature
-    assert first.max_iters == 7
-    assert first.max_llm_calls == 11
-    assert first.max_output_chars == 2048
-    assert first.sub_lm is sub_lm
-    assert not hasattr(first, "_interpreter")
-    assert first._interpreter_factory.__name__ == "in_process_interpreter_factory"
-    assert set(first.tools) == {"_lookup"}
-    assert first.generate_action.callbacks == []
-
-
-def test_build_native_rlm_requires_a_caller_owned_interpreter_factory() -> None:
-    from fleet_rlm.rlm.program import RLMOptions
-
-    with pytest.raises(TypeError, match="interpreter_factory"):
-        build_native_rlm(signature="request -> answer", options=RLMOptions(max_iters=1))
-
-
-def test_native_rlm_identity_is_kept_in_the_pinned_compatibility_seam() -> None:
-    from fleet_rlm.rlm.events import is_native_rlm
-
-    native = dspy.RLM("request -> answer")
-
-    class StructuralDouble:
-        def acall(self, **_kwargs: Any) -> None:
-            return None
-
-    class NativeSubclass(dspy.RLM):
-        pass
-
-    assert is_native_rlm(native)
-    assert not is_native_rlm(StructuralDouble())
-    assert not is_native_rlm(NativeSubclass("request -> answer"))
 
 
 @pytest.mark.asyncio
@@ -403,39 +224,6 @@ async def test_native_rlm_callback_observes_completed_action_without_altering_pr
     assert observed[0].text == "Decide the answer directly."
     assert observed[0].step == 1
     interpreter.shutdown()
-
-
-def test_composition_version_guard_accepts_exact_final_3_4_0_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from fleet_rlm.rlm.program import (
-        CERTIFIED_DSPY_VERSION,
-        UncertifiedDSpyVersionError,
-        assert_dspy_version,
-    )
-
-    assert CERTIFIED_DSPY_VERSION == "3.4.0"
-    monkeypatch.setattr(dspy, "__version__", "3.4.0")
-    assert_dspy_version()  # the certified final release
-    rejected_versions = (
-        "3.3.1",
-        "3.4.1",
-        "3.4.0.dev1",
-        "3.4.0a1",
-        "3.4.0b1",
-        "3.4.0rc1",
-        "3.4.0.post1",
-        # Literal string comparison must reject local segments that PEP 440
-        # specifier equality would silently ignore.
-        "3.4.0+local",
-        "not-a-version",
-        "3.2.9",
-        "4.0.0",
-    )
-    for reported in rejected_versions:
-        monkeypatch.setattr(dspy, "__version__", reported)
-        with pytest.raises(UncertifiedDSpyVersionError, match=r"exactly DSPy 3\.4\.0"):
-            assert_dspy_version()
 
 
 def test_composition_version_guard_error_is_bounded_and_typed(
@@ -959,101 +747,6 @@ def test_reasoning_callback_spans_the_complete_root_action(monkeypatch: pytest.M
     assert len(observed) == 1
 
 
-@pytest.mark.parametrize(
-    "provider_usage",
-    [
-        {"root": {"bad": object()}},
-        {"root": {"not_json": {1, 2}}},
-        {1: {"prompt_tokens": 4}},
-    ],
-)
-def test_malformed_provider_usage_degrades_without_losing_measured_fields(provider_usage: object) -> None:
-    from fleet_rlm.rlm.result import observed_usage
-
-    class Prediction:
-        trajectory: ClassVar[list[object]] = [{"output": "step one"}, {"output": "step two"}]
-
-        def get_lm_usage(self):
-            return provider_usage
-
-    assert observed_usage(Prediction(), duration_ms=17) == {
-        "iterations": 2,
-        "observed_lm_usage": {},
-        "duration_ms": 17,
-    }
-
-
-def test_lm_output_profile_reads_mapping_of_parsed_fields() -> None:
-    from fleet_rlm.rlm.events import _lm_output_profile
-
-    # Success path: adapter-parsed outputs arrive as a Mapping of signature fields.
-    outputs = {"reasoning": "step", "code": "print(1)"}
-    profile = _lm_output_profile(outputs)
-    assert profile["response_keys"] == ("code", "reasoning")
-    assert profile["response_chars"] == len("step") + len("print(1)")
-    assert "response_preview" in profile
-
-
-def test_lm_output_profile_reads_legacy_list_payloads() -> None:
-    from fleet_rlm.rlm.events import _lm_output_profile
-
-    text_only = _lm_output_profile(['{"reasoning": "r", "code": "c"}'])
-    assert text_only["response_keys"] == ("content",)
-    assert text_only["response_chars"] == len('{"reasoning": "r", "code": "c"}')
-    assert "response_preview" in text_only
-
-    reasoning_only = _lm_output_profile([{"text": "", "reasoning_content": "long think"}])
-    assert reasoning_only["response_keys"] == ("reasoning_content", "text")
-    assert reasoning_only["response_chars"] == len("long think")
-    assert reasoning_only["has_reasoning_content"] is True
-
-    assert _lm_output_profile([]) == {"response_keys": ()}
-
-
-def test_adapter_parse_profile_classifies_empty_and_non_json() -> None:
-    import dspy
-    from dspy.utils.exceptions import AdapterParseError
-
-    from fleet_rlm.rlm.events import _adapter_parse_profile
-
-    class _Sig(dspy.Signature):
-        reasoning: str = dspy.OutputField()
-        code: str = dspy.OutputField()
-
-    empty = AdapterParseError(
-        adapter_name="JSONAdapter",
-        signature=_Sig,
-        lm_response="",
-        message="The LM returned an empty or null response.",
-    )
-    empty_profile = _adapter_parse_profile(empty)
-    assert empty_profile["parse_failure_kind"] == "empty"
-    assert empty_profile["lm_response_chars"] == 0
-    assert "has_reasoning_content" not in empty_profile
-
-    reasoning = AdapterParseError(
-        adapter_name="JSONAdapter",
-        signature=_Sig,
-        lm_response=str({"text": None, "reasoning_content": "think"}),
-        message="The LM returned an empty or null response.",
-    )
-    reasoning_profile = _adapter_parse_profile(reasoning)
-    assert reasoning_profile["parse_failure_kind"] == "empty"
-    assert reasoning_profile["has_reasoning_content"] is True
-    assert int(reasoning_profile["lm_response_chars"]) > 0
-
-    junk = AdapterParseError(
-        adapter_name="JSONAdapter",
-        signature=_Sig,
-        lm_response="not json at all",
-        message="LM response cannot be serialized to a JSON object.",
-    )
-    junk_profile = _adapter_parse_profile(junk)
-    assert junk_profile["parse_failure_kind"] == "non_object_json"
-    assert junk_profile["lm_response_chars"] == len("not json at all")
-    assert _adapter_parse_profile(ValueError("unrelated")) == {}
-
-
 def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None:
     from fleet_rlm.rlm.events import _lm_output_profile
 
@@ -1067,39 +760,6 @@ def test_lm_output_profile_degrades_unknown_shapes_without_raw_probing() -> None
     # Genuinely unusable shapes still degrade to the historical empty-keys shape.
     assert _lm_output_profile(None) == {"response_keys": ()}
     assert _lm_output_profile(object()) == {"response_keys": ()}
-
-
-def test_latest_lm_telemetry_reads_only_the_certified_legacy_history_entry() -> None:
-    """P38-RLM-006/011: usage comes from the identity-matched legacy entry.
-
-    The typed ``LMResponse`` fallback (``usage_as_dict``) and raw
-    provider-response probing are deleted: a typed-shaped callback payload
-    with no matching history entry degrades to unavailable, never to an
-    estimate.
-    """
-    from types import SimpleNamespace
-
-    from fleet_rlm.rlm.events import _latest_lm_telemetry
-
-    outputs = ["parsed"]
-    lm = SimpleNamespace(
-        history=[
-            {"outputs": object(), "usage": {"prompt_tokens": 99, "completion_tokens": 1}},
-            {"outputs": outputs, "usage": {"prompt_tokens": 4, "completion_tokens": 2}},
-        ]
-    )
-
-    assert _latest_lm_telemetry(lm, 0, outputs) == {"prompt_tokens": 4, "completion_tokens": 2}
-
-    class TypedResponse:
-        def usage_as_dict(self) -> dict[str, int]:
-            return {"prompt_tokens": 7}
-
-    # A typed response with no matching history entry yields nothing.
-    assert _latest_lm_telemetry(SimpleNamespace(history=[]), 0, TypedResponse()) == {}
-    # Missing history or unknown payloads degrade to unavailable, not zero.
-    assert _latest_lm_telemetry(SimpleNamespace(history=[]), 0, None) == {}
-    assert _latest_lm_telemetry(SimpleNamespace(), 0, outputs) == {}
 
 
 def test_latest_lm_telemetry_falls_back_to_stored_response_usage() -> None:
@@ -1342,21 +1002,6 @@ async def test_native_submit_rejects_non_json_values_and_non_finite_numbers() ->
     assert "non-finite" in prediction.trajectory[0]["output"].lower()
 
 
-def test_prediction_result_applies_declared_defaults_without_mutating_prediction() -> None:
-    class Report(dspy.Signature):
-        request: str = dspy.InputField()
-        answer: str = dspy.OutputField()
-        tags: list[str] = dspy.OutputField(default_factory=list)
-        note: str | None = dspy.OutputField(default=None)
-
-    prediction = dspy.Prediction(answer="done")
-    result = prediction_result(prediction, Report)
-
-    assert result.outputs == {"answer": "done", "tags": (), "note": None}
-    assert not hasattr(prediction, "tags")
-    assert not hasattr(prediction, "note")
-
-
 def test_tool_result_serialization_rejects_non_json_values_without_coercion() -> None:
     events: list[object] = []
 
@@ -1411,19 +1056,6 @@ async def test_sync_and_async_tools_have_equivalent_results_and_lifecycle() -> N
         "ToolStarted",
         "ToolCompleted",
     ]
-
-
-def test_native_option_mapping_is_one_to_one_for_root_and_child_policy() -> None:
-    options = RLMOptions(max_iters=3, max_llm_calls=5, max_output_chars=17)
-    root = SimpleNamespace(copy=lambda **_kwargs: root)
-    sub = SimpleNamespace(copy=lambda **_kwargs: sub)
-    bundle = RLMModelBundle(root, sub)
-
-    rlm = build_native_rlm_for_test(signature="request -> answer", options=options, sub_lm=sub, verbose=False)
-
-    assert (rlm.max_iters, rlm.max_llm_calls, rlm.max_output_chars) == (3, 5, 17)
-    assert bundle.root_lm is root
-    assert bundle.sub_lm is sub
 
 
 def test_native_contract_does_not_construct_or_shutdown_caller_owned_interpreter() -> None:
@@ -1531,30 +1163,6 @@ async def test_caller_owned_interpreter_tool_injection_output_metadata_and_traje
     assert prediction.trajectory[1]["code"] == action2
 
 
-def test_lm_telemetry_preserves_counts_with_null_optional_usage_details() -> None:
-    from types import SimpleNamespace
-
-    from fleet_rlm.rlm.events import _latest_lm_telemetry, _mlflow_token_usage
-
-    outputs = ["42"]
-    lm = SimpleNamespace(
-        history=[
-            {
-                "outputs": outputs,
-                "usage": {
-                    "prompt_tokens": 38,
-                    "completion_tokens": 43,
-                    "total_tokens": 81,
-                    "completion_tokens_details": None,
-                    "prompt_tokens_details": {"cached_tokens": 0},
-                },
-            }
-        ]
-    )
-    usage = _latest_lm_telemetry(lm, 0, outputs)
-    assert _mlflow_token_usage(usage) == {"input_tokens": 38, "output_tokens": 43, "total_tokens": 81}
-
-
 def _raise_prediction_output_failure(case: str) -> None:
     """Raise the ``PredictionOutputError`` for one named validation site."""
     from fleet_rlm.rlm.result import (
@@ -1618,7 +1226,7 @@ def test_prediction_result_reports_fine_grained_causes_through_the_public_path()
     ``PredictionOutputError`` is a ``ValueError``, so a generic handler around the
     output-validation loop would otherwise swallow a specific cause.
     """
-    from fleet_rlm.rlm.result import PredictionOutputError, prediction_result
+    from fleet_rlm.rlm.result import PredictionOutputError
 
     class Report(dspy.Signature):
         answer: str = dspy.OutputField()

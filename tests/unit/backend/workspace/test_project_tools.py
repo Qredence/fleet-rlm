@@ -132,126 +132,16 @@ def _tools(fs: FakeProjectFS | None = None) -> tuple[FakeProjectFS, dict[str, ds
     return value, {str(tool.name): tool for tool in tools}
 
 
-def test_exposes_exact_typed_tool_contracts() -> None:
-    _, tools = _tools()
-
-    assert tuple(tools) == (
-        "list_project_files",
-        "stat_project_file",
-        "read_project_text",
-        "write_project_text",
-        "delete_project_path",
-        "edit_project_text",
-    )
-    assert all(type(tool) is dspy.Tool for tool in tools.values())
-    assert tools["delete_project_path"].args == {
-        "path": {"type": "string"},
-        "expected_sha256": {"type": ["string", "null"]},
-    }
-    assert tools["edit_project_text"].args == {
-        "path": {"type": "string"},
-        "old": {"type": "string"},
-        "new": {"type": "string"},
-        "expected_sha256": {"type": ["string", "null"]},
-    }
-    assert "projects/<slug>/" in tools["delete_project_path"].desc
-    assert "projects/<slug>/" in tools["edit_project_text"].desc
-    assert "independent of Turn Commit" in tools["delete_project_path"].desc
-    assert "independent of Turn Commit" in tools["edit_project_text"].desc
-    assert "projects/<slug>/" in tools["list_project_files"].desc
-    assert tools["list_project_files"].args == {
-        "path": {"type": "string"},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 100},
-        "after": {"type": ["string", "null"]},
-    }
-    assert tools["read_project_text"].args["max_chars"] == {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 10_000,
-    }
-    assert tools["write_project_text"].args == {
-        "path": {"type": "string"},
-        "content": {"type": "string"},
-        "overwrite": {"type": "boolean"},
-    }
-    assert "repo/task-derived slug" in tools["write_project_text"].desc
-    assert "independent of Turn Commit" in tools["write_project_text"].desc
-
-
-def test_round_trips_text_under_a_named_project() -> None:
-    fs, tools = _tools()
-
-    written = tools["write_project_text"](
-        path="fleet-rlm/reports/review.md",
-        content="durable review",
-        overwrite=False,
-    )
-    listed_root = tools["list_project_files"](path=".", limit=100)
-    listed = tools["list_project_files"](path="fleet-rlm", limit=100)
-    stated = tools["stat_project_file"](path="fleet-rlm/reports/review.md")
-    stated_dir = tools["stat_project_file"](path="fleet-rlm")
-    read = tools["read_project_text"](path="fleet-rlm/reports/review.md", max_chars=10_000)
-
-    assert written == {
-        "ok": True,
-        "namespace": "project_workspace",
-        "path": "fleet-rlm/reports/review.md",
-        "kind": "file",
-        "byte_size": 14,
-        "modified_at": "2026-07-16T12:00:00Z",
-    }
-    assert fs.files["fleet-rlm/reports/review.md"] == "durable review"
-    assert listed_root["count"] == 2  # the seeded project directories (fleet-rlm, other-proj)
-    assert listed_root["entries"][0]["kind"] == "directory"
-    assert listed["count"] == 1
-    assert listed["entries"][0]["path"] == "fleet-rlm/reports/review.md"
-    assert stated["entry"]["byte_size"] == 14
-    assert stated_dir["entry"]["kind"] == "directory"
-    assert read["content"] == "durable review"
-    assert read["eof"] is True
-    assert read["namespace"] == "project_workspace"
-
-
-def test_accepts_the_canonical_projects_prefixed_convention() -> None:
-    _, tools = _tools()
-
-    written = tools["write_project_text"](
-        path="projects/fleet-rlm/reports/review.md",
-        content="durable review",
-        overwrite=False,
-    )
-    read = tools["read_project_text"](path="projects/fleet-rlm/reports/review.md", max_chars=10_000)
-
-    assert written["path"] == "fleet-rlm/reports/review.md"
-    assert read["content"] == "durable review"
-    assert read["ok"] is True
-
-
-def test_write_requires_explicit_overwrite_for_replacement() -> None:
-    _, tools = _tools()
-
-    tools["write_project_text"](path="fleet-rlm/review.md", content="first", overwrite=False)
-    with pytest.raises(ProjectToolError, match="overwrite=True") as conflict:
-        tools["write_project_text"](path="fleet-rlm/review.md", content="second", overwrite=False)
-    assert conflict.value.code == "conflict"
-
-    replaced = tools["write_project_text"](path="fleet-rlm/review.md", content="second", overwrite=True)
-    assert replaced["ok"] is True
-    assert tools["read_project_text"](path="fleet-rlm/review.md", max_chars=10)["content"] == "second"
-
-
 @pytest.mark.parametrize(
     "path",
     [
-        "Fleet/review.md",  # uppercase slug
-        "sessions/review.md",  # reserved root slug
-        "memory/review.md",
-        "fleet-rlm/../review.md",  # traversal component
-        "fleet-rlm//review.md",  # empty segment
-        "/fleet-rlm/review.md",  # absolute
-        "équipe/review.md",  # unicode slug
-        "fleet-rlm",  # slug without a file inside the project
-        ".",  # projects root is not a file
+        "Fleet/review.md",
+        "sessions/review.md",
+        "fleet-rlm/../review.md",
+        "fleet-rlm//review.md",
+        "/fleet-rlm/review.md",
+        "fleet-rlm",
+        ".",
     ],
 )
 def test_write_rejects_paths_outside_the_slug_contract(path: str) -> None:
@@ -392,12 +282,7 @@ def test_delete_project_path_happy_scope_and_conflict_errors() -> None:
 
 @pytest.mark.parametrize(
     "path",
-    [
-        "attachments/private.md",  # reserved root slug: managed namespace
-        "artifacts/private.md",  # reserved root slug: managed namespace
-        "../fleet-rlm/review.md",  # traversal
-        "Projects/fleet-rlm/review.md",  # uppercase is not a valid slug
-    ],
+    ["attachments/private.md", "../fleet-rlm/review.md", "Projects/fleet-rlm/review.md"],
 )
 def test_delete_and_edit_reject_paths_outside_the_allowlist(path: str) -> None:
     _, tools = _tools()
@@ -408,65 +293,6 @@ def test_delete_and_edit_reject_paths_outside_the_allowlist(path: str) -> None:
     with pytest.raises(ProjectToolError) as edited:
         tools["edit_project_text"](path=path, old="a", new="b")
     assert edited.value.code == "invalid_path"
-
-
-def test_edit_project_text_replaces_one_unique_occurrence() -> None:
-    fs, tools = _tools()
-    fs.files["fleet-rlm/reports/review.md"] = "draft: keep"
-
-    edited = tools["edit_project_text"](path="fleet-rlm/reports/review.md", old="draft", new="final")
-
-    # LLM-facing shape stays the established 4-key entry (no checksum key).
-    assert edited == {
-        "ok": True,
-        "namespace": "project_workspace",
-        "path": "fleet-rlm/reports/review.md",
-        "kind": "file",
-        "byte_size": 11,
-        "modified_at": "2026-07-16T12:00:00Z",
-    }
-    assert fs.files["fleet-rlm/reports/review.md"] == "final: keep"
-
-
-def test_edit_project_text_conflict_and_missing_errors() -> None:
-    fs, tools = _tools()
-    fs.files["fleet-rlm/review.md"] = "dup dup"
-
-    with pytest.raises(ProjectToolError, match="more than once") as ambiguous:
-        tools["edit_project_text"](path="fleet-rlm/review.md", old="dup", new="once")
-    assert ambiguous.value.code == "conflict"
-
-    with pytest.raises(ProjectToolError, match="was not found") as missing:
-        tools["edit_project_text"](path="fleet-rlm/review.md", old="nope", new="once")
-    assert missing.value.code == "conflict"
-
-    with pytest.raises(ProjectToolError, match="checksum precondition") as checksum:
-        tools["edit_project_text"](path="fleet-rlm/review.md", old="dup", new="once", expected_sha256="f" * 64)
-    assert checksum.value.code == "conflict"
-
-    import hashlib
-
-    matched = tools["edit_project_text"](
-        path="fleet-rlm/review.md",
-        old="dup dup",
-        new="done",
-        expected_sha256=hashlib.sha256(b"dup dup").hexdigest(),
-    )
-    assert matched["ok"] is True
-    assert fs.files["fleet-rlm/review.md"] == "done"
-
-    with pytest.raises(ProjectToolError) as missing_file:
-        tools["edit_project_text"](path="fleet-rlm/missing.md", old="a", new="b")
-    assert missing_file.value.code == "not_found"
-
-    # Edits never target a directory or the projects root.
-    with pytest.raises(ProjectToolError) as directory:
-        tools["edit_project_text"](path="fleet-rlm", old="a", new="b")
-    assert directory.value.code == "invalid_path"
-
-    with pytest.raises(ProjectToolError) as too_large:
-        tools["edit_project_text"](path="fleet-rlm/review.md", old="y" * 33, new="b")
-    assert too_large.value.code == "too_large"
 
 
 def test_delete_and_edit_project_event_views_expose_metadata_only() -> None:

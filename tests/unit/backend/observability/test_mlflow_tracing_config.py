@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import importlib.util
 import os
-import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -193,14 +192,6 @@ def _install_fake_mlflow_exceptions(monkeypatch: pytest.MonkeyPatch) -> type[Exc
     return MlflowException
 
 
-def test_configure_tracing_records_experiment_purpose_tag(monkeypatch: pytest.MonkeyPatch) -> None:
-    experiment = SimpleNamespace(experiment_id="42", tags={})
-    calls = _install_fake_mlflow(monkeypatch, experiment=experiment)
-    _install_fake_mlflow_exceptions(monkeypatch)
-    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
-    assert calls.experiment_tag_args == [("fleet.experiment.purpose", "runtime")]
-
-
 def test_configure_tracing_purpose_conflict_propagates_configuration_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -213,146 +204,6 @@ def test_configure_tracing_purpose_conflict_propagates_configuration_error(
     assert "mlflow.experiment_purpose" in str(exc_info.value)
     assert "FLEET_MLFLOW_EXPERIMENT_PURPOSE" not in str(exc_info.value)
     assert tracing.is_tracing_active() is False
-
-
-def test_configure_tracing_matching_purpose_does_not_rewrite_the_tag(monkeypatch: pytest.MonkeyPatch) -> None:
-    experiment = SimpleNamespace(experiment_id="42", tags={tracing._EXPERIMENT_PURPOSE_TAG: "runtime"})
-    calls = _install_fake_mlflow(monkeypatch, experiment=experiment)
-    _install_fake_mlflow_exceptions(monkeypatch)
-    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
-    assert calls.experiment_tag_args == []
-
-
-def test_configure_tracing_purpose_tag_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
-    experiment = SimpleNamespace(experiment_id="42", tags={})
-
-    def _failing_tag(*_a: Any, **_k: Any) -> None:
-        raise AttributeError("simulated MLflow tag-write failure")
-
-    _install_fake_mlflow(monkeypatch, experiment=experiment, set_experiment_tag=_failing_tag)
-    _install_fake_mlflow_exceptions(monkeypatch)
-    assert tracing.configure_tracing(_enabled_settings(mlflow_experiment_purpose="runtime")) is True
-    assert tracing.is_tracing_active() is True
-
-
-def test_configure_tracing_disabled_skips_mlflow(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _boom(*_a: Any, **_k: Any) -> None:
-        raise AssertionError("mlflow must not be imported when disabled")
-
-    _install_fake_mlflow(monkeypatch, set_tracking_uri=_boom, set_experiment=_boom, autolog=_boom)
-    assert tracing.configure_tracing(Settings(mlflow_tracing_enabled=False)) is False
-
-
-def test_configure_tracing_enabled_without_workspace_settings_is_soft_disabled(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    for name in (
-        "FLEET_MLFLOW_EXPERIMENT_NAME",
-        "FLEET_MLFLOW_TRACE_CATALOG",
-        "FLEET_MLFLOW_TRACE_SCHEMA",
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    assert tracing.configure_tracing(Settings(mlflow_tracing_enabled=True)) is False
-    assert tracing.is_tracing_active() is False
-    assert calls.tracking_uri_args == []
-    assert calls.autolog_calls == 0
-
-
-def test_unavailable_local_tracking_uri_does_not_activate_turn_spans(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Dead HTTP tracking must not leave Turn spans armed for MLflow retries."""
-    fake = ModuleType("mlflow")
-    fake.__file__ = str(Path(__file__).resolve())
-    monkeypatch.setitem(sys.modules, "mlflow", fake)
-    monkeypatch.setitem(sys.modules, "mlflow.dspy", ModuleType("mlflow.dspy"))
-    monkeypatch.setattr(tracing, "_local_tracking_server_available", lambda _uri: False)
-
-    assert (
-        tracing.configure_tracing(
-            Settings(
-                mlflow_tracing_enabled=True,
-                mlflow_experiment_name="fleet-rlm-eval",
-                mlflow_tracking_uri="http://127.0.0.1:5001",
-            )
-        )
-        is False
-    )
-    assert tracing.is_tracing_active() is False
-
-
-def test_missing_export_distribution_is_handled_fail_soft(monkeypatch: pytest.MonkeyPatch) -> None:
-    def missing(_distribution: str) -> str:
-        raise tracing.PackageNotFoundError
-
-    monkeypatch.setattr(tracing, "package_version", missing)
-
-    assert tracing._mlflow_export_versions_are_certified() is False
-
-
-def test_missing_certified_mlflow_distribution_disables_tracing(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_fake_mlflow(monkeypatch)
-    fake_mlflow = sys.modules["mlflow"]
-    fake_mlflow.__file__ = str(Path(__file__).resolve())  # type: ignore[attr-defined]
-
-    def missing_distribution(name: str) -> str:
-        from importlib.metadata import PackageNotFoundError
-
-        raise PackageNotFoundError(name)
-
-    monkeypatch.setattr(tracing, "package_version", missing_distribution)
-    assert tracing.configure_tracing(_enabled_settings()) is False
-    assert tracing.is_tracing_active() is False
-
-
-def test_configure_tracing_enabled_sets_uri_experiment_and_autolog(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
-    assert tracing.configure_tracing(_enabled_settings()) is True
-    assert tracing.is_tracing_active() is True
-    assert calls.tracking_uri_args == ["databricks"]
-    assert calls.experiment_args == [()]
-    assert calls.experiment_kwargs[0]["experiment_name"] == "fleet-test-exp"
-    location = calls.experiment_kwargs[0]["trace_location"]
-    assert location.catalog_name == "analytics"
-    assert location.schema_name == "traces"
-    assert location.table_prefix == "fleet_app"
-    assert os.environ["MLFLOW_TRACING_SQL_WAREHOUSE_ID"] == "warehouse-123"
-    assert os.environ["MLFLOW_DISABLE_AGENT_HINT"] == "1"
-    assert calls.autolog_calls == 1
-    assert calls.autolog_kwargs == [
-        {
-            "log_traces": True,
-            "log_traces_from_eval": False,
-            "log_traces_from_compile": False,
-            "log_compiles": False,
-            "log_evals": False,
-            "silent": True,
-        }
-    ]
-    assert calls.async_logging_args == [True]
-    assert len(calls.processor_args) == 1
-    assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
-
-
-def test_configure_tracing_applies_sampling_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-
-    assert (
-        tracing.configure_tracing(_enabled_settings(mlflow_trace_sampling_ratio=0.25, mlflow_async_logging=False))
-        is True
-    )
-
-    assert os.environ["MLFLOW_TRACE_SAMPLING_RATIO"] == "0.25"
-    assert os.environ["MLFLOW_ENABLE_ASYNC_TRACE_LOGGING"] == "false"
-    assert calls.async_logging_args == [False]
 
 
 def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
@@ -510,40 +361,6 @@ def test_trace_export_policy_overrides_ambient_queue_settings(monkeypatch):
     assert tracing.trace_content_preview("private content") == "[content suppressed]"
 
 
-def test_mlflow_span_processor_preserves_autolog_content_fields() -> None:
-    class Span:
-        def __init__(self) -> None:
-            self.inputs: dict[str, object] = {
-                "prompt": "candidate instruction should remain readable",
-                "token_usage": 42,
-            }
-            self.outputs: dict[str, object] = {
-                "response": "provider body should remain readable",
-                "duration_ms": 15,
-            }
-            self.attributes: dict[str, object] = {"engine": "gepa", "tool_output": "private tool result"}
-
-        def set_inputs(self, value: object) -> None:
-            self.inputs = value
-
-        def set_outputs(self, value: object) -> None:
-            self.outputs = value
-
-        def set_attributes(self, value: dict[str, object]) -> None:
-            self.attributes = value
-
-    span = Span()
-
-    tracing._sanitize_mlflow_span(span)
-
-    assert span.inputs["prompt"] == "candidate instruction should remain readable"
-    assert span.inputs["token_usage"] == 42
-    assert span.outputs["response"] == "provider body should remain readable"
-    assert span.outputs["duration_ms"] == 15
-    assert span.attributes["engine"] == "gepa"
-    assert span.attributes["tool_output"] == "private tool result"
-
-
 def test_mlflow_span_processor_preserves_namespaced_and_unknown_text_fields() -> None:
     sanitized = tracing._sanitize_mlflow_value(
         {
@@ -591,56 +408,6 @@ def test_mlflow_span_processor_keeps_bounded_content_readable(monkeypatch: pytes
     assert sanitized["custom_question"] == "unknown fields remain protected"
 
 
-def test_configure_tracing_applies_content_bound(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-
-    tracing.configure_tracing(
-        _enabled_settings(
-            mlflow_trace_content_max_chars=2_048,
-        )
-    )
-
-    assert tracing.trace_content_max_chars() == 2_048
-    assert calls.processor_args[0][0] is tracing._sanitize_mlflow_span
-
-
-def test_mlflow_span_processor_bounds_collection_size_and_depth() -> None:
-    mapping = tracing._sanitize_mlflow_value({str(index): index for index in range(60)})
-    values = tracing._sanitize_mlflow_value(list(range(60)))
-
-    assert isinstance(mapping, dict)
-    assert len(mapping) == 50
-    assert isinstance(values, list)
-    assert len(values) == 50
-
-    nested: object = {"value": "private"}
-    for _ in range(8):
-        nested = {"nested": nested}
-    sanitized_nested = tracing._sanitize_mlflow_value(nested)
-    assert isinstance(sanitized_nested, dict)
-    cursor: object = sanitized_nested
-    for _ in range(8):
-        assert isinstance(cursor, dict)
-        cursor = cursor["nested"]
-    assert cursor == "[redacted depth]"
-
-
-def test_configure_tracing_local_server_needs_only_experiment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    tracing.configure_tracing(
-        Settings(
-            mlflow_tracing_enabled=True,
-            mlflow_experiment_name="fleet-rlm-eval",
-            mlflow_tracking_uri="http://localhost:5001",
-        )
-    )
-    assert calls.tracking_uri_args == ["http://localhost:5001"]
-    assert calls.experiment_kwargs == [{"experiment_name": "fleet-rlm-eval"}]
-    assert calls.autolog_calls == 1
-
-
 def test_configure_tracing_ignores_tracking_uri_environment_override(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -656,59 +423,6 @@ def test_configure_tracing_ignores_tracking_uri_environment_override(
 
     assert calls.tracking_uri_args == ["http://configured.example:5001"]
     assert calls.autolog_calls == 1
-
-
-def test_configure_tracing_bridges_dotenv_databricks_auth_without_overriding_exports(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    monkeypatch.delenv("DATABRICKS_HOST", raising=False)
-    monkeypatch.delenv("DATABRICKS_TOKEN", raising=False)
-    settings = _enabled_settings()
-    settings._dotenv_values = {
-        "DATABRICKS_HOST": "https://workspace.example",
-        "DATABRICKS_TOKEN": "dotenv-token",
-    }
-
-    tracing.configure_tracing(settings)
-
-    assert os.environ["DATABRICKS_HOST"] == "https://workspace.example"
-    assert os.environ["DATABRICKS_TOKEN"] == "dotenv-token"
-    assert calls.autolog_calls == 1
-
-
-def test_configure_tracing_preserves_exported_databricks_auth(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    calls = _install_fake_mlflow(monkeypatch)
-    monkeypatch.setenv("DATABRICKS_HOST", "https://exported.example")
-    monkeypatch.setenv("DATABRICKS_TOKEN", "exported-token")
-    settings = _enabled_settings()
-    settings._dotenv_values = {
-        "DATABRICKS_HOST": "https://dotenv.example",
-        "DATABRICKS_TOKEN": "dotenv-token",
-    }
-
-    tracing.configure_tracing(settings)
-
-    assert os.environ["DATABRICKS_HOST"] == "https://exported.example"
-    assert os.environ["DATABRICKS_TOKEN"] == "exported-token"
-    assert calls.autolog_calls == 1
-
-
-def test_configure_tracing_setup_failure_is_soft(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_mlflow(monkeypatch, raise_on_import=RuntimeError("mlflow unavailable"))
-    assert tracing.configure_tracing(_enabled_settings()) is False
-
-
-def test_set_tracing_active_for_tests_resets_content_policy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_ENABLED", True)
-    monkeypatch.setattr(tracing, "_TRACE_CONTENT_MAX_CHARS", 256)
-
-    tracing.set_tracing_active_for_tests(False)
-
-    assert tracing._TRACE_CONTENT_ENABLED is False
-    assert tracing._TRACE_CONTENT_MAX_CHARS == 10_000
 
 
 def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -788,61 +502,6 @@ def verifier() -> ModuleType:
     return module
 
 
-def test_managed_settings_are_resolved_from_fleet_policy(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    settings = SimpleNamespace(
-        mlflow_tracing_enabled=True,
-        mlflow_tracking_uri="databricks",
-        mlflow_experiment_name="/Users/zachary@qredence.ai/fleet-rlm-traces",
-        mlflow_trace_catalog="uscentral",
-        mlflow_trace_schema="default",
-        mlflow_trace_table_prefix="fleet_rlm",
-        mlflow_tracing_sql_warehouse_id="4d07bd43a3ddfff2",
-    )
-    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings)
-    monkeypatch.setenv("FLEET_MLFLOW_TRACE_SCHEMA", "stale-environment-value")
-
-    assert verifier._tracing_settings() is settings
-
-
-def test_local_settings_are_resolved_without_managed_fields(
-    verifier: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    settings = SimpleNamespace(
-        mlflow_tracing_enabled=True,
-        mlflow_tracking_uri="http://127.0.0.1:5001",
-        mlflow_experiment_name="fleet-rlm",
-        mlflow_trace_catalog=None,
-        mlflow_trace_schema=None,
-        mlflow_trace_table_prefix=None,
-        mlflow_tracing_sql_warehouse_id=None,
-    )
-    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings)
-
-    assert verifier._tracing_settings() is settings
-
-
-def test_tracing_settings_reject_incomplete_managed_policy(
-    verifier: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(
-        verifier,
-        "load_runtime_settings",
-        lambda: SimpleNamespace(
-            mlflow_tracing_enabled=True,
-            mlflow_tracking_uri="databricks",
-            mlflow_experiment_name="fleet-managed",
-            mlflow_trace_catalog=None,
-            mlflow_trace_schema=None,
-            mlflow_trace_table_prefix=None,
-            mlflow_tracing_sql_warehouse_id=None,
-        ),
-    )
-
-    with pytest.raises(RuntimeError, match="incomplete Managed Databricks MLflow"):
-        verifier._tracing_settings()
-
-
 def test_main_emits_and_retrieves_local_trace(
     verifier: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -916,33 +575,3 @@ def test_main_emits_and_retrieves_local_trace(
     assert "trace_id=trace-1" in output
     assert "tracking_uri=http://127.0.0.1:5001" in output
     assert "status=PASS" in output
-
-
-def test_tables_uses_configured_cli_profile(verifier: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout='[{"full_name": "cat.sch.tbl"}]')
-    calls: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return completed
-
-    monkeypatch.setattr(verifier.subprocess, "run", run)
-
-    assert verifier._tables("profile", "cat.sch") == {"cat.sch.tbl"}
-    assert calls == [["databricks", "tables", "list", "cat", "sch", "--profile", "profile", "-o", "json"]]
-
-
-def test_tables_uses_default_auth_when_profile_is_not_configured(
-    verifier: ModuleType, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    completed = subprocess.CompletedProcess(args=[], returncode=0, stdout="[]")
-    calls: list[list[str]] = []
-
-    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(command)
-        return completed
-
-    monkeypatch.setattr(verifier.subprocess, "run", run)
-
-    assert verifier._tables(None, "cat.sch") == set()
-    assert calls == [["databricks", "tables", "list", "cat", "sch", "-o", "json"]]

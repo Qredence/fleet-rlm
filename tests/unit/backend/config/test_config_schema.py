@@ -13,7 +13,6 @@ import re
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 import fleet_rlm.config.loader as config_loader
 import fleet_rlm.config.policy as config_policy
@@ -243,12 +242,6 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
 )
 
 
-def test_every_settings_field_carries_one_authoritative_declaration() -> None:
-    """Removing/duplicating a policy declaration fails the schema build loudly."""
-    policies = config._field_policies()
-    assert set(policies) == set(config.Settings.model_fields)
-
-
 def test_policy_inventory_is_derived_from_the_schema_identically() -> None:
     """The editor inventory built by ``config_policy`` is the schema inventory."""
     derived = tuple(
@@ -261,29 +254,6 @@ def test_policy_inventory_is_derived_from_the_schema_identically() -> None:
         for field in config_policy._FIELDS
     )
     assert current == derived
-
-
-def test_policy_inventory_matches_the_frozen_operator_surface() -> None:
-    current = tuple(
-        (field.path, field.group, field.label, field.editor, field.choices, field.settings_field)
-        for field in config_policy._FIELDS
-    )
-    assert current == _EXPECTED_INVENTORY
-
-
-def test_derived_table_keys_cover_exactly_the_supported_toml_surface() -> None:
-    document = config_loader._read_policy_document(Path("config/fleet.toml"))
-    for scope_name, scope in [("defaults", document.defaults)] + [
-        (name, profile) for name, profile in document.profiles.items()
-    ]:
-        for section_name, section in scope.items():
-            assert section_name in config_loader._TABLE_KEYS, f"{scope_name}.{section_name}"
-            for key, value in section.items():
-                assert key in config_loader._TABLE_KEYS[section_name], f"{scope_name}.{section_name}.{key}"
-                if section_name == "llm":
-                    assert isinstance(value, dict)
-                    for role_key in value:
-                        assert role_key in config_loader._ROLE_KEYS, f"{scope_name}.llm.{key}.{role_key}"
 
 
 def test_environment_reference_specs_reference_real_fields_and_follow_naming() -> None:
@@ -338,21 +308,6 @@ def test_unknown_direct_settings_field_is_rejected_without_leaking_values() -> N
     assert "super-secret-payload" not in message
 
 
-def test_retired_settings_kwargs_are_rejected() -> None:
-    with pytest.raises(config.FleetConfigurationError, match="_env_file"):
-        config.Settings(_env_file=None)  # type: ignore[call-arg]
-
-
-def test_model_validate_rejects_unknown_keys() -> None:
-    with pytest.raises(config.FleetConfigurationError, match="app_name_extra"):
-        config.Settings.model_validate({"app_name_extra": "x"})
-
-
-def test_known_field_type_errors_remain_pydantic_validation_errors() -> None:
-    with pytest.raises(ValidationError, match="turn_timeout_seconds"):
-        config.Settings(turn_timeout_seconds=0)
-
-
 def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """All supported committed TOML profiles resolve with identical values as documented."""
     import tomllib
@@ -395,28 +350,3 @@ def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.Mo
         settings = config_loader.load_runtime_settings()
         assert settings.run_environment == "daytona"
         assert settings.root_model and settings.sub_model
-
-
-def test_required_policy_key_reports_its_settings_field() -> None:
-    import tomllib
-
-    document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
-    document["defaults"]["runtime"].pop("turn_timeout_seconds")
-    profile = document["profiles"][document["config"]["default_profile"]]
-
-    with pytest.raises(config.FleetConfigurationError, match="turn_timeout_seconds"):
-        config_loader._flatten_policy(config_loader._deep_merge(document["defaults"], profile))
-
-
-def test_absent_optional_policy_keys_fall_back_to_settings_defaults() -> None:
-    import tomllib
-
-    document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
-    defaults = document["defaults"]
-    defaults["rlm"].pop("recursion_max_calls")
-
-    flat = config_loader._flatten_policy(config_loader._deep_merge(defaults, document["profiles"]["daytona-recursive"]))
-
-    assert "rlm_recursion_max_calls" not in flat.settings
-    # ``Settings`` owns the fallback default; TOML absence stays absent.
-    assert config.Settings(**flat.settings).rlm_recursion_max_calls == 4

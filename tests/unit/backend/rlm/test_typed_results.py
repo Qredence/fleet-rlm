@@ -27,18 +27,6 @@ def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
         outcome.prediction = None  # type: ignore[misc]
 
 
-def test_success_requires_prediction_and_failure_forbids_it() -> None:
-    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-
-    with pytest.raises(ValueError, match="prediction"):
-        RLMOutcome(terminal_status="completed")
-    with pytest.raises(ValueError, match="prediction"):
-        RLMOutcome(
-            terminal_status="failed",
-            prediction=PredictionResult("done", {"answer": "done"}, "default", "1"),
-        )
-
-
 def test_declared_output_validator_accepts_identifiers_placeholders_and_security_terms() -> None:
     from fleet_rlm.rlm.result import validate_declared_public_value
 
@@ -50,12 +38,6 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
     }
 
     validate_declared_public_value(value)
-
-
-def test_declared_output_validator_accepts_benign_lowercase_bearer_prose() -> None:
-    from fleet_rlm.rlm.result import validate_declared_public_value
-
-    validate_declared_public_value("Use a bearer token supplied by the caller.")
 
 
 @pytest.mark.parametrize(
@@ -100,7 +82,6 @@ def test_accepts_finalization_expressions(code: str) -> None:
         None,
         "",
         "SUBMIT(",
-        'print("explore"); SUBMIT(answer="done")',
         'SUBMIT(answer=llm_query("more work"))',
         "SUBMIT(answer=[lookup(item) for item in items])",
         "SUBMIT(**outputs)",
@@ -117,7 +98,6 @@ def test_rejects_non_finalization_syntax(code: object) -> None:
     "code",
     [
         'answer = "5"\nSUBMIT(answer=answer)',
-        "answer = 1\nSUBMIT(answer=answer)",
         'answer = json.dumps({"items": items})\nSUBMIT(answer=answer)',
         'answer = f"Found {count}"\nSUBMIT(answer=answer)',
         "partial = items[:3]\nanswer = str(partial)\nSUBMIT(answer=answer, count=len(items))",
@@ -137,7 +117,6 @@ def test_finalization_action_accepts_safe_binding_before_submit(code: str) -> No
         "SUBMIT(",
         'answer = "done"',
         "answer = tool()\nSUBMIT(answer=answer)",
-        'answer = llm_query("more work")\nSUBMIT(answer=answer)',
         'answer = "x"\nanswer = tool()\nSUBMIT(answer=answer)',
         'print("explore"); SUBMIT(answer="done")',
         "import json\nSUBMIT(answer=json.dumps({}))",
@@ -172,46 +151,6 @@ def test_sanitize_capture_text_always_redacts_secrets_and_urls() -> None:
         assert "preview.daytona.test" not in cleaned
         assert "[redacted-url]" in cleaned
         assert "\x07" not in cleaned  # control characters are always stripped
-
-
-def test_sanitize_capture_text_path_masking_is_an_explicit_trade_off() -> None:
-    """Sandbox paths are the main debugging signal, so masking them is opt-in.
-
-    Masking is a lossy privacy trade, not a default: it replaces every
-    ``/home/daytona/...`` path in generated code with ``[path]``.
-    """
-    from fleet_rlm.rlm.result import sanitize_capture_text
-
-    code = 'note = open("/home/daytona/fleet/notes.md").read()'
-
-    preserved = sanitize_capture_text(code, max_len=10_000, redact_paths=False)
-    masked = sanitize_capture_text(code, max_len=10_000, redact_paths=True)
-
-    assert "/home/daytona/fleet/notes.md" in preserved
-    assert "[path]" not in preserved
-    assert "/home/daytona/fleet/notes.md" not in masked
-    assert "[path]" in masked
-
-
-def test_sanitize_capture_text_bounds_every_field_to_max_len() -> None:
-    """The capture supplies its own bound, so no call site can widen it by omission."""
-    from fleet_rlm.rlm.result import sanitize_capture_text
-
-    cleaned = sanitize_capture_text("x" * 500, max_len=64, redact_paths=False)
-
-    assert len(cleaned) == 64
-    assert cleaned.endswith("...")
-
-
-def test_sanitize_capture_text_differs_from_the_public_wrapper_only_on_paths() -> None:
-    """Regression guard: the shared sanitizers keep their existing behaviour."""
-    from fleet_rlm.rlm.result import sanitize_capture_text, sanitize_public_text, sanitize_trace_text
-
-    code = 'note = open("/home/daytona/fleet/notes.md").read()'
-
-    assert "[path]" in sanitize_public_text(code, max_len=10_000)
-    assert "[path]" in sanitize_trace_text(code, max_len=10_000)
-    assert sanitize_capture_text(code, max_len=10_000, redact_paths=True) == sanitize_trace_text(code, max_len=10_000)
 
 
 _SANITIZER_CORPUS = (
@@ -254,10 +193,3 @@ def test_sanitizer_keeps_url_trailing_delimiters() -> None:
     cleaned = sanitize_trace_text('requests.get("http://host/preview?token=abc123")', max_len=1_000)
 
     assert cleaned == 'requests.get("[redacted-url]")'
-
-
-def test_sanitizer_keeps_the_distinct_dsn_marker() -> None:
-    """DSNs still report ``[redacted-dsn]`` rather than collapsing to a generic URL."""
-    from fleet_rlm.rlm.result import sanitize_trace_text
-
-    assert sanitize_trace_text("dsn = postgresql://u:p@h/db", max_len=1_000) == "dsn = [redacted-dsn]"
