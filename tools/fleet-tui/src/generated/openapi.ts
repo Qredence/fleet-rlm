@@ -1216,8 +1216,6 @@ export interface components {
                 trust?: string | null;
                 /** Affordances */
                 affordances?: string[] | null;
-                /** Skillid */
-                skillId?: string | null;
             };
             /** Transient */
             transient?: boolean | null;
@@ -1381,18 +1379,10 @@ export interface components {
                 name?: string | null;
                 /** Media Type */
                 media_type?: string | null;
-                /** Mediatype */
-                mediaType?: string | null;
                 /** Byte Size */
                 byte_size?: number | null;
-                /** Bytesize */
-                byteSize?: number | null;
                 /** Checksum Sha256 */
                 checksum_sha256?: string | null;
-                /** Checksumsha256 */
-                checksumSha256?: string | null;
-                /** Artifactid */
-                artifactId?: string | null;
             };
             /** Transient */
             transient?: boolean | null;
@@ -1429,10 +1419,6 @@ export interface components {
                 schema_version: string;
                 /** Value */
                 value: unknown;
-                /** Schemaid */
-                schemaId?: string | null;
-                /** Schemaversion */
-                schemaVersion?: string | null;
             };
             /** Transient */
             transient?: boolean | null;

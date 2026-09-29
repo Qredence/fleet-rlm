@@ -78,7 +78,6 @@ class SkillData(FleetUIDataModel):
     phase: Literal["activated", "loaded"] | None = None
     trust: str | None = None
     affordances: list[str] | None = None
-    skill_id_compat: str | None = Field(default=None, alias="skillId")
 
 
 class RLMCodeData(FleetUIDataModel):
@@ -118,12 +117,8 @@ class ArtifactData(FleetUIDataModel):
     title: str | None = None
     name: str | None = None
     media_type: str | None = None
-    media_type_compat: str | None = Field(default=None, alias="mediaType")
     byte_size: int | None = None
-    byte_size_compat: int | None = Field(default=None, alias="byteSize")
     checksum_sha256: str | None = None
-    checksum_sha256_compat: str | None = Field(default=None, alias="checksumSha256")
-    artifact_id_compat: str | None = Field(default=None, alias="artifactId")
 
 
 class UsageData(FleetUIDataModel):
@@ -134,8 +129,6 @@ class StructuredResultData(FleetUIDataModel):
     schema_id: str
     schema_version: str
     value: Any
-    schema_id_compat: str | None = Field(default=None, alias="schemaId")
-    schema_version_compat: str | None = Field(default=None, alias="schemaVersion")
 
 
 class StartChunk(FleetUIChunkModel):

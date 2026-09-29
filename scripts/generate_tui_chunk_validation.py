@@ -6,7 +6,7 @@ and adapted by ``src/fleet_rlm/api/sse.py`` and
 ``src/fleet_rlm/api/openapi.py``. This script derives the
 third surface — the TUI's strictest runtime validator — from the OpenAPI
 ``FleetUIMessageChunk`` variants, so the strict consumer can no longer drift
-silently from the documented schema. The dual snake_case/camelCase id
+silently from the documented schema. The remaining snake_case/camelCase id
 tolerances stay explicit as `_FIELD_ALTERNATIVES` below (they are a
 deliberate wire compatibility surface, not schema facts).
 
@@ -28,13 +28,15 @@ OPENAPI = ROOT / "openapi.yaml"
 TARGET = ROOT / "tools" / "fleet-tui" / "src" / "generated" / "fleet-ui-chunk-validation.ts"
 
 # Dual snake_case/camelCase id tolerances (hand-maintained contract; at least
-# one form per group must be present for the payload to validate).
+# one form per group must be present for the payload to validate). Only the
+# attachment group still has a live camelCase form: the serializer emits it
+# (``sse.py``), so the strict validator must keep tolerating it.
 _FIELD_ALTERNATIVES: dict[str, tuple[tuple[str, ...], ...]] = {
     "data-status": (("status",), ("detail",), ("message",)),
-    "data-skill": (("skill_id",), ("skillId",)),
+    "data-skill": (("skill_id",),),
     "data-attachment": (("attachment_id",), ("attachmentId",)),
-    "data-artifact": (("artifact_id",), ("artifactId",)),
-    "data-structured-result": (("schema_id", "schema_version"), ("schemaId", "schemaVersion")),
+    "data-artifact": (("artifact_id",),),
+    "data-structured-result": (("schema_id", "schema_version"),),
 }
 
 
@@ -103,7 +105,7 @@ def _render(tables: dict) -> str:
     out: list[str] = [
         "/**",
         " * REGENERATED from openapi.yaml by scripts/generate_tui_chunk_validation.py.",
-        " * Do not hand-edit — run `make api-sync`. The dataAlternatives dual",
+        " * Do not hand-edit — run `make api-sync`. The dataAlternatives",
         " * snake_case/camelCase id tolerances are the generator's declared input.",
         " */",
         "",
