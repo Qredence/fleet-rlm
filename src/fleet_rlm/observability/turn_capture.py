@@ -60,17 +60,21 @@ _SECONDS_PER_DAY = 86_400
 class EventCapture(Protocol):
     """Synchronous, fail-soft sink for one Turn's Runtime Events."""
 
-    def record(self, event: RuntimeEvent) -> None: ...
+    def record(self, event: RuntimeEvent) -> None:
+        raise NotImplementedError
 
-    def mark_stop_reason(self, reason: str) -> None: ...
+    def mark_stop_reason(self, reason: str) -> None:
+        raise NotImplementedError
 
-    def finish(self, *, trace_id: str | None = None) -> None: ...
+    def finish(self, *, trace_id: str | None = None) -> None:
+        raise NotImplementedError
 
 
 class EventCaptureSource(Protocol):
     """A capture source that opens one :class:`EventCapture` per Run."""
 
-    def open(self, session_id: UUID | str, run_id: UUID | str) -> EventCapture: ...
+    def open(self, session_id: UUID | str, run_id: UUID | str) -> EventCapture:
+        raise NotImplementedError
 
 
 class NullEventCapture:

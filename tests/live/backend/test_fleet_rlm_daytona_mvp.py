@@ -1046,7 +1046,6 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     app = create_app(settings=settings)
     sandbox_ids: set[str] = set()
     resources: Any | None = None
-    phase = "composition"
     turn_chunks: dict[str, list[dict[str, Any]]] = {}
     receipt_written = False
     scenario_passed = False
