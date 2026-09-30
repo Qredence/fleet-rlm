@@ -87,6 +87,14 @@ model-authored code does not run in the Fleet process. A healthy root Sandbox
 may be reused across clean sequential Turns, but each invocation gets fresh
 bindings, tools, budget, and DSPy history.
 
+The adapter calls one typed backend protocol: `run(code, variables,
+on_stdout=...)` returns `BackendExecutionResult`. `_SandboxProcessBackend`
+owns its live `DaytonaHttpToolBroker`, including the port configuration,
+startup, tool bindings, and strict shutdown. The adapter's `broker` property
+only exposes that backend-owned instance for inspection. Configure custom
+ports through `sandbox_backend(..., broker_port=...)`; zero is rejected
+because live execution requires the broker's persistent Python namespace.
+
 The active semantic-child path requests a Volume-less Sandbox. Fleet resolves
 selected child inputs under existing Session authority, stages bounded copies
 in private scratch, validates and harvests declared result files, and then

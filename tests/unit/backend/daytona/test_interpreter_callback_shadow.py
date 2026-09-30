@@ -11,7 +11,12 @@ from dspy.primitives.code_interpreter import CodeInterpreterError
 from dspy.utils.callback import BaseCallback
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import (
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+    OutputCallback,
+)
 from fleet_rlm.rlm.events import (
     ToolEventView,
     observe_tool,
@@ -47,8 +52,14 @@ def test_shadow_recorder_matches_manual_interpreter_lifecycle() -> None:
 
 def test_shadow_recorder_tracks_recoverable_and_terminal_exceptions() -> None:
     class BrokenBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             raise CodeInterpreterError("terminal")
 
         def close(self) -> None:
@@ -193,8 +204,14 @@ def test_shadow_lifecycle_parity_covers_cancellation_and_timeout(
     expected_category: str,
 ) -> None:
     class FailingBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             raise failure
 
         def close(self) -> None:

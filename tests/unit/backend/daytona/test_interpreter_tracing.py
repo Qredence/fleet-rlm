@@ -12,7 +12,12 @@ from typing import Any
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import (
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+    OutputCallback,
+)
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, TurnBudgetExhausted
 
 
@@ -99,8 +104,14 @@ def test_sandbox_execute_span_classifies_broker_failure_and_keeps_it_terminal(
     calls = _install_fake_mlflow(monkeypatch)
 
     class FailingBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             raise DaytonaAdapterError("safe failure", cause_type=cause_type)
 
         def close(self) -> None:

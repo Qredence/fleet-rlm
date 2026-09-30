@@ -95,23 +95,13 @@ def test_repair_category_from_multiline_traceback():
     assert _repair_category(name_tb) == "NameError"
 
 
-def test_direct_interpreter_rejects_brokerless_with_tools():
-    """Verify brokerless mode refuses to dispatch host tools.
-
-    `broker_port=0` selects brokerless mode, which has no host-tool transport. Running
-    anyway would let generated code NameError on the first tool call, so the
-    interpreter must fail fast with a typed cause instead.
-    """
+def test_direct_backend_rejects_brokerless_configuration():
+    """Live execution requires a broker even before host tools are bound."""
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+    from fleet_rlm.daytona.interpreter import sandbox_backend
 
-    backend = sandbox_backend(MagicMock())
-    interpreter = DaytonaCodeInterpreter(
-        backend=backend,
-        tools={"some_tool": lambda x: x},
-        broker_port=0,
-    )
-    interpreter.start()
-    with pytest.raises(DaytonaAdapterError) as exc_info:
-        interpreter.execute("some_tool(1)")
-    assert exc_info.value.cause_type == "BrokerlessToolDispatchError"
+    sandbox = MagicMock()
+    with pytest.raises(DaytonaAdapterError, match="brokerless execution is unsupported") as exc_info:
+        sandbox_backend(sandbox, broker_port=0)
+    assert exc_info.value.cause_type == "InterpreterConfigurationError"
+    assert not sandbox.mock_calls

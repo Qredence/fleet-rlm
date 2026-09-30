@@ -13,6 +13,7 @@ involved.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import os
@@ -185,3 +186,93 @@ async def test_live_delete_wait_true_reference_blocks_until_destroyed() -> None:
         with contextlib.suppress(Exception):
             await platform.delete(sandbox_id)
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_live_interpreter_invocations_settle_before_sandbox_deletion() -> None:
+    """Prove typed broker execution and fresh invocations on one real Sandbox."""
+    from dspy import FinalOutput
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop, sandbox_backend
+    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+
+    client, platform = _live_client_and_platform()
+    sandbox = None
+    interpreters: list[DaytonaCodeInterpreter] = []
+    calls: list[str] = []
+
+    def host_tool(value: str) -> str:
+        calls.append(value)
+        return value
+
+    async def async_host_tool() -> str:
+        assert asyncio.get_running_loop() is loop
+        calls.append("async")
+        return "async"
+
+    loop = asyncio.get_running_loop()
+    try:
+        sandbox = await platform.create(
+            with_volume=False, ephemeral=True, labels={"purpose": "interpreter-boundary-lifecycle"}
+        )
+        template = DaytonaCodeInterpreter(
+            backend=sandbox_backend(sandbox, loop=loop, timeout_s=20),
+            tools={"host_tool": host_tool, "async_host_tool": async_host_tool},
+            output_fields=[{"name": "answer", "type": "str", "required": True}],
+        )
+        interpreters.append(template)
+        first = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+        interpreters.append(first)
+        assert await asyncio.to_thread(first.execute, "cached = host_tool(value='first'); print(cached)") == "first\n"
+        assert first.broker is not None
+        assert template.broker is None
+        result = await asyncio.to_thread(first.execute, "SUBMIT(answer=cached + '-' + async_host_tool())")
+        assert isinstance(result, FinalOutput)
+        assert result.output == {"answer": "first-async"}
+        assert calls == ["first", "async"]
+        await asyncio.to_thread(first.shutdown, strict_broker_cleanup=True)
+        assert first.broker is None
+        assert first._backend is None
+        assert await platform.get(sandbox.id) is not None
+
+        second = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+        interpreters.append(second)
+        fresh = await asyncio.to_thread(
+            second.execute, "SUBMIT(answer='fresh' if 'cached' not in globals() else 'leaked')"
+        )
+        assert isinstance(fresh, FinalOutput)
+        assert fresh.output == {"answer": "fresh"}
+    finally:
+        cleanup_errors: list[Exception] = []
+        try:
+            for interpreter in reversed(interpreters):
+                try:
+                    await asyncio.to_thread(interpreter.shutdown, strict_broker_cleanup=True)
+                except Exception as exc:
+                    cleanup_errors.append(exc)
+        finally:
+            try:
+                if sandbox is not None:
+                    await platform.delete(sandbox.id)
+                    outcome = await confirm_absence(
+                        probe=platform.get, sandbox_id=sandbox.id, timeout_s=180.0, poll_interval_s=2.0
+                    )
+                    assert isinstance(outcome, AbsenceConfirmation), outcome
+            finally:
+                await client.close()
+        if cleanup_errors:
+            raise ExceptionGroup("interpreter cleanup failed", cleanup_errors)
+    _write_receipt(
+        "interpreter-boundary",
+        {
+            "schema": _RECEIPT_SCHEMA,
+            "case": "interpreter-invocations-before-deletion",
+            "sandbox_id": sandbox.id,
+            "host_tool_calls": calls,
+            "same_invocation_state": True,
+            "fresh_invocation_state": True,
+            "typed_submit": True,
+            "strict_interpreter_cleanup": True,
+            "sandbox_absent": outcome.absent,
+        },
+    )

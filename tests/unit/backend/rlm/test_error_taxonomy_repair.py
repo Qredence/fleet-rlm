@@ -10,17 +10,23 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
-from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter
+from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter, OutputCallback
 from fleet_rlm.rlm.result import RunNoProgressError
 
 
 class _ScriptBackend:
-    def __init__(self, *results: BackendExecutionResult | str) -> None:
+    def __init__(self, *results: BackendExecutionResult) -> None:
         self.results = list(results)
         self.calls = 0
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult | str:
-        del code, variables
+    def run(
+        self,
+        code: str,
+        variables: dict[str, object] | None = None,
+        *,
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult:
+        del code, variables, on_stdout
         self.calls += 1
         result = self.results.pop(0)
         return result
@@ -65,8 +71,14 @@ def test_terminal_interpreter_error_stops_native_rlm_without_repair_or_extract()
     class TerminalBackend:
         calls = 0
 
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             self.calls += 1
             raise CodeInterpreterError("protocol is corrupt")
 
@@ -108,8 +120,14 @@ def test_direct_native_terminal_error_is_sanitized_and_stops() -> None:
     from dspy.primitives.code_interpreter import CodeInterpreterError
 
     class NativeBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             raise CodeInterpreterError(
                 "protocol https://provider.invalid/private /root/secret.py \x1b[31mcorrupt\x1b[0m"
             )
@@ -126,6 +144,18 @@ def test_direct_native_terminal_error_is_sanitized_and_stops() -> None:
     assert "provider.invalid" not in str(caught.value)
     assert "/root/secret.py" not in str(caught.value)
     assert "\x1b" not in str(caught.value)
+
+
+@pytest.mark.parametrize("category", ["CodeInterpreterError", "InterpreterLifecycleError"])
+def test_typed_backend_terminal_error_is_not_repairable(category: str) -> None:
+    backend = _ScriptBackend(BackendExecutionResult(error="protocol is corrupt", error_category=category))
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    with pytest.raises(dspy.CodeInterpreterError, match="protocol is corrupt") as caught:
+        interpreter.execute("broken")
+    assert not isinstance(caught.value, dspy.CodeExecutionError)
+    assert caught.value.category == category
+    assert backend.calls == 1
+    interpreter.shutdown()
 
 
 def test_no_progress_has_one_native_repair_then_terminal_bound() -> None:

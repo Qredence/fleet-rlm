@@ -13,7 +13,14 @@ import pytest
 
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop, sandbox_backend
+from fleet_rlm.daytona.interpreter import (
+    DEFAULT_BROKER_PORT,
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    _SyncBridgeLoop,
+    sandbox_backend,
+)
+from fleet_rlm.rlm.events import RLMOutput
 
 
 class _LocalBroker:
@@ -23,6 +30,7 @@ class _LocalBroker:
 
     def __init__(self, _sandbox: Any, *, port: int, **_kwargs: Any) -> None:
         assert port > 0
+        self.port = port
         self.namespace: dict[str, Any] = {}
         self.calls: list[str] = []
         self.closed = False
@@ -30,6 +38,7 @@ class _LocalBroker:
 
     def bind_tools(self, tools: dict[str, Any]) -> None:
         self.tools = tools
+        self.namespace.update(tools)
 
     def bind_async_bridge(self, _bridge: Any) -> None:
         pass
@@ -89,11 +98,64 @@ def test_broker_receives_typed_submit_and_rejects_unserializable_binding(
     backend = sandbox_backend(MagicMock())
     backend.ensure_submit([{"name": "answer", "type": "str", "required": True}])
     result = backend.run("SUBMIT(answer=note)", {"note": "café"})
+    assert isinstance(result, BackendExecutionResult)
     assert result.final == {"answer": "café"}
     assert "SUBMIT(answer=note)" in _LocalBroker.instances[0].calls[0]
     with pytest.raises(DaytonaAdapterError, match="binding 'opaque' contains unsupported type"):
         backend.run("pass", {"opaque": object()})
     backend.close()
+
+
+@pytest.mark.parametrize("configured_port", [None, 9017])
+def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
+    monkeypatch: pytest.MonkeyPatch, configured_port: int | None
+) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    options = {} if configured_port is None else {"broker_port": configured_port}
+    backend = sandbox_backend(object(), **options)
+    root = DaytonaCodeInterpreter(backend=backend, tools={"host_tool": lambda: "host result"})
+    expected_port = DEFAULT_BROKER_PORT if configured_port is None else configured_port
+    assert backend.broker_port == expected_port
+    assert root.broker is None
+    root.start()
+    assert not _LocalBroker.instances
+
+    observed: list[object] = []
+    first = root.new_invocation(observer=observed.append)
+    assert first._backend.broker_port == expected_port
+    assert first.broker is None
+    assert first.execute("cached = host_tool(); print(cached)") == "host result\n"
+    broker = _LocalBroker.instances[0]
+    assert first.broker is first._backend.broker is broker
+    assert broker.port == expected_port
+    assert set(broker.tools) == {"host_tool"}
+    assert "".join(event.output for event in observed if isinstance(event, RLMOutput)) == "host result\n"
+    assert first.execute("SUBMIT(answer=cached)").output == {"answer": "host result"}
+    assert len(_LocalBroker.instances) == 1
+    first.shutdown(strict_broker_cleanup=True)
+    assert broker.closed
+    assert first.broker is None
+    assert root.broker is None
+    assert not backend._closed
+
+    second = root.new_invocation()
+    assert second._backend.broker_port == expected_port
+    assert second.execute("print('cached' in globals())") == "False\n"
+    assert second.broker is not broker
+    assert second.broker.port == expected_port
+    second.shutdown()
+    root.shutdown()
+    assert all(instance.closed for instance in _LocalBroker.instances)
+
+
+@pytest.mark.parametrize("port", [-1, 0, 65536])
+def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    with pytest.raises(DaytonaAdapterError, match="broker port must be between"):
+        sandbox_backend(object(), broker_port=port)
+    assert not _LocalBroker.instances
 
 
 def test_broker_submit_size_failure_is_recoverable(monkeypatch: pytest.MonkeyPatch) -> None:

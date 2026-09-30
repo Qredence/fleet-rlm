@@ -428,7 +428,14 @@ class InProcessInterpreterBackend:
 class InterpreterBackend(Protocol):
     """Protocol satisfied by interpreter execution backends."""
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> str | BackendExecutionResult: ...
+    def run(
+        self,
+        code: str,
+        variables: dict[str, object] | None = None,
+        *,
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult: ...
+
     def close(self) -> None: ...
 
 
@@ -475,13 +482,14 @@ def is_host_setup_action(code: str) -> bool:
 
 
 class _SandboxProcessBackend:
-    """Execute Python code in a live Daytona sandbox via process or code interpreter."""
+    """Own the live Sandbox's invocation broker, configuration and shutdown."""
 
     def __init__(
         self,
         sandbox: Any,
         *,
         timeout_s: int | None = None,
+        broker_port: int = DEFAULT_BROKER_PORT,
     ) -> None:
         self._sandbox = sandbox
         if timeout_s is not None and int(timeout_s) <= 0:
@@ -490,6 +498,12 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
+        if not 1 <= broker_port <= 65535:
+            raise DaytonaAdapterError(
+                message="broker port must be between 1 and 65535; brokerless execution is unsupported",
+                cause_type="InterpreterConfigurationError",
+            )
+        self._broker_port = broker_port
         self._output_fields: list[dict[str, Any]] | None = None
         self._max_final_output_chars: int | None = None
         self._bound_tools: dict[str, Callable[..., Any]] = {}
@@ -556,6 +570,15 @@ class _SandboxProcessBackend:
     @property
     def timeout_s(self) -> int | None:
         return self._timeout_s
+
+    @property
+    def broker_port(self) -> int:
+        return self._broker_port
+
+    @property
+    def broker(self) -> DaytonaHttpToolBroker | None:
+        """Inspect the backend-owned broker without transferring cleanup ownership."""
+        return self._broker
 
     @property
     def fleet_host_tool_dispatch_available(self) -> bool:
@@ -666,7 +689,7 @@ def _fleet_load_context_manifest(raw_manifest):
         if self._broker is None:
             self._broker = DaytonaHttpToolBroker(
                 self._sandbox,
-                port=DEFAULT_BROKER_PORT,
+                port=self._broker_port,
                 tool_settled=self._tool_settled,
                 tool_failed=self._tool_failed,
             )
@@ -731,7 +754,6 @@ class DaytonaCodeInterpreter:
         tools: Mapping[str, Callable[..., Any]] | None = None,
         output_fields: list[dict[str, Any]] | None = None,
         callbacks: list[BaseCallback] | None = None,
-        broker_port: int = DEFAULT_BROKER_PORT,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
     ) -> None:
@@ -751,8 +773,6 @@ class DaytonaCodeInterpreter:
         self._output_fields = copy_output_fields(output_fields)
         self._started = False
         self._shutdown = False
-        self._broker_port = broker_port
-        self._http_broker: Any | None = None
         self._observer: ObservationObserver | None = None
         self._observation_max_chars = 10_000
         self._turn_budget: TurnBudget | None = None
@@ -798,6 +818,7 @@ class DaytonaCodeInterpreter:
             fresh_backend = _SandboxProcessBackend(
                 backend.sandbox,
                 timeout_s=backend.timeout_s,
+                broker_port=backend.broker_port,
             )
             if backend._run_scratch_path is not None:
                 fresh_backend.bind_run_scratch(backend._run_scratch_path)
@@ -811,7 +832,6 @@ class DaytonaCodeInterpreter:
             tools=dict(self._tools),
             output_fields=list(self._output_fields) if self._output_fields is not None else None,
             callbacks=list(self.callbacks),
-            broker_port=self._broker_port,
             execution_output_cap=self._execution_output_cap,
             max_code_chars=self._max_code_chars,
         )
@@ -845,7 +865,7 @@ class DaytonaCodeInterpreter:
             with self._shutdown_lock:
                 try:
                     if self._pending_shutdown is not None:
-                        self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+                        self._close_backend()
                 finally:
                     self._execution_lock.release()
 
@@ -870,8 +890,10 @@ class DaytonaCodeInterpreter:
         return True
 
     @property
-    def broker(self) -> Any:
-        return self._http_broker or getattr(self._backend, "_broker", None)
+    def broker(self) -> DaytonaHttpToolBroker | None:
+        """Inspect the live broker; its backend owns creation and cleanup."""
+        backend = self._backend
+        return backend.broker if isinstance(backend, _SandboxProcessBackend) else None
 
     @property
     def fleet_host_tool_dispatch_available(self) -> bool:
@@ -1005,25 +1027,16 @@ class DaytonaCodeInterpreter:
     def _run_backend(
         self,
         code: str,
-        variables: dict[str, Any] | None,
+        variables: dict[str, object] | None,
         *,
-        on_stdout: OutputCallback,
-    ) -> str | BackendExecutionResult:
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult:
         backend = self._backend
         if backend is None:
             raise DaytonaAdapterError(
                 message="interpreter backend is not configured", cause_type="InterpreterConfigurationError"
             )
-        run = cast(Callable[..., str | BackendExecutionResult], backend.run)
-        try:
-            signature = inspect.signature(run)
-        except (TypeError, ValueError):
-            return run(code, variables)
-        try:
-            signature.bind(code, variables, on_stdout=on_stdout)
-        except TypeError:
-            return run(code, variables)
-        return run(code, variables, on_stdout=on_stdout)  # type: ignore[call-arg]
+        return backend.run(code, variables, on_stdout=on_stdout)
 
     def _execution_tools(self) -> dict[str, Callable[..., Any]]:
         tools = dict(self._tools)
@@ -1064,11 +1077,6 @@ class DaytonaCodeInterpreter:
             raise DaytonaAdapterError(
                 message="DaytonaCodeInterpreter has been shut down",
                 cause_type="InterpreterLifecycleError",
-            )
-        if self._broker_port == 0 and bool(self._tools):
-            raise DaytonaAdapterError(
-                message="brokerless mode cannot dispatch host tools",
-                cause_type="BrokerlessToolDispatchError",
             )
         if not self._started:
             self.start()
@@ -1158,8 +1166,7 @@ class DaytonaCodeInterpreter:
                 ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
 
                 raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
-                if isinstance(raw, BackendExecutionResult):
-                    self._context_accesses.extend(raw.context_accesses)
+                self._context_accesses.extend(raw.context_accesses)
                 result = self._finalize(raw)
 
                 execute_ms = int((time.perf_counter() - execute_started) * 1_000)
@@ -1266,36 +1273,17 @@ class DaytonaCodeInterpreter:
                     message="interpreter is already executing or configuring", cause_type="InterpreterReuseError"
                 )
             try:
-                self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+                self._close_backend()
             finally:
                 self._execution_lock.release()
 
-    def _close_backend(self, *, strict_broker_cleanup: bool) -> None:
+    def _close_backend(self) -> None:
         """Close under both lifecycle locks; retain failed cleanup for retry."""
-        broker_error: BaseException | None = None
-        if self._http_broker is not None:
-            stop = getattr(self._http_broker, "stop", None)
-            if callable(stop):
-                try:
-                    stop(strict=strict_broker_cleanup)
-                except BaseException as exc:
-                    if strict_broker_cleanup:
-                        broker_error = exc
-
-        backend_error: BaseException | None = None
         backend = self._backend
         if backend is not None:
-            try:
-                backend.close()
-            except BaseException as exc:
-                backend_error = exc
-            else:
-                self._backend = None
+            backend.close()
+            self._backend = None
 
-        if broker_error is not None:
-            raise broker_error
-        if backend_error is not None:
-            raise backend_error
         self._shutdown = True
         self._pending_shutdown = None
 
@@ -1381,25 +1369,20 @@ class DaytonaCodeInterpreter:
         self._context_accesses.clear()
         return values
 
-    def _finalize(self, raw: str | BackendExecutionResult) -> Any:
-        if isinstance(raw, BackendExecutionResult):
-            if raw.error:
-                error = sanitize_repair_text(sanitize_provider_message(raw.error))
-                category = raw.error_category or _repair_category(error)
-                if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
-                    raise _terminal_error(error, category=category)
-                feedback = error
-                stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
-                if stderr:
-                    feedback = f"{feedback}\nstderr: {stderr}"
-                return _RepairFeedback(feedback=feedback, category=category)
-            if raw.final is not None:
-                return wrap_final_output(raw.final)
-            return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
-        final = extract_final_payload(str(raw))
-        if final is not None:
-            return wrap_final_output(final)
-        return truncate_head_tail(str(raw), max_chars=self._execution_output_cap)
+    def _finalize(self, raw: BackendExecutionResult) -> Any:
+        if raw.error:
+            error = sanitize_repair_text(sanitize_provider_message(raw.error))
+            category = raw.error_category or _repair_category(error)
+            if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
+                raise _terminal_error(error, category=category)
+            feedback = error
+            stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
+            if stderr:
+                feedback = f"{feedback}\nstderr: {stderr}"
+            return _RepairFeedback(feedback=feedback, category=category)
+        if raw.final is not None:
+            return wrap_final_output(raw.final)
+        return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
 
     def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> CodeExecutionError | None:
         if is_final_output(result):
@@ -1434,11 +1417,12 @@ def sandbox_backend(
     loop: asyncio.AbstractEventLoop | None = None,
     dispatcher: SyncBridgeDispatcher | None = None,
     timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
+    broker_port: int = DEFAULT_BROKER_PORT,
 ) -> InterpreterBackend:
-    """Build a stateful backend from a live Daytona sandbox."""
+    """Build a stateful backend owning one broker on a positive, configured port."""
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop, dispatcher)
-    return _SandboxProcessBackend(sandbox, timeout_s=timeout_s)
+    return _SandboxProcessBackend(sandbox, timeout_s=timeout_s, broker_port=broker_port)
 
 
 # ---------------------------------------------------------------------------
