@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
-import contextvars
 import inspect
 import io
 import json
 import logging
 import re
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from copy import deepcopy
 from dataclasses import dataclass, field
 from threading import Lock
@@ -62,11 +61,6 @@ def copy_output_fields(output_fields: list[dict[str, Any]] | None) -> list[dict[
     return deepcopy(output_fields) if output_fields is not None else None
 
 
-def needs_binding_refresh(*, desired_generation: int, installed_generation: int, broker_ready: bool) -> bool:
-    """Return whether invocation-local interpreter bindings are stale."""
-    return desired_generation != installed_generation or not broker_ready
-
-
 def wrap_final_output(value: Any) -> FinalOutput:
     return FinalOutput(value)
 
@@ -86,10 +80,6 @@ DAYTONA_EXECUTION_INSTRUCTIONS = (
 )
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
 _UNSET = object()
-_BINDING_RESERVATION: contextvars.ContextVar[object | None] = contextvars.ContextVar(
-    "fleet_interpreter_binding_reservation",
-    default=None,
-)
 
 
 OutputCallback = Callable[[str], None]
@@ -264,7 +254,7 @@ def _submitted_payload(result: Any) -> Mapping[str, Any] | None:
 
 
 class _BindingTools(dict[str, Callable[..., Any]]):
-    """Invocation tool map that marks binding state dirty on mutation."""
+    """DSPy's mutable setup surface, protected by the invocation's seal."""
 
     def __init__(
         self,
@@ -275,27 +265,36 @@ class _BindingTools(dict[str, Callable[..., Any]]):
         super().__init__(initial or {})
 
     def __setitem__(self, key: str, value: Callable[..., Any]) -> None:
-        self._owner._begin_binding_injection()
-        self._owner._ensure_binding_mutation_allowed()
-        super().__setitem__(key, value)
-        self._owner._binding_generation += 1
+        with self._owner._binding_mutation():
+            super().__setitem__(key, value)
 
     def __delitem__(self, key: str) -> None:
-        self._owner._ensure_binding_mutation_allowed()
-        super().__delitem__(key)
-        self._owner._binding_generation += 1
+        with self._owner._binding_mutation():
+            super().__delitem__(key)
 
     def clear(self) -> None:
-        self._owner._ensure_binding_mutation_allowed()
-        super().clear()
-        self._owner._binding_generation += 1
+        with self._owner._binding_mutation():
+            super().clear()
 
     def update(self, *args: Any, **kwargs: Any) -> None:
-        self._owner._begin_binding_injection()
-        self._owner._ensure_binding_mutation_allowed()
-        super().clear()
-        super().update(*args, **kwargs)
-        self._owner._binding_generation += 1
+        with self._owner._binding_mutation():
+            super().update(*args, **kwargs)
+
+    def pop(self, key: object, *default: Any) -> Any:
+        with self._owner._binding_mutation():
+            return super().pop(cast(str, key), *default)
+
+    def popitem(self) -> tuple[str, Callable[..., Any]]:
+        with self._owner._binding_mutation():
+            return super().popitem()
+
+    def setdefault(self, key: str, default: Any = None) -> Any:
+        with self._owner._binding_mutation():
+            return super().setdefault(key, default)
+
+    def __ior__(self, other: Any) -> _BindingTools:
+        self.update(other)
+        return self
 
 
 class InProcessInterpreterBackend:
@@ -738,21 +737,18 @@ class DaytonaCodeInterpreter:
     ) -> None:
         self._backend = backend
         self.callbacks = list(callbacks or [])
-        self._binding_generation = 0
-        self._installed_binding_generation = -1
+        self._bindings_sealed = False
+        self._bindings_installed = False
+        self._binding_error: BaseException | None = None
         self._execution_lock = Lock()
         self._shutdown_lock = Lock()
-        self._reservation_token: object | None = None
-        self._reservation_task: asyncio.Task[Any] | None = None
-        self._execution_started: bool = False
-        self._reservation_state_lock = Lock()
+        self._pending_shutdown: bool | None = None
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._async_bridge: Any | None = None
         self._fleet_output_contract: FleetOutputContract | None = None
         self._max_final_output_chars: int | None = None
-        self._output_fields: list[dict[str, Any]] | None = None
-        self.output_fields = output_fields
+        self._output_fields = copy_output_fields(output_fields)
         self._started = False
         self._shutdown = False
         self._broker_port = broker_port
@@ -830,96 +826,40 @@ class DaytonaCodeInterpreter:
             fresh.bind_output_contract(output_contract)
         return fresh
 
-    def _ensure_binding_mutation_allowed(self) -> None:
-        """Reject an overlapping invocation before it can mutate the current namespace."""
-        current = _BINDING_RESERVATION.get()
-        with self._reservation_state_lock:
-            allowed = not self._execution_lock.locked() or (
-                self._reservation_token is current and current is not None and not self._execution_started
-            )
-        if not allowed:
+    @contextlib.contextmanager
+    def _exclusive_access(self) -> Iterator[None]:
+        """Keep configuration, execution and cleanup from interleaving."""
+        if not self._execution_lock.acquire(blocking=False):
             raise DaytonaAdapterError(
-                message="interpreter is already executing",
+                message="interpreter is already executing or configuring",
                 cause_type="InterpreterReuseError",
             )
-
-    def _begin_binding_injection(self) -> None:
-        """Reserve this interpreter before DSPy starts an overlapping acall."""
         try:
-            task = asyncio.current_task()
-        except RuntimeError:
-            task = None
-        if task is None:
-            return
-        current = _BINDING_RESERVATION.get()
-        with self._reservation_state_lock:
-            if self._reservation_token is current and current is not None and not self._execution_started:
-                return
-            if not self._execution_lock.acquire(blocking=False):
+            with self._shutdown_lock:
+                if self._pending_shutdown is not None:
+                    raise DaytonaAdapterError(
+                        message="interpreter shutdown has been requested", cause_type="InterpreterLifecycleError"
+                    )
+            yield
+        finally:
+            with self._shutdown_lock:
+                try:
+                    if self._pending_shutdown is not None:
+                        self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+                finally:
+                    self._execution_lock.release()
+
+    @contextlib.contextmanager
+    def _binding_mutation(self) -> Iterator[None]:
+        """Allow atomic Fleet/DSPy configuration only before first execute."""
+        with self._exclusive_access():
+            if self._shutdown:
                 raise DaytonaAdapterError(
-                    message="interpreter is already executing",
-                    cause_type="InterpreterReuseError",
+                    message="interpreter already shut down", cause_type="InterpreterLifecycleError"
                 )
-            token = object()
-            self._reservation_token = token
-            self._reservation_task = task
-            self._execution_started = False
-            _BINDING_RESERVATION.set(token)
-        task.add_done_callback(lambda _done, token=token: self._release_reservation(token))
-
-    def _release_reservation(self, token: object) -> None:
-        """Release a pre-execution reservation when an async call settles early."""
-        clear_context = False
-        with self._reservation_state_lock:
-            if token is not self._reservation_token or self._execution_started:
-                return
-            self._reservation_token = None
-            self._reservation_task = None
-            if self._execution_lock.locked():
-                self._execution_lock.release()
-            clear_context = _BINDING_RESERVATION.get() is token
-        if clear_context:
-            _BINDING_RESERVATION.set(None)
-
-    def _acquire_execution(self) -> object:
-        """Consume an injection reservation or acquire one for direct execution."""
-        current = _BINDING_RESERVATION.get()
-        with self._reservation_state_lock:
-            if self._reservation_token is current and current is not None and not self._execution_started:
-                self._execution_started = True
-                return current
-            if not self._execution_lock.acquire(blocking=False):
-                raise DaytonaAdapterError(
-                    message="interpreter is already executing",
-                    cause_type="InterpreterReuseError",
-                )
-            token = object()
-            self._reservation_token = token
-            try:
-                task = asyncio.current_task()
-            except RuntimeError:
-                task = None
-            self._reservation_task = task
-            self._execution_started = True
-            _BINDING_RESERVATION.set(token)
-            if task is not None:
-                task.add_done_callback(lambda _done, token=token: self._release_reservation(token))
-            return token
-
-    def _release_execution(self, token: object) -> None:
-        """Release the execution lease after backend output and callbacks settle."""
-        clear_context = False
-        with self._reservation_state_lock:
-            if token is not self._reservation_token:
-                return
-            self._execution_started = False
-            self._reservation_task = None
-            self._reservation_token = None
-            if self._execution_lock.locked():
-                self._execution_lock.release()
-            clear_context = _BINDING_RESERVATION.get() is token
-        if clear_context:
-            _BINDING_RESERVATION.set(None)
+            if self._bindings_sealed:
+                raise DaytonaAdapterError(message="invocation bindings are sealed", cause_type="InterpreterReuseError")
+            yield
 
     @property
     def tools(self) -> dict[str, Callable[..., Any]]:
@@ -942,21 +882,21 @@ class DaytonaCodeInterpreter:
 
     @property
     def output_fields(self) -> list[dict[str, Any]] | None:
-        return self._output_fields
+        return copy_output_fields(self._output_fields)
 
     @output_fields.setter
     def output_fields(self, value: list[dict[str, Any]] | None) -> None:
-        self._ensure_binding_mutation_allowed()
-        if value is not None and self._fleet_output_contract is not None:
-            value = self._fleet_output_contract.merge(value)
-        self._output_fields = value
-        self._binding_generation += 1
+        with self._binding_mutation():
+            if value is not None and self._fleet_output_contract is not None:
+                value = self._fleet_output_contract.merge(value)
+            self._output_fields = copy_output_fields(value)
 
     def bind_output_contract(self, contract: FleetOutputContract) -> None:
-        self._fleet_output_contract = contract
-        self._max_final_output_chars = contract.max_output_chars
-        if self._output_fields is not None:
-            self.output_fields = contract.merge(self._output_fields)
+        with self._binding_mutation():
+            fields = contract.merge(self._output_fields) if self._output_fields is not None else None
+            self._fleet_output_contract = contract
+            self._max_final_output_chars = contract.max_output_chars
+            self._output_fields = copy_output_fields(fields)
 
     @with_callbacks
     def start(self) -> None:
@@ -965,77 +905,72 @@ class DaytonaCodeInterpreter:
         self._started = True
 
     def bind_observer(self, observer: ObservationObserver | None, *, max_chars: int = 10_000) -> None:
-        self._ensure_binding_mutation_allowed()
-        self._observer = observer
-        self._observation_max_chars = max(1, int(max_chars))
+        with self._binding_mutation():
+            self._observer = observer
+            self._observation_max_chars = max(1, int(max_chars))
 
     def bind_turn_budget(self, budget: TurnBudget | None) -> None:
-        self._ensure_binding_mutation_allowed()
-        self._turn_budget = budget
-        self._output_budget_exhausted = False
+        with self._binding_mutation():
+            self._turn_budget = budget
+            self._output_budget_exhausted = False
 
     def bind_turn_request(self, request: str | None) -> None:
-        self._turn_request = request
+        with self._binding_mutation():
+            self._turn_request = request
 
     def bind_async_bridge(self, async_bridge: Any | None) -> None:
         """Pass the composition-owned async bridge to a live tool broker."""
-        self._ensure_binding_mutation_allowed()
-        self._async_bridge = async_bridge
-        backend = self._backend
-        bind_bridge = getattr(backend, "bind_async_bridge", None)
-        if callable(bind_bridge):
-            bind_bridge(async_bridge)
+        with self._binding_mutation():
+            self._async_bridge = async_bridge
+            backend = self._backend
+            bind_bridge = getattr(backend, "bind_async_bridge", None)
+            if callable(bind_bridge):
+                bind_bridge(async_bridge)
 
     def bind_context_capsule(self, capsule: Any) -> None:
-        self._ensure_binding_mutation_allowed()
-        from fleet_rlm.rlm.program import AttachmentContextCapsule
+        with self._binding_mutation():
+            from fleet_rlm.rlm.program import AttachmentContextCapsule
 
-        if not isinstance(capsule, AttachmentContextCapsule):
-            raise DaytonaAdapterError(
-                message="context capsule is invalid",
-                cause_type="ContextIntegrityError",
-            )
-        raw_manifest = capsule.to_sandbox()
-        binding = (capsule.mount_root, str(hashlib_sha256(raw_manifest)))
-        if self._context_binding is not None and self._context_binding != binding:
-            raise DaytonaAdapterError(
-                message="context manifest binding cannot be replaced",
-                cause_type="ContextIntegrityError",
-            )
-        bind_backend = getattr(self._backend, "bind_context_manifest", None)
-        if callable(bind_backend):
-            bind_backend(
-                trusted_mount_root=binding[0],
-                expected_manifest_sha256=binding[1],
-            )
-        self._context_binding = binding
+            if not isinstance(capsule, AttachmentContextCapsule):
+                raise DaytonaAdapterError(
+                    message="context capsule is invalid",
+                    cause_type="ContextIntegrityError",
+                )
+            raw_manifest = capsule.to_sandbox()
+            binding = (capsule.mount_root, str(hashlib_sha256(raw_manifest)))
+            if self._context_binding is not None and self._context_binding != binding:
+                raise DaytonaAdapterError(
+                    message="context manifest binding cannot be replaced",
+                    cause_type="ContextIntegrityError",
+                )
+            self._context_binding = binding
 
     def bind_run_scratch(self, run_id: Any, *, call_index: int | None = None) -> str:
         """Bind scratch beneath /tmp/fleet for one Run or recursive call."""
-        self._ensure_binding_mutation_allowed()
-        from uuid import UUID
+        with self._binding_mutation():
+            from uuid import UUID
 
-        parsed = UUID(str(run_id))
-        if parsed.int == 0:
-            raise ValueError("run_id must be a non-zero UUID")
-        suffix = str(parsed)
-        if call_index is not None:
-            if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
-                raise ValueError("call_index must be positive")
-            path = f"/tmp/fleet/child-data/{suffix}/{call_index}"
-        else:
-            path = f"/tmp/fleet/{suffix}"
-        bind = getattr(self._backend, "bind_run_scratch", None)
-        if callable(bind):
-            bind(path)
-        return path
+            parsed = UUID(str(run_id))
+            if parsed.int == 0:
+                raise ValueError("run_id must be a non-zero UUID")
+            suffix = str(parsed)
+            if call_index is not None:
+                if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
+                    raise ValueError("call_index must be positive")
+                path = f"/tmp/fleet/child-data/{suffix}/{call_index}"
+            else:
+                path = f"/tmp/fleet/{suffix}"
+            bind = getattr(self._backend, "bind_run_scratch", None)
+            if callable(bind):
+                bind(path)
+            return path
 
     def cleanup_run_scratch(self) -> None:
         """Remove this Run's scratch after its owned execution has settled."""
-        self._ensure_binding_mutation_allowed()
-        cleanup = getattr(self._backend, "cleanup_run_scratch", None)
-        if callable(cleanup):
-            cleanup()
+        with self._exclusive_access():
+            cleanup = getattr(self._backend, "cleanup_run_scratch", None)
+            if callable(cleanup):
+                cleanup()
 
     def _observe(self, detail: StepStarted | RLMCode | RLMOutput | StepFinished) -> None:
         if not self._public_observation:
@@ -1120,11 +1055,9 @@ class DaytonaCodeInterpreter:
     @with_callbacks
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """Execute one action under single-flight concurrency protection."""
-        token = self._acquire_execution()
-        try:
+        with self._exclusive_access():
+            self._bindings_sealed = True
             return self._execute_once(code, variables)
-        finally:
-            self._release_execution(token)
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if self._shutdown:
@@ -1132,7 +1065,7 @@ class DaytonaCodeInterpreter:
                 message="DaytonaCodeInterpreter has been shut down",
                 cause_type="InterpreterLifecycleError",
             )
-        if self._broker_port == 0 and bool(self._execution_tools()):
+        if self._broker_port == 0 and bool(self._tools):
             raise DaytonaAdapterError(
                 message="brokerless mode cannot dispatch host tools",
                 cause_type="BrokerlessToolDispatchError",
@@ -1323,43 +1256,48 @@ class DaytonaCodeInterpreter:
 
     @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
-        """Shut down the interpreter and release backend resources."""
+        """Request cleanup, deferring it until an active operation settles."""
         with self._shutdown_lock:
             if self._shutdown:
                 return
+            self._pending_shutdown = strict_broker_cleanup or bool(self._pending_shutdown)
+            if not self._execution_lock.acquire(blocking=False):
+                raise DaytonaAdapterError(
+                    message="interpreter is already executing or configuring", cause_type="InterpreterReuseError"
+                )
+            try:
+                self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+            finally:
+                self._execution_lock.release()
 
-            with self._reservation_state_lock:
-                if self._reservation_token is not None and not self._execution_started:
-                    self._reservation_token = None
-                    self._reservation_task = None
-                    if self._execution_lock.locked():
-                        self._execution_lock.release()
-
-            broker_error: BaseException | None = None
-            if self._http_broker is not None:
-                stop = getattr(self._http_broker, "stop", None)
-                if callable(stop):
-                    try:
-                        stop(strict=strict_broker_cleanup)
-                    except BaseException as exc:
-                        if strict_broker_cleanup:
-                            broker_error = exc
-
-            backend_error: BaseException | None = None
-            backend = self._backend
-            if backend is not None:
+    def _close_backend(self, *, strict_broker_cleanup: bool) -> None:
+        """Close under both lifecycle locks; retain failed cleanup for retry."""
+        broker_error: BaseException | None = None
+        if self._http_broker is not None:
+            stop = getattr(self._http_broker, "stop", None)
+            if callable(stop):
                 try:
-                    backend.close()
+                    stop(strict=strict_broker_cleanup)
                 except BaseException as exc:
-                    backend_error = exc
-                else:
-                    self._backend = None
+                    if strict_broker_cleanup:
+                        broker_error = exc
 
-            if broker_error is not None:
-                raise broker_error
-            if backend_error is not None:
-                raise backend_error
-            self._shutdown = True
+        backend_error: BaseException | None = None
+        backend = self._backend
+        if backend is not None:
+            try:
+                backend.close()
+            except BaseException as exc:
+                backend_error = exc
+            else:
+                self._backend = None
+
+        if broker_error is not None:
+            raise broker_error
+        if backend_error is not None:
+            raise backend_error
+        self._shutdown = True
+        self._pending_shutdown = None
 
     def bind_tool_outcomes(
         self,
@@ -1367,10 +1305,11 @@ class DaytonaCodeInterpreter:
         tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None,
         tool_failed: Callable[[str, Mapping[str, Any]], None] | None,
     ) -> None:
-        backend = self._backend
-        bind = getattr(backend, "bind_tool_outcomes", None)
-        if callable(bind):
-            bind(tool_settled=tool_settled, tool_failed=tool_failed)
+        with self._binding_mutation():
+            backend = self._backend
+            bind = getattr(backend, "bind_tool_outcomes", None)
+            if callable(bind):
+                bind(tool_settled=tool_settled, tool_failed=tool_failed)
 
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any], *args: Any) -> Any:
@@ -1395,14 +1334,21 @@ class DaytonaCodeInterpreter:
         backend = self._backend
         if backend is None:
             return
+        if self._bindings_installed:
+            return
+        if self._binding_error is not None:
+            raise self._binding_error
+        try:
+            self._install_bindings(backend)
+        except BaseException as exc:
+            # A partially installed invocation must be finalized, never rebound.
+            self._binding_error = exc
+            raise
+        self._bindings_installed = True
+
+    def _install_bindings(self, backend: InterpreterBackend) -> None:
         tools = self._execution_tools()
         self._bound_tools = tools
-        if not needs_binding_refresh(
-            desired_generation=self._binding_generation,
-            installed_generation=self._installed_binding_generation,
-            broker_ready=True,
-        ):
-            return
 
         def host_binding(name: str, source: Callable[..., Any]) -> Callable[..., Any]:
             def invoke(*args: Any, **kwargs: Any) -> Any:
@@ -1429,7 +1375,6 @@ class DaytonaCodeInterpreter:
                 trusted_mount_root=self._context_binding[0],
                 expected_manifest_sha256=self._context_binding[1],
             )
-        self._installed_binding_generation = self._binding_generation
 
     def drain_context_accesses(self) -> tuple[str, ...]:
         values = tuple(self._context_accesses)
