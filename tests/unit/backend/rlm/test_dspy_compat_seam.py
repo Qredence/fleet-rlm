@@ -282,7 +282,7 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
     def execute() -> None:
         try:
             outcomes.append(interpreter.execute("_out = 'settled'"))
-        except BaseException as exc:
+        except Exception as exc:
             outcomes.append(exc)
 
     worker = threading.Thread(target=execute)
