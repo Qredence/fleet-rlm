@@ -44,13 +44,20 @@ def test_copy_output_fields_does_not_share_nested_metadata() -> None:
     assert fields[0]["metadata"]["description"] == "final answer"
 
 
-def test_needs_binding_refresh_uses_fleet_generation_state() -> None:
-    from fleet_rlm.daytona.interpreter import needs_binding_refresh
+def test_output_metadata_cannot_mutate_invocation_through_aliases() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 
-    assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=False) is True
-    assert needs_binding_refresh(desired_generation=1, installed_generation=0, broker_ready=True) is True
-    assert needs_binding_refresh(desired_generation=1, installed_generation=1, broker_ready=False) is True
-    assert needs_binding_refresh(desired_generation=1, installed_generation=1, broker_ready=True) is False
+    fields = [{"name": "answer", "type": "str", "metadata": {"description": "original"}}]
+    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), output_fields=fields)
+    fields[0]["name"] = "changed"
+    interp.execute("value = 41")
+    snapshot = interp.output_fields
+    assert snapshot is not None
+    snapshot[0]["metadata"]["description"] = "changed"
+    snapshot.append({"name": "extra"})
+    assert interp.output_fields == [{"name": "answer", "type": "str", "metadata": {"description": "original"}}]
+    assert interp.execute("SUBMIT(answer=str(value + 1))").output == {"answer": "42"}
+    interp.shutdown()
 
 
 def test_public_final_output_label_is_stable() -> None:

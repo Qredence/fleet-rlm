@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -16,8 +17,10 @@ class _FakeBackend:
         self.namespace: dict[str, object] = {"_out": ""}
         self.closed = False
         self.fail_with: BaseException | None = None
+        self.calls = 0
 
     def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+        self.calls += 1
         if self.closed:
             msg = "backend already closed"
             raise RuntimeError(msg)
@@ -39,8 +42,112 @@ def test_execute_returns_string_and_preserves_state() -> None:
     interp = DaytonaCodeInterpreter(backend=backend)
     interp.start()
     interp.execute("value = 41")
-    result = interp.execute("_out = str(value)")
-    assert result == "41"
+    result = interp.execute("_out = str(value + 1)")
+    assert result == "42"
+
+
+def test_invocation_installs_tools_output_and_context_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.events import observe_tool
+    from fleet_rlm.rlm.output_contract import FleetOutputContract, OutputField
+    from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+
+    backend = InProcessInterpreterBackend()
+    bind_tools = Mock(wraps=backend.bind_host_tools)
+    submit = Mock(wraps=backend.ensure_submit)
+    context = Mock(wraps=backend.bind_context_manifest)
+    monkeypatch.setattr(backend, "bind_host_tools", bind_tools)
+    monkeypatch.setattr(backend, "ensure_submit", submit)
+    monkeypatch.setattr(backend, "bind_context_manifest", context)
+    observed_wrapper = Mock(wraps=observe_tool)
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.observe_tool", observed_wrapper)
+    interp = DaytonaCodeInterpreter(backend=backend, tools={"configured": lambda: "configured"})
+    interp.bind_observer(lambda _event: None)
+    interp.tools.update({"llm_query": lambda prompt: prompt})
+    interp.output_fields = [{"name": "answer", "type": "str"}]
+    interp.bind_output_contract(FleetOutputContract((OutputField("answer", True),), max_output_chars=100))
+    capsule = AttachmentContextCapsule(
+        (AttachmentContextEntry(uuid4(), "input.txt", "text/plain", 1, "a" * 64, "/mnt/fleet/input.txt"),),
+        mount_root="/mnt/fleet",
+    )
+    interp.bind_context_capsule(capsule)
+    assert context.call_count == 0
+    assert interp.execute("_out = configured()") == "configured"
+    assert interp.execute("SUBMIT(answer=llm_query(prompt='second'))").output == {"answer": "second"}
+    assert bind_tools.call_count == submit.call_count == context.call_count == observed_wrapper.call_count == 1
+    submit.assert_called_once_with([{"name": "answer", "type": "str", "required": True}], 100)
+    interp.shutdown()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda i: i.tools.__setitem__("late", lambda: "late"),
+        lambda i: i.tools.__delitem__("tool"),
+        lambda i: i.tools.clear(),
+        lambda i: i.tools.update({"late": lambda: "late"}),
+        lambda i: i.tools.pop("tool"),
+        lambda i: i.tools.popitem(),
+        lambda i: i.tools.setdefault("late", lambda: "late"),
+        lambda i: i.tools.__ior__({"late": lambda: "late"}),
+        lambda i: setattr(i, "output_fields", [{"name": "late", "type": "str"}]),
+        lambda i: i.bind_output_contract(None),
+        lambda i: i.bind_context_capsule(None),
+        lambda i: i.bind_observer(None),
+        lambda i: i.bind_turn_budget(None),
+        lambda i: i.bind_turn_request("late"),
+        lambda i: i.bind_async_bridge(None),
+        lambda i: i.bind_tool_outcomes(tool_settled=None, tool_failed=None),
+        lambda i: i.bind_run_scratch(None),
+    ],
+)
+def test_post_seal_configuration_is_rejected_before_backend_action(mutate: Callable) -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    backend = _FakeBackend()
+    interp = DaytonaCodeInterpreter(backend=backend, tools={"tool": lambda: "original"})
+    interp.execute("value = 41")
+    with pytest.raises(DaytonaAdapterError, match="sealed") as exc:
+        mutate(interp)
+    assert exc.value.cause_type == "InterpreterReuseError"
+    assert backend.calls == 1
+    assert set(interp.tools) == {"tool"}
+    assert interp.execute("_out = str(value + 1)") == "42"
+    interp.shutdown()
+
+
+def test_failed_binding_installation_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    backend = InProcessInterpreterBackend()
+    bind = Mock(side_effect=DaytonaAdapterError(message="binding failed", cause_type="InterpreterConfigurationError"))
+    run = Mock(wraps=backend.run)
+    monkeypatch.setattr(backend, "bind_host_tools", bind)
+    monkeypatch.setattr(backend, "run", run)
+    interp = DaytonaCodeInterpreter(backend=backend)
+    for code in ("x = 1", "x = 2"):
+        with pytest.raises(DaytonaAdapterError, match="binding failed"):
+            interp.execute(code)
+    assert bind.call_count == 1
+    run.assert_not_called()
+    interp.shutdown()
+    assert backend.closed
+
+
+def test_scratch_cleanup_remains_available_after_sealing() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    backend = _FakeBackend()
+    backend.cleanup_run_scratch = Mock()
+    interp = DaytonaCodeInterpreter(backend=backend)
+    interp.execute("value = 1")
+    interp.cleanup_run_scratch()
+    backend.cleanup_run_scratch.assert_called_once_with()
+    interp.shutdown()
 
 
 def test_run_backend_does_not_retry_typeerror_from_backend() -> None:
@@ -164,7 +271,7 @@ def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
 
 @pytest.mark.asyncio
 async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, _SyncBridgeLoop
 
     loop = asyncio.get_running_loop()
 
@@ -172,10 +279,12 @@ async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None
         assert asyncio.get_running_loop() is loop
         return "bridged"
 
-    interpreter = DaytonaCodeInterpreter()
-    interpreter._bound_tools = {"tool": tool}
-    interpreter.bind_async_bridge(_SyncBridgeLoop(caller_loop=loop))
-    assert await asyncio.to_thread(interpreter.invoke_tool, "tool", {}) == "bridged"
+    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), tools={"tool": tool})
+    interpreter = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+    assert await asyncio.to_thread(interpreter.execute, "_out = tool()") == "bridged"
+    result = await asyncio.to_thread(interpreter.execute, "SUBMIT(answer=tool())")
+    assert result.output == {"answer": "bridged"}
+    interpreter.shutdown()
 
 
 def test_shutdown_is_idempotent() -> None:

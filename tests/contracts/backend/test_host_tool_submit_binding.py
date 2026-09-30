@@ -57,13 +57,20 @@ def test_final_output_type_is_dspy_final_output() -> None:
     assert type(result) is FinalOutput
 
 
-def test_fleet_generation_marks_bindings_dirty_on_native_inject() -> None:
-    """Native DSPy injection advances Fleet-owned generation state."""
-    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    initial_generation = interp._binding_generation
+def test_native_injection_configures_factory_invocation_before_execution() -> None:
+    """DSPy's injected tools and output metadata work on an open invocation."""
+    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interp = retained.new_invocation()
+    interp.start()
+    interp.start()
     rlm = build_native_rlm_for_test(
         signature=FleetRLMSignature,
         options=RLMOptions(max_iters=1),
     )
-    rlm._inject_execution_context(interp, {})
-    assert interp._binding_generation > initial_generation
+    rlm._inject_execution_context(interp, {"injected_tool": lambda: "injected"})
+    assert "injected_tool" in interp.tools
+    assert interp.output_fields is not None
+    assert interp.execute("SUBMIT(answer=injected_tool())").output == {"answer": "injected"}
+    interp.shutdown()
+    assert retained.output_fields is None
+    assert retained.tools == {}

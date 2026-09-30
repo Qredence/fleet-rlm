@@ -232,12 +232,58 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
 
     with pytest.raises(DaytonaAdapterError, match="already executing"):
         interpreter.execute("_out = 'overlap'")
+    with pytest.raises(DaytonaAdapterError, match="already executing"):
+        interpreter.tools.update({"overlap": lambda: "wrong"})
+    with pytest.raises(DaytonaAdapterError, match="already executing"):
+        interpreter.shutdown()
+    with pytest.raises(DaytonaAdapterError, match="already executing"):
+        interpreter.cleanup_run_scratch()
+    assert not interpreter.tools
 
     release.set()
     worker.join(timeout=2)
     assert first_result == ["first"]
     assert interpreter.execute("_out = 'after-settlement'") == "after-settlement"
     interpreter.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_phase", ["injection", "serialize", "setup", "execution"])
+async def test_native_dspy_finalizes_invocation_after_failure(failure_phase: str) -> None:
+    from fleet_rlm.rlm.output_contract import FleetOutputContract, OutputField
+
+    class FailingInput(dspy.SandboxSerializable):
+        def to_sandbox(self) -> bytes:
+            if failure_phase == "serialize":
+                raise ValueError("serialization failed")
+            return b"payload"
+
+        def sandbox_setup(self) -> str:
+            return "raise ValueError('setup failed')"
+
+        def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+            return f"{var_name} = {data_expr}"
+
+        def rlm_preview(self, max_chars: int = 500) -> str:
+            return "failing input"[:max_chars]
+
+    class FailingBackend(InProcessInterpreterBackend):
+        def run(self, *args: Any, **kwargs: Any) -> Any:
+            if failure_phase == "execution":
+                raise DaytonaAdapterError(message="execution failed", cause_type="InterpreterLifecycleError")
+            return super().run(*args, **kwargs)
+
+    backend = FailingBackend()
+    invocation = DaytonaCodeInterpreter(backend=backend)
+    if failure_phase == "injection":
+        invocation.bind_output_contract(FleetOutputContract((OutputField("different", True),)))
+    rlm = _rlm()
+    rlm.generate_action = _OneAction("SUBMIT(answer='never')")
+    request = "ordinary" if failure_phase == "execution" else FailingInput()
+    with pytest.raises(Exception, match=r"failed|output fields do not match"):
+        await rlm.acall(interpreter_factory=lambda: invocation, request=request)
+    assert backend.closed
+    invocation.shutdown()
 
 
 @pytest.mark.asyncio
