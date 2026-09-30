@@ -1061,10 +1061,10 @@ class DaytonaCodeInterpreter:
     def _public_output(self, result: Any) -> str:
         if is_final_output(result):
             return PUBLIC_FINAL_OUTPUT_LABEL
-        if isinstance(result, CodeInterpreterError):
-            return "Execution failed"
         if isinstance(result, CodeExecutionError):
             return "Execution error"
+        if isinstance(result, CodeInterpreterError):
+            return "Execution failed"
         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
 
     def _run_backend(
@@ -1081,9 +1081,14 @@ class DaytonaCodeInterpreter:
             )
         run = cast(Callable[..., str | BackendExecutionResult], backend.run)
         try:
-            return run(code, variables, on_stdout=on_stdout)  # type: ignore[call-arg]
+            signature = inspect.signature(run)
+        except (TypeError, ValueError):
+            return run(code, variables)
+        try:
+            signature.bind(code, variables, on_stdout=on_stdout)
         except TypeError:
             return run(code, variables)
+        return run(code, variables, on_stdout=on_stdout)  # type: ignore[call-arg]
 
     def _execution_tools(self) -> dict[str, Callable[..., Any]]:
         tools = dict(self._tools)

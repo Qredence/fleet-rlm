@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,82 @@ def test_execute_returns_string_and_preserves_state() -> None:
     interp.execute("value = 41")
     result = interp.execute("_out = str(value)")
     assert result == "41"
+
+
+def test_run_backend_does_not_retry_typeerror_from_backend() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    class _TypeErrorBackend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: Callable[[str], None] | None = None,
+        ) -> str:
+            del code, variables, on_stdout
+            self.calls += 1
+            raise TypeError("backend failed")
+
+        def close(self) -> None:
+            return None
+
+    backend = _TypeErrorBackend()
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+
+    with pytest.raises(TypeError, match="backend failed"):
+        interpreter._run_backend("pass", None, on_stdout=lambda _value: None)
+
+    assert backend.calls == 1
+
+
+def test_run_backend_does_not_retry_typeerror_from_stdout_callback() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    class _CallbackBackend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: Callable[[str], None] | None = None,
+        ) -> str:
+            del code, variables
+            self.calls += 1
+            if on_stdout is not None:
+                on_stdout("output")
+            return "output"
+
+        def close(self) -> None:
+            return None
+
+    backend = _CallbackBackend()
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+
+    def fail_callback(_value: str) -> None:
+        raise TypeError("callback failed")
+
+    with pytest.raises(TypeError, match="callback failed"):
+        interpreter._run_backend("print('output')", None, on_stdout=fail_callback)
+
+    assert backend.calls == 1
+
+
+def test_public_output_classifies_dspy_execution_errors_before_interpreter_errors() -> None:
+    from dspy import CodeExecutionError, CodeInterpreterError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    interpreter = DaytonaCodeInterpreter(backend=_FakeBackend())
+
+    assert interpreter._public_output(CodeExecutionError("recoverable")) == "Execution error"
+    assert interpreter._public_output(CodeInterpreterError("terminal")) == "Execution failed"
 
 
 def test_factory_created_adapter_is_invocation_scoped_and_does_not_close_retained_backend() -> None:
