@@ -742,6 +742,7 @@ class DaytonaCodeInterpreter:
         self._binding_error: BaseException | None = None
         self._execution_lock = Lock()
         self._shutdown_lock = Lock()
+        self._pending_shutdown: bool | None = None
         self._tools: _BindingTools = _BindingTools(self, tools)
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._async_bridge: Any | None = None
@@ -834,9 +835,19 @@ class DaytonaCodeInterpreter:
                 cause_type="InterpreterReuseError",
             )
         try:
+            with self._shutdown_lock:
+                if self._pending_shutdown is not None:
+                    raise DaytonaAdapterError(
+                        message="interpreter shutdown has been requested", cause_type="InterpreterLifecycleError"
+                    )
             yield
         finally:
-            self._execution_lock.release()
+            with self._shutdown_lock:
+                try:
+                    if self._pending_shutdown is not None:
+                        self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+                finally:
+                    self._execution_lock.release()
 
     @contextlib.contextmanager
     def _binding_mutation(self) -> Iterator[None]:
@@ -1245,36 +1256,48 @@ class DaytonaCodeInterpreter:
 
     @with_callbacks
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
-        """Shut down the interpreter and release backend resources."""
-        with self._shutdown_lock, self._exclusive_access():
+        """Request cleanup, deferring it until an active operation settles."""
+        with self._shutdown_lock:
             if self._shutdown:
                 return
+            self._pending_shutdown = strict_broker_cleanup or bool(self._pending_shutdown)
+            if not self._execution_lock.acquire(blocking=False):
+                raise DaytonaAdapterError(
+                    message="interpreter is already executing or configuring", cause_type="InterpreterReuseError"
+                )
+            try:
+                self._close_backend(strict_broker_cleanup=self._pending_shutdown)
+            finally:
+                self._execution_lock.release()
 
-            broker_error: BaseException | None = None
-            if self._http_broker is not None:
-                stop = getattr(self._http_broker, "stop", None)
-                if callable(stop):
-                    try:
-                        stop(strict=strict_broker_cleanup)
-                    except BaseException as exc:
-                        if strict_broker_cleanup:
-                            broker_error = exc
-
-            backend_error: BaseException | None = None
-            backend = self._backend
-            if backend is not None:
+    def _close_backend(self, *, strict_broker_cleanup: bool) -> None:
+        """Close under both lifecycle locks; retain failed cleanup for retry."""
+        broker_error: BaseException | None = None
+        if self._http_broker is not None:
+            stop = getattr(self._http_broker, "stop", None)
+            if callable(stop):
                 try:
-                    backend.close()
+                    stop(strict=strict_broker_cleanup)
                 except BaseException as exc:
-                    backend_error = exc
-                else:
-                    self._backend = None
+                    if strict_broker_cleanup:
+                        broker_error = exc
 
-            if broker_error is not None:
-                raise broker_error
-            if backend_error is not None:
-                raise backend_error
-            self._shutdown = True
+        backend_error: BaseException | None = None
+        backend = self._backend
+        if backend is not None:
+            try:
+                backend.close()
+            except BaseException as exc:
+                backend_error = exc
+            else:
+                self._backend = None
+
+        if broker_error is not None:
+            raise broker_error
+        if backend_error is not None:
+            raise backend_error
+        self._shutdown = True
+        self._pending_shutdown = None
 
     def bind_tool_outcomes(
         self,

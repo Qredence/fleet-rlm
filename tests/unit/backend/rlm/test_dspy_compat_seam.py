@@ -235,8 +235,6 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
     with pytest.raises(DaytonaAdapterError, match="already executing"):
         interpreter.tools.update({"overlap": lambda: "wrong"})
     with pytest.raises(DaytonaAdapterError, match="already executing"):
-        interpreter.shutdown()
-    with pytest.raises(DaytonaAdapterError, match="already executing"):
         interpreter.cleanup_run_scratch()
     assert not interpreter.tools
 
@@ -244,6 +242,115 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
     worker.join(timeout=2)
     assert first_result == ["first"]
     assert interpreter.execute("_out = 'after-settlement'") == "after-settlement"
+    interpreter.shutdown()
+
+
+@pytest.mark.parametrize("execution_fails", [False, True])
+@pytest.mark.parametrize("cleanup_failure", [None, "backend", "broker"])
+def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool, cleanup_failure: str | None) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    closes: list[str] = []
+    stops: list[bool] = []
+
+    class BlockingBackend(InProcessInterpreterBackend):
+        def run(self, *args: Any, **kwargs: Any) -> Any:
+            entered.set()
+            assert release.wait(5)
+            if execution_fails:
+                raise DaytonaAdapterError(message="execution failed", cause_type="InterpreterLifecycleError")
+            return super().run(*args, **kwargs)
+
+        def close(self) -> None:
+            closes.append("backend")
+            if cleanup_failure == "backend" and len(closes) == 1:
+                raise RuntimeError("backend cleanup failed")
+            super().close()
+
+    class Broker:
+        def stop(self, *, strict: bool) -> None:
+            assert strict
+            stops.append(strict)
+            if cleanup_failure == "broker" and len(stops) == 1:
+                raise RuntimeError("broker cleanup failed")
+
+    backend = BlockingBackend()
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    interpreter._http_broker = Broker()
+    outcomes: list[Any] = []
+
+    def execute() -> None:
+        try:
+            outcomes.append(interpreter.execute("_out = 'settled'"))
+        except BaseException as exc:
+            outcomes.append(exc)
+
+    worker = threading.Thread(target=execute)
+    worker.start()
+    try:
+        assert entered.wait(5)
+        for strict in (False, True, False):
+            with pytest.raises(DaytonaAdapterError, match="already executing") as exc:
+                interpreter.shutdown(strict_broker_cleanup=strict)
+            assert exc.value.cause_type == "InterpreterReuseError"
+        assert not backend.closed
+        assert not closes
+    finally:
+        release.set()
+        worker.join(timeout=5)
+
+    assert not worker.is_alive()
+    assert closes == ["backend"]
+    if cleanup_failure is not None:
+        assert isinstance(outcomes[0], RuntimeError)
+        assert str(outcomes[0]) == f"{cleanup_failure} cleanup failed"
+        assert backend.closed == (cleanup_failure == "broker")
+    elif execution_fails:
+        assert isinstance(outcomes[0], DaytonaAdapterError)
+        assert str(outcomes[0]) == "execution failed"
+        assert backend.closed
+    else:
+        assert outcomes == ["settled"]
+        assert backend.closed
+    interpreter.shutdown()
+    assert backend.closed
+    assert len(closes) == (2 if cleanup_failure == "backend" else 1)
+    assert len(stops) == (2 if cleanup_failure else 1)
+    with pytest.raises(DaytonaAdapterError, match="shut down"):
+        interpreter.execute("_out = 'must not run'")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_to_thread_execution_keeps_shutdown_request() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    closed = threading.Event()
+
+    class BlockingBackend(InProcessInterpreterBackend):
+        def run(self, *args: Any, **kwargs: Any) -> Any:
+            entered.set()
+            assert release.wait(5)
+            return super().run(*args, **kwargs)
+
+        def close(self) -> None:
+            super().close()
+            closed.set()
+
+    backend = BlockingBackend()
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    task = asyncio.create_task(asyncio.to_thread(interpreter.execute, "_out = 'settled'"))
+    try:
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        with pytest.raises(DaytonaAdapterError, match="already executing"):
+            interpreter.shutdown()
+        assert not backend.closed
+    finally:
+        release.set()
+    assert await asyncio.to_thread(closed.wait, 5)
+    assert backend.closed
     interpreter.shutdown()
 
 
