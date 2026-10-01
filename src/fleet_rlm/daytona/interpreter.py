@@ -525,6 +525,7 @@ class _SandboxProcessBackend:
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._context_binding: tuple[str, str] | None = None
         self._context_loaded = False
+        self._setup_installed = False
         self._context_accesses: list[str] = []
         self._closed = False
         self._broker: DaytonaHttpToolBroker | None = None
@@ -653,13 +654,7 @@ class _SandboxProcessBackend:
         if self._closed:
             raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
 
-        context_lines = ["if 'context' not in globals(): context = []"]
-        if self._run_scratch_path is not None:
-            context_lines.append(
-                "import os as _fleet_scratch_os; "
-                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
-                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
-            )
+        loader_source = ""
         setup_manifest_ids: tuple[str, ...] = ()
         if self._context_binding is not None and not self._context_loaded and is_host_setup_action(code):
             from fleet_rlm.rlm.program import context_loader_source
@@ -667,9 +662,7 @@ class _SandboxProcessBackend:
             mount_root, manifest_sha = self._context_binding
             # The loader exists only until DSPy's host setup action succeeds;
             # later model actions cannot re-run it.
-            context_lines.append(
-                context_loader_source(trusted_mount_root=mount_root, expected_manifest_sha256=manifest_sha)
-            )
+            loader_source = context_loader_source(trusted_mount_root=mount_root, expected_manifest_sha256=manifest_sha)
             setup_manifest_ids = _bound_manifest_ids(variables, manifest_sha)
         timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
         for name, value in (variables or {}).items():
@@ -677,24 +670,13 @@ class _SandboxProcessBackend:
                 validate_json_value(value, path=f"binding {name!r}")
             except TypeError as exc:
                 raise DaytonaAdapterError(message=str(exc), cause_type="InterpreterBindingError") from exc
-        if self._broker is None:
-            self._broker = DaytonaHttpToolBroker(
-                self._sandbox,
-                port=self._broker_port,
-                tool_settled=self._tool_settled,
-                tool_failed=self._tool_failed,
-            )
-            bind_bridge = getattr(self._broker, "bind_async_bridge", None)
-            if callable(bind_bridge):
-                bind_bridge(self._async_bridge)
-            self._broker.bind_tools(self._bound_tools)
-        context_code = "\n".join(context_lines)
-        setup = self._broker.setup_source(
-            f"{remote_submit_setup_code(self._output_fields, max_output_chars=self._max_final_output_chars)}"
-            f"\n\n{context_code}"
-        )
+        broker = self._ensure_broker()
+        if not self._setup_installed:
+            self._install_setup(broker, timeout)
+        if loader_source:
+            code = f"{loader_source}\n\n{code}"
         try:
-            result = self._broker.execute(f"{setup}\n\n{code}", variables or {}, timeout_s=timeout)
+            result = broker.execute(code, variables or {}, timeout_s=timeout)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -724,6 +706,50 @@ class _SandboxProcessBackend:
             error_category=str(result.get("error_category") or "") or None,
             context_accesses=self._drain_context_accesses(),
         )
+
+    def _ensure_broker(self) -> DaytonaHttpToolBroker:
+        if self._broker is None:
+            self._broker = DaytonaHttpToolBroker(
+                self._sandbox,
+                port=self._broker_port,
+                tool_settled=self._tool_settled,
+                tool_failed=self._tool_failed,
+            )
+            bind_bridge = getattr(self._broker, "bind_async_bridge", None)
+            if callable(bind_bridge):
+                bind_bridge(self._async_bridge)
+            self._broker.bind_tools(self._bound_tools)
+        return self._broker
+
+    def _install_setup(self, broker: DaytonaHttpToolBroker, timeout: int) -> None:
+        """Install the sealed invocation's tools, SUBMIT and defaults once.
+
+        Bindings cannot change after the broker starts, so later actions carry
+        only the model's code, and their error positions refer to it.
+        """
+        lines = [
+            remote_submit_setup_code(self._output_fields, max_output_chars=self._max_final_output_chars),
+            "if 'context' not in globals(): context = []",
+        ]
+        if self._run_scratch_path is not None:
+            lines.append(
+                "import os as _fleet_scratch_os; "
+                f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+            )
+        try:
+            result = broker.execute(broker.setup_source("\n\n".join(lines)), {}, timeout_s=timeout)
+        except Exception as exc:
+            if isinstance(exc, DaytonaAdapterError):
+                raise
+            raise map_provider_error(exc) from exc
+        error = str(result.get("error") or "")
+        if error:
+            raise DaytonaAdapterError(
+                message=sanitize_provider_message(f"Sandbox setup failed: {error}"),
+                cause_type="HostSetupError",
+            )
+        self._setup_installed = True
 
     def _drain_context_accesses(self) -> tuple[str, ...]:
         values = tuple(self._context_accesses)
