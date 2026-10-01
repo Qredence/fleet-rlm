@@ -1,15 +1,32 @@
 # Fleet-RLM Daytona simplification — archived implementation bundles
 
-## Archive status in this checkout
+## Current status
+
+[`IMPLEMENTATION-PLAN.md`](IMPLEMENTATION-PLAN.md) is the one active task
+specification: the 2026-10-01 consolidated assessment and completion plan.
+[`ARCHITECTURE.md`](../ARCHITECTURE.md) remains the lasting ownership reference, and
+[Daytona cleanup acceptance](../docs/testing/daytona-cleanup-acceptance.md) is the
+evidence log. Everything else in this directory is a historical archive.
+
+| Historical work item | Current implementation | Current evidence |
+| --- | --- | --- |
+| PR 1 | Merged as #576; direct typed dispatch now supersedes its temporary signature compatibility | Current source and retained no-replay tests |
+| PR 2 | Merged as #577, including the deferred-shutdown correction | Current source and lifecycle contracts |
+| PR 3 | Merged as #578; internal backend and port migration complete | Narrow live canaries reported for that PR |
+| Cleanup follow-up | Merged as #579 | Local/CI evidence; broader live acceptance in the acceptance record |
+| Follow-ups A and B of the active plan | Branch `fix/daytona-attachment-parity-and-broker` | Acceptance record, 2026-10-01 follow-up section |
+
+## Historical archive
 
 These files preserve the 2026-09-30 proposals against commit
 `c3f3d536242c7663cfeecdfbf63670b51630e9aa`. Their implementation status,
 source findings, and patch instructions refer to that historical baseline;
 they do not describe the current checkout. Do not apply these patches to the
-current branch. The cleanup fix now being delivered is documented in
-[Daytona cleanup acceptance](../docs/testing/daytona-cleanup-acceptance.md).
+current branch.
 
-The unsuffixed Markdown and patch files are the v2 bundle's extracted documents.
+The unsuffixed Markdown and patch files are the v2 bundle's extracted documents,
+except `IMPLEMENTATION-PLAN.md`. The active plan replaced it, and the original is
+still in the v2 ZIP and Git history.
 Loose Markdown has normalized trailing whitespace; the ZIPs preserve original bytes.
 The `(1)` PRD and patch preserve the original bundle version. Both ZIPs are
 retained as original inputs. The helper scripts, manifests, and validation
@@ -23,7 +40,10 @@ unzip fleet-daytona-implementation-bundle-v2.zip -d /tmp/fleet-daytona-bundle-v2
 cd /tmp/fleet-daytona-bundle-v2/fleet-daytona-self-contained
 ```
 
+## Historical v2 instructions
+
 The following sections retain the v2 bundle instructions for its pinned baseline.
+Their status labels, checklists, and patch commands are not current work items.
 
 This bundle is designed to be reviewed and used **without any earlier Plan A/Plan B/Plan C/Plan D documents**.
 
