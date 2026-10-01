@@ -94,6 +94,11 @@ def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: boo
     Inspect and bind before invoking so a ``TypeError`` raised by shutdown's
     body is preserved as a cleanup failure rather than mistaken for a legacy
     signature.
+
+    Return without action if shutdown is absent. Forward ``strict_broker_cleanup``
+    when supported; if the signature is unavailable, try that keyword once.
+    Shutdown errors propagate. A non-callable shutdown or a signature supporting
+    neither the keyword nor a no-argument call raises ``TypeError``.
     """
     missing = object()
     shutdown = getattr(interpreter, "shutdown", missing)
@@ -1265,6 +1270,13 @@ class InterpreterLease:
         return self._state is LeaseState.FAILED
 
     def release(self) -> None:
+        """Close the interpreter, requesting strict broker cleanup when supported.
+
+        Closed leases are unchanged. Shutdown failures propagate and mark the
+        lease failed, allowing a later call to retry. On success, mark it closed
+        and invoke the owner callback unless deferred; callback errors are
+        suppressed. This method does not retire the underlying Sandbox.
+        """
         with self._release_lock:
             if self.closed:
                 return
@@ -1435,6 +1447,12 @@ class SandboxLease:
         )
 
     def _shutdown_interpreter(self) -> InterpreterCloseOutcome:
+        """Return the interpreter cleanup outcome under this lease's policy.
+
+        Report an absent interpreter or disabled shutdown without calling it.
+        Shutdown exceptions, including cancellation, become failed outcomes with
+        sanitized error text; successful shutdown produces a clean outcome.
+        """
         interpreter = self._interpreter
         policy = self._policy
         has_broker = bool(getattr(interpreter, "broker", None)) if interpreter is not None else False
@@ -5167,6 +5185,20 @@ class DaytonaRuntime:
             raise mapped from exc
 
     async def release(self, lease: InterpreterLease) -> None:
+        """Release an interpreter lease and perform required Sandbox containment.
+
+        Closed leases with retired provider resources are unchanged. Leases
+        awaiting containment, or requiring Sandbox deletion, complete that
+        cleanup before returning. Otherwise, shut down the interpreter; failures
+        propagate, with Daytona SDK errors mapped to Fleet errors. When ownership
+        IDs are complete, retain failed cleanup for later release or ``aclose``.
+        Cancellation of the caller does not cancel an active interpreter shutdown.
+
+        Containment and finalization errors propagate; a local shutdown failure
+        encountered during containment is suppressed once containment succeeds.
+        Missing ownership IDs for required Sandbox deletion raise ``RuntimeError``;
+        malformed ownership UUIDs raise ``ValueError`` when containment is arranged.
+        """
         if lease.closed and lease._provider_retired:
             # Confirmed provider retirement is terminal. In particular, do
             # not reuse a failed local release task after quarantine has

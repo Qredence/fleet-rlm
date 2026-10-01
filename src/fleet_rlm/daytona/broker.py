@@ -280,6 +280,12 @@ class DaytonaHttpToolBroker:
         return response.json()
 
     def stop(self, *, strict: bool = False) -> None:
+        """Disable execution and attempt to close the client and delete its session.
+
+        Retain handles whose cleanup fails so a later call can retry them.
+        Ordinary cleanup exceptions are suppressed unless ``strict`` is true,
+        in which case the first is re-raised after both cleanup attempts.
+        """
         self._stopped = True
         cleanup_error: Exception | None = None
         client = self._client
