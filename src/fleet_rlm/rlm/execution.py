@@ -1546,6 +1546,9 @@ class RLMRunner:
             supports_invocation_bindings = bool(
                 getattr(state_context.execution.interpreter, "invocation_scoped_bindings", False)
             )
+            # Run-local record of factory-created invocations; their context
+            # accesses are drained after settlement, never via the template.
+            created_invocations: list[Any] = []
             if callable(fresh_interpreter) and supports_invocation_bindings:
                 # The retained Daytona adapter is a resource template only.
                 # Capture every Run-local binding in DSPy's zero-argument
@@ -1556,7 +1559,7 @@ class RLMRunner:
                 )
 
                 def invocation_factory() -> Any:
-                    return fresh_interpreter(
+                    invocation = fresh_interpreter(
                         observer=observations.publish,
                         observation_max_chars=state_context.execution.options.max_output_chars,
                         turn_budget=getattr(state_context.execution.models, "budget", None),
@@ -1573,6 +1576,8 @@ class RLMRunner:
                         context_capsule=state_context.session.attachment_context,
                         output_contract=output_contract,
                     )
+                    created_invocations.append(invocation)
+                    return invocation
             else:
                 interpreter = state_context.execution.interpreter
 
@@ -1643,7 +1648,7 @@ class RLMRunner:
                 history=state_context.session.history,
                 signature=spec.signature,
             )
-            trace = ExecutionTraceAssembler(recursive_executor, self._adapter_factory)
+            trace = ExecutionTraceAssembler(recursive_executor, self._adapter_factory, created_invocations)
             worker = start_rlm_worker(
                 rlm=rlm,
                 context=state_context,

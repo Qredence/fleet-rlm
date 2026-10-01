@@ -1374,6 +1374,9 @@ class ExecutionTraceAssembler:
 
     recursive_executor: RecursiveRLMExecutor | None
     _adapter_factory: Callable[[Any], Any] | None = None
+    # Factory-created invocations for this Run; empty when the Run executes
+    # the context's interpreter directly.
+    _invocations: list[Any] = field(default_factory=list)
 
     async def execute(
         self,
@@ -1471,13 +1474,17 @@ class ExecutionTraceAssembler:
                 lms=(context.execution.models.root_lm, context.execution.models.sub_lm),
             )
 
-    @staticmethod
-    def _record_attachment_accesses(context: RLMExecutionContext) -> None:
-        """Record interpreter attachment accesses in the execution capabilities when supported."""
-        drain_accesses = getattr(context.execution.interpreter, "drain_context_accesses", None)
+    def _record_attachment_accesses(self, context: RLMExecutionContext) -> None:
+        """Record the Run's interpreter attachment accesses in the execution capabilities when supported."""
         record_accesses = getattr(context.capabilities, "record_attachment_accesses", None)
-        if callable(drain_accesses) and callable(record_accesses):
-            record_accesses(tuple(drain_accesses()))
+        if not callable(record_accesses):
+            return
+        accesses: list[str] = []
+        for interpreter in self._invocations or (context.execution.interpreter,):
+            drain_accesses = getattr(interpreter, "drain_context_accesses", None)
+            if callable(drain_accesses):
+                accesses.extend(drain_accesses())
+        record_accesses(tuple(accesses))
 
 
 # ---------------------------------------------------------------------------

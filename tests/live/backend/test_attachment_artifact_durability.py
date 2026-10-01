@@ -40,6 +40,7 @@ from fleet_rlm.daytona.runtime import (
     sandbox_spec_from_settings,
 )
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
 from tests.live.backend._evidence import candidate_identity, write_receipt
@@ -86,6 +87,7 @@ class _Source:
 pytestmark = [pytest.mark.live_daytona]
 
 ATTACHMENT_BYTES = b"b5-staged-attachment-payload"
+BINARY_ATTACHMENT_BYTES = b"\xff\xfeb5\x00binary"
 ARTIFACT_TEXT = "b5-durable-artifact-body"
 
 
@@ -187,13 +189,17 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             access,
             AttachmentUpload("b5.txt", "text/plain", _Source(ATTACHMENT_BYTES)),
         )
+        binary_ref = await attachment_module.upload(
+            access,
+            AttachmentUpload("b5.bin", "application/octet-stream", _Source(BINARY_ATTACHMENT_BYTES)),
+        )
         prepared = await attachment_module.prepare_run(
             access,
-            (ref.id,),
+            (ref.id, binary_ref.id),
             AttachmentRun(session_id, run_id),
             _LiveSink(volume_fs),
         )
-        staged = prepared.staged[0]
+        staged = next(item for item in prepared.staged if item.attachment_id == ref.id)
 
         await asyncio.to_thread(lease.interpreter.start)
         read_staged = await asyncio.to_thread(
@@ -203,6 +209,48 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             "print(p.read_text(encoding='utf-8') if p.is_file() else 'MISSING')\n",
         )
         assert ATTACHMENT_BYTES.decode() in read_staged
+
+        # The prepared-context loader the RLM setup action runs in production.
+        staged_by_id = {item.attachment_id: item for item in prepared.staged}
+        capsule = AttachmentContextCapsule(
+            tuple(
+                AttachmentContextEntry(
+                    attachment_id=item.id,
+                    filename=item.filename,
+                    content_type=item.content_type,
+                    byte_size=item.byte_size,
+                    checksum_sha256=item.checksum_sha256,
+                    sandbox_path=staged_by_id[item.id].sandbox_path,
+                )
+                for item in (ref, binary_ref)
+            ),
+            mount_root=lease.mount_path,
+        )
+        invocation = lease.interpreter.new_invocation(context_capsule=capsule)
+        try:
+            await asyncio.to_thread(
+                invocation.execute,
+                capsule.sandbox_assignment("attachments", "_raw_attachments"),
+                {"_raw_attachments": capsule.to_sandbox().decode("utf-8")},
+            )
+            loaded = await asyncio.to_thread(
+                invocation.execute,
+                "print([(a['id'], a['filename'], a['encoding'], a['data'] if a['encoding'] == 'utf-8' "
+                "else a['data'].hex()) for a in attachments])",
+            )
+            context_accesses = invocation.drain_context_accesses()
+        finally:
+            await asyncio.to_thread(invocation.shutdown)
+        assert (
+            str(
+                [
+                    (str(ref.id), "b5.txt", "utf-8", ATTACHMENT_BYTES.decode()),
+                    (str(binary_ref.id), "b5.bin", "bytes", BINARY_ATTACHMENT_BYTES.hex()),
+                ]
+            )
+            in loaded
+        )
+        assert context_accesses == (str(ref.id), str(binary_ref.id))
 
         art = await asyncio.to_thread(
             artifact_store.create,
@@ -285,6 +333,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             "volume_subpath": f"workspaces/{workspace_id}",
             "staged_path_prefix": "/home/daytona/fleet/sessions/",
             "staged_readable": True,
+            "prepared_context_parity": True,
+            "context_accesses": list(context_accesses),
             "artifact_id": str(art.id),
             "artifact_checksum": art.checksum_sha256,
             "artifact_survived_replace": True,
@@ -301,6 +351,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             "candidate": candidate_identity(),
             "assertions": {
                 "attachment_readable": True,
+                "prepared_context_text_and_binary_loaded": True,
+                "prepared_context_accesses_reported": True,
                 "artifact_survived_replacement": True,
                 "shared_volume_checksum_verified": True,
             },

@@ -4,11 +4,13 @@
 
 from __future__ import annotations
 
-import hashlib
+import functools
+import inspect
 import json
 import logging
 import os
 import re
+import textwrap
 from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -800,7 +802,13 @@ def _materialize_context_manifest(
     *,
     trusted_mount_root: str,
     expected_manifest_sha256: str,
-) -> tuple[list[dict[str, Any]], tuple[str, ...]]:
+) -> tuple[list[dict[str, object]], tuple[str, ...]]:
+    # Self-contained by design: context_loader_source() embeds this exact
+    # function into the live Sandbox, so it may use only builtins and stdlib.
+    import hashlib
+    import json
+    import os
+
     try:
         raw = raw_manifest.encode("utf-8") if isinstance(raw_manifest, str) else bytes(raw_manifest)
         if hashlib.sha256(raw).hexdigest() != expected_manifest_sha256:
@@ -813,7 +821,7 @@ def _materialize_context_manifest(
     except Exception as exc:
         raise ValueError("context manifest is invalid") from exc
 
-    values: list[dict[str, Any]] = []
+    values: list[dict[str, object]] = []
     accesses: list[str] = []
     for entry in entries:
         try:
@@ -849,6 +857,41 @@ def _materialize_context_manifest(
         except Exception as exc:
             raise ValueError("prepared context failed integrity verification") from exc
     return values, tuple(accesses)
+
+
+def _context_convenience(values: list[dict[str, object]]) -> object:
+    """Expose one text attachment directly as ``context``; otherwise an empty list."""
+    if len(values) == 1 and values[0]["encoding"] == "utf-8":
+        return values[0]["data"]
+    return []
+
+
+@functools.cache
+def _context_helper_source() -> str:
+    return "\n".join(inspect.getsource(fn) for fn in (_materialize_context_manifest, _context_convenience))
+
+
+def context_loader_source(*, trusted_mount_root: str, expected_manifest_sha256: str) -> str:
+    """Return Sandbox source defining the one-shot ``_fleet_load_context_manifest`` loader.
+
+    The loader embeds the same materializer the in-process backend calls, bound
+    to host-trusted values, and assigns ``context`` like the in-process backend.
+    Helpers are nested so only the loader name enters the namespace, and
+    :meth:`AttachmentContextCapsule.sandbox_assignment` deletes it after use.
+    """
+    helpers = textwrap.indent(_context_helper_source(), "    ")
+    return (
+        "def _fleet_load_context_manifest(raw_manifest):\n"
+        f"{helpers}\n"
+        "    global context\n"
+        "    values, _accesses = _materialize_context_manifest(\n"
+        "        raw_manifest,\n"
+        f"        trusted_mount_root={str(trusted_mount_root)!r},\n"
+        f"        expected_manifest_sha256={str(expected_manifest_sha256)!r},\n"
+        "    )\n"
+        "    context = _context_convenience(values)\n"
+        "    return values\n"
+    )
 
 
 @dataclass(frozen=True, slots=True)

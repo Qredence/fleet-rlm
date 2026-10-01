@@ -309,8 +309,8 @@ class InProcessInterpreterBackend:
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
 
-        def load_context(raw_manifest: bytes | str) -> list[dict[str, Any]]:
-            from fleet_rlm.rlm.program import _materialize_context_manifest
+        def load_context(raw_manifest: bytes | str) -> list[dict[str, object]]:
+            from fleet_rlm.rlm.program import _context_convenience, _materialize_context_manifest
 
             binding = self._context_binding
             if binding is None:
@@ -321,10 +321,7 @@ class InProcessInterpreterBackend:
                 expected_manifest_sha256=binding[1],
             )
             self._context_accesses.extend(accesses)
-            if len(values) == 1 and values[0]["encoding"] == "utf-8":
-                self.namespace["context"] = values[0]["data"]
-            else:
-                self.namespace["context"] = []
+            self.namespace["context"] = _context_convenience(values)
             return values
 
         self.namespace["_fleet_load_context_manifest"] = load_context
@@ -482,6 +479,24 @@ def is_host_setup_action(code: str) -> bool:
     return "_fleet_load_context_manifest" in code
 
 
+def _is_context_verification_failure(feedback: str) -> bool:
+    # Both prepared-context loader failures; see rlm.program._materialize_context_manifest.
+    return "integrity verification" in feedback or "context manifest is invalid" in feedback
+
+
+def _bound_manifest_ids(variables: Mapping[str, object] | None, manifest_sha256: str) -> tuple[str, ...]:
+    """Attachment IDs of the host-bound manifest passed to a setup action, if any."""
+    for value in (variables or {}).values():
+        if not isinstance(value, str | bytes):
+            continue
+        raw = value.encode("utf-8") if isinstance(value, str) else value
+        if hashlib_sha256(raw) != manifest_sha256:
+            continue
+        entries = json.loads(raw)["entries"]
+        return tuple(str(entry["attachment_id"]) for entry in entries)
+    return ()
+
+
 class _SandboxProcessBackend:
     """Own the live Sandbox's invocation broker, configuration and shutdown."""
 
@@ -509,6 +524,7 @@ class _SandboxProcessBackend:
         self._max_final_output_chars: int | None = None
         self._bound_tools: dict[str, Callable[..., Any]] = {}
         self._context_binding: tuple[str, str] | None = None
+        self._context_loaded = False
         self._context_accesses: list[str] = []
         self._closed = False
         self._broker: DaytonaHttpToolBroker | None = None
@@ -647,40 +663,17 @@ class _SandboxProcessBackend:
                 f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
                 f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
             )
-        if self._context_binding is not None:
+        setup_manifest_ids: tuple[str, ...] = ()
+        if self._context_binding is not None and not self._context_loaded and is_host_setup_action(code):
+            from fleet_rlm.rlm.program import context_loader_source
+
             mount_root, manifest_sha = self._context_binding
-            context_lines.append(f"""
-import hashlib as _hashlib
-import json as _json_ctx
-import os as _os_ctx
-
-_CONTEXT_MOUNT_ROOT = {mount_root!r}
-_CONTEXT_MANIFEST_SHA256 = {manifest_sha!r}
-
-def _fleet_load_context_manifest(raw_manifest):
-    if isinstance(raw_manifest, str):
-        raw_manifest = raw_manifest.encode("utf-8")
-    if _hashlib.sha256(bytes(raw_manifest)).hexdigest() != _CONTEXT_MANIFEST_SHA256:
-        raise ValueError("manifest checksum mismatch")
-    manifest = _json_ctx.loads(bytes(raw_manifest).decode("utf-8"))
-    mount_root = _os_ctx.path.realpath(str(_CONTEXT_MOUNT_ROOT))
-    values = []
-    for entry in manifest.get("entries", []):
-        path = _os_ctx.path.realpath(str(entry["sandbox_path"]))
-        expected_size = int(entry["byte_size"])
-        expected_sha = str(entry["checksum_sha256"])
-        with open(path, "rb") as f:
-            data = f.read(expected_size + 1)
-        if len(data) != expected_size or _hashlib.sha256(data).hexdigest() != expected_sha:
-            raise ValueError("attachment checksum mismatch")
-        enc = entry.get("encoding", "utf-8")
-        att_id = entry.get("attachment_id")
-        if enc == "utf-8":
-            values.append({{"data": data.decode("utf-8"), "encoding": "utf-8", "attachment_id": att_id}})
-        else:
-            values.append({{"data": data, "encoding": "bytes", "attachment_id": att_id}})
-    return values
-""")
+            # The loader exists only until DSPy's host setup action succeeds;
+            # later model actions cannot re-run it.
+            context_lines.append(
+                context_loader_source(trusted_mount_root=mount_root, expected_manifest_sha256=manifest_sha)
+            )
+            setup_manifest_ids = _bound_manifest_ids(variables, manifest_sha)
         timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
         for name, value in (variables or {}).items():
             try:
@@ -722,6 +715,10 @@ def _fleet_load_context_manifest(raw_manifest):
                 f"[call_id={str(failure.get('call_id', ''))[:128]}]: "
                 f"{str(failure.get('message', 'tool call failed'))[:500]}"
             )
+        if error is None and setup_manifest_ids:
+            # A loader return means every bound entry passed verification.
+            self._context_loaded = True
+            self._context_accesses.extend(setup_manifest_ids)
         return BackendExecutionResult(
             stdout=stdout,
             stderr=str(result.get("stderr") or ""),
@@ -1176,7 +1173,7 @@ class DaytonaCodeInterpreter:
                         raise DaytonaAdapterError(
                             message=result.feedback,
                             cause_type="ContextVerificationError"
-                            if "integrity" in result.feedback
+                            if _is_context_verification_failure(result.feedback)
                             else "HostSetupError",
                         )
                     repair_np = self._reject_repeated_no_progress(normalized_code, result.feedback)

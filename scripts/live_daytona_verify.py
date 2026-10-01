@@ -55,7 +55,13 @@ _NATIVE_ASSERTIONS = frozenset(
     }
 )
 _DURABILITY_ASSERTIONS = frozenset(
-    {"attachment_readable", "artifact_survived_replacement", "shared_volume_checksum_verified"}
+    {
+        "attachment_readable",
+        "prepared_context_text_and_binary_loaded",
+        "prepared_context_accesses_reported",
+        "artifact_survived_replacement",
+        "shared_volume_checksum_verified",
+    }
 )
 
 EXIT_PRECONDITION = 2
