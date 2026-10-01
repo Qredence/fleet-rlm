@@ -8,10 +8,11 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
+from uuid import uuid4
 
 
 class ReleaseTriggerError(RuntimeError):
@@ -112,21 +113,20 @@ def _find_run(
     api_root: str,
     headers: dict[str, str],
     ref: str,
-    started_at: float,
+    expected_sha: str,
+    display_title: str,
     deadline: float,
 ) -> dict[str, Any]:
-    url = f"{api_root}/actions/workflows/release.yml/runs?event=workflow_dispatch&branch={ref}&per_page=20"
+    query = urlencode({"event": "workflow_dispatch", "branch": ref, "per_page": 100})
+    url = f"{api_root}/actions/workflows/release.yml/runs?{query}"
     while time.time() < deadline:
         _, payload = _request_json(url, headers=headers)
-        candidates = []
         for run in payload.get("workflow_runs", []):
-            if not isinstance(run, dict) or "created_at" not in run:
+            if not isinstance(run, dict) or run.get("display_title") != display_title:
                 continue
-            created_at = datetime.fromisoformat(str(run["created_at"]).replace("Z", "+00:00"))
-            if created_at.timestamp() >= started_at - 10:
-                candidates.append(run)
-        if candidates:
-            return max(candidates, key=lambda run: int(run["id"]))
+            if run.get("head_sha") != expected_sha:
+                raise ReleaseTriggerError("dispatched GitHub release resolved to a different source commit")
+            return run
         time.sleep(10)
     raise ReleaseTriggerError("timed out waiting for the dispatched GitHub release run")
 
@@ -151,9 +151,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True, help="PyPI version accepted by release.yml")
     parser.add_argument("--repository", help="GitHub owner/name; defaults to CircleCI metadata")
     parser.add_argument("--ref", default="main", help="Git ref used for workflow_dispatch")
+    parser.add_argument("--expected-sha", help="Full commit SHA validated by CircleCI")
     args = parser.parse_args(argv)
 
     try:
+        if args.expected_sha is not None and re.fullmatch(r"[0-9a-f]{40}", args.expected_sha) is None:
+            raise ReleaseTriggerError("expected SHA must be a full lowercase 40-character commit SHA")
         repository = _repository(args.repository)
         api_root = f"https://api.github.com/repos/{repository}"
         existing_release_url = _existing_release_url(repository, args.version)
@@ -172,12 +175,28 @@ def main(argv: list[str] | None = None) -> int:
             "User-Agent": "fleet-rlm-circleci-pypi-deploy",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        ref_status, commit = _request_json(f"{api_root}/commits/{quote(args.ref, safe='')}", headers=headers)
+        resolved_sha = commit.get("sha")
+        if (
+            ref_status != 200
+            or not isinstance(resolved_sha, str)
+            or re.fullmatch(r"[0-9a-f]{40}", resolved_sha) is None
+        ):
+            raise ReleaseTriggerError("could not resolve the release ref to a full commit SHA")
+        expected_sha = args.expected_sha or resolved_sha
+        if resolved_sha != expected_sha:
+            raise ReleaseTriggerError("release ref does not match the source commit validated by CircleCI")
+        dispatch_id = uuid4().hex
+        display_title = f"Release {args.version} [{dispatch_id}]"
         started_at = time.time()
         status, _ = _request_json(
             f"{api_root}/actions/workflows/release.yml/dispatches",
             headers=headers,
             method="POST",
-            payload={"ref": args.ref, "inputs": {"version": args.version}},
+            payload={
+                "ref": args.ref,
+                "inputs": {"version": args.version, "expected_sha": expected_sha, "dispatch_id": dispatch_id},
+            },
         )
         if status not in {200, 204}:
             raise ReleaseTriggerError(f"GitHub release dispatch returned HTTP {status}")
@@ -186,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
             api_root=api_root,
             headers=headers,
             ref=args.ref,
-            started_at=started_at,
+            expected_sha=expected_sha,
+            display_title=display_title,
             deadline=time.time() + 300,
         )
         print(f"GitHub release run: {run['html_url']}", flush=True)
