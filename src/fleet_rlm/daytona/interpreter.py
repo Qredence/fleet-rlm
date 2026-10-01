@@ -434,7 +434,8 @@ class InterpreterBackend(Protocol):
         variables: dict[str, object] | None = None,
         *,
         on_stdout: OutputCallback | None = None,
-    ) -> BackendExecutionResult: ...
+    ) -> BackendExecutionResult:
+        """Execute one action and return its structured result, forwarding stdout when requested."""
 
     def close(self) -> None: ...
 
