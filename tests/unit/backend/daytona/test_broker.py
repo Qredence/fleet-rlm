@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import httpx
@@ -304,6 +305,58 @@ def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> No
     from fleet_rlm.daytona.broker import _SERVER_SOURCE
 
     assert "sys.set_int_max_str_digits(200_000)" in _SERVER_SOURCE
+
+
+@pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
+def test_stop_retains_session_after_nonstrict_delete_failure_for_retry(error_type: type[Exception]) -> None:
+    class Process:
+        calls = 0
+
+        def delete_session(self, session: str) -> None:
+            assert session == "fleet-tool-broker-test"
+            self.calls += 1
+            if self.calls == 1:
+                raise error_type("delete failed")
+
+    process = Process()
+    broker = DaytonaHttpToolBroker(SimpleNamespace(process=process), port=1)
+    client = MagicMock()
+    broker._client = client
+    broker._session = "fleet-tool-broker-test"
+
+    broker.stop()
+
+    assert broker._stopped is True
+    assert broker._client is None
+    assert broker._session == "fleet-tool-broker-test"
+    client.close.assert_called_once_with()
+
+    broker.stop()
+
+    assert broker._session is None
+    assert process.calls == 2
+    client.close.assert_called_once_with()
+
+
+def test_stop_retains_http_client_when_close_fails_and_surfaces_strict_error() -> None:
+    class Process:
+        def delete_session(self, _session: str) -> None:
+            return None
+
+    broker = DaytonaHttpToolBroker(SimpleNamespace(process=Process()), port=1)
+    client = MagicMock()
+    client.close.side_effect = [RuntimeError("close failed"), None]
+    broker._client = client
+    broker._session = "fleet-tool-broker-test"
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        broker.stop(strict=True)
+
+    assert broker._client is client
+    assert broker._session is None
+    broker.stop(strict=True)
+    assert broker._client is None
+    assert client.close.call_count == 2
 
 
 def test_poll_settles_required_mutation_only_after_remote_acknowledgement() -> None:

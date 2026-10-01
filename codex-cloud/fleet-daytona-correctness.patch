@@ -1,0 +1,210 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Fleet-RLM implementation review <noreply@example.invalid>
+Date: Wed, 30 Sep 2026 20:56:00 +0200
+Subject: [PATCH] fix(daytona): prevent backend replay and classify recoverable errors
+
+Base-Commit: c3f3d536242c7663cfeecdfbf63670b51630e9aa
+Repository: Qredence/fleet-rlm
+Reviewed-Fleet-Version: 0.7.10
+Reviewed-DSPy-Version: 3.4.0
+Reviewed-Daytona-Version: 0.218.0
+
+Purpose
+-------
+This is PR 1 of the standalone Daytona interpreter simplification plan in
+PRD-and-implementation-plan.md. It fixes two concrete adapter issues without
+changing dependencies, public API schemas, Sandbox ownership, the broker
+protocol, or the native DSPy RLM loop.
+
+1. `_run_backend()` currently catches TypeError around the backend call and
+   retries the same action without `on_stdout`. A TypeError raised after the
+   backend has started, including from the stdout callback, can therefore
+   replay side effects. This patch determines the supported call shape before
+   execution, so one logical action is dispatched at most once locally.
+
+2. `_public_output()` checks CodeInterpreterError before its subclass
+   CodeExecutionError. This makes the recoverable public classification branch
+   unreachable. The checks are reordered.
+
+Scope
+-----
+Changed repository files: 2
+New repository files: 0
+New dependencies: 0
+New configuration fields: 0
+
+The signature-inspection compatibility branch is deliberately temporary. PR 3
+standardizes every first-party InterpreterBackend.run() implementation on the
+`on_stdout` keyword and BackendExecutionResult, after which this branch should
+be deleted in favor of one direct typed call.
+
+Regression cases added to the existing adapter test module
+-----------------------------------------------------------
+- backend-origin TypeError does not replay execution;
+- stdout-callback TypeError does not replay execution;
+- legacy, streaming, and **kwargs backend call shapes are selected before run;
+- incompatible backend signature is rejected before execution;
+- CodeExecutionError is projected as "Execution error";
+- CodeInterpreterError is projected as "Execution failed".
+
+Validation status at patch generation
+-------------------------------------
+A method-level isolated harness using the exact changed method bodies produced:
+
+  baseline: 5 passed, 3 failed
+  patched:  8 passed, 0 failed
+
+A fragment-level unified-diff application check passed. A full Fleet checkout,
+pinned dependency suite, Ruff/type checks, and live Daytona lifecycle tests were
+not available in that generation environment and must be run before merge.
+
+Apply and verify
+----------------
+  git switch -c fix/daytona-dispatch c3f3d536242c7663cfeecdfbf63670b51630e9aa
+  git apply --check /path/to/fleet-daytona-correctness.patch
+  git apply /path/to/fleet-daytona-correctness.patch
+  uv sync --frozen --dev
+  uv run pytest tests/unit/backend/daytona/test_daytona_adapter.py
+  uv run ruff check src/fleet_rlm/daytona/interpreter.py tests/unit/backend/daytona/test_daytona_adapter.py
+  uv run ruff format --check src/fleet_rlm/daytona/interpreter.py tests/unit/backend/daytona/test_daytona_adapter.py
+  uv run ty check
+  git diff --check
+
+The complete architecture decision, PR 2/3 plan, affected code tree, acceptance
+criteria, evidence basis, and rollout rules are included in the same bundle.
+
+---
+diff --git a/src/fleet_rlm/daytona/interpreter.py b/src/fleet_rlm/daytona/interpreter.py
+--- a/src/fleet_rlm/daytona/interpreter.py
++++ b/src/fleet_rlm/daytona/interpreter.py
+@@ -1061,10 +1061,10 @@
+     def _public_output(self, result: Any) -> str:
+         if is_final_output(result):
+             return PUBLIC_FINAL_OUTPUT_LABEL
++        if isinstance(result, CodeExecutionError):
++            return "Execution error"
+         if isinstance(result, CodeInterpreterError):
+             return "Execution failed"
+-        if isinstance(result, CodeExecutionError):
+-            return "Execution error"
+         return truncate_public_text(str(result or ""), max_len=self._observation_max_chars)
+ 
+     def _run_backend(
+@@ -1080,10 +1080,15 @@
+                 message="interpreter backend is not configured", cause_type="InterpreterConfigurationError"
+             )
+         run = cast(Callable[..., str | BackendExecutionResult], backend.run)
++        # Select the legacy call shape before executing anything. A TypeError
++        # from backend code or an output callback must never replay the action.
++        signature = inspect.signature(run)
+         try:
+-            return run(code, variables, on_stdout=on_stdout)  # type: ignore[call-arg]
++            signature.bind(code, variables, on_stdout=on_stdout)
+         except TypeError:
++            signature.bind(code, variables)
+             return run(code, variables)
++        return run(code, variables, on_stdout=on_stdout)
+ 
+     def _execution_tools(self) -> dict[str, Callable[..., Any]]:
+         tools = dict(self._tools)
+diff --git a/tests/unit/backend/daytona/test_daytona_adapter.py b/tests/unit/backend/daytona/test_daytona_adapter.py
+--- a/tests/unit/backend/daytona/test_daytona_adapter.py
++++ b/tests/unit/backend/daytona/test_daytona_adapter.py
+@@ -31,4 +31,97 @@
+         self.closed = True
++
++
++@pytest.mark.parametrize("failure_source", ["backend", "stdout"])
++def test_backend_type_error_never_replays_execution(failure_source: str) -> None:
++    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
++
++    failure = TypeError("failure after the action already started")
++    calls: list[str] = []
++
++    class StreamingBackend(_FakeBackend):
++        def run(self, code, variables=None, *, on_stdout=None):
++            assert code == "action"
++            assert variables == {"value": 1}
++            calls.append(code)
++            if failure_source == "backend":
++                raise failure
++            if on_stdout is not None:
++                on_stdout("partial output")
++            return "done"
++
++    def output(value: str) -> None:
++        assert value == "partial output"
++        raise failure
++
++    interpreter = DaytonaCodeInterpreter(backend=StreamingBackend())
++    with pytest.raises(TypeError) as raised:
++        interpreter._run_backend("action", {"value": 1}, on_stdout=output)
++    assert raised.value is failure
++    assert calls == ["action"]
++
++
++@pytest.mark.parametrize("shape", ["legacy", "streaming", "variadic"])
++def test_backend_dispatch_selects_call_shape_before_execution(shape: str) -> None:
++    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
++
++    calls: list[tuple[str, object]] = []
++    chunks: list[str] = []
++
++    class LegacyBackend(_FakeBackend):
++        def run(self, code, variables=None):
++            calls.append((code, variables))
++            return "done"
++
++    class StreamingBackend(_FakeBackend):
++        def run(self, code, variables=None, *, on_stdout=None):
++            calls.append((code, variables))
++            assert on_stdout is not None
++            on_stdout("chunk")
++            return "done"
++
++    class VariadicBackend(_FakeBackend):
++        def run(self, code, variables=None, **kwargs):
++            calls.append((code, variables))
++            kwargs["on_stdout"]("chunk")
++            return "done"
++
++    backends = {"legacy": LegacyBackend, "streaming": StreamingBackend, "variadic": VariadicBackend}
++    interpreter = DaytonaCodeInterpreter(backend=backends[shape]())
++    result = interpreter._run_backend("action", {"value": 1}, on_stdout=chunks.append)
++    assert result == "done"
++    assert calls == [("action", {"value": 1})]
++    assert chunks == ([] if shape == "legacy" else ["chunk"])
++
++
++def test_backend_dispatch_rejects_incompatible_shape_without_execution() -> None:
++    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
++
++    calls: list[str] = []
++
++    class IncompatibleBackend(_FakeBackend):
++        def run(self, code, variables, required, *, on_stdout=None):
++            del variables, required, on_stdout
++            calls.append(code)
++            return "done"
++
++    interpreter = DaytonaCodeInterpreter(backend=IncompatibleBackend())
++    with pytest.raises(TypeError):
++        interpreter._run_backend("action", None, on_stdout=lambda _value: None)
++    assert calls == []
++
++
++@pytest.mark.parametrize(
++    ("recoverable", "expected"),
++    [(True, "Execution error"), (False, "Execution failed")],
++)
++def test_public_output_distinguishes_execution_and_interpreter_errors(recoverable: bool, expected: str) -> None:
++    from dspy.primitives.code_interpreter import CodeExecutionError, CodeInterpreterError
++
++    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
++
++    error_type = CodeExecutionError if recoverable else CodeInterpreterError
++    interpreter = DaytonaCodeInterpreter()
++    assert interpreter._public_output(error_type("private error details")) == expected
+ 
+ 
+ def test_execute_returns_string_and_preserves_state() -> None:
