@@ -32,13 +32,14 @@ from fleet_rlm.attachments import (
 )
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox
 from fleet_rlm.daytona.runtime import (
     DEFAULT_IDLE_STOP_SECONDS,
     DaytonaRuntime,
     LeaseRequest,
     sandbox_spec_from_settings,
 )
+from fleet_rlm.paths import VolumePaths
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
@@ -128,6 +129,8 @@ def _write_evidence(name: str, payload: dict[str, Any]) -> Path:
 
 def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> SimpleNamespace:
     bindings = InMemorySandboxBindingStore()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
     runtime = DaytonaRuntime.from_settings(
         settings,
         bindings=bindings,
@@ -137,8 +140,15 @@ def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> Simple
         idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
         execution_output_cap=settings.rlm_max_execution_output_chars,
         execution_timeout_s=settings.rlm_execution_timeout_s,
+        dispatcher=dispatcher,
     )
-    return SimpleNamespace(runtime=runtime, settings=settings, bindings=bindings, volume_config=runtime.volume_config)
+    return SimpleNamespace(
+        runtime=runtime,
+        settings=settings,
+        bindings=bindings,
+        volume_config=runtime.volume_config,
+        dispatcher=dispatcher,
+    )
 
 
 @pytest.mark.asyncio
@@ -166,22 +176,26 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         resources.runtime.track_sandbox(lease.sandbox_id)
         sandbox_ids.append(lease.sandbox_id)
         volume_id = lease.volume_id
-        assert lease.volume_subpath == f"workspaces/{workspace_id}"
+        volume_subpath = f"workspaces/{workspace_id}/sessions/{session_id}/workspace"
+        assert lease.volume_subpath == volume_subpath
 
         sandbox = await resources.runtime._platform.get(lease.sandbox_id)
         assert sandbox is not None
         assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
-        volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, asyncio.get_running_loop()))
+        volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, asyncio.get_running_loop(), resources.dispatcher))
+        # Paths follow the lease's actual Volume mount, as production storage does.
+        volume_paths = VolumePaths.from_mount(lease.mount_path)
 
         attachment_module = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(tmp_path / "attachments"),
             blobs=_LiveAttachmentBlob(volume_fs),
-            paths=WorkspaceAttachmentPathPolicy(resources.volume_config.paths()),
+            paths=WorkspaceAttachmentPathPolicy(volume_paths),
             max_bytes=1024 * 1024,
         )
         artifact_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
+            volume_paths=volume_paths,
             volume_fs=volume_fs,
         )
         access = AttachmentAccess(user_id, workspace_id)
@@ -201,16 +215,9 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         )
         staged = next(item for item in prepared.staged if item.attachment_id == ref.id)
 
-        await asyncio.to_thread(lease.interpreter.start)
-        read_staged = await asyncio.to_thread(
-            lease.interpreter.execute,
-            "from pathlib import Path\n"
-            f"p = Path({staged.sandbox_path!r})\n"
-            "print(p.read_text(encoding='utf-8') if p.is_file() else 'MISSING')\n",
-        )
-        assert ATTACHMENT_BYTES.decode() in read_staged
-
         # The prepared-context loader the RLM setup action runs in production.
+        # It runs and shuts down before the template executes, because each
+        # invocation's broker binds the Sandbox's broker port.
         staged_by_id = {item.attachment_id: item for item in prepared.staged}
         capsule = AttachmentContextCapsule(
             tuple(
@@ -252,6 +259,15 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         )
         assert context_accesses == (str(ref.id), str(binary_ref.id))
 
+        await asyncio.to_thread(lease.interpreter.start)
+        read_staged = await asyncio.to_thread(
+            lease.interpreter.execute,
+            "from pathlib import Path\n"
+            f"p = Path({staged.sandbox_path!r})\n"
+            "print(p.read_text(encoding='utf-8') if p.is_file() else 'MISSING')\n",
+        )
+        assert ATTACHMENT_BYTES.decode() in read_staged
+
         art = await asyncio.to_thread(
             artifact_store.create,
             user_id=user_id,
@@ -274,7 +290,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
                 sandbox_id=old_sid,
                 workspace_id=workspace_id,
                 volume_id=volume_id or "",
-                volume_subpath=f"workspaces/{workspace_id}",
+                volume_subpath=volume_subpath,
                 mount_path=lease.mount_path,
                 provider_state="unrecoverable",
             ),
@@ -304,7 +320,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         sandbox2 = await resources.runtime._platform.get(lease2.sandbox_id)
         assert sandbox2 is not None
         assert getattr(sandbox2, "snapshot", None) == settings.daytona_snapshot
-        volume_fs2 = DaytonaSandboxVolumeFs(sync_sandbox(sandbox2, asyncio.get_running_loop()))
+        volume_fs2 = DaytonaSandboxVolumeFs(sync_sandbox(sandbox2, asyncio.get_running_loop(), resources.dispatcher))
         remounted = await asyncio.to_thread(volume_fs2.read_bytes, durable)
         assert remounted == ARTIFACT_TEXT.encode("utf-8")
         assert hashlib.sha256(remounted).hexdigest() == art.checksum_sha256
@@ -313,6 +329,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         rebound_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
+            volume_paths=volume_paths,
             volume_fs=volume_fs2,
         )
         assert await asyncio.to_thread(
@@ -330,8 +347,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             "uv_lock_fingerprint": _lockfile_fingerprint(),
             "workspace_id": str(workspace_id),
             "volume_id": volume_id,
-            "volume_subpath": f"workspaces/{workspace_id}",
-            "staged_path_prefix": "/home/daytona/fleet/sessions/",
+            "volume_subpath": volume_subpath,
+            "staged_path_prefix": f"{lease.mount_path}/sessions/",
             "staged_readable": True,
             "prepared_context_parity": True,
             "context_accesses": list(context_accesses),
@@ -344,7 +361,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         assert path.is_file()
     finally:
         await cleanup.shutdown(drain_seconds=30)
-        await resources.adispose()
+        await resources.runtime.adispose()
     write_receipt(
         {
             "schema": "fleet.p35d-attachment-artifact/v1",

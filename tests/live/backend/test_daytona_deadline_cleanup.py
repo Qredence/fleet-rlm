@@ -88,7 +88,7 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 
 
 def _wait_for_release(resources: Any, session_id: UUID, *, permits: int, portal: Any) -> None:
-    runtime = getattr(resources, "runtime", None)
+    runtime = getattr(resources, "runtime", resources)
     close = getattr(runtime, "close_root_session", None)
     if callable(close):
         portal.call(lambda: close(LocalScope().workspace_id, session_id))

@@ -461,7 +461,7 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any) -> UUID:
     starts = [chunk for chunk in chunks if chunk.get("type") == "start"]
     if len(starts) != 1:
-        runtime = getattr(resources, "runtime", None)
+        runtime = getattr(resources, "runtime", resources)
         pending_ownership = bool(getattr(runtime, "has_pending_ownership", False))
         runtime_roots = len(getattr(runtime, "roots", ())) if runtime is not None else 0
         tracked_sandboxes = len(getattr(runtime, "_tracked_sandbox_ids", ())) if runtime is not None else 0
@@ -566,7 +566,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert len(text_parts) == 1
             assert text_parts[0]["text"] == "1"
 
-            binding = portal.call(resources.bindings.get, session_id)
+            binding = portal.call(resources._bindings.get, session_id)
             assert binding is not None
             assert binding.sandbox_id is not None
             sandbox_ids.add(binding.sandbox_id)
@@ -797,7 +797,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 assert first_structured["data"]["value"] == structured_chunks[0]["data"]["value"]
 
                 phase = "first_durability"
-                binding = portal.call(resources.bindings.get, session_id)
+                binding = portal.call(resources._bindings.get, session_id)
                 assert binding is not None
                 assert binding.sandbox_id is not None
                 assert binding.volume_id is not None
@@ -1136,7 +1136,8 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                             " verification = verify_semantic_work(iteration_token=iteration_token,"
                             " single_result=single_result, batch_results=batch_results, accumulator=accumulator);"
                             " require verification['ok'] and print SEMANTIC_VERIFICATION_READY. Do not recreate"
-                            " the accumulator. 3) Set a non-empty string summary and evidence, then call exactly"
+                            " the accumulator. 3) Set a non-empty string summary and evidence that never include"
+                            " the iteration token's value, then call exactly"
                             " SUBMIT(answer=summary, evidence=evidence) with keywords. Do not call"
                             " rlm_query or rlm_query_batched."
                         ),
@@ -1204,7 +1205,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 assert termination_mode == "typed_submit"
 
                 run_id = _run_id_from_sse(chunks, label="native_semantic_calls", resources=resources)
-                binding = portal.call(resources.bindings.get, session_id)
+                binding = portal.call(resources._bindings.get, session_id)
                 assert binding is not None and binding.sandbox_id is not None
                 sandbox_ids.add(binding.sandbox_id)
                 finished_at = datetime.now(UTC)
