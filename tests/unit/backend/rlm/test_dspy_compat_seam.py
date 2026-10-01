@@ -14,8 +14,10 @@ import pytest
 from fleet_rlm.daytona.errors import DaytonaAdapterError
 from fleet_rlm.daytona.interpreter import (
     DAYTONA_EXECUTION_INSTRUCTIONS,
+    BackendExecutionResult,
     DaytonaCodeInterpreter,
     InProcessInterpreterBackend,
+    OutputCallback,
 )
 from fleet_rlm.rlm.program import (
     RLMOptions,
@@ -215,7 +217,7 @@ def test_overlapping_interpreter_reuse_is_rejected_until_settlement() -> None:
             variables: dict[str, object] | None = None,
             *,
             on_stdout: Callable[[str], None] | None = None,
-        ) -> Any:
+        ) -> BackendExecutionResult:
             entered.set()
             assert release.wait(2)
             return super().run(code, variables, on_stdout=on_stdout)
@@ -254,17 +256,24 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
     stops: list[bool] = []
 
     class BlockingBackend(InProcessInterpreterBackend):
-        def run(self, *args: Any, **kwargs: Any) -> Any:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
             entered.set()
             assert release.wait(5)
             if execution_fails:
                 raise DaytonaAdapterError(message="execution failed", cause_type="InterpreterLifecycleError")
-            return super().run(*args, **kwargs)
+            return super().run(code, variables, on_stdout=on_stdout)
 
         def close(self) -> None:
             closes.append("backend")
             if cleanup_failure == "backend" and len(closes) == 1:
                 raise RuntimeError("backend cleanup failed")
+            self._broker.stop(strict=True)
             super().close()
 
     class Broker:
@@ -275,8 +284,8 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
                 raise RuntimeError("broker cleanup failed")
 
     backend = BlockingBackend()
+    backend._broker = Broker()
     interpreter = DaytonaCodeInterpreter(backend=backend)
-    interpreter._http_broker = Broker()
     outcomes: list[Any] = []
 
     def execute() -> None:
@@ -295,6 +304,7 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
             assert exc.value.cause_type == "InterpreterReuseError"
         assert not backend.closed
         assert not closes
+        assert not stops
     finally:
         release.set()
         worker.join(timeout=5)
@@ -304,7 +314,7 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
     if cleanup_failure is not None:
         assert isinstance(outcomes[0], RuntimeError)
         assert str(outcomes[0]) == f"{cleanup_failure} cleanup failed"
-        assert backend.closed == (cleanup_failure == "broker")
+        assert not backend.closed
     elif execution_fails:
         assert isinstance(outcomes[0], DaytonaAdapterError)
         assert str(outcomes[0]) == "execution failed"
@@ -314,8 +324,8 @@ def test_shutdown_during_execution_closes_after_settlement(execution_fails: bool
         assert backend.closed
     interpreter.shutdown()
     assert backend.closed
-    assert len(closes) == (2 if cleanup_failure == "backend" else 1)
-    assert len(stops) == (2 if cleanup_failure else 1)
+    assert len(closes) == (2 if cleanup_failure else 1)
+    assert len(stops) == (2 if cleanup_failure == "broker" else 1)
     with pytest.raises(DaytonaAdapterError, match="shut down"):
         interpreter.execute("_out = 'must not run'")
 
@@ -327,10 +337,16 @@ async def test_cancelled_to_thread_execution_keeps_shutdown_request() -> None:
     closed = threading.Event()
 
     class BlockingBackend(InProcessInterpreterBackend):
-        def run(self, *args: Any, **kwargs: Any) -> Any:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
             entered.set()
             assert release.wait(5)
-            return super().run(*args, **kwargs)
+            return super().run(code, variables, on_stdout=on_stdout)
 
         def close(self) -> None:
             super().close()
@@ -375,10 +391,16 @@ async def test_native_dspy_finalizes_invocation_after_failure(failure_phase: str
             return "failing input"[:max_chars]
 
     class FailingBackend(InProcessInterpreterBackend):
-        def run(self, *args: Any, **kwargs: Any) -> Any:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
             if failure_phase == "execution":
                 raise DaytonaAdapterError(message="execution failed", cause_type="InterpreterLifecycleError")
-            return super().run(*args, **kwargs)
+            return super().run(code, variables, on_stdout=on_stdout)
 
     backend = FailingBackend()
     invocation = DaytonaCodeInterpreter(backend=backend)

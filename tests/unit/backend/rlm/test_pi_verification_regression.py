@@ -9,7 +9,12 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import (
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+    OutputCallback,
+)
 from fleet_rlm.rlm.program import FleetJSONAdapter
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
@@ -73,8 +78,14 @@ def test_broker_timeout_stops_native_rlm_and_closes_interpreter() -> None:
     class TimedOutBackend:
         closed = False
 
-        def run(self, code: str, variables: dict[str, object] | None = None) -> str:
-            del code, variables
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
             raise DaytonaAdapterError("sandbox execution request timed out", cause_type="BrokerExecutionTimeout")
 
         def close(self) -> None:

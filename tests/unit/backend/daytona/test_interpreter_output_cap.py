@@ -13,6 +13,7 @@ from fleet_rlm.daytona.interpreter import (
     BackendExecutionResult,
     DaytonaCodeInterpreter,
     InProcessInterpreterBackend,
+    OutputCallback,
     sandbox_backend,
 )
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
@@ -57,7 +58,13 @@ def test_turn_output_budget_is_shared_and_fail_closed() -> None:
 
 def test_error_feedback_includes_capped_stderr() -> None:
     class _StderrBackend:
-        def run(self, code: str, variables: dict[str, object] | None = None) -> BackendExecutionResult:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
             """
             Simulate a failed backend execution with an undefined-name error.
 
@@ -65,7 +72,7 @@ def test_error_feedback_includes_capped_stderr() -> None:
                 BackendExecutionResult: An execution result with a fixed `NameError`
                     message and 5,000-character stderr output.
             """
-            del code, variables
+            del code, variables, on_stdout
             return BackendExecutionResult(
                 stdout="", error="NameError: name 'missing' is not defined", stderr="s" * 5000
             )
@@ -84,6 +91,16 @@ def test_error_feedback_includes_capped_stderr() -> None:
     assert "stderr:" in result
     assert len(result) < 450
     assert "characters omitted" in result
+
+
+def test_typed_stdout_is_capped_before_returning_feedback() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=300)
+    result = interpreter.execute("print('head' + 'x' * 5_000 + 'tail')")
+    assert result.startswith("head")
+    assert result.endswith("tail\n")
+    assert "characters omitted" in result
+    assert len(result) < 400
+    interpreter.shutdown()
 
 
 def test_sandbox_backend_retains_timeout_for_broker_execution() -> None:

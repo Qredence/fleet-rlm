@@ -9,6 +9,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from fleet_rlm.daytona.interpreter import BackendExecutionResult, OutputCallback
+
 
 class _FakeBackend:
     """In-memory REPL stand-in for offline adapter tests."""
@@ -19,7 +21,13 @@ class _FakeBackend:
         self.fail_with: BaseException | None = None
         self.calls = 0
 
-    def run(self, code: str, variables: dict[str, object] | None = None) -> str:
+    def run(
+        self,
+        code: str,
+        variables: dict[str, object] | None = None,
+        *,
+        on_stdout: OutputCallback | None = None,
+    ) -> BackendExecutionResult:
         self.calls += 1
         if self.closed:
             msg = "backend already closed"
@@ -29,7 +37,10 @@ class _FakeBackend:
         if variables:
             self.namespace.update(variables)
         exec(code, self.namespace, self.namespace)
-        return str(self.namespace.get("_out", ""))
+        stdout = str(self.namespace.get("_out", ""))
+        if on_stdout is not None and stdout:
+            on_stdout(stdout)
+        return BackendExecutionResult(stdout=stdout)
 
     def close(self) -> None:
         self.closed = True
@@ -163,7 +174,7 @@ def test_run_backend_does_not_retry_typeerror_from_backend() -> None:
             variables: dict[str, object] | None = None,
             *,
             on_stdout: Callable[[str], None] | None = None,
-        ) -> str:
+        ) -> BackendExecutionResult:
             del code, variables, on_stdout
             self.calls += 1
             raise TypeError("backend failed")
@@ -193,12 +204,12 @@ def test_run_backend_does_not_retry_typeerror_from_stdout_callback() -> None:
             variables: dict[str, object] | None = None,
             *,
             on_stdout: Callable[[str], None] | None = None,
-        ) -> str:
+        ) -> BackendExecutionResult:
             del code, variables
             self.calls += 1
             if on_stdout is not None:
                 on_stdout("output")
-            return "output"
+            return BackendExecutionResult(stdout="output")
 
         def close(self) -> None:
             return None
@@ -213,6 +224,93 @@ def test_run_backend_does_not_retry_typeerror_from_stdout_callback() -> None:
         interpreter._run_backend("print('output')", None, on_stdout=fail_callback)
 
     assert backend.calls == 1
+
+
+def test_run_backend_forwards_code_variables_and_callback_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    backend = InProcessInterpreterBackend()
+    run = Mock(wraps=backend.run)
+    monkeypatch.setattr(backend, "run", run)
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    callback = Mock()
+    variables = {"value": 42}
+    result = interpreter._run_backend("print(value)", variables, on_stdout=callback)
+
+    run.assert_called_once_with("print(value)", variables, on_stdout=callback)
+    assert isinstance(result, BackendExecutionResult)
+    assert result.stdout == "42\n"
+    assert "".join(call.args[0] for call in callback.call_args_list) == result.stdout
+    interpreter.shutdown()
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (BackendExecutionResult(stdout="ordinary output"), "ordinary output"),
+        (
+            BackendExecutionResult(stdout='__FLEET_FINAL_OUTPUT__{"answer":"ordinary"}__FLEET_FINAL_OUTPUT__'),
+            '__FLEET_FINAL_OUTPUT__{"answer":"ordinary"}__FLEET_FINAL_OUTPUT__',
+        ),
+        (BackendExecutionResult(stdout="ignored", final={"answer": "typed"}), {"answer": "typed"}),
+    ],
+)
+def test_typed_backend_finalization_preserves_stdout_and_structural_final(
+    monkeypatch: pytest.MonkeyPatch, raw: BackendExecutionResult, expected: object
+) -> None:
+    from dspy import FinalOutput
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    backend = _FakeBackend()
+    run = Mock(return_value=raw)
+    monkeypatch.setattr(backend, "run", run)
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    result = interpreter.execute("pass")
+    if raw.final is not None:
+        assert isinstance(result, FinalOutput)
+        assert result.output == expected
+    else:
+        assert isinstance(result, str)
+        assert result == expected
+    run.assert_called_once()
+    interpreter.shutdown()
+
+
+def test_typed_backend_context_accesses_are_drained_even_on_execution_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dspy import CodeExecutionError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    backend = _FakeBackend()
+    run = Mock(
+        return_value=BackendExecutionResult(
+            error="missing input", error_category="NameError", context_accesses=("input-1",)
+        )
+    )
+    monkeypatch.setattr(backend, "run", run)
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    with pytest.raises(CodeExecutionError, match="missing input") as caught:
+        interpreter.execute("pass")
+    assert caught.value.category == "NameError"
+    assert interpreter.drain_context_accesses() == ("input-1",)
+    assert interpreter.drain_context_accesses() == ()
+    run.assert_called_once()
+    interpreter.shutdown()
+
+
+def test_inprocess_stdout_reaches_adapter_output_projection() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.events import RLMOutput
+
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_observer(observed.append)
+    assert interpreter.execute("print('first'); print('second')") == "first\nsecond\n"
+    outputs = [event for event in observed if isinstance(event, RLMOutput)]
+    assert "".join(event.output for event in outputs) == "first\nsecond\n"
+    assert all(event.is_delta for event in outputs)
+    interpreter.shutdown()
 
 
 def test_public_output_classifies_dspy_execution_errors_before_interpreter_errors() -> None:
@@ -298,27 +396,36 @@ def test_shutdown_is_idempotent() -> None:
     assert backend.closed is True
 
 
-def test_strict_shutdown_preserves_broker_error_and_closes_backend() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+def test_strict_shutdown_preserves_backend_owned_broker_error_and_retries_cleanup() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 
     class _Broker:
+        calls = 0
+
         def stop(self, *, strict: bool = False) -> None:
             assert strict is True
-            raise RuntimeError("broker cleanup failed")
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("broker cleanup failed")
 
-    class _FailingCloseBackend(_FakeBackend):
-        def close(self) -> None:
-            self.closed = True
-            raise RuntimeError("backend cleanup failed")
-
-    backend = _FailingCloseBackend()
+    backend = sandbox_backend(object())
+    broker = _Broker()
+    backend._broker = broker
     interp = DaytonaCodeInterpreter(backend=backend)
-    interp._http_broker = _Broker()  # type: ignore[assignment]
 
     with pytest.raises(RuntimeError, match="broker cleanup failed"):
         interp.shutdown(strict_broker_cleanup=True)
 
-    assert backend.closed is True
+    assert backend._closed
+    assert interp._backend is backend
+    assert interp.broker is broker
+    assert not interp._shutdown
+    interp.shutdown(strict_broker_cleanup=True)
+    interp.shutdown(strict_broker_cleanup=True)
+    assert broker.calls == 2
+    assert interp.broker is None
+    assert backend.broker is None
+    assert interp._shutdown
 
 
 def test_lease_release_is_idempotent() -> None:
