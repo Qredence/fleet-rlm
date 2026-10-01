@@ -38,6 +38,7 @@ from fleet_rlm.rlm.result import (
     _safe_usage_entry,
     observed_usage,
     rlm_termination_mode,
+    sanitize_trace_text,
     truncate_public_text,
     validate_rlm_usage,
 )
@@ -709,7 +710,17 @@ def _execute_observed_tool(
         if guards is not None:
             guards.failed(str(source.name), arguments)
         observer(ToolFailed(trace.call_id, str(source.name), event_view.error(validation=False, exception=exc)))
-        trace.finish(status="failed", output={"tool_status": "failed", "failure_category": "tool_error"})
+        # The public event stays the closed "Tool failed"; the span (observation
+        # only) keeps a bounded, sanitized cause for diagnosis.
+        trace.finish(
+            status="failed",
+            output={
+                "tool_status": "failed",
+                "failure_category": "tool_error",
+                "failure_cause_class": type(exc).__name__[:80],
+                "failure_message": sanitize_trace_text(str(exc), max_len=256),
+            },
+        )
         raise
     return result
 

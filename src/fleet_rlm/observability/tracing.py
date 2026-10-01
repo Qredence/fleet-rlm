@@ -144,6 +144,8 @@ _OPERATIONAL_TEXT_KEYS = frozenset(
         "code_chars",
         "engine",
         "failure_category",
+        "failure_cause_class",
+        "failure_message",
         "kind",
         "history_length_before",
         "input_keys",
