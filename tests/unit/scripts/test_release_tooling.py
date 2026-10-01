@@ -9,6 +9,8 @@ from __future__ import annotations
 import gzip
 import hashlib
 import io
+import os
+import subprocess
 import tarfile
 import time
 import zipfile
@@ -48,6 +50,8 @@ def test_main_accepts_documented_dispatch_success_statuses(
                 "payload": payload,
             }
         )
+        if method == "GET":
+            return 200, {"sha": "a" * 40}
         return dispatch_status, {}
 
     monkeypatch.setenv("GITHUB_TOKEN", "test-token")
@@ -73,11 +77,15 @@ def test_main_accepts_documented_dispatch_success_statuses(
         )
         == 0
     )
-    assert captured[0]["url"] == (
-        "https://api.github.com/repos/Qredence/fleet-rlm/actions/workflows/release.yml/dispatches"
-    )
-    assert captured[0]["method"] == "POST"
-    assert captured[0]["payload"] == {"ref": "main", "inputs": {"version": "0.7.3"}}
+    dispatch = captured[1]
+    assert dispatch["url"] == "https://api.github.com/repos/Qredence/fleet-rlm/actions/workflows/release.yml/dispatches"
+    assert dispatch["method"] == "POST"
+    payload = dispatch["payload"]
+    assert isinstance(payload, dict)
+    assert payload["ref"] == "main"
+    assert payload["inputs"]["version"] == "0.7.3"
+    assert payload["inputs"]["expected_sha"] == "a" * 40
+    assert len(payload["inputs"]["dispatch_id"]) == 32
     assert "https://github.com/Qredence/fleet-rlm/actions/runs/1" in capsys.readouterr().out
 
 
@@ -133,6 +141,133 @@ def test_main_verifies_existing_latest_pypi_release_without_dispatch(
         assert result == 1
         assert "does not match its PyPI SHA-256" in capsys.readouterr().err
         assert len(requested_urls) == 3
+
+
+@pytest.mark.parametrize("expected_sha", ["b" * 40, "short-sha"])
+def test_bridge_rejects_invalid_or_changed_commit_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], expected_sha: str
+) -> None:
+    def request(_url: str, **kwargs: object) -> tuple[int, dict[str, object]]:
+        assert kwargs.get("method", "GET") == "GET", "must not dispatch a mismatched release"
+        return 200, {"sha": "a" * 40}
+
+    monkeypatch.setenv("GITHUB_TOKEN", "test-token")
+    monkeypatch.setattr(trigger, "_existing_release_url", lambda *_args: None)
+    monkeypatch.setattr(trigger, "_request_json", request)
+    assert (
+        trigger.main(["--version", "0.7.3", "--repository", "Qredence/fleet-rlm", "--expected-sha", expected_sha]) == 1
+    )
+    message = "full lowercase" if expected_sha == "short-sha" else "does not match"
+    assert message in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("resolved_sha", ["a" * 40, "b" * 40])
+def test_find_run_matches_dispatch_identity_and_commit(monkeypatch: pytest.MonkeyPatch, resolved_sha: str) -> None:
+    title = "Release 0.7.3 [unique-dispatch]"
+    target = {"id": 1, "display_title": title, "head_sha": resolved_sha}
+    runs = [
+        {"id": 99, "display_title": "Release 0.7.3 [another-dispatch]", "head_sha": "a" * 40},
+        {"id": 100, "display_title": "Release 0.7.3 [manual]", "head_sha": "a" * 40},
+        target,
+    ]
+    monkeypatch.setattr(trigger, "_request_json", lambda *_args, **_kwargs: (200, {"workflow_runs": runs}))
+    kwargs = {
+        "api_root": "https://api.github.com/repos/Qredence/fleet-rlm",
+        "headers": {},
+        "ref": "main",
+        "expected_sha": "a" * 40,
+        "display_title": title,
+        "deadline": time.time() + 10,
+    }
+    if resolved_sha == "a" * 40:
+        assert trigger._find_run(**kwargs) is target
+    else:
+        with pytest.raises(trigger.ReleaseTriggerError, match="different source commit"):
+            trigger._find_run(**kwargs)
+
+
+@pytest.mark.parametrize("expected", ["", "matching", "different", "invalid"])
+def test_release_preflight_checks_source_and_supports_manual_dispatch(tmp_path: Path, expected: str) -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/release.yml").read_text())
+    source = next(step for step in workflow["jobs"]["preflight"]["steps"] if step.get("id") == "source")
+    sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, text=True).strip()
+    values = {"": "", "matching": sha, "different": "0" * 40, "invalid": "short"}
+    output = tmp_path / "github-output"
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", source["run"]],
+        cwd=REPO_ROOT,
+        env={**os.environ, "EXPECTED_SHA": values[expected], "RESOLVED_SHA": sha, "GITHUB_OUTPUT": str(output)},
+        text=True,
+        capture_output=True,
+    )
+    if expected in ("", "matching"):
+        assert result.returncode == 0, result.stderr
+        assert output.read_text() == f"source_sha={sha}\n"
+    else:
+        assert result.returncode != 0
+        assert not output.exists()
+
+
+@pytest.mark.parametrize("tag_state", ["matching", "different", "absent"])
+def test_release_preflight_rejects_existing_tag_on_another_commit(tmp_path: Path, tag_state: str) -> None:
+    def git(*args: str) -> str:
+        return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
+
+    git("init", "--quiet")
+    git(
+        "-c",
+        "user.name=CI test",
+        "-c",
+        "user.email=ci@example.invalid",
+        "commit",
+        "--quiet",
+        "--allow-empty",
+        "-m",
+        "first",
+    )
+    if tag_state != "absent":
+        git("-c", "user.name=CI test", "-c", "user.email=ci@example.invalid", "tag", "-a", "v0.7.3", "-m", "release")
+    if tag_state == "different":
+        git(
+            "-c",
+            "user.name=CI test",
+            "-c",
+            "user.email=ci@example.invalid",
+            "commit",
+            "--quiet",
+            "--allow-empty",
+            "-m",
+            "second",
+        )
+    git("remote", "add", "origin", str(tmp_path))
+    sha = git("rev-parse", "HEAD")
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/release.yml").read_text())
+    step = next(
+        s for s in workflow["jobs"]["preflight"]["steps"] if s.get("name") == "Verify existing release tag source"
+    )
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "SOURCE_SHA": sha, "RELEASE_TAG": "v0.7.3"},
+        text=True,
+        capture_output=True,
+    )
+    if tag_state == "different":
+        assert result.returncode != 0
+        assert "different source commit" in result.stderr
+    else:
+        assert result.returncode == 0, result.stderr
+
+
+def test_release_downstream_checkouts_use_verified_commit() -> None:
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/release.yml").read_text())
+    for name, job in workflow["jobs"].items():
+        for step in job["steps"]:
+            if str(step.get("uses", "")).startswith("actions/checkout@"):
+                expected = "${{ github.sha }}" if name == "preflight" else "${{ needs.preflight.outputs.source_sha }}"
+                assert step["with"]["ref"] == expected
+                if name != "preflight":
+                    assert "preflight" in job["needs"]
 
 
 def _circleci_run_step(job: dict[str, object], name: str) -> dict[str, object]:

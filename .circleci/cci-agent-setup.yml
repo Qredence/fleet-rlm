@@ -5,11 +5,17 @@ jobs:
     docker:
       - image: cimg/python:3.13.13-node
     working_directory: ~/project
+    environment:
+      UV_LOCKED: "true"
     steps:
       - checkout
       - run:
           name: Install uv
-          command: curl -LsSf https://astral.sh/uv/install.sh | sh
+          command: |
+            curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
+            test "$("$HOME/.local/bin/uv" --version | cut -d ' ' -f 2)" = "0.12.21"
+            "$HOME/.local/bin/uv" --version
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
       - run:
           name: Provision locked Python dependencies
           command: |
@@ -20,7 +26,8 @@ jobs:
           command: |
             corepack enable
             corepack prepare pnpm@12.6.0 --activate
-            pnpm --dir tools/fleet-tui install --frozen-lockfile
+            cd tools/fleet-tui
+            pnpm install --frozen-lockfile
 
 workflows:
   cci-agent-setup:

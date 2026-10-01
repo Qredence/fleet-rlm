@@ -5,16 +5,18 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v1-uv-bin-{{ arch }}
+            - v3-uv-bin-0.12.21-{{ arch }}
       - run:
           name: Install uv (skip if cached)
           command: |
-            if [ ! -f "$HOME/.local/bin/uv" ]; then
-              curl -LsSf https://astral.sh/uv/install.sh | sh
+            if [ ! -x "$HOME/.local/bin/uv" ] || [ "$("$HOME/.local/bin/uv" --version | cut -d ' ' -f 2)" != "0.12.21" ]; then
+              curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
             fi
+            test "$("$HOME/.local/bin/uv" --version | cut -d ' ' -f 2)" = "0.12.21"
+            "$HOME/.local/bin/uv" --version
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
       - save_cache:
-          key: v1-uv-bin-{{ arch }}
+          key: v3-uv-bin-0.12.21-{{ arch }}
           paths:
             - ~/.local/bin/uv
             - ~/.local/bin/uvx
@@ -27,7 +29,8 @@ executors:
       - image: cimg/python:3.13.13-node
     working_directory: ~/project
     environment:
-      UV_CACHE_DIR: ~/.cache/uv
+      UV_CACHE_DIR: /home/circleci/.cache/uv
+      UV_LOCKED: "true"
 jobs:
   deploy-pypi-rollback:
     executor: python

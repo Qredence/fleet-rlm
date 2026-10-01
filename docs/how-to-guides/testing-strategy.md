@@ -262,3 +262,57 @@ git diff --check
 
 `make build-release` builds the Python distributions and validates wheel content
 and metadata. These lanes do not replace the primary repository gate.
+
+## CircleCI checks and release routing
+
+CircleCI runs on hosted Docker executors. The unit suite uses four shards,
+Python compatibility covers 3.11–3.13, and a downstream coverage-only environment
+combines shard data with the coverage version in `uv.lock`. The threshold comes
+from `pyproject.toml`. The quality job includes source-tree and dependency-boundary
+checks as well as docs, security, and generated contracts.
+
+All CircleCI Python entry points use uv 0.12.21. Dependency synchronization is
+locked; stale project metadata must fail rather than rewrite `uv.lock`. Binary
+and dependency caches have versioned namespaces. TUI jobs cache the pnpm store,
+scoped by architecture, actual Node/pnpm versions, and lockfile, and run package
+commands from `tools/fleet-tui/`.
+
+Both Python suites permit at most two automatic retries with a two-minute retry
+budget. Inspect CircleCI test results and suite logs for tests that pass only on
+retry. Retained JUnit artifacts support diagnosis; a green result after retry
+does not establish that a timing failure has been fixed.
+
+The CircleCI release bridge supplies its checkout SHA and a unique dispatch ID
+to GitHub Actions. The bridge checks `main` before dispatch, the workflow checks
+its resolved SHA again before release checks, and downstream jobs use that
+verified SHA. A moved `main` fails instead of releasing a different candidate.
+Manual GitHub dispatch may omit the expected SHA and uses the run's resolved
+commit. Existing published releases still require matching GitHub/PyPI asset
+digests. Automatic PyPI rollback remains unsupported.
+
+For an authorized branch validation, run a cold-cache pipeline after a cache
+namespace change followed by two warm-cache runs, with `deploy_pypi=false`.
+Record pipeline IDs and revisions, uv version, all job outcomes, retry-only
+successes, combined coverage, setup duration, total duration, and credits when
+available. Cache restoration and local checks alone do not establish runner
+performance or release readiness. Commit/push and release authorization are
+separate operator decisions.
+
+### Trigger inventory observed on 2026-10-01
+
+This snapshot describes observed routing, not a live guarantee. Project UUID:
+`122b2cc9-5a9c-4b3b-88c6-9276bd5d5d98`.
+
+| Definition UUID | Name | Config | Observed trigger state |
+| --- | --- | --- | --- |
+| `fe82e142-4105-421e-a525-eb47298d5e7a` | build-and-test | `.circleci/config.yml` | All pushes, enabled |
+| `47909734-57e6-4f6b-8b02-fb867c1c6fea` | deploy-markers-setup | `.circleci/config.yml` | No triggers |
+| `cdd26158-a2e2-49f0-ac8f-442c8184c726` | deploy-markers-setup | `.circleci/config.yml` | No triggers |
+| `0f2376c8-8b4c-4bd8-a583-c7cca7ba257c` | deploy-markers-setup | `.circleci/config.yml` | All pushes, disabled |
+| `3ce81903-5623-47a1-8a2e-3b4bfbe53ce4` | deploy-markers-setup | `.circleci/config.yml` | All pushes, disabled |
+| `3078fcb4-7056-4c90-8ecc-7f2831046a53` | deploy-pipeline | `.circleci/deploy.yml` | Separate deploy definition; triggers not audited |
+| `330a2c33-9a78-4f30-8dad-ecd897ab3465` | rollback-pipeline | `.circleci/rollback.yml` | Separate rollback definition; triggers not audited |
+
+The Chunk task definition is separate and uses CircleCI-managed configuration.
+Duplicate setup definitions do not demonstrate duplicate execution. Preserve
+the observed trigger state until an explicit routing change is authorized.
