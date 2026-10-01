@@ -169,7 +169,8 @@ class Handler(BaseHTTPRequestHandler):
                 if request is None:
                     duplicate = call_id in _completed
                     _send(self, {"error": "duplicate call" if duplicate else "unknown call"}, 409 if duplicate else 404); return
-                if request["lease"] != lease: _send(self, {"error": "stale lease"}, 409); return
+                if request["lease"] is None or request["lease"] != lease: _send(self, {"error": "stale lease"}, 409); return
+                if call_id in _results: _send(self, {"error": "duplicate result"}, 409); return
                 _results[call_id] = {"tool_error": data["tool_error"]} if "tool_error" in data else {"result": data.get("result")}
                 request["event"].set()
             _send(self, {"status": "ok"}); return

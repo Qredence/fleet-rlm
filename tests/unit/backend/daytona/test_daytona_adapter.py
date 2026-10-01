@@ -638,3 +638,39 @@ async def test_sync_sandbox_bridges_workspace_metadata_operations() -> None:
     bridge = sync_sandbox(SimpleNamespace(fs=Fs()), asyncio.get_running_loop())
     assert await asyncio.to_thread(bridge.fs.get_file_info, "/workspace/a") == {"path": "/workspace/a"}
     assert await asyncio.to_thread(bridge.fs.create_folder, "/workspace/a") == ("/workspace/a", "755")
+
+
+@pytest.mark.parametrize("outcome", ["deleted", "missing", "body_type_error"])
+def test_run_scratch_cleanup_calls_delete_once_and_keeps_failed_paths(outcome: str) -> None:
+    from uuid import uuid4
+
+    from daytona.common.errors import DaytonaFileNotFoundError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
+
+    calls: list[tuple[str, bool]] = []
+    failures = {"body_type_error": TypeError("provider body failed")}
+
+    class Filesystem:
+        def delete_file(self, path: str, recursive: bool = False) -> None:
+            calls.append((path, recursive))
+            failure = failures.pop(outcome, None)
+            if failure is not None:
+                raise failure
+            if outcome == "missing":
+                raise DaytonaFileNotFoundError("missing Run scratch", status_code=404)
+
+    interp = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=Filesystem())))
+    path = interp.bind_run_scratch(uuid4())
+
+    if outcome == "body_type_error":
+        with pytest.raises(TypeError, match="provider body failed"):
+            interp.cleanup_run_scratch()
+        assert calls == [(path, True)]
+        assert interp._backend._run_scratch_path == path
+        interp.cleanup_run_scratch()
+        assert calls == [(path, True), (path, True)]
+    else:
+        interp.cleanup_run_scratch()
+        assert calls == [(path, True)]
+    assert interp._backend._run_scratch_path is None

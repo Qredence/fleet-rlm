@@ -154,8 +154,8 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     assert all(instance.closed for instance in _LocalBroker.instances)
 
 
-@pytest.mark.parametrize("port", [-1, 0, 65536])
-def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
+@pytest.mark.parametrize("port", [-1, 0, 65536, True, 8080.5, "8080"])
+def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest.MonkeyPatch, port: Any) -> None:
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
     with pytest.raises(DaytonaAdapterError, match="broker port must be between"):

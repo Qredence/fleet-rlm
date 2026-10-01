@@ -514,7 +514,7 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
-        if not 1 <= broker_port <= 65535:
+        if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 1 <= broker_port <= 65535:
             raise DaytonaAdapterError(
                 message="broker port must be between 1 and 65535; brokerless execution is unsupported",
                 cause_type="InterpreterConfigurationError",
@@ -569,15 +569,12 @@ class _SandboxProcessBackend:
                 message="Sandbox filesystem cannot remove Run scratch",
                 cause_type="InterpreterConfigurationError",
             )
-        try:
-            try:
-                delete(path, recursive=True)
-            except TypeError:
-                delete(path)
-        except DaytonaFileNotFoundError:
-            # A Run that failed before its first action may never create its
-            # bound scratch directory. Absence confirms this path is clean.
-            pass
+        # A Run that failed before its first action may never create its
+        # bound scratch directory; absence confirms this path is clean. Call
+        # once: retrying another shape after a body-level TypeError could
+        # replay the deletion and hide the original failure.
+        with contextlib.suppress(DaytonaFileNotFoundError):
+            delete(path, recursive=True)
         self._run_scratch_path = None
 
     @property
@@ -1736,43 +1733,6 @@ class FleetFinalOutputError(Exception):
     def __init__(self, value: Any) -> None:
         self.value = value
         super().__init__("Final output submitted")
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutionResult:
-    """Outcome of a code execution in a Daytona sandbox."""
-
-    stdout: str = ""
-    stderr: str = ""
-    exit_code: int = 0
-    final_output: dict[str, Any] | None = None
-    error: str | None = None
-
-
-class DaytonaExecutionBackend(Protocol):
-    """Contract for executing code and managing files in a Daytona sandbox."""
-
-    async def execute_code(
-        self,
-        code: str,
-        *,
-        timeout: float = 60.0,
-        env: dict[str, str] | None = None,
-    ) -> ExecutionResult:
-        """Execute python code in Daytona sandbox and extract stdout, stderr, exit_code, and SUBMIT output."""
-        ...
-
-    async def read_file(self, path: str) -> bytes:
-        """Read a file from the sandbox filesystem."""
-        ...
-
-    async def write_file(self, path: str, data: bytes) -> None:
-        """Write a file to the sandbox filesystem."""
-        ...
-
-    async def delete_sandbox(self) -> None:
-        """Destroy the underlying sandbox."""
-        ...
 
 
 def validate_json_value(value: Any, *, path: str = "value") -> None:
