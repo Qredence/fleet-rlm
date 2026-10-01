@@ -428,6 +428,54 @@ def test_strict_shutdown_preserves_backend_owned_broker_error_and_retries_cleanu
     assert interp._shutdown
 
 
+@pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
+@pytest.mark.parametrize("failure_count", [1, 2])
+def test_strict_shutdown_retries_real_broker_session_deletion(error_type: type[Exception], failure_count: int) -> None:
+    from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+
+    class Process:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def delete_session(self, session: str) -> None:
+            self.deleted.append(session)
+            if len(self.deleted) <= failure_count:
+                raise error_type("provider delete failed")
+
+    process = Process()
+    backend = sandbox_backend(SimpleNamespace(process=process))
+    broker = DaytonaHttpToolBroker(SimpleNamespace(process=process), port=1)
+    broker._session = "fleet-tool-broker-test"
+    client = Mock()
+    broker._client = client
+    backend._broker = broker
+    interp = DaytonaCodeInterpreter(backend=backend)
+
+    for failed_attempt in range(1, failure_count + 1):
+        with pytest.raises(error_type, match="provider delete failed"):
+            interp.shutdown(strict_broker_cleanup=True)
+
+        assert backend._closed is True
+        assert backend._broker is broker
+        assert interp._backend is backend
+        assert interp._shutdown is False
+        assert broker._session == "fleet-tool-broker-test"
+        assert broker._client is None
+        assert process.deleted == ["fleet-tool-broker-test"] * failed_attempt
+
+    client.close.assert_called_once_with()
+
+    interp.shutdown(strict_broker_cleanup=True)
+    interp.shutdown(strict_broker_cleanup=True)
+
+    assert process.deleted == ["fleet-tool-broker-test"] * (failure_count + 1)
+    assert broker._session is None
+    assert backend._broker is None
+    assert interp._backend is None
+    assert interp._shutdown is True
+
+
 def test_lease_release_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
     from fleet_rlm.daytona.runtime import InterpreterLease

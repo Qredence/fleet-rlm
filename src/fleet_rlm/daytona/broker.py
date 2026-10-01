@@ -281,16 +281,26 @@ class DaytonaHttpToolBroker:
 
     def stop(self, *, strict: bool = False) -> None:
         self._stopped = True
-        client, self._client = self._client, None
+        cleanup_error: Exception | None = None
+        client = self._client
         if client is not None:
-            client.close()
+            try:
+                client.close()
+            except Exception as exc:
+                cleanup_error = exc
+            else:
+                self._client = None
         if self._session is not None:
-            session, self._session = self._session, None
+            session = self._session
             try:
                 self._sandbox.process.delete_session(session)
-            except Exception:
-                if strict:
-                    raise
+            except Exception as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+            else:
+                self._session = None
+        if strict and cleanup_error is not None:
+            raise cleanup_error
 
     def _ensure_started(self) -> None:
         if self._stopped:

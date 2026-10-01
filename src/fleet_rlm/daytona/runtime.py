@@ -87,6 +87,36 @@ _ZERO_UUID = UUID(int=0)
 EXECUTION_MOUNT_PATH = "/workspace"
 
 
+def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: bool) -> None:
+    """Call an interpreter's shutdown using its declared call signature.
+
+    Some older interpreter implementations expose a no-argument shutdown.
+    Inspect and bind before invoking so a ``TypeError`` raised by shutdown's
+    body is preserved as a cleanup failure rather than mistaken for a legacy
+    signature.
+    """
+    missing = object()
+    shutdown = getattr(interpreter, "shutdown", missing)
+    if shutdown is missing:
+        return
+    if not callable(shutdown):
+        raise TypeError("interpreter shutdown attribute is not callable")
+    try:
+        signature = inspect.signature(shutdown)
+    except (TypeError, ValueError):
+        # Opaque callables get one attempt using the current strict contract.
+        shutdown(strict_broker_cleanup=strict_broker_cleanup)
+        return
+
+    try:
+        signature.bind(strict_broker_cleanup=strict_broker_cleanup)
+    except TypeError:
+        signature.bind()
+        shutdown()
+    else:
+        shutdown(strict_broker_cleanup=strict_broker_cleanup)
+
+
 class DaytonaEnvironmentProfile(StrEnum):
     """The three logical execution environments; capacity is not implied."""
 
@@ -1240,11 +1270,7 @@ class InterpreterLease:
                 return
             self._state = LeaseState.CLOSING
             try:
-                if hasattr(self.interpreter, "shutdown"):
-                    try:
-                        self.interpreter.shutdown(strict_broker_cleanup=True)
-                    except TypeError:
-                        self.interpreter.shutdown()
+                _invoke_interpreter_shutdown(self.interpreter, strict_broker_cleanup=True)
             except BaseException:
                 self._state = LeaseState.FAILED
                 raise
@@ -1420,11 +1446,10 @@ class SandboxLease:
                 backend="not_present" if not has_backend else "skipped",
             )
         try:
-            if hasattr(interpreter, "shutdown"):
-                try:
-                    interpreter.shutdown(strict_broker_cleanup=policy.strict_broker_cleanup)
-                except TypeError:
-                    interpreter.shutdown()
+            _invoke_interpreter_shutdown(
+                interpreter,
+                strict_broker_cleanup=policy.strict_broker_cleanup,
+            )
         except BaseException as exc:
             error = sanitize_failure_text(exc)
             return InterpreterCloseOutcome(
@@ -5142,6 +5167,11 @@ class DaytonaRuntime:
             raise mapped from exc
 
     async def release(self, lease: InterpreterLease) -> None:
+        if lease.closed and lease._provider_retired:
+            # Confirmed provider retirement is terminal. In particular, do
+            # not reuse a failed local release task after quarantine has
+            # already contained its remote resource.
+            return
         unpublished = self._late_owners.get(id(lease))
         if unpublished is not None and unpublished.unpublished:
             await self._finish_unpublished_lease(unpublished)

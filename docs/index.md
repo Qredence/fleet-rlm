@@ -37,3 +37,6 @@ Regenerate `openapi.yaml` and the TUI HTTP types with `make api-sync`, stream
 fixtures with `make stream-sync`, and the profile matrix with
 `make profile-matrix`. The [agent guide](../AGENTS.md) lists the matching
 verification commands.
+
+See the [Daytona cleanup acceptance receipt](testing/daytona-cleanup-acceptance.md)
+for local cleanup regression evidence and pending live acceptance.

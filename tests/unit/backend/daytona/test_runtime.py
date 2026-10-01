@@ -20,7 +20,9 @@ from pydantic import SecretStr
 
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona import runtime as runtime_module
+from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError, classify_provider_error
+from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
 from fleet_rlm.daytona.runtime import (
     AbsenceConfirmation,
     AbsenceTimeout,
@@ -30,10 +32,12 @@ from fleet_rlm.daytona.runtime import (
     InterpreterLease,
     LeaseRequest,
     RootSessionSpec,
+    SandboxLease,
+    SandboxLeasePolicy,
     build_daytona_client,
 )
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
-from tests.support.session_manager import _FakeSandbox, make_daytona_runtime
+from tests.support.session_manager import _FakePlatform, _FakeSandbox, make_daytona_runtime
 
 
 @pytest.mark.asyncio
@@ -216,6 +220,220 @@ async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
     assert id(lease) in runtime._late_owners
     assert "sandbox_id=sandbox-1 error_type=BadRequestException" in caplog.text
     assert "private" not in caplog.text
+
+
+def test_interpreter_release_does_not_retry_a_body_type_error() -> None:
+    calls: list[bool] = []
+
+    class TypeErrorInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            calls.append(strict_broker_cleanup)
+            raise TypeError("failure inside shutdown")
+
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=TypeErrorInterpreter(),
+    )
+
+    with pytest.raises(TypeError, match="failure inside shutdown"):
+        lease.release()
+
+    assert calls == [True]
+    assert lease.failed
+
+
+def test_interpreter_release_supports_no_argument_shutdown() -> None:
+    calls: list[None] = []
+
+    class LegacyInterpreter:
+        def shutdown(self) -> None:
+            calls.append(None)
+
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=LegacyInterpreter(),
+    )
+
+    lease.release()
+
+    assert calls == [None]
+    assert lease.closed
+
+
+def test_interpreter_release_tries_opaque_shutdown_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+
+    class OpaqueInterpreter:
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            calls.append(strict_broker_cleanup)
+            raise TypeError("opaque shutdown body failed")
+
+    actual_signature = runtime_module.inspect.signature
+
+    def unavailable_signature(callable_obj: object) -> object:
+        if getattr(callable_obj, "__name__", None) == "shutdown":
+            raise ValueError("signature unavailable")
+        return actual_signature(callable_obj)
+
+    monkeypatch.setattr(runtime_module.inspect, "signature", unavailable_signature)
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=OpaqueInterpreter(),
+    )
+
+    with pytest.raises(TypeError, match="opaque shutdown body failed"):
+        lease.release()
+
+    assert calls == [True]
+    assert lease.failed
+
+
+def test_interpreter_release_rejects_unsupported_shutdown_signature() -> None:
+    calls: list[object] = []
+
+    class UnsupportedInterpreter:
+        def shutdown(self, required: object) -> None:
+            calls.append(required)
+
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=UnsupportedInterpreter(),
+    )
+
+    with pytest.raises(TypeError):
+        lease.release()
+
+    assert calls == []
+    assert lease.failed
+
+
+def test_interpreter_release_rejects_non_callable_shutdown_attribute() -> None:
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=SimpleNamespace(shutdown=None),
+    )
+
+    with pytest.raises(TypeError, match="shutdown attribute is not callable"):
+        lease.release()
+
+    assert lease.failed
+
+
+def test_sandbox_lease_shutdown_preserves_body_type_error() -> None:
+    calls: list[bool] = []
+
+    class TypeErrorInterpreter:
+        broker = object()
+        _backend = object()
+
+        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+            calls.append(strict_broker_cleanup)
+            raise TypeError("failure inside shutdown")
+
+    owner = make_daytona_runtime()
+    lease = SandboxLease(
+        owner=owner,
+        sandbox=None,
+        interpreter=TypeErrorInterpreter(),
+        policy=SandboxLeasePolicy(kind="retained_session"),
+    )
+
+    outcome = lease._shutdown_interpreter()
+
+    assert outcome.status == "failed"
+    assert calls == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
+async def test_root_retains_admission_when_real_broker_delete_fails_until_quarantined(
+    error_type: type[Exception],
+) -> None:
+    class Process:
+        def __init__(self) -> None:
+            self.deleted: list[str] = []
+
+        def delete_session(self, session: str) -> None:
+            self.deleted.append(session)
+            if len(self.deleted) == 1:
+                raise error_type("provider delete failed")
+
+    process = Process()
+    sandbox = SimpleNamespace(id="sandbox-1", process=process)
+    backend = sandbox_backend(sandbox)
+    broker = DaytonaHttpToolBroker(sandbox, port=1)
+    broker._session = "fleet-tool-broker-runtime-test"
+    broker._client = SimpleNamespace(close=lambda: None)
+    backend._broker = broker
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    session_id, workspace_id, user_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
+    lease = InterpreterLease(
+        sandbox_id="sandbox-1",
+        interpreter_id="interpreter-1",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=interpreter,
+        sandbox=sandbox,
+        session_id=str(session_id),
+        workspace_id=str(workspace_id),
+        user_id=str(user_id),
+        run_id=str(run_id),
+        created_sandbox=False,
+    )
+    admission = DaytonaAdmission(max_active_leases=2)
+    platform = _FakePlatform()
+    platform.sandboxes["sandbox-1"] = _FakeSandbox("sandbox-1")
+    runtime = make_daytona_runtime(admission=admission, platform=platform)
+    runtime._acquire_provider = AsyncMock(return_value=lease)  # type: ignore[method-assign]
+    await runtime.acquire_root_session(
+        RootSessionSpec(session_id=session_id, workspace_id=workspace_id, user_id=user_id)
+    )
+
+    with pytest.raises(error_type, match="provider delete failed"):
+        await runtime.release(lease)
+
+    assert lease.failed
+    assert id(lease) in runtime._late_owners
+    assert process.deleted == ["fleet-tool-broker-runtime-test"]
+    with pytest.raises(runtime_module.DaytonaAdmissionTimeoutError):
+        await admission.acquire(deadline=asyncio.get_running_loop().time() + 0.02)
+
+    await runtime.release(lease)
+
+    # The runtime contains an unconfirmed broker shutdown by fencing the
+    # owning Sandbox; it does not replay the failed SDK deletion call.
+    assert process.deleted == ["fleet-tool-broker-runtime-test"]
+    assert lease.closed
+    assert id(lease) not in runtime._late_owners
+    assert platform.sandboxes["sandbox-1"].state == "stopped"
+    fencing_ops = tuple(platform.sandboxes["sandbox-1"].ops)
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
+
+    assert await runtime.aclose()
+    assert runtime.roots == ()
+    record = runtime.session_record(workspace_id, session_id)
+    assert record is not None and record.root is None
+    assert tuple(platform.sandboxes["sandbox-1"].ops) == fencing_ops
+    assert process.deleted == ["fleet-tool-broker-runtime-test"]
+    assert await runtime.aclose()
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    permit.release()
 
 
 @pytest.mark.asyncio
