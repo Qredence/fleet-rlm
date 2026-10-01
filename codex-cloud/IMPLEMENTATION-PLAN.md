@@ -4,12 +4,17 @@
 > that historical version remains in `fleet-daytona-implementation-bundle-v2.zip`
 > and Git history.
 >
-> **Implementation status (2026-10-01):** Follow-ups A and B are implemented on
-> branch `fix/daytona-attachment-parity-and-broker`. Verification also found and
-> fixed issues this audit did not list: the Sandbox loader stayed callable from
-> later model actions, loader failures were classified as `HostSetupError`, and the
-> broker accepted a `/result` before a lease was issued. Current local and live
-> evidence is in [Daytona cleanup acceptance](../docs/testing/daytona-cleanup-acceptance.md).
+> **Implementation status (2026-10-01):** Follow-ups A and B and Closeout C are
+> complete on branch `fix/daytona-attachment-parity-and-broker`, and all four
+> live gates passed on its candidate. Verification also found and fixed issues
+> this audit did not list:
+> - the Sandbox loader stayed callable from later model actions;
+> - loader failures were classified as `HostSetupError`;
+> - the broker accepted a `/result` before a lease was issued;
+> - concurrent Volume creation failed on 400/500 provider responses;
+> - the declared-output rule rejected keyword passthroughs.
+>
+> Evidence is in [Daytona cleanup acceptance](../docs/testing/daytona-cleanup-acceptance.md).
 > The rest of this document is the audit as written, against `e45bff1`.
 
 - **Audit date:** 2026-10-01

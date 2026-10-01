@@ -7,8 +7,8 @@ Date: 2026-10-01.
 | Revision | Status |
 | --- | --- |
 | Merged code | Cleanup follow-up #579 merged to `main` as `e45bff132e5b2fdfe14ff81f7cc66ac89aedd536` (base `a041d747f711747d527724ddeb0100318c2406b9`) |
-| Locally tested | #579 tree: receipts below. Follow-ups A and B: `927ccccbac47a64fb141beb7eb191363599061bf`, see [2026-10-01 follow-up](#2026-10-01-follow-up-attachment-parity-and-broker-results) |
-| Live tested | `927ccccbac47a64fb141beb7eb191363599061bf`: the interpreter/deletion lifecycle gate passed; the other three gates remain pending (see the follow-up section) |
+| Locally tested | #579 tree: receipts below. Follow-up candidate `e7b1e6e72`: see [2026-10-01 follow-up](#2026-10-01-follow-up-attachment-parity-and-broker-results) |
+| Live tested | `e7b1e6e72`: all four live gates passed (see the follow-up section) |
 
 ## Implemented behavior
 
@@ -79,7 +79,7 @@ uv run --no-sync --python 3.11 pytest -q -n 2 --dist=loadfile -p no:warnings \
   tests/unit/backend tests/contracts/backend
 ```
 
-## Remaining live acceptance
+## Live acceptance gates
 
 On a clean non-main candidate, with operator authorization, use fresh evidence
 paths and the existing bounded native/recursive profiles for:
@@ -90,8 +90,8 @@ paths and the existing bounded native/recursive profiles for:
 4. The FastAPI cancellation test: unresolved execution blocks reuse and cleanup settles.
 
 Record the immutable candidate SHA, exact commands, environment, receipt paths,
-cleanup observations, and unresolved failures. Full acceptance remains pending
-until these live gates pass; local results do not certify provider behavior.
+cleanup observations, and unresolved failures. Local results do not certify
+provider behavior.
 
 ## #579 review before merge
 
@@ -114,12 +114,13 @@ is `/tmp/fleet-cleanup-review-final-check.log`.
 ## 2026-10-01 follow-up: attachment parity and broker results
 
 Scope: Follow-ups A and B of the active
-[implementation plan](../../codex-cloud/IMPLEMENTATION-PLAN.md), on branch
-`fix/daytona-attachment-parity-and-broker`, candidate
-`927ccccbac47a64fb141beb7eb191363599061bf`. Environment: Python 3.13.13,
-DSPy 3.4.0, Daytona SDK 0.218.0, Fleet 0.7.10.
+[implementation plan](../../codex-cloud/IMPLEMENTATION-PLAN.md), plus the defects
+the live gates then exposed. Branch: `fix/daytona-attachment-parity-and-broker`.
+Candidate: `e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303`. Environment: Python 3.13.13, DSPy 3.4.0, Daytona SDK 0.218.0,
+MLflow 3.16.1 (local server via `uv run fleet cli`), Fleet 0.7.10, policy models
+`deepseek-v4.1-flash`.
 
-Behavior established by the new local regressions:
+Behavior established by new regressions:
 
 - Both backends now run the same prepared-attachment materializer. Matrix tests
   run against the real generated Sandbox loader and the in-process backend, and
@@ -140,21 +141,41 @@ Behavior established by the new local regressions:
   result before a lease is issued, a stale lease, and a duplicate after
   consumption are each rejected with 409. The first value survives.
 
-| Local gate | Result |
+Defects found by the live gates and fixed in their owners:
+
+- **Concurrent Volume creation (`daytona/runtime.py`).** When two creates race,
+  the provider rejects the loser with HTTP 500 or 400 "already exists", not 409.
+  This was reproduced directly against the provider. The Turn failed with
+  `ProviderRequestError`. Those responses are now reconciled by one lookup,
+  without repeating creation.
+- **Declared-output credential rule (`rlm/result.py`).** It rejected
+  `iteration_token=iteration_token` and `iteration_token=...` in a model's
+  summary of its own code, so valid Turns failed with "Turn output is invalid".
+  Native-proof live runs passed 2 of 7 before the fix and 4 of 4 after it. Real
+  values are still rejected.
+- **Stale live harnesses.** Several live tests had drifted from the runtime:
+  - the bridge dispatcher and session-scoped Volume subpath;
+  - the `/workspace` mount;
+  - the frozen preparation plan;
+  - `close_root_session` never being called;
+  - `_bindings` access.
+
+  Separately, the verifier replaced proof failures with `cleanup_failed`.
+
+| Local gate (candidate above) | Result |
 | --- | --- |
-| Backend Daytona/RLM/contract lane (`-n 0`, non-live markers) | 1,168 passed |
-| `make check` | Lint, format, `ty`, coverage (83.11%), 444 TUI tests, codebase-tree and dependency-boundary checks passed. `check-instructions` then stopped on an untracked, git-ignored local `docs/plans/` directory that is not part of the candidate; the tracked docs check is recorded separately below |
+| Python tests with coverage (`make check`) | Passed; total coverage 83.12% (75% required) |
+| Lint, format, `ty` | Passed |
+| API/stream contracts, 444 TUI tests | Passed |
+| Codebase-tree, dependency-boundary, docs/hygiene, profile matrix | Passed. Docs/hygiene ran from a clean worktree; a local, git-ignored `docs/plans/` directory fails the hygiene check in the working checkout |
 
-Live gates were run by the operator on 2026-10-01 against the candidate above,
-with receipts in `.scratch/daytona-current-acceptance/<sha>/`:
-
-| Live gate | Outcome |
+| Live gate (candidate above) | Result |
 | --- | --- |
-| Interpreter/deletion lifecycle test | **Passed**. Same-invocation state, fresh invocation state, async host tools, typed SUBMIT, strict interpreter cleanup, and provider-confirmed Sandbox absence |
-| `scripts/live_recursive_batch_canary.py` (`daytona-recursive`, `deepseek-v4.1-flash`) | **Pending**. Ordered two-child outcomes, distinct child Sandboxes and Volume subpaths, call indexes `[1, 2]`, and peak concurrency 2 were asserted. The run then failed its final check because no root MLflow trace ID was exposed: the local tracking server was not running |
-| `scripts/live_daytona_verify.py` | **Pending, harness defect**. The durability test calls `DaytonaRuntime.from_settings()` without the now-required `dispatcher` argument. It fails identically on `main`, before any provider operation. It now also asserts text and binary prepared-context loading and access reporting, but that assertion has not yet run live |
-| FastAPI cancellation lane | **Pending, harness defect**. The test assigns to the frozen `TurnPreparationPlan` (`preparation._models`). It fails identically on `main`, before any provider operation |
+| Interpreter/deletion lifecycle test | **Passed**. Same-invocation and fresh-invocation state, async host tools, typed SUBMIT, strict interpreter cleanup, and provider-confirmed Sandbox absence |
+| `scripts/live_daytona_verify.py` | **Passed**. Native semantic calls, and attachment/artifact durability, including text and binary prepared-context loading with reported access IDs |
+| `scripts/live_recursive_batch_canary.py` (`daytona-recursive`) | **Passed**. Two ordered native children, peak concurrency 2, retained root reused on a second Turn, and cleanup with admission restored |
+| FastAPI cancellation lane | **Passed**. Cancellation observed, lease released, admission restored, and Sandbox confirmed absent |
 
-The two harness defects come from earlier lifecycle refactors and have not been
-fixed by this follow-up. Full live acceptance stays pending until all four gates
-pass on one candidate.
+Receipts: `.scratch/daytona-current-acceptance/e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303/`. These results certify
+this candidate's local and live gates. They do not certify release or
+promotion.
