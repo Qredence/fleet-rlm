@@ -17,6 +17,7 @@ executors:
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: /home/circleci/.cache/uv
+      UV_LOCKED: "true"
   python-compat:
     parameters:
       image:
@@ -26,6 +27,7 @@ executors:
     working_directory: ~/project
     environment:
       UV_CACHE_DIR: /home/circleci/.cache/uv
+      UV_LOCKED: "true"
   node:
     docker:
       - image: cimg/node:22.23.2@sha256:7c78a95e25876729c2c9cada532b0636fd3ec7dbae922b3d90d83704f4c87639
@@ -36,19 +38,21 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v2-uv-bin-{{ arch }}
+            - v3-uv-bin-0.12.21-{{ arch }}
       - run:
           name: Install uv (skip if cached)
           command: |
-            if [ ! -f "$HOME/.local/bin/uv" ]; then
-              curl -LsSf https://astral.sh/uv/install.sh | sh
+            if [ ! -x "$HOME/.local/bin/uv" ] || [ "$("$HOME/.local/bin/uv" --version | cut -d ' ' -f 2)" != "0.12.21" ]; then
+              curl -LsSf https://astral.sh/uv/0.12.21/install.sh | sh
             fi
+            test "$("$HOME/.local/bin/uv" --version | cut -d ' ' -f 2)" = "0.12.21"
+            "$HOME/.local/bin/uv" --version
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
 
   save_uv_binary_cache:
     steps:
       - save_cache:
-          key: v2-uv-bin-{{ arch }}
+          key: v3-uv-bin-0.12.21-{{ arch }}
           paths:
             - ~/.local/bin/uv
             - ~/.local/bin/uvx
@@ -61,8 +65,8 @@ commands:
     steps:
       - restore_cache:
           keys:
-            - v2-uv-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
-            - v2-uv-<< parameters.python_tag >>-{{ arch }}-
+            - v3-uv-0.12.21-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
+            - v3-uv-0.12.21-<< parameters.python_tag >>-{{ arch }}-
 
   save_uv_cache:
     parameters:
@@ -71,7 +75,7 @@ commands:
         default: "py313"
     steps:
       - save_cache:
-          key: v2-uv-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
+          key: v3-uv-0.12.21-<< parameters.python_tag >>-{{ arch }}-{{ checksum "uv.lock" }}
           paths:
             - /home/circleci/.cache/uv
 
@@ -90,25 +94,29 @@ commands:
       - run:
           name: Install Python dependencies (<< parameters.python_version >>)
           no_output_timeout: 15m
-          command: uv sync --all-extras --dev --python << parameters.python_version >>
+          command: uv sync --locked --all-extras --dev --python << parameters.python_version >>
 
   install_tui_dependencies:
     steps:
-      - restore_cache:
-          keys:
-            - v1-pnpm-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
       - run:
-          name: Enable corepack and activate pnpm
+          name: Enable corepack and record TUI runtime versions
           command: |
             corepack enable
             corepack prepare pnpm@12.6.0 --activate
+            mkdir -p .scratch
+            cd tools/fleet-tui
+            { node --version; pnpm --version; } > ../../.scratch/pnpm-runtime
+      - restore_cache:
+          keys:
+            - v2-pnpm-store-{{ arch }}-{{ checksum ".scratch/pnpm-runtime" }}-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
       - run:
           name: Install TUI dependencies
-          command: pnpm --dir tools/fleet-tui install --frozen-lockfile
+          working_directory: ~/project/tools/fleet-tui
+          command: pnpm install --frozen-lockfile --store-dir ../../.scratch/pnpm-store
       - save_cache:
-          key: v1-pnpm-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
+          key: v2-pnpm-store-{{ arch }}-{{ checksum ".scratch/pnpm-runtime" }}-{{ checksum "tools/fleet-tui/pnpm-lock.yaml" }}
           paths:
-            - tools/fleet-tui/node_modules
+            - .scratch/pnpm-store
 
 jobs:
   quality:
@@ -138,6 +146,11 @@ jobs:
           name: Stream contract check
           no_output_timeout: 5m
           command: make stream-check
+      - run:
+          name: Ownership and dependency boundary checks
+          command: |
+            make check-codebase-tree
+            make check-dependency-boundaries
       - run:
           name: Python dependency check
           command: make check-deps
@@ -188,15 +201,21 @@ jobs:
     resource_class: small
     steps:
       - checkout
-      - install_python_dependencies
+      - install_uv
+      - run:
+          name: Install locked coverage tooling only
+          command: |
+            COVERAGE_VERSION=$(python -c 'import tomllib; print(next(p["version"] for p in tomllib.load(open("uv.lock", "rb"))["package"] if p["name"] == "coverage"))')
+            uv venv .scratch/coverage-venv --python 3.13
+            uv pip install --python .scratch/coverage-venv/bin/python "coverage==$COVERAGE_VERSION"
       - attach_workspace:
           at: .scratch/coverage
       - run:
           name: Combine shard coverage and enforce floor
           no_output_timeout: 5m
           command: |
-            .venv/bin/coverage combine --keep .scratch/coverage
-            .venv/bin/coverage report --fail-under=75 --show-missing > coverage-report.txt || {
+            .scratch/coverage-venv/bin/coverage combine --rcfile=pyproject.toml --keep .scratch/coverage
+            .scratch/coverage-venv/bin/coverage report --rcfile=pyproject.toml --show-missing > coverage-report.txt || {
               cat coverage-report.txt
               exit 1
             }
@@ -251,7 +270,8 @@ jobs:
             uv run --no-project python scripts/circleci_trigger_release.py \
               --version="<< pipeline.parameters.release_version >>" \
               --repository=Qredence/fleet-rlm \
-              --ref=main
+              --ref=main \
+              --expected-sha="$(git rev-parse HEAD)"
       - run:
           name: Update deploy to SUCCESS
           command: circleci run release update pypi-publish --status=SUCCESS
@@ -324,11 +344,12 @@ jobs:
       - install_tui_dependencies
       - run:
           name: TUI lint, type, and tests
+          working_directory: ~/project/tools/fleet-tui
           command: |
-            pnpm --dir tools/fleet-tui run format:check
-            pnpm --dir tools/fleet-tui run lint
-            pnpm --dir tools/fleet-tui run typecheck
-            pnpm --dir tools/fleet-tui test
+            pnpm run format:check
+            pnpm run lint
+            pnpm run typecheck
+            pnpm test
 
 workflows:
   ci:
