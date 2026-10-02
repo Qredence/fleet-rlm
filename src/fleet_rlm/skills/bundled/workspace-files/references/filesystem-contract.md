@@ -1,45 +1,41 @@
 # Workspace filesystem contract
 
-The Daytona sandbox sees its Workspace-scoped durable Volume at `/home/daytona/fleet`. The same backing Volume may serve multiple Workspaces, but Fleet mounts only the current Workspace's isolated subpath.
+Your Sandbox mounts exactly one durable location: this Session's Workspace, at
+`/workspace`. Everything else durable lives on the Workspace's Daytona Volume,
+outside your Sandbox, and is reached only through host tools.
 
-## Acquisition-created layout
-
-Before a Run begins, Fleet creates the shared roots and the current Session and Run containers:
+## What the Sandbox sees
 
 ```text
-/home/daytona/fleet/
-├── artifacts/
-├── attachments/
-├── files/
-├── memory/MEMORIES.md
-├── projects/<slug>/
-└── sessions/<session_uuid>/
-    ├── workspace/
-    └── runs/
-        └── <run_uuid>/
-            ├── artifacts/
-            └── attachments/
+/workspace/          durable Session Workspace (survives Turns, failed Runs,
+                     and Sandbox replacement)
+/tmp/fleet/<run>/    private Run scratch; removed when the Run ends
+└── attachments/     Run copies of the Attachments authorized to this Turn
 ```
 
-Session and Run directory names are UUID-shaped. The containers exist at acquisition; workspace documents, `result.json`, and UUID-specific Attachment or Artifact files exist only after they are written.
+Any other path in the Sandbox, including your home directory, is ephemeral
+local disk: it is lost when the Sandbox is replaced, and nothing there is a
+Workspace operation.
 
-## Boundaries
+## Durable Workspace stores (host tools only)
 
-| Location | Meaning |
+| Logical location | Meaning |
 |---|---|
+| `sessions/<session_uuid>/workspace/` | The same files you see at `/workspace`. Use the Session Workspace tools with relative paths. |
 | `projects/<slug>/` | Browsable durable deliverables named by an explicit model-chosen slug (`^[a-z0-9][a-z0-9._-]{0,63}$`; reserved roots `sessions`, `files`, `artifacts`, `attachments`, `memory` are not valid slugs). Write with `write_project_text`; replacement requires `overwrite=True`. |
-| `sessions/<session_uuid>/workspace/` | Immediate private Session working state (scratch); durable across Turns, failed Runs, and sandbox replacement. |
-| `sessions/<session_uuid>/runs/<run_uuid>/attachments/` | Private Run staging for Attachments authorized to that Turn. Read them with `read_attachment`, not by guessing a path. |
-| `sessions/<session_uuid>/runs/<run_uuid>/artifacts/` | Private Artifact Candidate bytes. Writing here directly does not publish or register an Artifact. |
+| `memory/MEMORIES.md` | Workspace Memory; use the dedicated bounded memory tools. |
+| `attachments/<attachment_uuid>/` | Durable Attachment originals. Read the Run copy with `read_attachment`, not by guessing a path. |
 | `artifacts/<artifact_uuid>/` | Durable promoted bytes. They represent a public Artifact only after successful Turn Commit; raw paths remain private. |
+| `files/` | Public Workspace files managed by the user through the API. |
+
+Session and Run directory names are UUID-shaped. A document exists only after
+its owning operation creates or migrates it.
 
 The catalog remains host-owned. Loading an authorized Skill may install its
 manifested resources under `skills/<name>/` in the Session Workspace;
 `read_skill_resource` remains the fallback when installation is unavailable.
-Workspace Memory lives at `memory/MEMORIES.md` and uses the dedicated bounded
-memory tools. Session `exports/` and `staging/`, and Run `staging/`, are not
-general-purpose tool namespaces. The tree shows logical locations; a document
-exists only after its owning operation creates or migrates it.
+Session `exports/` and `staging/`, and Run `staging/`, are not general-purpose
+tool namespaces.
 
 `create_artifact` writes a private candidate under the current Run. On successful finalization, Fleet validates the candidate, promotes its bytes to the durable Artifact area, and commits its public identity with the Turn. Failure, cancellation, timeout, or commit failure does not publish that identity, even if private bytes were written before the metadata commit completed.
 
