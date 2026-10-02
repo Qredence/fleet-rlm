@@ -842,9 +842,12 @@ class DaytonaSandboxWorkspaceStorage:
 
     @staticmethod
     def _is_not_found(exc: BaseException) -> bool:
-        return isinstance(exc, (FileNotFoundError, KeyError)) or any(
-            token in str(exc).lower() for token in ("not found", "status 404", " 404")
-        )
+        # The Daytona SDK's not-found errors are not FileNotFoundError; they
+        # carry status_code 404 and may say only "no such file or directory".
+        if isinstance(exc, (FileNotFoundError, KeyError)) or getattr(exc, "status_code", None) == 404:
+            return True
+        text = str(exc).lower()
+        return any(token in text for token in ("not found", "no such file or directory", "status 404", " 404"))
 
     def _read_optional(self, full_path: str) -> bytes | None:
         try:
