@@ -199,6 +199,7 @@ _DECLARED_SECRET_ASSIGNMENT = re.compile(
     r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key))\b"
     r"\s*(?:=|:)\s*(?P<value>\"[^\"\r\n]+\"|'[^'\r\n]+'|[^\s,;}\]\)]+)"
 )
+_DECLARED_CALL_VALUE = re.compile(r"[A-Za-z_][\w.]*\(")
 _DECLARED_BEARER = re.compile(r"(?i)\bbearer\s+(?P<value>[a-z0-9._~+/=-]+)")
 _DECLARED_PROVIDER_TOKEN = re.compile(
     r"(?i)\b(?:"
@@ -402,8 +403,9 @@ def _contains_sensitive_value(value: Any) -> bool:
 
 def _validate_declared_text(text: str) -> None:
     for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
-        # ``name=name`` passes a variable through a keyword; it carries no value.
-        if match.group("value") == match.group("key"):
+        # ``name=name`` passes a variable through a keyword, and ``name = f(...)``
+        # assigns a call result; neither is a credential value.
+        if match.group("value") == match.group("key") or _DECLARED_CALL_VALUE.match(match.group("value")):
             continue
         if not _is_safe_placeholder(match.group("value")):
             raise ValueError("declared output contains a sensitive value")

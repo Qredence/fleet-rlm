@@ -36,6 +36,7 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
         # A keyword passthrough names a variable, never its value.
         "code": "verify_semantic_work(iteration_token=iteration_token, single_result=single_result)",
         "elided": "verify_semantic_work(iteration_token=..., accumulator=...)",
+        "call": "iteration_token = issue_iteration_token(); api_key = load_key(path)",
         "mount": "/home/daytona/fleet",
         "api_key": "${FLEET_DAYTONA_API_KEY}",
     }
