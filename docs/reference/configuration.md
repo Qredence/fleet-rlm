@@ -171,6 +171,11 @@ the shipped `daytona-native` default) and bound the Fleet
 `recursion_max_parallel_children` bounds the number of independent child RLMs
 that Fleet may run concurrently; the committed default is `4` and it is not a
 model-facing concurrency control.
+`child_execution_timeout_s` scopes each child's per-action execution deadline
+independently of the parent `execution_timeout_s`. The committed default `0`
+derives `max(1, int(execution_timeout_s × 0.9))`, clamped to the parent, so a
+recursion batch's in-sandbox wait always outlives its slowest child; an
+explicit value must not exceed `execution_timeout_s`.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.

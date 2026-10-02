@@ -467,6 +467,16 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=120, gt=0)
+    rlm_child_execution_timeout_s: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="rlm.child_execution_timeout_s",
+            group="RLM",
+            label="Child sandbox execution timeout (seconds)",
+            editor="number",
+            rank=41,
+        ),
+    ] = Field(default=0, ge=0)
     rlm_wrap_up_seconds: Annotated[
         int,
         FleetFieldPolicy(
@@ -979,6 +989,8 @@ class Settings(BaseModel):
             raise ValueError("rlm_wrap_up_seconds must be less than turn_timeout_seconds")
         if self.rlm_recursion_max_parallel_children > self.rlm_recursion_max_calls:
             raise ValueError("rlm_recursion_max_parallel_children must not exceed rlm_recursion_max_calls")
+        if self.rlm_child_execution_timeout_s > self.rlm_execution_timeout_s:
+            raise ValueError("rlm_child_execution_timeout_s must not exceed rlm_execution_timeout_s")
         return self
 
     @field_validator("rlm_autonomous_memory_categories")

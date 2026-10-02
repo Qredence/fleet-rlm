@@ -821,6 +821,7 @@ class DaytonaCodeInterpreter:
         tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
         context_capsule: Any | None = None,
         output_contract: FleetOutputContract | None = None,
+        timeout_s: int | None = None,
     ) -> DaytonaCodeInterpreter:
         """Create an invocation-scoped adapter without retiring its Sandbox.
 
@@ -831,6 +832,8 @@ class DaytonaCodeInterpreter:
         callers pass them through the zero-argument factory supplied to DSPy;
         the retained template never receives per-Run observer, budget,
         request, bridge, tool-settlement, context, or output-contract state.
+        ``timeout_s`` overrides the fresh backend's per-action execution
+        deadline; ``None`` inherits the retained backend's timeout.
         """
         backend = self._backend
         if isinstance(backend, InProcessInterpreterBackend):
@@ -838,7 +841,7 @@ class DaytonaCodeInterpreter:
         elif isinstance(backend, _SandboxProcessBackend):
             fresh_backend = _SandboxProcessBackend(
                 backend.sandbox,
-                timeout_s=backend.timeout_s,
+                timeout_s=timeout_s if timeout_s is not None else backend.timeout_s,
                 broker_port=backend.broker_port,
             )
             if backend._run_scratch_path is not None:

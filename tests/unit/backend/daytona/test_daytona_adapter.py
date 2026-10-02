@@ -353,6 +353,40 @@ def test_factory_created_adapter_keeps_run_bindings_off_retained_template() -> N
     assert retained._turn_request is None
 
 
+def test_new_invocation_timeout_override_scopes_only_the_fresh_backend() -> None:
+    from fleet_rlm.daytona.interpreter import (
+        DaytonaCodeInterpreter,
+        _SandboxProcessBackend,
+    )
+
+    retained = DaytonaCodeInterpreter(
+        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
+    )
+
+    fresh = retained.new_invocation(timeout_s=45)
+    assert fresh._backend.timeout_s == 45
+    assert retained._backend.timeout_s == 300
+
+    inherited = retained.new_invocation()
+    assert inherited._backend.timeout_s == 300
+
+
+def test_new_invocation_rejects_non_positive_timeout_override() -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import (
+        DaytonaCodeInterpreter,
+        _SandboxProcessBackend,
+    )
+
+    retained = DaytonaCodeInterpreter(
+        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
+    )
+
+    with pytest.raises(DaytonaAdapterError, match="execution timeout must be positive") as caught:
+        retained.new_invocation(timeout_s=0)
+    assert caught.value.cause_type == "InterpreterConfigurationError"
+
+
 def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
     from dspy.primitives.code_interpreter import CodeInterpreterError
 

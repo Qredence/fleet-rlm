@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import functools
 import time
 from collections.abc import Callable
 from uuid import uuid4
@@ -38,6 +39,7 @@ from fleet_rlm.rlm.execution import (
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
+    RLMConfigError,
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
@@ -240,6 +242,62 @@ def test_public_settings_surface_exposes_no_recursion_depth() -> None:
     recursion_settings = [name for name in Settings.model_fields if name.startswith("rlm_recursion")]
     assert recursion_settings
     assert not any("depth" in name for name in recursion_settings)
+
+
+class _SpyInvocationFactory(_RecordingFactory):
+    """Record the kwargs each child lease interpreter's factory receives."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.invocation_kwargs: list[dict[str, object]] = []
+
+    def __call__(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        lease = super().__call__(call_index, profile=profile)
+        real_new_invocation = lease.interpreter.new_invocation
+
+        @functools.wraps(real_new_invocation)
+        def recording_new_invocation(**kwargs: object) -> object:
+            self.invocation_kwargs.append(dict(kwargs))
+            return real_new_invocation(**kwargs)
+
+        lease.interpreter.new_invocation = recording_new_invocation
+        return lease
+
+
+def test_invocation_factory_scopes_the_child_action_deadline_from_options() -> None:
+    """The invocation factory passes the resolved child per-action
+    deadline into ``new_invocation`` so a child cannot consume the parent's
+    whole action budget; without an options value it passes no override."""
+    root_actions = [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"}]
+
+    spy = _SpyInvocationFactory()
+    executor = _executor(root_actions, spy, options=RecursiveRLMOptions(child_execution_timeout_s=45))
+    assert executor.tool(task="bounded child", inputs=[])["answer"] == "child-ok"
+    assert spy.invocation_kwargs
+    assert all(kwargs.get("timeout_s") == 45 for kwargs in spy.invocation_kwargs)
+
+    inherited = _SpyInvocationFactory()
+    executor = _executor(root_actions, inherited, options=RecursiveRLMOptions())
+    assert executor.tool(task="inheriting child", inputs=[])["answer"] == "child-ok"
+    assert inherited.invocation_kwargs
+    assert all("timeout_s" not in kwargs for kwargs in inherited.invocation_kwargs)
+
+
+def test_recursive_options_reject_non_positive_child_timeouts() -> None:
+    for value in (0, -5):
+        with pytest.raises(RLMConfigError, match="child_execution_timeout_s"):
+            RecursiveRLMOptions(child_execution_timeout_s=value)
+
+
+def test_settings_resolved_child_deadline_derives_from_and_never_exceeds_the_parent() -> None:
+    from fleet_rlm.config.settings import Settings
+    from fleet_rlm.rlm.recursion import recursive_rlm_options
+
+    derived = recursive_rlm_options(Settings(rlm_execution_timeout_s=300))
+    assert derived.child_execution_timeout_s == 270
+
+    explicit = recursive_rlm_options(Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=120))
+    assert explicit.child_execution_timeout_s == 120
 
 
 def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:

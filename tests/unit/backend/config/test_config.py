@@ -498,6 +498,38 @@ def test_deadline_reserve_must_leave_time_inside_the_turn() -> None:
     assert valid.rlm_wrap_up_seconds < valid.turn_timeout_seconds
 
 
+def test_child_execution_timeout_defaults_to_derive_sentinel() -> None:
+    assert Settings().rlm_child_execution_timeout_s == 0
+
+
+def test_child_execution_timeout_must_not_exceed_the_parent_deadline() -> None:
+    with pytest.raises(ValidationError, match="rlm_child_execution_timeout_s"):
+        Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=301)
+
+    valid = Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=300)
+    assert valid.rlm_child_execution_timeout_s == 300
+
+
+def test_child_execution_timeout_resolves_from_the_committed_toml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import fleet_rlm.config.loader as config
+
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    policy.write_text(
+        policy.read_text(encoding="utf-8").replace(
+            "execution_timeout_s = 90",
+            "execution_timeout_s = 90\nchild_execution_timeout_s = 45",
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+
+    settings = config.load_runtime_settings()
+    assert settings.rlm_child_execution_timeout_s == 45
+
+
 def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:
     assert Settings().live_enabled is True
     assert Settings(live_enabled=False).live_enabled is False
