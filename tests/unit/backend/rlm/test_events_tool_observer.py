@@ -322,3 +322,45 @@ async def test_async_tool_uses_the_composition_bridge_inside_dspy_event_loop() -
     assert wrapped.func(value=7) == {"value": 7}
     assert bridge_calls == 1
     assert [type(event).__name__ for event in observed] == ["ToolStarted", "ToolCompleted"]
+
+
+def test_tool_failure_span_carries_closed_cause_without_exception_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    finished: list[dict[str, Any]] = []
+
+    class _Span:
+        def finish(self, *, phase_status: str, outputs: dict[str, Any] | None = None) -> None:
+            finished.append({"phase_status": phase_status, **(outputs or {})})
+
+    monkeypatch.setattr("fleet_rlm.observability.tracing.start_turn_span", lambda *_a, **_k: _Span())
+    observed: list[Any] = []
+
+    def batched(prompts: list[str]) -> list[str]:
+        if len(prompts) > 1:
+            raise RuntimeError(f"LLM call limit exceeded: 0 + {len(prompts)} > 32. Use Python code instead.")
+        # An unlabeled opaque credential in an exception must never reach the span.
+        raise RuntimeError("upstream rejected AKIAIOSFODNN7EXAMPLEKEY")
+
+    wrapped = observe_tool(dspy.Tool(batched), observed.append, ToolEventView.metadata_only())
+    with pytest.raises(RuntimeError):
+        wrapped(prompts=["a"] * 40)
+    with pytest.raises(RuntimeError):
+        wrapped(prompts=["a"])
+
+    budget, opaque = finished[-2], finished[-1]
+    assert budget == {
+        "phase_status": "failed",
+        "tool_status": "failed",
+        "failure_category": "tool_error",
+        "failure_cause_class": "RuntimeError",
+        "failure_detail": "llm_call_limit",
+    }
+    assert opaque == {
+        "phase_status": "failed",
+        "tool_status": "failed",
+        "failure_category": "tool_error",
+        "failure_cause_class": "RuntimeError",
+    }
+    assert "AKIA" not in str(finished)
+    assert observed[-1].error == "Tool failed"

@@ -127,7 +127,8 @@ lint:
 	uv run ruff check $(PYTHON_SOURCES)
 
 typecheck:
-	uv run ty check src
+	uv run ty check src tests/live
+	env -u FLEET_LIVE uv run pytest --collect-only -q tests/live > /dev/null
 
 test:
 	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS)
