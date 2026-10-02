@@ -19,7 +19,7 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.program import RLMModelBundle
 from tests.live.backend._evidence import candidate_identity, write_receipt
-from tests.live.backend._mvp_support import _live_settings, _strict_cleanup
+from tests.live.backend._mvp_support import _live_settings, _strict_cleanup, live_runtime
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 
@@ -113,12 +113,11 @@ def test_daytona_deadline_cleanup_through_fastapi(
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
-        inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
-        assert resources is not None
-        preparation = inventory.run_preparation
-        assert preparation is not None
-        preparation._models = RLMModelBundle(_DeadlineRootLM(), dspy.utils.DummyLM([{"answer": "unused"}]))
+        resources, preparation = live_runtime(app)
+        # TurnPreparationPlan is frozen; swap its models in place for the canary.
+        object.__setattr__(
+            preparation, "models", RLMModelBundle(_DeadlineRootLM(), dspy.utils.DummyLM([{"answer": "unused"}]))
+        )
         session_id: UUID | None = None
         try:
             created = client.post("/api/sessions", json={"title": "Daytona live deadline canary"})

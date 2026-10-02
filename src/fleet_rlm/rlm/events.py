@@ -709,7 +709,16 @@ def _execute_observed_tool(
         if guards is not None:
             guards.failed(str(source.name), arguments)
         observer(ToolFailed(trace.call_id, str(source.name), event_view.error(validation=False, exception=exc)))
-        trace.finish(status="failed", output={"tool_status": "failed", "failure_category": "tool_error"})
+        # The public event stays the closed "Tool failed". The span records only
+        # message-free causes: exception text can carry unlabeled credentials.
+        output: dict[str, str] = {
+            "tool_status": "failed",
+            "failure_category": "tool_error",
+            "failure_cause_class": type(exc).__name__[:80],
+        }
+        if str(exc).startswith("LLM call limit exceeded"):
+            output["failure_detail"] = "llm_call_limit"
+        trace.finish(status="failed", output=output)
         raise
     return result
 

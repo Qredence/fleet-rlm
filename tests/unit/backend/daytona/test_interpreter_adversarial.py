@@ -104,7 +104,7 @@ class TestInterpreterTimeoutsAndLimits:
         monkeypatch.setattr(DaytonaHttpToolBroker, "execute", execute)
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=42))
         assert interpreter.execute("print('done')") == "done\n"
-        assert observed == [42]
+        assert observed == [42, 42]  # one-time setup, then the action
 
     def test_empty_and_oversized_code_are_rejected(self) -> None:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), max_code_chars=100)

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,7 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
+from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.tracing import _local_tracking_server_available
 from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
@@ -47,6 +49,7 @@ from tests.live.backend._mvp_support import (
     _sse_chunks,
     _sse_finish_diagnostic,
     _strict_cleanup,
+    live_runtime,
 )
 
 # The live marker rides the live cases individually so the deterministic
@@ -397,6 +400,24 @@ def _stream_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _semantic_input_shape(values: Mapping[str, Any]) -> JsonValue:
+    """Project only the argument shapes of a verify_semantic_work call."""
+    return {
+        "iteration_token_type": type(values.get("iteration_token")).__name__,
+        "single_result_type": type(values.get("single_result")).__name__,
+        "batch_results_type": type(values.get("batch_results")).__name__,
+        "batch_result_item_types": tuple(sorted({type(value).__name__ for value in values.get("batch_results", ())}))
+        if isinstance(values.get("batch_results"), (list, tuple))
+        else (),
+        "batch_count": len(values["batch_results"]) if isinstance(values.get("batch_results"), (list, tuple)) else 0,
+        "accumulator_type": type(values.get("accumulator")).__name__,
+        "accumulator_item_types": tuple(sorted({type(value).__name__ for value in values.get("accumulator", ())}))
+        if isinstance(values.get("accumulator"), (list, tuple))
+        else (),
+        "accumulator_count": len(values["accumulator"]) if isinstance(values.get("accumulator"), (list, tuple)) else 0,
+    }
+
+
 def _failure_diagnostic(streams: dict[str, list[dict[str, Any]]]) -> dict[str, Any]:
     """Per-stream diagnostics keyed by phase label; streams without chunks are omitted."""
     return {label: _stream_diagnostic(chunks) for label, chunks in streams.items() if chunks}
@@ -409,7 +430,7 @@ def _failure_receipt(
     category: str,
     phase: str,
     diagnostic: dict[str, Any] | None = None,
-) -> dict[str, object]:
+) -> dict[str, Any]:
     return {
         "schema": _RECEIPT_SCHEMA,
         "candidate": {key: candidate[key] for key in ("sha", "branch", "tracked_tree_clean")},
@@ -488,8 +509,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
     cleanup_failures: tuple[str, ...] = ()
 
     with TestClient(app) as client:
-        resources = app.state.runtime_inventory.daytona_runtime_owner
-        assert resources is not None
+        resources, _ = live_runtime(app)
         portal = client.portal
         assert portal is not None
         try:
@@ -644,26 +664,7 @@ def test_complete_daytona_mvp_through_fastapi(
                 output_projection=lambda _result: {"issued": True},
             ),
             "verify_semantic_work": ToolEventView(
-                input_projection=lambda values: {
-                    "iteration_token_type": type(values.get("iteration_token")).__name__,
-                    "single_result_type": type(values.get("single_result")).__name__,
-                    "batch_results_type": type(values.get("batch_results")).__name__,
-                    "batch_result_item_types": sorted(
-                        {type(value).__name__ for value in values.get("batch_results", ())}
-                    )
-                    if isinstance(values.get("batch_results"), (list, tuple))
-                    else [],
-                    "batch_count": len(values["batch_results"])
-                    if isinstance(values.get("batch_results"), (list, tuple))
-                    else 0,
-                    "accumulator_type": type(values.get("accumulator")).__name__,
-                    "accumulator_item_types": sorted({type(value).__name__ for value in values.get("accumulator", ())})
-                    if isinstance(values.get("accumulator"), (list, tuple))
-                    else [],
-                    "accumulator_count": len(values["accumulator"])
-                    if isinstance(values.get("accumulator"), (list, tuple))
-                    else 0,
-                },
+                input_projection=_semantic_input_shape,
                 output_projection=lambda result: {
                     "ok": bool(result.get("ok")),
                     "batch_count": int(result.get("batch_count", 0)),
@@ -694,11 +695,7 @@ def test_complete_daytona_mvp_through_fastapi(
     try:
         app.add_middleware(_FirstStreamDeltaMiddleware, probe=first_delta_probe)
         with TestClient(app) as client:
-            inventory = app.state.runtime_inventory
-            resources = inventory.daytona_runtime_owner
-            preparation = inventory.run_preparation
-            assert resources is not None
-            assert preparation is not None
+            resources, preparation = live_runtime(app)
             object.__setattr__(
                 preparation,
                 "capabilities",
@@ -1099,11 +1096,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
         # Past the precondition, failures before the Turn are composition failures.
         phase = "composition"
         with TestClient(app) as client:
-            inventory = app.state.runtime_inventory
-            resources = inventory.daytona_runtime_owner
-            preparation = inventory.run_preparation
-            assert resources is not None
-            assert preparation is not None
+            resources, preparation = live_runtime(app)
             object.__setattr__(
                 preparation,
                 "capabilities",

@@ -21,6 +21,10 @@ import pytest
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"},
+    reason="Set FLEET_LIVE=1; this test starts a local MLflow server",
+)
 async def test_delayed_worker_trace_is_exported_with_complete_parentage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

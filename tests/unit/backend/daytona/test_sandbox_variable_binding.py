@@ -105,7 +105,7 @@ def test_broker_receives_typed_submit_and_rejects_unserializable_binding(
     result = backend.run("SUBMIT(answer=note)", {"note": "café"})
     assert isinstance(result, BackendExecutionResult)
     assert result.final == {"answer": "café"}
-    assert "SUBMIT(answer=note)" in _LocalBroker.instances[0].calls[0]
+    assert _LocalBroker.instances[0].calls[-1] == "SUBMIT(answer=note)"
     with pytest.raises(DaytonaAdapterError, match="binding 'opaque' contains unsupported type"):
         backend.run("pass", {"opaque": object()})
     backend.close()
@@ -399,3 +399,44 @@ def test_sandbox_context_integrity_failure_is_a_verification_error(
     assert raised.value.cause_type == "ContextVerificationError"
     assert invocation.drain_context_accesses() == ()
     invocation.shutdown()
+
+
+def test_setup_is_installed_once_and_actions_carry_only_model_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    backend = sandbox_backend(MagicMock())
+    backend.ensure_submit([{"name": "answer", "type": "str", "required": True}])
+
+    assert backend.run("value = 40").error is None
+    assert backend.run("value += 2").error is None
+    final = backend.run("SUBMIT(answer=str(value))")
+    broken = backend.run("ok = 1\nbroken = (\n")
+
+    calls = _LocalBroker.instances[0].calls
+    assert len(calls) == 5
+    assert "def SUBMIT" in calls[0]
+    assert calls[1:4] == ["value = 40", "value += 2", "SUBMIT(answer=str(value))"]
+    assert final.final == {"answer": "42"}
+    # Error positions refer to the model's own code, not a prepended setup.
+    assert broken.error is not None and "line 2" in broken.error
+    backend.close()
+
+
+def test_setup_failure_stops_before_model_code(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingSetupBroker(_LocalBroker):
+        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
+            if not self.calls:
+                self.calls.append(code)
+                return {"stdout": "", "stderr": "", "error": "setup exploded", "final": None}
+            return super().execute(code, variables, timeout_s=timeout_s)
+
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", FailingSetupBroker)
+    backend = sandbox_backend(MagicMock())
+
+    with pytest.raises(DaytonaAdapterError) as raised:
+        backend.run("print('model code')")
+
+    assert raised.value.cause_type == "HostSetupError"
+    assert len(_LocalBroker.instances[0].calls) == 1
+    backend.close()

@@ -8,6 +8,7 @@ import os
 import queue
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import MappingProxyType
@@ -30,6 +31,7 @@ from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
 from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
 from tests.live.backend._evidence import candidate_identity, write_receipt
+from tests.live.backend._mvp_support import live_runtime
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
@@ -277,15 +279,15 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
     lock = threading.Lock()
 
     async def observed(
-        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: object
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: Any
     ) -> recursive_child_runtime.ChildRuntimeLease:
-        lease = await original(owner, **kwargs)  # type: ignore[arg-type]
+        lease = await original(owner, **kwargs)
         with lock:
             evidence._active += 1
             evidence.peak_observed = max(evidence.peak_observed, evidence._active)
             evidence.sandbox_ids.append(lease.sandbox_id)
             evidence.volume_subpaths.append(lease.volume_subpath)
-            evidence.call_indexes.append(int(kwargs["call_index"]))  # type: ignore[arg-type]
+            evidence.call_indexes.append(int(kwargs["call_index"]))
         close = lease._close
 
         def observed_close() -> None:
@@ -310,7 +312,7 @@ def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _Ch
     """Record host-side ``rlm_query_batched`` answers so Root cannot fake order via verify_batch alone."""
     original = RecursiveRLMExecutor._call_children_batched
 
-    def observed(self: RecursiveRLMExecutor, tasks: list[dict[str, object]]) -> list[dict[str, object]]:
+    def observed(self: RecursiveRLMExecutor, tasks: list[Mapping[str, object]]) -> list[dict[str, object]]:
         outcomes = original(self, tasks)
         assert all(item["status"] == "completed" for item in outcomes)
         evidence.batch_answers = [str(item["answer"]).strip() for item in outcomes]
@@ -373,11 +375,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
-        inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
-        preparation = inventory.run_preparation
-        assert resources is not None
-        assert preparation is not None
+        resources, preparation = live_runtime(app)
         object.__setattr__(
             preparation,
             "capabilities",
@@ -471,6 +469,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert "fresh invocation confirmed" in str(followup_chunks)
             close = getattr(runtime, "close_root_session", None)
             if callable(close):
+                assert client.portal is not None
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             assert resources._admission._semaphore._value == settings.max_active_daytona_leases
             assert resources.active_leases.holder(session_id) is None
@@ -522,7 +521,7 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
             raise ValueError("P6D.4 injected ordinary child invocation failure")
         return original_invoke(self, *args, **kwargs)
 
-    def capture_batch(self: RecursiveRLMExecutor, tasks: list[dict[str, object]]) -> list[dict[str, object]]:
+    def capture_batch(self: RecursiveRLMExecutor, tasks: list[Mapping[str, object]]) -> list[dict[str, object]]:
         ledger.batch_calls += 1
         outcomes = original_batch(self, tasks)
         ledger.outcomes = outcomes
@@ -547,10 +546,7 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
     cleanup_failures: tuple[str, ...] = ()
     trace_id: str | None = None
     with TestClient(app) as client:
-        resources = app.state.runtime_inventory.daytona_runtime_owner
-        preparation = app.state.runtime_inventory.run_preparation
-        assert resources is not None
-        assert preparation is not None
+        resources, preparation = live_runtime(app)
         object.__setattr__(
             preparation,
             "capabilities",

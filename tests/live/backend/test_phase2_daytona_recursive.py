@@ -27,6 +27,7 @@ from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from tests.live.backend._cleanup import _retry_cleanup, _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
+from tests.live.backend._mvp_support import live_runtime
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
@@ -267,7 +268,7 @@ def _install_child_evidence(
     original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
 
     async def observed(
-        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: object
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: Any
     ) -> recursive_child_runtime.ChildRuntimeLease:
         """
         Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
@@ -280,7 +281,7 @@ def _install_child_evidence(
                 recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
         """
         evidence.started_at = time.perf_counter()
-        lease = await original(owner, **kwargs)  # type: ignore[arg-type]
+        lease = await original(owner, **kwargs)
         evidence.created += 1
         expected_scope = f"recursive/{kwargs['workspace_id']}/{kwargs['run_id']}/{kwargs['call_index']}"
         evidence.same_volume_sibling_scope = (
@@ -301,7 +302,7 @@ def _install_child_evidence(
             provider_child = None
         provider_mounts = getattr(provider_child, "volumes", None)
         evidence.provider_mounts_inspected = provider_child is not None and provider_mounts is not None
-        evidence.provider_no_volume_mount = evidence.provider_mounts_inspected and len(provider_mounts) == 0
+        evidence.provider_no_volume_mount = provider_mounts is not None and len(provider_mounts) == 0
         stage_files = lease._stage_files
         if stage_files is not None:
 
@@ -493,11 +494,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
-        inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
-        preparation = inventory.run_preparation
-        assert resources is not None
-        assert preparation is not None
+        resources, preparation = live_runtime(app)
         object.__setattr__(
             preparation,
             "capabilities",
