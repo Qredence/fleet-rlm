@@ -107,7 +107,8 @@ async def test_sql_sandbox_binding_store_round_trips_and_updates_scope() -> None
                 provider_state="running",
             )
         )
-        assert first.mount_path == "/home/daytona/fleet"
+        # An unset mount path means the current Session Workspace mount.
+        assert first.mount_path == "/workspace"
         assert first.last_verified_at is not None
         loaded_first = await store.get(session_id)
         assert loaded_first is not None

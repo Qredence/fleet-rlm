@@ -284,11 +284,12 @@ async def build_daytona_composition(
     from fleet_rlm.sessions.task import SessionTaskService
     from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
     from fleet_rlm.turns import TurnRuntime
+    from fleet_rlm.workspace.host_io import DaytonaWorkspaceFiles
     from fleet_rlm.workspace.mounted_gateway import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
     )
-    from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
+    from fleet_rlm.workspace.workspace import WorkspaceFileService
 
     resolved = settings
     require_daytona_settings(resolved)
@@ -324,12 +325,7 @@ async def build_daytona_composition(
             execution_timeout_s=resolved.rlm_execution_timeout_s,
             dispatcher=dispatcher,
         )
-        mounted_workspace_gateway = DaytonaWorkspaceGateway(
-            runtime=runtime,
-            paths=volume_paths,
-            max_file_bytes=resolved.max_upload_bytes,
-            map_error=map_provider_error,
-        )
+        mounted_workspace_gateway = DaytonaWorkspaceGateway(runtime=runtime, map_error=map_provider_error)
         gateway = DaytonaWorkspaceVolumeGateway(
             mounted_workspace_gateway,
             mount_path=resolved.volume_mount_path,
@@ -345,7 +341,14 @@ async def build_daytona_composition(
             catalog=artifact_catalog,
             blobs=gateway,
         )
-        workspace_file_service = WorkspaceFileService(cast(WorkspaceAccessGateway, mounted_workspace_gateway))
+        workspace_file_service = WorkspaceFileService(
+            DaytonaWorkspaceFiles(
+                mounted_workspace_gateway,
+                dispatcher=dispatcher,
+                paths=volume_paths,
+                max_file_bytes=resolved.max_upload_bytes,
+            )
+        )
         local_scope = LocalScope()
         session_catalog = SqlAlchemySessionCatalog(session_factory)
         task_service = SessionTaskService(session_catalog, gateway, volume_paths)
@@ -692,6 +695,7 @@ def build_run_preparation(
         RootSessionSpec,
         ensure_volume_layout,
     )
+    from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
     from fleet_rlm.turn_preparation import (
         RunEnvironment,
         RunPreparationTimeoutError,
@@ -767,8 +771,8 @@ def build_run_preparation(
             )
             session_workspace = DaytonaSandboxWorkspaceStorage(
                 sink.sandbox,
-                volume_root="/workspace",
-                root="/workspace",
+                volume_root=SESSION_WORKSPACE_MOUNT_PATH,
+                root=SESSION_WORKSPACE_MOUNT_PATH,
                 max_file_bytes=settings.max_upload_bytes,
                 allow_volume_root=True,
             )
@@ -783,7 +787,6 @@ def build_run_preparation(
 
             child_runtime_factory = runtime.build_child_factory(
                 volume_id=owner.volume_id,
-                mount_path=runtime.volume_config.mount_path,
                 workspace_id=run.access.workspace_id,
                 session_id=run.session_id,
                 run_id=run.run_id,

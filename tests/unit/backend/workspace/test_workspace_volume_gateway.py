@@ -14,7 +14,7 @@ from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
 
 from fleet_rlm.paths import UnsafePathError
 from fleet_rlm.workspace.models import WorkspaceEntry
-from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway, _DaytonaWorkspaceFileSession
+from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceFileSession, DaytonaWorkspaceVolumeGateway
 from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
 
@@ -178,7 +178,7 @@ async def test_stat_preserves_an_explicit_false_checksum_request() -> None:
             calls.append(include_checksum)
             return WorkspaceEntry(path, "file", 3, None, None)
 
-    session = _DaytonaWorkspaceFileSession(Workspace(), max_file_bytes=1024)
+    session = DaytonaWorkspaceFileSession(Workspace(), max_file_bytes=1024)
     entry = await session.stat("note.txt", include_checksum=False)
 
     assert calls == [False]

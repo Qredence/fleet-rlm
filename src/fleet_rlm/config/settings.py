@@ -260,7 +260,7 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(
-        default="rlm-volume-dspy",
+        default="fleet-volume",
         description="Daytona Volume name for workspace durable files",
     )
     volume_mount_path: Annotated[

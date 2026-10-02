@@ -33,7 +33,7 @@ from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from fleet_rlm.config.settings import LLMRoleSettings, Settings
-from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, validate_mount_path
+from fleet_rlm.paths import validate_mount_path
 from fleet_rlm.rlm.budget import (
     DEFAULT_PARSE_RETRIES,
     AdapterBudget,
@@ -899,7 +899,7 @@ class AttachmentContextCapsule(dspy.SandboxSerializable):
     """Compact manifest for authorized immutable context already staged in a Volume."""
 
     entries: tuple[AttachmentContextEntry, ...]
-    mount_root: str = DEFAULT_VOLUME_MOUNT_PATH
+    mount_root: str
 
     def __post_init__(self) -> None:
         mount = validate_mount_path(self.mount_root)

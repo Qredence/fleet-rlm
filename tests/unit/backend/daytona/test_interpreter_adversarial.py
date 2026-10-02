@@ -437,7 +437,6 @@ class TestSandboxIsolationInvariants:
         runtime = make_daytona_runtime(platform=mock_platform, admission=mock_admission)
         await runtime._acquire_child_runtime(
             volume_id=None,
-            mount_path=None,
             profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
             workspace_id=uuid4(),
             run_id=uuid4(),

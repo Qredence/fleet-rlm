@@ -23,6 +23,7 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.paths import (
+    SESSION_WORKSPACE_MOUNT_PATH,
     UnsafePathError,
     VolumePaths,
     validate_path_id,
@@ -323,7 +324,7 @@ class WorkspaceStorage:
         **kwargs: Any,
     ) -> None:
         self._sandbox = sandbox
-        resolved_root = root or volume_root or "/workspace"
+        resolved_root = root or volume_root or SESSION_WORKSPACE_MOUNT_PATH
         _validate_workspace_roots(volume_root, resolved_root, allow_volume_root=allow_volume_root)
         self._root = Path(resolved_root)
         self._volume_root = Path(volume_root) if volume_root else None
@@ -841,9 +842,12 @@ class DaytonaSandboxWorkspaceStorage:
 
     @staticmethod
     def _is_not_found(exc: BaseException) -> bool:
-        return isinstance(exc, (FileNotFoundError, KeyError)) or any(
-            token in str(exc).lower() for token in ("not found", "status 404", " 404")
-        )
+        # The Daytona SDK's not-found errors are not FileNotFoundError; they
+        # carry status_code 404 and may say only "no such file or directory".
+        if isinstance(exc, (FileNotFoundError, KeyError)) or getattr(exc, "status_code", None) == 404:
+            return True
+        text = str(exc).lower()
+        return any(token in text for token in ("not found", "no such file or directory", "status 404", " 404"))
 
     def _read_optional(self, full_path: str) -> bytes | None:
         try:
@@ -1148,15 +1152,11 @@ class DaytonaSandboxWorkspaceStorage:
         self._fs.delete_file(full_path)
 
 
-class AsyncWorkspaceStorage:
-    """Async wrapper exposing AsyncStorageSession and AsyncVolumeStorage protocols."""
+class AsyncTextStorage:
+    """Run a synchronous StorageSession's text-file operations off the event loop."""
 
-    def __init__(self, storage: WorkspaceStorage) -> None:
+    def __init__(self, storage: StorageSession) -> None:
         self._sync = storage
-
-    @property
-    def root(self) -> Path:
-        return self._sync.root
 
     def warnings(self) -> tuple[Mapping[str, object], ...]:
         return self._sync.warnings()
@@ -1204,25 +1204,37 @@ class AsyncWorkspaceStorage:
     async def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         await asyncio.to_thread(self._sync.delete_path, path, expected_sha256=expected_sha256)
 
+
+class AsyncWorkspaceStorage(AsyncTextStorage):
+    """Async wrapper exposing AsyncStorageSession and AsyncVolumeStorage protocols."""
+
+    def __init__(self, storage: WorkspaceStorage) -> None:
+        super().__init__(storage)
+        self._local = storage
+
+    @property
+    def root(self) -> Path:
+        return self._local.root
+
     async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
-        return await asyncio.to_thread(self._sync.read_bytes, logical_path, max_bytes=max_bytes)
+        return await asyncio.to_thread(self._local.read_bytes, logical_path, max_bytes=max_bytes)
 
     async def write_bytes(self, logical_path: str, data: bytes, *, max_bytes: int | None = None) -> None:
-        await asyncio.to_thread(self._sync.write_bytes, logical_path, data, max_bytes=max_bytes)
+        await asyncio.to_thread(self._local.write_bytes, logical_path, data, max_bytes=max_bytes)
 
     async def exists(self, logical_path: str) -> bool:
-        return await asyncio.to_thread(self._sync.exists, logical_path)
+        return await asyncio.to_thread(self._local.exists, logical_path)
 
     async def remove_bytes(self, logical_path: str) -> None:
-        await asyncio.to_thread(self._sync.remove_bytes, logical_path)
+        await asyncio.to_thread(self._local.remove_bytes, logical_path)
 
     async def list_files(
         self, logical_root: str = "", *, max_depth: int = 10, max_files: int = 1000
     ) -> tuple[VolumeFile, ...]:
-        return await asyncio.to_thread(self._sync.list_files, logical_root, max_depth=max_depth, max_files=max_files)
+        return await asyncio.to_thread(self._local.list_files, logical_root, max_depth=max_depth, max_files=max_files)
 
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
-        return self._sync.read_tail(path, byte_budget=byte_budget)
+        return self._local.read_tail(path, byte_budget=byte_budget)
 
 
 class WorkspaceMemoryStorage:

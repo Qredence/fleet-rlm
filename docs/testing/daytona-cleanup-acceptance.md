@@ -182,3 +182,32 @@ Defects found by the live gates and fixed in their owners:
 Receipts: `.scratch/daytona-current-acceptance/e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303/`. These results certify
 this candidate's local and live gates. They do not certify release or
 promotion.
+
+## 2026-10-02 follow-up: Workspace files on the Daytona Volume
+
+Branch `fix/workspace-files-on-volume`, candidate
+`d37219504` (Python 3.13.13, DSPy 3.4.0, Daytona SDK 0.218.0).
+
+Defects fixed:
+
+- **`/api/files` used the API host's disk.** `DaytonaWorkspaceGateway` opened a
+  host-I/O Sandbox, then read and wrote host-local paths. Files now go through
+  that Sandbox's Volume mount (`DaytonaWorkspaceFiles`).
+- **Writes into new directories failed through the Sandbox storage.** The
+  SDK's not-found error was not recognized while probing path components.
+- **The model's filesystem contract named `/home/daytona/fleet`.** The Sandbox
+  mounts only the Session Workspace at `/workspace`; the contract now says so.
+- **Another declared-output false positive.** `iteration_token =
+  issue_iteration_token()` failed the native proof once (trace
+  `tr-344122bf…`); call-valued assignments are now accepted.
+
+| Gate (candidate above) | Result |
+| --- | --- |
+| Local: lint, format, `ty`, coverage (83.15%), boundaries, docs, API/stream contracts | Passed |
+| Live through `uv run fleet cli`: `PUT`/`GET /api/files/content`, then `/api/volume/tree` | Passed. The file is listed as `files/volume-check/…` on the Volume; nothing on the API host |
+| Interpreter/deletion lifecycle test | Passed |
+| `scripts/live_daytona_verify.py` (native semantic calls + production-path durability) | Passed |
+
+Defaults now match the layout: one `SESSION_WORKSPACE_MOUNT_PATH`, the
+`fleet-volume` name default, and no dead `/home/daytona/fleet` or child mount
+arguments.

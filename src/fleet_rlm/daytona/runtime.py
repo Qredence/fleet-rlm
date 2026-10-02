@@ -41,7 +41,7 @@ from fleet_rlm.daytona.interpreter import (
     SyncBridgeDispatcher,
     sandbox_backend,
 )
-from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths, validate_mount_path
+from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, SESSION_WORKSPACE_MOUNT_PATH, VolumePaths, validate_mount_path
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
 from fleet_rlm.sessions.bindings import (
     BindingGenerationAuthority,
@@ -76,7 +76,7 @@ _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, Sys
 
 DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
 DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v2"
-DEFAULT_VOLUME_NAME = "rlm-volume-dspy"
+DEFAULT_VOLUME_NAME = "fleet-volume"
 _PROVIDER_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
@@ -84,7 +84,6 @@ SESSION_RESOURCES: tuple[int, int, int] = (4, 8, 8)
 SEMANTIC_CHILD_RESOURCES: tuple[int, int, int] = (2, 4, 4)
 _DIRECTORY_MODE = "700"
 _ZERO_UUID = UUID(int=0)
-EXECUTION_MOUNT_PATH = "/workspace"
 
 
 def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: bool) -> None:
@@ -494,7 +493,7 @@ async def ensure_volume_layout(
 async def ensure_execution_layout(sandbox: Any, *, run_id: UUID) -> None:
     """Create only the shared Session workspace mount and Run-local scratch."""
     fs = _sandbox_filesystem(sandbox)
-    await _require_directory(fs, EXECUTION_MOUNT_PATH, create=False)
+    await _require_directory(fs, SESSION_WORKSPACE_MOUNT_PATH, create=False)
     await _ensure_directories(fs, ("/tmp/fleet", f"/tmp/fleet/{run_id}"))
 
 
@@ -507,7 +506,7 @@ async def verify_execution_mount(sandbox: Any) -> None:
             cause_type="InterpreterConfigurationError",
         )
     check = await process.exec(
-        f"python -c 'import os; os.chdir(\"{EXECUTION_MOUNT_PATH}\")'",
+        f"python -c 'import os; os.chdir(\"{SESSION_WORKSPACE_MOUNT_PATH}\")'",
         timeout=10,
     )
     if getattr(check, "exit_code", None) != 0:
@@ -3199,7 +3198,7 @@ class DaytonaRuntime:
                                 _coerce_uuid(spec.workspace_id, "workspace_id"),
                                 _coerce_uuid(spec.session_id, "session_id"),
                             )
-                            or binding.mount_path != EXECUTION_MOUNT_PATH
+                            or binding.mount_path != SESSION_WORKSPACE_MOUNT_PATH
                         )
                     )
                 )
@@ -3820,7 +3819,6 @@ class DaytonaRuntime:
         self,
         *,
         volume_id: str | None,
-        mount_path: str | None,
         profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.WORKSPACE_CHILD,
         workspace_id: UUID,
         run_id: UUID,
@@ -3840,7 +3838,7 @@ class DaytonaRuntime:
         if not isinstance(profile, DaytonaEnvironmentProfile):
             profile = DaytonaEnvironmentProfile(str(profile))
         semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
-        if not semantic and (not volume_id or not mount_path or session_id is None):
+        if not semantic and (not volume_id or session_id is None):
             raise ValueError("WorkspaceChild requires a Volume binding")
         if not semantic:
             assert session_id is not None
@@ -3866,7 +3864,7 @@ class DaytonaRuntime:
             create_kwargs: dict[str, Any] = {
                 "profile": profile,
                 "volume_id": None if semantic else volume_id,
-                "mount_path": None if semantic else EXECUTION_MOUNT_PATH,
+                "mount_path": None if semantic else SESSION_WORKSPACE_MOUNT_PATH,
                 "volume_subpath": None if semantic else subpath,
                 "labels": labels,
                 "with_volume": not semantic,
@@ -4042,7 +4040,6 @@ class DaytonaRuntime:
         self,
         *,
         volume_id: str | None,
-        mount_path: str | None,
         workspace_id: UUID,
         run_id: UUID,
         deadline: float,
@@ -4075,7 +4072,6 @@ class DaytonaRuntime:
                     raise ValueError("SemanticChild requires FLEET_DAYTONA_CHILD_SNAPSHOT")
                 acquisition_coroutine = runtime._acquire_child_runtime(
                     volume_id=volume_id,
-                    mount_path=mount_path,
                     profile=selected_profile,
                     workspace_id=workspace_id,
                     session_id=session_id,
@@ -4256,7 +4252,7 @@ class DaytonaRuntime:
         return ExpectedWorkspaceMount(
             volume_id=str(volume_id),
             volume_subpath=session_workspace_volume_subpath(workspace_id, session_id),
-            mount_path=EXECUTION_MOUNT_PATH,
+            mount_path=SESSION_WORKSPACE_MOUNT_PATH,
             workspace_id=workspace_id,
             session_id=session_id,
         )
@@ -5739,7 +5735,7 @@ class DaytonaRuntime:
             volume_subpath=volume_subpath,
             mount_path=mount_path,
             workspace_id=request.workspace_id,
-            session_id=request.session_id if mount_path == EXECUTION_MOUNT_PATH else None,
+            session_id=request.session_id if mount_path == SESSION_WORKSPACE_MOUNT_PATH else None,
         )
         try:
             return await _provider_call(

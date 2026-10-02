@@ -119,3 +119,32 @@ def test_daytona_storage_rejects_symlink_and_outside_root_listing_records() -> N
     fs.listing = [SimpleNamespace(path="/outside/escape.txt", is_dir=False, size=1)]
     with pytest.raises(UnsafePathError, match="escapes trusted root"):
         storage.list_entries()
+
+
+class _SdkNotFoundError(Exception):
+    """Shaped like daytona.DaytonaFileNotFoundError: not a FileNotFoundError."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to get file info: stat {path}: no such file or directory")
+        self.status_code = 404
+
+
+def test_daytona_storage_writes_into_new_directories_with_sdk_not_found_errors() -> None:
+    class SdkFs(_Fs):
+        def get_file_info(self, path: str):
+            try:
+                return super().get_file_info(path)
+            except FileNotFoundError:
+                raise _SdkNotFoundError(path) from None
+
+        def download_file(self, path: str) -> bytes:
+            if path not in self.files:
+                raise _SdkNotFoundError(path)
+            return self.files[path]
+
+    fs = SdkFs()
+    storage = _storage(fs)
+
+    storage.write_text("reports/2026/summary.md", "written")
+
+    assert fs.files[f"{ROOT}/reports/2026/summary.md"] == b"written"

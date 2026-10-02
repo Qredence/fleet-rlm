@@ -48,6 +48,14 @@ through successful settlement and Turn Commit.
 | `sessions/` | Projects committed history and owns the bounded, revisioned task checkpoint. |
 | `attachments/`, `artifacts/`, `workspace/` | Own durable content, scoped file access, host I/O, and workspace memory. |
 
+One Daytona Volume holds each Workspace under `workspaces/<workspace_id>`, and
+Fleet mounts it two ways:
+
+| Sandbox | Mount | Holds |
+| --- | --- | --- |
+| Root `session` (and `workspace-child`) | `workspaces/<wid>/sessions/<sid>/workspace` at `/workspace` | The Session Workspace, the only durable path model code sees. Run scratch is local at `/tmp/fleet/<run>`, including staged Attachment copies. |
+| Short-lived host I/O | `workspaces/<wid>` at the configured `volume_mount_path` | Workspace memory, task checkpoints, Attachment originals, Artifacts, result snapshots, Projects, and public `files/`, reached only through host owners. |
+
 Committed Turns are projected into native `dspy.History` for a new invocation.
 The interpreter may receive a serialized projection of that history, while
 durable conversation authority remains with the Session and its persistence

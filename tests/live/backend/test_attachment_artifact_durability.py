@@ -126,8 +126,6 @@ def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> Simple
     volume_paths = runtime.volume_config.paths()
     workspace_gateway = DaytonaWorkspaceGateway(
         runtime=runtime,
-        paths=volume_paths,
-        max_file_bytes=settings.max_upload_bytes,
         map_error=map_provider_error,
     )
     return SimpleNamespace(

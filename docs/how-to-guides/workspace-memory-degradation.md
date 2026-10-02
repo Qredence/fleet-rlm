@@ -27,8 +27,8 @@ Turn result is unaffected.
 | `category` | Likely area |
 | --- | --- |
 | `normalization` | Turn request could not be normalized into a search query (input preparation). Memory falls back to the recency-only digest. |
-| `provider_unavailable` | The mounted Workspace agent / Volume storage failed or is unreachable (Daytona Sandbox, Volume mount, agent process). Memory falls back to recency-only or no injection. |
-| `corrupt_record_set` | A mounted-agent Memory payload violated its checked response shape (store corruption or provider-side tampering). |
+| `provider_unavailable` | Host-I/O Volume storage failed or is unreachable (Daytona I/O Sandbox or Volume mount). Memory falls back to recency-only or no injection. |
+| `corrupt_record_set` | A Memory payload read from the Volume violated its checked shape (store corruption or provider-side tampering). |
 | `invariant_violation` | The durable store contains duplicate/stable-id rows that fail closed. Repair or dedupe `memory/MEMORIES.md` in the Workspace Volume. |
 | `search_failure` | The lexical relevance-search machinery failed after normalization succeeded. Memory falls back to the recency-only digest. |
 | `legacy_migration` | The legacy root `MEMORIES.md` → `memory/MEMORIES.md` migration/read sequence failed (for example a non-regular file at the legacy path). |

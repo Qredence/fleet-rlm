@@ -24,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import JSON, Uuid
 
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
+
 
 class Base(DeclarativeBase):
     """Declarative base for Fleet RLM tables."""
@@ -190,7 +192,7 @@ class SandboxBindingRow(Base):
     )
     volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume_subpath: Mapped[str] = mapped_column(String(512), nullable=False)
-    mount_path: Mapped[str] = mapped_column(String(512), nullable=False, default="/home/daytona/fleet")
+    mount_path: Mapped[str] = mapped_column(String(512), nullable=False, default=SESSION_WORKSPACE_MOUNT_PATH)
     provider_state: Mapped[str] = mapped_column(String(64), nullable=False, default="missing")
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

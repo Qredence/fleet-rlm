@@ -26,7 +26,6 @@ current production certification.
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)
-  * [Workspace Agent filesystem operation audit](reference/workspace-agent-operation-audit.md)
   * [Source Layout](reference/source-layout.md)
   * [Performance Budget Decision](reference/performance-budget.md)
 * [Lakebase Postgres](how-to-guides/lakebase-postgres.md)

@@ -79,14 +79,16 @@ def test_sandbox_execute_span_emits_bounded_metadata(monkeypatch: pytest.MonkeyP
         "variable_count": 0,
         "code_preview": "_out = 'hello'",
     }
-    assert calls.span_outputs[0] == {
+    outputs = dict(calls.span_outputs[0])
+    # Timings are wall-clock milliseconds: bounded and non-negative, not exact.
+    timings = {name: outputs.pop(name) for name in ("ensure_bindings_ms", "execute_ms")}
+    assert all(isinstance(value, int) and 0 <= value < 1_000 for value in timings.values())
+    assert outputs == {
         "path": "InProcessInterpreterBackend",
         "result_kind": "output",
         "stdout_chars": 5,
         "output_preview": "hello",
         "phase_status": "completed",
-        "ensure_bindings_ms": 0,
-        "execute_ms": 0,
     }
 
 

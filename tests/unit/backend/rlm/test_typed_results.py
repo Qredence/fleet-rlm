@@ -36,6 +36,7 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
         # A keyword passthrough names a variable, never its value.
         "code": "verify_semantic_work(iteration_token=iteration_token, single_result=single_result)",
         "elided": "verify_semantic_work(iteration_token=..., accumulator=...)",
+        "call": "iteration_token = issue_iteration_token(); api_key = load_key(path)",
         "mount": "/home/daytona/fleet",
         "api_key": "${FLEET_DAYTONA_API_KEY}",
     }
@@ -52,6 +53,10 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
         {"provider_token": "actual-provider-value"},
         "verify(iteration_token='f3a9c1d2e4b5a6978877665544332211')",
         "verify(iteration_token=session_token)",
+        # A call result is code, but a literal inside its arguments is still a credential.
+        'api_key = load_key("actual-secret")',
+        "token = get_token('abc123secret')",
+        'token = fetch(path)["secret-literal"]',
         "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
         "sk-ant-abcdef123456",
         "redis://default:secret@private.example:6379/0",

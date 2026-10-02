@@ -230,7 +230,6 @@ def make_daytona_child_factory(
     platform: Any,
     admission: DaytonaAdmission,
     volume_id: str | None,
-    mount_path: str | None,
     workspace_id: UUID,
     run_id: UUID,
     deadline: float,
@@ -250,7 +249,6 @@ def make_daytona_child_factory(
     runtime = make_daytona_runtime(platform=platform, admission=admission, dispatcher=dispatcher)
     return runtime.build_child_factory(
         volume_id=volume_id,
-        mount_path=mount_path,
         workspace_id=workspace_id,
         session_id=session_id,
         run_id=run_id,
