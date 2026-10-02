@@ -36,7 +36,12 @@ from fleet_rlm.daytona.errors import (
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.diagnostics import trace_failure_category
-from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, start_turn_span
+from fleet_rlm.observability.tracing import (
+    dspy_turn_callbacks,
+    rlm_callback_parent,
+    start_turn_span,
+    trace_preview_limit,
+)
 from fleet_rlm.rlm.budget import BudgetDimension
 from fleet_rlm.rlm.events import (
     ChildProgress,
@@ -401,7 +406,8 @@ RLM_NATIVE_CHILD_DEPTH = 1
 _MAX_CHILD_RESULT_BYTES = 50_000
 _MAX_CHILD_TASK_CHARS = 2_000
 _MAX_CHILD_CONTEXT_CHARS = 2_000
-_MAX_CHILD_PROGRESS_OUTCOME_CHARS = 240
+_MAX_CHILD_PROGRESS_OUTCOME_CHARS = 480
+_MAX_CHILD_FAILURE_DETAIL_CHARS = 400
 _MAX_CHILD_INPUTS = 16
 _MAX_CHILD_MANIFEST_BYTES = 64 * 1024
 
@@ -1560,6 +1566,8 @@ class RecursiveRLMExecutor:
                     "duration_ms": _elapsed_ms(harvest_started_at),
                     "file_count": len(files),
                     "result_file_bytes": sum(map(len, files.values())),
+                    "answer": answer,
+                    "answer_chars": len(answer),
                 },
             )
         except BaseException as exc:
@@ -1655,7 +1663,10 @@ class RecursiveRLMExecutor:
             self._state.termination_modes.append("child_error")
         call.span.finish(
             phase_status="failed",
-            outputs={"failure_category": trace_failure_category(exc)},
+            outputs={
+                "failure_category": trace_failure_category(exc),
+                "failure_detail": sanitize_public_text(str(exc), max_len=_MAX_CHILD_FAILURE_DETAIL_CHARS),
+            },
         )
         return failure_category
 
@@ -1712,7 +1723,19 @@ class RecursiveRLMExecutor:
                 outputs={"failure_category": failure_category},
             )
         elif not failed and completion_outputs is not None:
-            call.span.finish(phase_status="completed", outputs=completion_outputs)
+            child_outcome = None
+            if isinstance(child_answer, str) and child_answer:
+                child_outcome = sanitize_public_text(
+                    " ".join(child_answer.split()), max_len=min(trace_preview_limit(), 2000)
+                )
+            call.span.finish(
+                phase_status="completed",
+                outputs={
+                    **completion_outputs,
+                    "child_outcome": child_outcome,
+                    "child_answer_chars": len(child_answer) if isinstance(child_answer, str) else 0,
+                },
+            )
         if completion_outputs is not None and completion_outputs.get("status") == "not_started":
             progress_status = "child_not_started"
         elif failed:

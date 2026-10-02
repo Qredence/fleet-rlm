@@ -291,10 +291,81 @@ def test_child_progress_outcome_is_bounded_and_has_an_explicit_fallback() -> Non
     excerpt = _child_progress_outcome(long_answer, None)
 
     assert excerpt.startswith("Useful finding Useful finding")
-    assert len(excerpt) == 240
+    assert len(excerpt) == 480
     assert excerpt.endswith("...")
+    assert len(excerpt) <= 500
     assert _child_progress_outcome("  \n ", None) == "Child answer unavailable"
     assert _child_progress_outcome(None, "capacity") == "capacity"
+
+
+def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    real_start_turn_span = recursive_calls.start_turn_span
+    captured: dict[str, list[object]] = {}
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        captured.setdefault(name, []).append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            return dspy.Prediction(answer="x" * 600, evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def build(**kwargs: object) -> Child:  # noqa: ARG001
+        return Child()
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    result = executor.tool(task="rich child", inputs=[])
+
+    assert result["status"] == "completed"
+    harvest = captured["RLM.child.result_harvest"][0]
+    assert harvest.outputs["answer"] == "x" * 600
+    assert harvest.outputs["answer_chars"] == 600
+    call_span = captured["RLM.recursive_call"][0]
+    assert call_span.outputs["child_answer_chars"] == 600
+    assert call_span.outputs["child_outcome"] == "x" * 600
+    executor.wait_owned()
+
+
+def test_child_call_span_records_failure_category_and_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    real_start_turn_span = recursive_calls.start_turn_span
+    captured: dict[str, list[object]] = {}
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        captured.setdefault(name, []).append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            raise ValueError("private-primary-cause sandbox exploded")
+
+    def build(**kwargs: object) -> Child:  # noqa: ARG001
+        return Child()
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    outcomes = executor.batched_tool(tasks=[{"task": "fail"}])
+
+    assert outcomes[0]["status"] == "failed"
+    call_span = captured["RLM.recursive_call"][0]
+    assert call_span.outputs.get("failure_category")
+    detail = call_span.outputs.get("failure_detail")
+    assert isinstance(detail, str)
+    assert "private-primary-cause" in detail
+    assert len(detail) <= 400
+    executor.wait_owned()
 
 
 def test_child_capacity_refusal_is_not_reported_as_a_started_timeout() -> None:
