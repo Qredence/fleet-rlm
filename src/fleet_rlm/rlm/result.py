@@ -195,9 +195,9 @@ _URLISH = re.compile(r"(?i)\b[a-z][a-z0-9+.-]*://[^\s\"'<>]+")
 _UNSAFE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 
 _DECLARED_SECRET_ASSIGNMENT = re.compile(
-    r"(?i)(?<![a-z0-9])(?:[a-z0-9]+[_-])*"
-    r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key)\b"
-    r"\s*(?:=|:)\s*(?P<value>\"[^\"\r\n]+\"|'[^'\r\n]+'|[^\s,;}\]]+)"
+    r"(?i)(?<![a-z0-9])(?P<key>(?:[a-z0-9]+[_-])*"
+    r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key))\b"
+    r"\s*(?:=|:)\s*(?P<value>\"[^\"\r\n]+\"|'[^'\r\n]+'|[^\s,;}\]\)]+)"
 )
 _DECLARED_BEARER = re.compile(r"(?i)\bbearer\s+(?P<value>[a-z0-9._~+/=-]+)")
 _DECLARED_PROVIDER_TOKEN = re.compile(
@@ -235,6 +235,8 @@ _DECLARED_SAFE_PLACEHOLDERS = frozenset(
     {
         "",
         "***",
+        "...",
+        "\u2026",
         "[redacted]",
         "<redacted>",
         "redacted",
@@ -400,6 +402,9 @@ def _contains_sensitive_value(value: Any) -> bool:
 
 def _validate_declared_text(text: str) -> None:
     for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
+        # ``name=name`` passes a variable through a keyword; it carries no value.
+        if match.group("value") == match.group("key"):
+            continue
         if not _is_safe_placeholder(match.group("value")):
             raise ValueError("declared output contains a sensitive value")
     for match in _DECLARED_BEARER.finditer(text):

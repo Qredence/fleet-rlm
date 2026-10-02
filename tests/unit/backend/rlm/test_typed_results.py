@@ -33,6 +33,9 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
     value = {
         "answer": "API_KEY and token are security identifiers; system prompt dumps must not be returned.",
         "examples": ["API_KEY=${API_KEY}", "Authorization: <AUTHORIZATION>", "Bearer TOKEN"],
+        # A keyword passthrough names a variable, never its value.
+        "code": "verify_semantic_work(iteration_token=iteration_token, single_result=single_result)",
+        "elided": "verify_semantic_work(iteration_token=..., accumulator=...)",
         "mount": "/home/daytona/fleet",
         "api_key": "${FLEET_DAYTONA_API_KEY}",
     }
@@ -47,6 +50,8 @@ def test_declared_output_validator_accepts_identifiers_placeholders_and_security
         {"nested": {"private-key": "-----BEGIN PRIVATE KEY-----"}},
         {"FLEET_DAYTONA_API_KEY": "actual-provider-value"},
         {"provider_token": "actual-provider-value"},
+        "verify(iteration_token='f3a9c1d2e4b5a6978877665544332211')",
+        "verify(iteration_token=session_token)",
         "Bearer eyJhbGciOiJIUzI1NiJ9.payload.signature",
         "sk-ant-abcdef123456",
         "redis://default:secret@private.example:6379/0",

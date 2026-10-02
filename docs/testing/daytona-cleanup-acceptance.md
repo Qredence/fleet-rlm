@@ -4,11 +4,11 @@ Date: 2026-10-01.
 
 ## Candidate and status
 
-- Base commit: `a041d747f711747d527724ddeb0100318c2406b9` on `main`.
-- Implementation: cleanup changes prepared on `fix/daytona-cleanup-ownership`;
-  no live-certified candidate SHA yet.
-- Local acceptance: focused lifecycle lane, full gate, and Python 3.11 compatibility passed.
-- Live acceptance: pending separate operator authorization and a clean non-main candidate.
+| Revision | Status |
+| --- | --- |
+| Merged code | Cleanup follow-up #579 merged to `main` as `e45bff132e5b2fdfe14ff81f7cc66ac89aedd536` (base `a041d747f711747d527724ddeb0100318c2406b9`) |
+| Locally tested | #579 tree: receipts below. Follow-up candidate `e7b1e6e72`: see [2026-10-01 follow-up](#2026-10-01-follow-up-attachment-parity-and-broker-results) |
+| Live tested | `e7b1e6e72`: all four live gates passed (see the follow-up section) |
 
 ## Implemented behavior
 
@@ -79,11 +79,10 @@ uv run --no-sync --python 3.11 pytest -q -n 2 --dist=loadfile -p no:warnings \
   tests/unit/backend tests/contracts/backend
 ```
 
-## Remaining live acceptance
+## Live acceptance gates
 
-After explicit operator authorization and preparation of a clean non-main
-candidate, use fresh evidence paths and existing bounded native/recursive
-profiles for:
+On a clean non-main candidate, with operator authorization, use fresh evidence
+paths and the existing bounded native/recursive profiles for:
 
 1. `scripts/live_daytona_verify.py`: native semantics and attachment/artifact durability.
 2. `scripts/live_recursive_batch_canary.py`: ordered children, retained-root reuse, isolation, and cleanup.
@@ -91,12 +90,12 @@ profiles for:
 4. The FastAPI cancellation test: unresolved execution blocks reuse and cleanup settles.
 
 Record the immutable candidate SHA, exact commands, environment, receipt paths,
-cleanup observations, and unresolved failures. Full acceptance remains pending
-until these live gates pass; local results do not certify provider behavior.
+cleanup observations, and unresolved failures. Local results do not certify
+provider behavior.
 
-## Pre-commit review
+## #579 review before merge
 
-The full uncommitted tree was reviewed on 2026-10-01. No actionable production
+The #579 tree was reviewed before merge on 2026-10-01. No actionable production
 code defect was found. The imported bundle README now distinguishes historical
 plans and patches from current behavior and explains where its helper files
 can be extracted. Loose Markdown whitespace was normalized; original ZIPs and
@@ -111,3 +110,75 @@ The three modified test modules also passed in a separate focused run
 
 The final complete `make check` rerun passed after these review fixes; its log
 is `/tmp/fleet-cleanup-review-final-check.log`.
+
+## 2026-10-01 follow-up: attachment parity and broker results
+
+Scope: Follow-ups A and B of the active
+[implementation plan](../../codex-cloud/IMPLEMENTATION-PLAN.md), plus the defects
+the live gates then exposed. Branch: `fix/daytona-attachment-parity-and-broker`.
+Candidate: `e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303`. Environment: Python 3.13.13, DSPy 3.4.0, Daytona SDK 0.218.0,
+MLflow 3.16.1 (local server via `uv run fleet cli`), Fleet 0.7.10, policy models
+`deepseek-v4.1-flash`.
+
+Behavior established by new regressions:
+
+- Both backends now run the same prepared-attachment materializer. Matrix tests
+  run against the real generated Sandbox loader and the in-process backend, and
+  cover the following:
+  - text and multiple-attachment metadata;
+  - invalid UTF-8 and NUL bytes;
+  - the single-text `context` value;
+  - rejection of a bad manifest digest or root, a wrong file length or digest,
+    and an out-of-mount symlink.
+- The loader is installed only for DSPy's setup action, so later model actions
+  cannot call it. Its failures map to `ContextVerificationError`.
+- Verified attachment IDs come from factory-created invocations, are recorded
+  once after settlement on success and on a later failure, and never come from
+  the retained template.
+- Run scratch deletion makes exactly one call. A body-level `TypeError` stays
+  visible, the path is retained, and an explicit retry succeeds.
+- The broker accepts one result per call. A duplicate before consumption, a
+  result before a lease is issued, a stale lease, and a duplicate after
+  consumption are each rejected with 409. The first value survives.
+
+Defects found by the live gates and fixed in their owners:
+
+- **Concurrent Volume creation (`daytona/runtime.py`).** When two creates race,
+  the provider rejects the loser with HTTP 500 or 400 "already exists", not 409.
+  This was reproduced directly against the provider. The Turn failed with
+  `ProviderRequestError`. Those responses are now reconciled by one lookup,
+  without repeating creation.
+- **Declared-output credential rule (`rlm/result.py`).** It rejected
+  `iteration_token=iteration_token` and `iteration_token=...` in a model's
+  summary of its own code, so valid Turns failed with "Turn output is invalid".
+  Native-proof live runs passed 2 of 7 before the fix and 4 of 4 after it. Real
+  values are still rejected.
+- **Stale live harnesses.** Several live tests had drifted from the runtime:
+  - the bridge dispatcher and session-scoped Volume subpath;
+  - hand-rolled attachment and artifact storage. The durability test now
+    composes production's objects: durable blobs go to the Workspace Volume
+    through host-I/O Sandboxes, Run copies are staged in `/tmp/fleet/<run>`,
+    and the Artifact is read back from the Volume after replacement;
+  - the frozen preparation plan;
+  - `close_root_session` never being called;
+  - `_bindings` access.
+
+  Separately, the verifier replaced proof failures with `cleanup_failed`.
+
+| Local gate (candidate above) | Result |
+| --- | --- |
+| Python tests with coverage (`make check`) | Passed; total coverage 83.12% (75% required) |
+| Lint, format, `ty` | Passed |
+| API/stream contracts, 444 TUI tests | Passed |
+| Codebase-tree, dependency-boundary, docs/hygiene, profile matrix | Passed. Docs/hygiene ran from a clean worktree; a local, git-ignored `docs/plans/` directory fails the hygiene check in the working checkout |
+
+| Live gate (candidate above) | Result |
+| --- | --- |
+| Interpreter/deletion lifecycle test | **Passed**. Same-invocation and fresh-invocation state, async host tools, typed SUBMIT, strict interpreter cleanup, and provider-confirmed Sandbox absence |
+| `scripts/live_daytona_verify.py` | **Passed**. Native semantic calls, and attachment/artifact durability, including text and binary prepared-context loading with reported access IDs |
+| `scripts/live_recursive_batch_canary.py` (`daytona-recursive`) | **Passed**. Two ordered native children, peak concurrency 2, retained root reused on a second Turn, and cleanup with admission restored |
+| FastAPI cancellation lane | **Passed**. Cancellation observed, lease released, admission restored, and Sandbox confirmed absent |
+
+Receipts: `.scratch/daytona-current-acceptance/e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303/`. These results certify
+this candidate's local and live gates. They do not certify release or
+promotion.

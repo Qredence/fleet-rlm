@@ -661,16 +661,21 @@ class LiveDaytonaVolumeClient:
         self._client = client
 
     async def get(self, name: str, *, create: bool = False) -> Any:
-        from daytona.common.errors import DaytonaConflictError
+        from daytona.common.errors import DaytonaBadRequestError, DaytonaConflictError, DaytonaInternalServerError
 
         try:
             volume = await self._client.volume.get(name, create=create)
-        except DaytonaConflictError as exc:
+        except (DaytonaConflictError, DaytonaBadRequestError, DaytonaInternalServerError) as exc:
             if not create:
                 raise map_provider_error(exc) from exc
             # The SDK creates only after typed absence. A concurrent creator
-            # may win that race; reconcile by lookup, never repeat creation.
-            volume = await self._get_existing(name)
+            # may win that race, and the provider reports the losing create as
+            # 409, 400 "already exists" or 500. Reconcile by one lookup and
+            # never repeat creation; without a winner, the create error stands.
+            try:
+                volume = await self._client.volume.get(name, create=False)
+            except Exception:
+                raise map_provider_error(exc) from exc
         except Exception as exc:
             raise map_provider_error(exc) from exc
         if not create:

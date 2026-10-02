@@ -248,7 +248,7 @@ class _QRE142Runner:
     def memory_store(self) -> WorkspaceMemory:
         if self._store is None:
             assert self.session_id is not None
-            binding = self.portal.call(self.resources.bindings.get, self.session_id)
+            binding = self.portal.call(self.resources._bindings.get, self.session_id)
             assert binding is not None and binding.sandbox_id is not None
             self.sandbox_ids.add(binding.sandbox_id)
             portal_loop = self.portal.call(lambda: asyncio.get_running_loop())

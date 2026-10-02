@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import io
 import json
+from pathlib import Path
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
+from uuid import UUID
 
 import pytest
 
@@ -17,10 +20,12 @@ from fleet_rlm.daytona.interpreter import (
     DEFAULT_BROKER_PORT,
     BackendExecutionResult,
     DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
     _SyncBridgeLoop,
     sandbox_backend,
 )
 from fleet_rlm.rlm.events import RLMOutput
+from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 
 
 class _LocalBroker:
@@ -149,8 +154,8 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     assert all(instance.closed for instance in _LocalBroker.instances)
 
 
-@pytest.mark.parametrize("port", [-1, 0, 65536])
-def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest.MonkeyPatch, port: int) -> None:
+@pytest.mark.parametrize("port", [-1, 0, 65536, True, 8080.5, "8080"])
+def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest.MonkeyPatch, port: Any) -> None:
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
     with pytest.raises(DaytonaAdapterError, match="broker port must be between"):
@@ -215,3 +220,182 @@ async def test_broker_resolves_awaitable_tools_and_returns_structured_failure() 
     assert isinstance(failure, dict)
     assert failure["category"] == "KeyError"
     assert failure["call_id"] == "bad-1"
+
+
+# --- prepared-attachment contract shared by both backends ----------------
+_TEXT_ID = UUID("00000000-0000-4000-8000-0000000000a1")
+_OTHER_ID = UUID("00000000-0000-4000-8000-0000000000a2")
+_ATTACHMENT_PROBE = (
+    "print(repr([(a['id'], a['filename'], a['content_type'], a['byte_size'], a['data'], a['encoding'])"
+    " for a in attachments]))\nprint(repr(context))"
+)
+
+
+def _capsule(mount: Path, files: dict[UUID, tuple[str, bytes]]) -> AttachmentContextCapsule:
+    entries = []
+    for attachment_id, (name, body) in files.items():
+        path = mount / name
+        path.write_bytes(body)
+        entries.append(
+            AttachmentContextEntry(
+                attachment_id, name, "text/plain", len(body), hashlib.sha256(body).hexdigest(), str(path)
+            )
+        )
+    return AttachmentContextCapsule(tuple(entries), mount_root=str(mount))
+
+
+def _attachment_backend(kind: str, monkeypatch: pytest.MonkeyPatch) -> Any:
+    if kind == "in_process":
+        return InProcessInterpreterBackend()
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    return sandbox_backend(MagicMock())
+
+
+def _load_attachments(
+    backend: Any, capsule: AttachmentContextCapsule, *, raw: bytes | None = None, bound_raw: bytes | None = None
+) -> BackendExecutionResult:
+    manifest = capsule.to_sandbox() if raw is None else raw
+    backend.bind_context_manifest(
+        trusted_mount_root=capsule.mount_root,
+        expected_manifest_sha256=hashlib.sha256(manifest if bound_raw is None else bound_raw).hexdigest(),
+    )
+    return backend.run(
+        capsule.sandbox_assignment("attachments", "_raw_attachments"),
+        {"_raw_attachments": manifest.decode("utf-8")},
+    )
+
+
+_BACKENDS = pytest.mark.parametrize("kind", ["in_process", "sandbox"])
+
+
+@_BACKENDS
+@pytest.mark.parametrize(
+    ("files", "expected_records", "expected_context"),
+    [
+        pytest.param(
+            {_TEXT_ID: ("note.txt", b"Fleet context")},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 13, "Fleet context", "utf-8")],
+            "Fleet context",
+            id="single-text",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("a.txt", b"first"), _OTHER_ID: ("b.txt", b"second")},
+            [
+                (str(_TEXT_ID), "a.txt", "text/plain", 5, "first", "utf-8"),
+                (str(_OTHER_ID), "b.txt", "text/plain", 6, "second", "utf-8"),
+            ],
+            [],
+            id="multiple",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("blob.bin", b"\xff\xfe\x00")},
+            [(str(_TEXT_ID), "blob.bin", "text/plain", 3, b"\xff\xfe\x00", "bytes")],
+            [],
+            id="invalid-utf8",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("nul.txt", b"a\x00b")},
+            [(str(_TEXT_ID), "nul.txt", "text/plain", 3, b"a\x00b", "bytes")],
+            [],
+            id="nul-bearing",
+        ),
+    ],
+)
+def test_prepared_attachments_materialize_identically(
+    kind: str,
+    files: dict[UUID, tuple[str, bytes]],
+    expected_records: list[tuple[object, ...]],
+    expected_context: object,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    backend = _attachment_backend(kind, monkeypatch)
+    loaded = _load_attachments(backend, _capsule(tmp_path, files))
+
+    assert loaded.error is None
+    assert loaded.context_accesses == tuple(str(attachment_id) for attachment_id in files)
+    probe = backend.run(_ATTACHMENT_PROBE)
+    assert probe.error is None
+    assert probe.stdout == f"{expected_records!r}\n{expected_context!r}\n"
+    assert probe.context_accesses == ()
+    leaked = backend.run(
+        "print(sorted(n for n in globals() if n.startswith(('_fleet_load', '_fleet_materialize', '_CONTEXT'))"
+        " or n in ('_hashlib', '_json_ctx', '_os_ctx')))"
+    )
+    assert leaked.stdout == "[]\n"
+    backend.close()
+
+
+def _forge(raw: bytes, **changes: object) -> bytes:
+    manifest = json.loads(raw)
+    manifest.update(changes)
+    return json.dumps(manifest).encode()
+
+
+@_BACKENDS
+@pytest.mark.parametrize("case", ["manifest-digest", "manifest-root", "file-length", "file-digest", "symlink"])
+def test_prepared_attachments_reject_integrity_violations(
+    kind: str, case: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mount = tmp_path / "mount"
+    mount.mkdir()
+    capsule = _capsule(mount, {_TEXT_ID: ("note.txt", b"Fleet context")})
+    raw = capsule.to_sandbox()
+    backend = _attachment_backend(kind, monkeypatch)
+    target = mount / "note.txt"
+    if case == "manifest-digest":
+        result = _load_attachments(backend, capsule, raw=_forge(raw, extra=1), bound_raw=raw)
+    elif case == "manifest-root":
+        other = tmp_path / "other"
+        other.mkdir()
+        forged = _forge(raw, mount_root=str(other))
+        result = _load_attachments(backend, capsule, raw=forged, bound_raw=forged)
+    else:
+        if case == "file-length":
+            target.write_bytes(b"Fleet context, longer")
+        elif case == "file-digest":
+            target.write_bytes(b"Fleet CONTEXT")
+        else:
+            outside = tmp_path / "outside.txt"
+            outside.write_bytes(b"Fleet context")
+            target.unlink()
+            target.symlink_to(outside)
+        result = _load_attachments(backend, capsule)
+
+    assert result.error in {"context manifest is invalid", "prepared context failed integrity verification"}
+    assert result.context_accesses == ()
+    backend.close()
+
+
+@_BACKENDS
+def test_context_loader_is_unavailable_to_later_actions(
+    kind: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    backend = _attachment_backend(kind, monkeypatch)
+    assert _load_attachments(backend, _capsule(tmp_path, {_TEXT_ID: ("note.txt", b"x")})).error is None
+
+    later = backend.run("_fleet_load_context_manifest")
+
+    assert later.error is not None and "_fleet_load_context_manifest" in later.error
+    backend.close()
+
+
+def test_sandbox_context_integrity_failure_is_a_verification_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    capsule = _capsule(tmp_path, {_TEXT_ID: ("note.txt", b"Fleet context")})
+    (tmp_path / "note.txt").write_bytes(b"Fleet CONTEXT")
+    invocation = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock())).new_invocation(context_capsule=capsule)
+
+    with pytest.raises(DaytonaAdapterError) as raised:
+        invocation.execute(
+            capsule.sandbox_assignment("attachments", "_raw_attachments"),
+            {"_raw_attachments": capsule.to_sandbox().decode("utf-8")},
+        )
+
+    assert raised.value.cause_type == "ContextVerificationError"
+    assert invocation.drain_context_accesses() == ()
+    invocation.shutdown()

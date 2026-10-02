@@ -204,7 +204,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 assert int(proposal_output["byte_size"]) > 0
 
                 phase = "read_promoted_memory"
-                binding = portal.call(resources.bindings.get, session_id)
+                binding = portal.call(resources._bindings.get, session_id)
                 assert binding is not None and binding.sandbox_id is not None
                 sandbox_ids.add(binding.sandbox_id)
                 sandbox = sync_sandbox(portal.call(resources._platform.get, binding.sandbox_id), portal_loop)

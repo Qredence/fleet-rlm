@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -55,7 +56,13 @@ _NATIVE_ASSERTIONS = frozenset(
     }
 )
 _DURABILITY_ASSERTIONS = frozenset(
-    {"attachment_readable", "artifact_survived_replacement", "shared_volume_checksum_verified"}
+    {
+        "attachment_readable",
+        "prepared_context_text_and_binary_loaded",
+        "prepared_context_accesses_reported",
+        "artifact_survived_replacement",
+        "shared_volume_checksum_verified",
+    }
 )
 
 EXIT_PRECONDITION = 2
@@ -345,7 +352,8 @@ def _remove_detached_worktree(worktree: Path, repo_root: Path) -> None:
         stderr=subprocess.DEVNULL,
     )
     if parent.name.startswith(".fleet-live-daytona-") and parent.parent == repo_root.parent:
-        parent.rmdir()
+        # A failed contract leaves its receipt here; it has already been read.
+        shutil.rmtree(parent)
 
 
 def _pytest_command(test: str, timeout_seconds: int) -> list[str]:
@@ -472,7 +480,8 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 _remove_detached_worktree(worktree, repo_root)
             except (OSError, RuntimeError, subprocess.SubprocessError):
-                failure = ("cleanup_failed", "candidate_worktree")
+                # Keep the proof failure visible; cleanup failure is secondary.
+                failure = failure or ("cleanup_failed", "candidate_worktree")
 
     candidate = {
         "sha": sha,

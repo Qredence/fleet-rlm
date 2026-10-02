@@ -470,3 +470,94 @@ async def test_runner_rejects_native_build_without_invocation_factory() -> None:
 
     assert stream.outcome is not None
     assert not stream.outcome.succeeded
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("later_failure", [False, True])
+async def test_root_records_attachment_accesses_from_the_created_invocation(later_failure: bool, tmp_path: Any) -> None:
+    """Accesses come from the factory-created invocation, never the retained template."""
+    import hashlib
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from fleet_rlm.rlm.execution import ExecutionRuntime, RLMExecutionContext, RLMRunner, RunIdentity, SessionView
+    from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    body = b"Fleet context"
+    (tmp_path / "note.txt").write_bytes(body)
+    attachment_id = uuid4()
+    capsule = AttachmentContextCapsule(
+        (
+            AttachmentContextEntry(
+                attachment_id,
+                "note.txt",
+                "text/plain",
+                len(body),
+                hashlib.sha256(body).hexdigest(),
+                str(tmp_path / "note.txt"),
+            ),
+        ),
+        mount_root=str(tmp_path),
+    )
+    created: list[DaytonaCodeInterpreter] = []
+
+    class Program:
+        def __init__(self, interpreter_factory: Callable[[], DaytonaCodeInterpreter]) -> None:
+            self._factory = interpreter_factory
+
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            for _ in range(2):
+                invocation = self._factory()
+                created.append(invocation)
+                invocation.execute(
+                    capsule.sandbox_assignment("attachments", "_raw_attachments"),
+                    {"_raw_attachments": capsule.to_sandbox().decode("utf-8")},
+                )
+                invocation.shutdown()
+            if later_failure:
+                raise RuntimeError("later execution failed")
+            return dspy.Prediction(answer="done")
+
+    def build_program(**kwargs: Any) -> Program:
+        return Program(kwargs["interpreter_factory"])
+
+    class Capabilities(EmptyCapabilities):
+        def __init__(self) -> None:
+            super().__init__()
+            self.recorded: list[tuple[str, ...]] = []
+
+        def record_attachment_accesses(self, accesses: tuple[str, ...]) -> None:
+            self.recorded.append(accesses)
+
+    async def not_cancelled() -> bool:
+        return False
+
+    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    capabilities = Capabilities()
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            attachment_context=capsule,
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=dspy.utils.DummyLM([]), sub_lm=dspy.utils.DummyLM([])),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=template,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=capabilities,
+    )
+
+    _ = [event async for event in RLMRunner(program_builder=build_program).stream(context)]
+
+    assert len(created) == 2 and template not in created
+    assert capabilities.recorded == [(str(attachment_id), str(attachment_id))]
+    assert template.drain_context_accesses() == ()
+    assert all(invocation.drain_context_accesses() == () for invocation in created)

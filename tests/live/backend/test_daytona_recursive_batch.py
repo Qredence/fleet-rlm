@@ -443,7 +443,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert child_evidence._active == 0
             trace_id = _trace_id_from_chunks(chunks)
             trace_evidence = _retrieve_trace_hierarchy(trace_id)
-            runtime = getattr(resources, "runtime", None)
+            runtime = getattr(resources, "runtime", resources)
             retained_roots = tuple(runtime.roots)
             assert len(retained_roots) == 1
             followup = client.post(

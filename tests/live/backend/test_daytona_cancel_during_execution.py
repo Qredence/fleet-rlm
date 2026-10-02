@@ -116,7 +116,12 @@ def test_daytona_cancel_during_execution_through_fastapi(
         assert resources is not None
         preparation = inventory.run_preparation
         assert preparation is not None
-        preparation._models = RLMModelBundle(_CancelRootLM(), dspy.utils.DummyLM([{"answer": "unused"}]))
+        # TurnPreparationPlan is frozen; swap the models the same way the recursive canary swaps capabilities.
+        object.__setattr__(
+            preparation,
+            "models",
+            RLMModelBundle(_CancelRootLM(), dspy.utils.DummyLM([{"answer": "unused"}])),
+        )
         session_id: UUID | None = None
         try:
             created = client.post("/api/sessions", json={"title": "Daytona live cancel canary"})
@@ -146,7 +151,7 @@ def test_daytona_cancel_during_execution_through_fastapi(
             assert any(chunk.get("type") == "abort" and chunk.get("reason") == "Turn cancelled" for chunk in chunks)
             finish = chunks[-1]
             assert finish.get("type") != "finish" or finish.get("finishReason") != "stop"
-            runtime = getattr(resources, "runtime", None)
+            runtime = getattr(resources, "runtime", resources)
             close = getattr(runtime, "close_root_session", None)
             if callable(close):
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))

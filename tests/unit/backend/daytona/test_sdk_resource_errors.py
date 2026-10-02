@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, call
 import pytest
 from daytona.common.errors import (
     DaytonaAuthenticationError,
+    DaytonaBadRequestError,
     DaytonaConflictError,
     DaytonaConnectionError,
     DaytonaFileNotFoundError,
@@ -42,12 +43,33 @@ def test_control_plane_sandbox_absence_is_recognized():
     assert is_sandbox_not_found(DaytonaNotFoundError("missing", status_code=404, source="DAYTONA_API"))
 
 
+# Observed live on 2026-10-01: two concurrent creates of one fresh Volume name
+# failed the loser with HTTP 500 or 400 "already exists", not only 409.
+_CREATE_RACE_ERRORS = [
+    DaytonaConflictError("already exists", status_code=409),
+    DaytonaBadRequestError("Volume with name shared already exists", status_code=400),
+    DaytonaInternalServerError("An unexpected error occurred.", status_code=500),
+]
+
+
 @pytest.mark.asyncio
-async def test_volume_creation_conflict_reconciles_without_another_create():
+@pytest.mark.parametrize("error", _CREATE_RACE_ERRORS)
+async def test_volume_creation_race_reconciles_without_another_create(error):
     volume = SimpleNamespace(id="volume", state="ready")
-    get = AsyncMock(side_effect=[DaytonaConflictError("already exists", status_code=409), volume])
+    get = AsyncMock(side_effect=[error, volume])
     adapter = LiveDaytonaVolumeClient(SimpleNamespace(volume=SimpleNamespace(get=get)))
     assert await adapter.get("shared", create=True) is volume
+    assert get.call_args_list == [call("shared", create=True), call("shared", create=False)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", _CREATE_RACE_ERRORS)
+async def test_volume_creation_failure_without_winner_keeps_the_create_error(error):
+    get = AsyncMock(side_effect=[error, DaytonaNotFoundError("missing", status_code=404)])
+    adapter = LiveDaytonaVolumeClient(SimpleNamespace(volume=SimpleNamespace(get=get)))
+    with pytest.raises(DaytonaAdapterError) as caught:
+        await adapter.get("shared", create=True)
+    assert caught.value.__cause__ is error
     assert get.call_args_list == [call("shared", create=True), call("shared", create=False)]
 
 
@@ -59,7 +81,6 @@ async def test_volume_creation_conflict_reconciles_without_another_create():
         DaytonaForbiddenError,
         DaytonaRateLimitError,
         DaytonaConnectionError,
-        DaytonaInternalServerError,
     ],
 )
 async def test_volume_failures_are_normalized_without_retry(error_type):

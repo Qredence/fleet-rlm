@@ -192,3 +192,19 @@ def test_native_pytest_command_targets_current_contract() -> None:
     command = verifier._pytest_command(verifier._NATIVE_TEST, 840)
     assert command[-1] == "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
     assert "test_complete_daytona_mvp_through_fastapi" not in command[-1]
+
+
+def test_worktree_cleanup_removes_a_failed_contract_receipt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    parent = tmp_path / ".fleet-live-daytona-test"
+    worktree = parent / "checkout"
+    worktree.mkdir(parents=True)
+    (parent / "native-receipt.json").write_text("{}", encoding="utf-8")
+    removed: list[list[str]] = []
+    monkeypatch.setattr(verifier.subprocess, "run", lambda command, **_kwargs: removed.append(command))
+
+    verifier._remove_detached_worktree(worktree, repo_root)
+
+    assert removed == [["git", "worktree", "remove", "--force", str(worktree)]]
+    assert not parent.exists()

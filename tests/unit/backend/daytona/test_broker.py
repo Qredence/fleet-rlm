@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import socket
 import subprocess
@@ -29,11 +30,11 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-@pytest.fixture
-def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
+@contextlib.contextmanager
+def _start_embedded_server(prefix: str = "") -> Iterator[tuple[str, dict[str, str]]]:
     port = _free_port()
     secret = "test-broker-secret"
-    source = (
+    source = prefix + (
         broker_module._SERVER_SOURCE.replace("__SECRET__", repr(secret))
         .replace("__PORT__", str(port))
         .replace("__MAX_REQUEST_BYTES__", str(broker_module._MAX_REQUEST_BYTES))
@@ -61,6 +62,12 @@ def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
     finally:
         process.terminate()
         process.wait(timeout=2)
+
+
+@pytest.fixture
+def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
+    with _start_embedded_server() as server:
+        yield server
 
 
 def _run_execute(
@@ -385,3 +392,88 @@ def test_poll_settles_required_mutation_only_after_remote_acknowledgement() -> N
     broker._poll_once()
 
     assert settled == [("append_workspace_text", {"path": "notes/findings.md", "content": "durable"}, {"ok": True})]
+
+
+def _held_result_server(gate: Path) -> contextlib.AbstractContextManager[tuple[str, dict[str, str]]]:
+    """Hold each woken tool-call waiter until ``gate`` exists, widening the result-ready window.
+
+    Only timed waits are held: the tool-call waiter is the server's sole timed
+    wait, while ``threading.Thread.start`` waits without a timeout.
+    """
+    prefix = (
+        "import os as _gate_os, threading as _gate_threading, time as _gate_time\n"
+        "class _HeldEvent(_gate_threading.Event):\n"
+        "    def wait(self, timeout=None):\n"
+        "        woke = super().wait(timeout)\n"
+        f"        while woke and timeout is not None and not _gate_os.path.exists({str(gate)!r}):\n"
+        "            _gate_time.sleep(0.01)\n"
+        "        return woke\n"
+        "_gate_threading.Event = _HeldEvent\n"
+    )
+    return _start_embedded_server(prefix)
+
+
+def _pending_lease(client: httpx.Client) -> tuple[str, str | None]:
+    for _ in range(200):
+        requests = client.get("/pending").json()["requests"]
+        if requests:
+            return str(requests[0]["id"]), requests[0]["lease"]
+        time.sleep(0.01)
+    raise AssertionError("tool call never became pending")
+
+
+def _tool_source(port: int, secret: str) -> str:
+    broker = DaytonaHttpToolBroker(object(), port=port)
+    broker._secret = secret
+    broker.bind_tools({"answer": lambda: None})
+    return broker.setup_source("print(answer())")
+
+
+def test_result_is_accepted_once_before_the_waiter_consumes_it(tmp_path: Path) -> None:
+    gate = tmp_path / "release"
+    with (
+        _held_result_server(gate) as (base_url, headers),
+        httpx.Client(base_url=base_url, headers=headers, timeout=3) as client,
+    ):
+        source = _tool_source(int(base_url.rsplit(":", 1)[1]), headers["X-Broker-Secret"])
+        thread, responses = _run_execute(client, source, timeout_s=5)
+        call_id, lease = _pending_lease(client)
+
+        first = client.post("/result", json={"id": call_id, "lease": lease, "result": "first"})
+        duplicate = client.post("/result", json={"id": call_id, "lease": lease, "result": "second"})
+        gate.touch()
+        thread.join(timeout=5)
+
+    assert (first.status_code, duplicate.status_code) == (200, 409)
+    assert responses[0].json()["stdout"] == "first\n"
+
+
+def test_result_requires_an_issued_lease(embedded_server: tuple[str, dict[str, str]]) -> None:
+    base_url, headers = embedded_server
+    with httpx.Client(base_url=base_url, headers=headers, timeout=3) as client:
+        thread, _ = _run_execute(client, "import time; time.sleep(1)", timeout_s=5)
+        call: list[httpx.Response] = []
+        for _ in range(100):
+            waiter = threading.Thread(
+                target=lambda: call.append(client.post("/tool_call", json={"id": "call-1", "tool_name": "answer"})),
+                daemon=True,
+            )
+            waiter.start()
+            waiter.join(timeout=0.05)
+            if waiter.is_alive():
+                break
+            call.clear()
+            time.sleep(0.01)
+        unleased = client.post("/result", json={"id": "call-1", "result": "forged"})
+        assert unleased.status_code == 409
+        call_id, lease = _pending_lease(client)
+        stale = client.post("/result", json={"id": call_id, "lease": "stale", "result": "forged"})
+        delivered = client.post("/result", json={"id": call_id, "lease": lease, "result": "ok"})
+        waiter.join(timeout=5)
+        consumed = client.post("/result", json={"id": call_id, "lease": lease, "result": "late"})
+        thread.join(timeout=5)
+
+    assert stale.status_code == 409
+    assert delivered.status_code == 200
+    assert consumed.status_code == 409
+    assert call[0].json() == {"result": "ok"}
