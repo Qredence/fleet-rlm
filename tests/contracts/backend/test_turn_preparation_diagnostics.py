@@ -172,3 +172,47 @@ def test_unknown_adapter_failure_logs_cause_class_only(caplog: pytest.LogCapture
     assert "message=UnexpectedSDKError" in caplog.text
     assert "never-log-this" not in caplog.text
     assert "/Users/zach" not in caplog.text
+
+
+class _RecordingClient:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def capture(self, *, event: str, properties: dict, **_kwargs: object) -> None:
+        self.events.append((event, properties))
+
+
+@pytest.mark.parametrize(
+    ("cause", "category", "cause_class", "status_category"),
+    [
+        (
+            ProviderRequestError("provider failed", cause_type="ProviderResponseError", status_code=503),
+            "provider_5xx",
+            "ProviderResponseError",
+            "5xx",
+        ),
+        (RuntimeError("api_key=never-log-this"), "unknown", "RuntimeError", "none"),
+    ],
+)
+def test_unavailable_open_failure_capture_names_the_cause(
+    monkeypatch: pytest.MonkeyPatch,
+    cause: BaseException,
+    category: str,
+    cause_class: str,
+    status_category: str,
+) -> None:
+    from fleet_rlm.observability import posthog
+
+    recorder = _RecordingClient()
+    monkeypatch.setattr(posthog, "_client", recorder)
+
+    _assert_streamed_failure(_post(_client(cause)), "Turn is unavailable")
+
+    failures = [properties for event, properties in recorder.events if event == "turn_failed"]
+    assert len(failures) == 1
+    assert failures[0]["failure_phase"] == "open"
+    assert failures[0]["failure_message"] == "Turn is unavailable"
+    assert failures[0]["failure_category"] == category
+    assert failures[0]["failure_cause_class"] == cause_class
+    assert failures[0]["provider_status_category"] == status_category
+    assert "never-log-this" not in json.dumps(failures[0])

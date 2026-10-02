@@ -14,8 +14,9 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fleet_rlm.api.dependencies import LocalScopeDep, SettingsDep, TurnRuntimeDep
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.observability.diagnostics import normalize_turn_failure, trace_failure_details
 from fleet_rlm.observability.posthog import capture
+from fleet_rlm.rlm.events import RunCompleted
 from fleet_rlm.sessions.models import TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
     RunIdempotencyMismatchError,
@@ -194,6 +195,7 @@ async def create_turn(
                 "session_id": str(session_id),
                 "failure_phase": "open",
                 "failure_message": message,
+                **trace_failure_details(exc),
             },
         )
         for chunk in _open_failure_frames(message):
@@ -218,6 +220,19 @@ async def create_turn(
             },
         )
         async for event in owner:
+            # RunFailed, RunTimedOut, and RunCancelled also end the stream
+            # normally, so only a RunCompleted terminal counts as success.
+            if isinstance(event.detail, RunCompleted):
+                capture(
+                    "turn_completed",
+                    properties={
+                        "workspace_id": str(identity.workspace_id),
+                        "session_id": str(session_id),
+                        "skill_count": skill_count,
+                        "duration_ms": event.detail.duration_ms,
+                        "delivery": event.detail.delivery,
+                    },
+                )
             for chunk in projector.project(event):
                 yield ServerSentEvent(data=chunk)
         yield ServerSentEvent(raw_data="[DONE]")
@@ -232,6 +247,7 @@ async def create_turn(
                 "session_id": str(session_id),
                 "failure_phase": "stream",
                 "failure_message": normalize_turn_failure(exc).message,
+                **trace_failure_details(exc),
             },
         )
         raise
