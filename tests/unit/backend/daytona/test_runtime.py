@@ -506,7 +506,6 @@ async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdow
     monkeypatch.setattr(runtime, "_acquire_child_runtime", acquire_child)
     factory = runtime.build_child_factory(
         volume_id="child-volume",
-        mount_path=None,
         workspace_id=uuid4(),
         session_id=uuid4(),
         run_id=uuid4(),
@@ -783,7 +782,6 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
     runtime = make_daytona_runtime(platform=Platform(), admission=admission)
     factory = runtime.build_child_factory(
         volume_id="volume",
-        mount_path="/home/daytona/fleet",
         workspace_id=uuid4(),
         session_id=uuid4(),
         run_id=uuid4(),

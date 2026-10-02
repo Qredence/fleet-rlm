@@ -8,7 +8,7 @@ from threading import Lock
 from typing import Protocol
 from uuid import UUID
 
-from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
 
 _ZERO_UUID = UUID(int=0)
 
@@ -20,7 +20,7 @@ class SandboxBinding:
     workspace_id: UUID
     volume_id: str | None
     volume_subpath: str
-    mount_path: str = DEFAULT_VOLUME_MOUNT_PATH
+    mount_path: str = SESSION_WORKSPACE_MOUNT_PATH
     provider_state: str = "missing"
     last_verified_at: datetime | None = None
     # Monotonic provider-binding generation.  Recovery and cleanup operations

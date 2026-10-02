@@ -15,6 +15,8 @@ from uuid import UUID
 
 # Design default mount (must be absolute, not `/`, not a prohibited system dir).
 DEFAULT_VOLUME_MOUNT_PATH = "/home/daytona/fleet"
+# Execution Sandboxes mount only the Session Workspace, here.
+SESSION_WORKSPACE_MOUNT_PATH = "/workspace"
 
 # Daytona rejects mounts under these prefixes (skill + platform rules).
 _PROHIBITED_MOUNT_PREFIXES = (
@@ -274,6 +276,7 @@ def volume_paths_from_settings(settings: Any) -> VolumePaths:
 
 __all__ = [
     "DEFAULT_VOLUME_MOUNT_PATH",
+    "SESSION_WORKSPACE_MOUNT_PATH",
     "UnsafePathError",
     "VolumePaths",
     "as_posix",

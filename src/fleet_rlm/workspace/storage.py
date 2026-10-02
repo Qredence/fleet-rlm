@@ -23,6 +23,7 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.paths import (
+    SESSION_WORKSPACE_MOUNT_PATH,
     UnsafePathError,
     VolumePaths,
     validate_path_id,
@@ -323,7 +324,7 @@ class WorkspaceStorage:
         **kwargs: Any,
     ) -> None:
         self._sandbox = sandbox
-        resolved_root = root or volume_root or "/workspace"
+        resolved_root = root or volume_root or SESSION_WORKSPACE_MOUNT_PATH
         _validate_workspace_roots(volume_root, resolved_root, allow_volume_root=allow_volume_root)
         self._root = Path(resolved_root)
         self._volume_root = Path(volume_root) if volume_root else None

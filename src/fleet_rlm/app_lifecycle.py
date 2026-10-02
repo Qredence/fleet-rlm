@@ -695,6 +695,7 @@ def build_run_preparation(
         RootSessionSpec,
         ensure_volume_layout,
     )
+    from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
     from fleet_rlm.turn_preparation import (
         RunEnvironment,
         RunPreparationTimeoutError,
@@ -770,8 +771,8 @@ def build_run_preparation(
             )
             session_workspace = DaytonaSandboxWorkspaceStorage(
                 sink.sandbox,
-                volume_root="/workspace",
-                root="/workspace",
+                volume_root=SESSION_WORKSPACE_MOUNT_PATH,
+                root=SESSION_WORKSPACE_MOUNT_PATH,
                 max_file_bytes=settings.max_upload_bytes,
                 allow_volume_root=True,
             )
@@ -786,7 +787,6 @@ def build_run_preparation(
 
             child_runtime_factory = runtime.build_child_factory(
                 volume_id=owner.volume_id,
-                mount_path=runtime.volume_config.mount_path,
                 workspace_id=run.access.workspace_id,
                 session_id=run.session_id,
                 run_id=run.run_id,

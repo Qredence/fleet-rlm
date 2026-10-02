@@ -143,7 +143,6 @@ def _factory(
         platform=platform,
         admission=admission,
         volume_id="shared-volume",
-        mount_path=MOUNT,
         workspace_id=workspace_id,
         session_id=uuid4(),
         run_id=run_id,

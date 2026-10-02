@@ -23,7 +23,7 @@ from fleet_rlm.attachments import (
     AttachmentRef,
     StoredAttachment,
 )
-from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
 from fleet_rlm.persistence.models import (
     ArtifactRow,
     AttachmentRow,
@@ -575,7 +575,7 @@ class SqlAlchemySandboxBindingStore:
             ):
                 raise ValueError("stale running sandbox binding generation")
             now = datetime.now(UTC)
-            mount_path = binding.mount_path or DEFAULT_VOLUME_MOUNT_PATH
+            mount_path = binding.mount_path or SESSION_WORKSPACE_MOUNT_PATH
             if row is None:
                 row = SandboxBindingRow(
                     id=uuid4(),
@@ -625,7 +625,7 @@ class SqlAlchemySandboxBindingStore:
                 generation = row.generation + 1
             candidate = replace(binding, generation=generation)
             now = datetime.now(UTC)
-            mount_path = candidate.mount_path or DEFAULT_VOLUME_MOUNT_PATH
+            mount_path = candidate.mount_path or SESSION_WORKSPACE_MOUNT_PATH
             if row is None:
                 row = SandboxBindingRow(
                     id=uuid4(),
