@@ -110,16 +110,16 @@ The profile contract is deliberately explicit:
 
 | Profile | Volume | Intended use |
 | --- | --- | --- |
-| `session` | Workspace-scoped mount | Root Turn execution |
+| `session` | Session Workspace (`workspaces/<wid>/sessions/<sid>/workspace`) at `/workspace` | Root Turn execution |
 | `semantic-child` | None | Selected-input iterative child; generic warm capacity may be eligible |
-| `workspace-child` | Scoped `workspaces/<workspace_id>` mount | Child work that truly needs durable Workspace files |
+| `workspace-child` | The parent Session Workspace at `/workspace` | Child work that truly needs durable Workspace files |
 
 These are environment-manifest roles, not selectable `runtime.variant` values.
 The recursive factory passes `semantic-child` through its selected-profile
-seam for capsule children, so they are volume-less SemanticChild sandboxes;
-it falls back to the scoped `workspace-child` only when that snapshot is not
-configured. Snapshot creation alone does not certify containment, mounts, or
-warm pools.
+seam for capsule children, so they are volume-less SemanticChild sandboxes.
+It does not fall back to `workspace-child` when the child snapshot is
+missing; semantic children then fail closed. Snapshot creation alone does not
+certify containment, mounts, or warm pools.
 
 Create and verify a new immutable name before changing `.env`. A Session
 replacement retains the authorized Workspace Volume identity and subpath; it

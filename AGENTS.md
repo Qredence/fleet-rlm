@@ -41,9 +41,10 @@ behavior and tests define what the system does.
 - Resolve child inputs under Session authority. The active `semantic-child`
   path stages bounded copies in private scratch, validates outputs before
   cleanup, and stays Volume-less. The separate `workspace-child` profile
-  supports child work that needs durable files through a mount scoped to
-  `workspaces/<workspace_id>`. Keep task checkpoints, memory tools, publication,
-  and credentials under their existing owners; Root verifies child findings.
+  supports child work that needs durable files by mounting the parent
+  Session Workspace at `/workspace`. Keep task checkpoints, memory tools,
+  publication, and credentials under their existing owners; Root verifies
+  child findings.
 - Keep invocation state scoped to a Turn. Sessions own committed conversation
   and task checkpoints; Workspace services own durable files and memory.
   `DaytonaRuntime` owns provider resources and cleanup; `TurnRuntime`
