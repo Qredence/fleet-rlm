@@ -19,7 +19,7 @@ from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import TurnAccess
 from tests.live.backend._evidence import candidate_identity, write_receipt
-from tests.live.backend._mvp_support import _live_settings, _strict_cleanup
+from tests.live.backend._mvp_support import _live_settings, _strict_cleanup, live_runtime
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(600)]
 
@@ -111,11 +111,7 @@ def test_daytona_cancel_during_execution_through_fastapi(
     cleanup_failures: tuple[str, ...] = ()
     app = create_app(settings=settings)
     with TestClient(app) as client:
-        inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
-        assert resources is not None
-        preparation = inventory.run_preparation
-        assert preparation is not None
+        resources, preparation = live_runtime(app)
         # TurnPreparationPlan is frozen; swap the models the same way the recursive canary swaps capabilities.
         object.__setattr__(
             preparation,
@@ -154,6 +150,7 @@ def test_daytona_cancel_during_execution_through_fastapi(
             runtime = getattr(resources, "runtime", resources)
             close = getattr(runtime, "close_root_session", None)
             if callable(close):
+                assert client.portal is not None
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             release_deadline = time.perf_counter() + 45
             while time.perf_counter() < release_deadline:

@@ -14,6 +14,8 @@ from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import active_profile_contract, load_profile_environment_contracts, load_runtime_settings
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.runtime import DaytonaRuntime
+from fleet_rlm.turn_preparation import TurnPreparationPlan
 from tests.live.backend._database import upgrade_to_head
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -140,7 +142,7 @@ def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str,
 
 def _semantic_tool_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, object]:
     inputs = [
-        chunk.get("input") if isinstance(chunk.get("input"), dict) else {}
+        value if isinstance(value := chunk.get("input"), dict) else {}
         for chunk in chunks
         if chunk.get("type") == "tool-input-available" and chunk.get("toolName") == "verify_semantic_work"
     ]
@@ -292,3 +294,16 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
     if not await _retry_cleanup(delete_volume):
         failures.append("volume")
     return tuple(failures)
+
+
+def live_runtime(app: Any) -> tuple[DaytonaRuntime, TurnPreparationPlan]:
+    """Return the app's concrete Daytona runtime and Turn preparation plan.
+
+    ``app.state`` is untyped; narrowing here lets ``ty`` flag live-test drift
+    such as a renamed runtime attribute or a write to the frozen plan.
+    """
+    inventory = app.state.runtime_inventory
+    resources, preparation = inventory.daytona_runtime_owner, inventory.run_preparation
+    assert isinstance(resources, DaytonaRuntime)
+    assert isinstance(preparation, TurnPreparationPlan)
+    return resources, preparation

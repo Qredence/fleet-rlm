@@ -25,6 +25,7 @@ from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from tests.live.backend._cleanup import _strict_cleanup
 from tests.live.backend._database import upgrade_to_head
+from tests.live.backend._mvp_support import live_runtime
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(900)]
 
@@ -359,12 +360,13 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
     )
     app.add_middleware(_FirstStreamDeltaMiddleware, probe=probe)
     with TestClient(app) as client:
-        inventory = app.state.runtime_inventory
-        resources = inventory.daytona_runtime_owner
-        preparation = inventory.run_preparation
-        assert resources is not None
-        assert preparation is not None
-        preparation._capabilities = _ProofCapabilityPreparer(preparation._capabilities, (proof_tool,), proof_views)
+        resources, preparation = live_runtime(app)
+        # TurnPreparationPlan is frozen; wrap its capability preparer in place.
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
         try:
             created = client.post("/api/sessions", json={"title": "Phase 1 Daytona stream canary"})
             assert created.status_code == 201

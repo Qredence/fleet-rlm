@@ -56,7 +56,7 @@ from fleet_rlm.skills.catalog import stable_skill_id
 from fleet_rlm.workspace.memory import WorkspaceMemory, WorkspaceMemoryToolHost, read_workspace_memory_injection_digest
 from fleet_rlm.workspace.models import WORKSPACE_MEMORY_INJECTION_TAIL_BYTES
 from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs, WorkspaceMemoryStorage, WorkspaceStorage
-from tests.live.backend._mvp_support import _assert_sse_stop, _live_settings, _sse_chunks, _strict_cleanup
+from tests.live.backend._mvp_support import _assert_sse_stop, _live_settings, _sse_chunks, _strict_cleanup, live_runtime
 from tests.live.backend._tool_chunks import _paired_tool_chunks
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
@@ -203,9 +203,7 @@ class _QRE142Runner:
         self.app = create_app(settings=self.settings)
         self.client = TestClient(self.app)
         self.client.__enter__()
-        inventory = self.app.state.runtime_inventory
-        self.resources = inventory.daytona_runtime_owner
-        self.preparation = inventory.run_preparation
+        self.resources, self.preparation = live_runtime(self.app)
         assert self.resources is not None and self.preparation is not None
         self.portal = self.client.portal
         assert self.portal is not None

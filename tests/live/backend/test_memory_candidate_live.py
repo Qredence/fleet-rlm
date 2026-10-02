@@ -32,6 +32,7 @@ from tests.live.backend._mvp_support import (
     _sandbox_environment_names,
     _sse_chunks,
     _strict_cleanup,
+    live_runtime,
 )
 from tests.live.backend._tool_chunks import _paired_tool_chunks
 
@@ -159,9 +160,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
 
     try:
         with TestClient(app) as client:
-            resources = app.state.runtime_inventory.daytona_runtime_owner
-            preparation = app.state.runtime_inventory.run_preparation
-            assert resources is not None and preparation is not None
+            resources, _ = live_runtime(app)
             portal = client.portal
             assert portal is not None
             portal_loop = portal.call(lambda: asyncio.get_running_loop())
