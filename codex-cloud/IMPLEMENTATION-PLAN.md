@@ -15,7 +15,10 @@
 > - the declared-output rule rejected keyword passthroughs.
 >
 > Evidence is in [Daytona cleanup acceptance](../docs/testing/daytona-cleanup-acceptance.md).
-> The rest of this document is the audit as written, against `e45bff1`.
+>
+> **Everything below is historical.** It is the audit as written against
+> `e45bff1`. Its "next work", follow-up and live-gate instructions (sections 5,
+> 8 and 10) are complete and kept for provenance; they are not open tasks.
 
 - **Audit date:** 2026-10-01
 - **Repository:** `Qredence/fleet-rlm`

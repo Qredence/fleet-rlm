@@ -419,7 +419,7 @@ def _pending_lease(client: httpx.Client) -> tuple[str, str | None]:
         if requests:
             return str(requests[0]["id"]), requests[0]["lease"]
         time.sleep(0.01)
-    pytest.fail("tool call never became pending")
+    raise AssertionError("tool call never became pending")
 
 
 def _tool_source(port: int, secret: str) -> str:
