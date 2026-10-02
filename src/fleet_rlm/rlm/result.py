@@ -199,7 +199,12 @@ _DECLARED_SECRET_ASSIGNMENT = re.compile(
     r"(?:api[_-]?key|access[_-]?key|authorization|password|secret|token|credential|private[_-]?key))\b"
     r"\s*(?:=|:)\s*(?P<value>\"[^\"\r\n]+\"|'[^'\r\n]+'|[^\s,;}\]\)]+)"
 )
-_DECLARED_CALL_VALUE = re.compile(r"[A-Za-z_][\w.]*\(")
+_DECLARED_NAME = r"[A-Za-z_][\w.]*"
+_DECLARED_CALL_ARGUMENT = rf"{_DECLARED_NAME}(?:\s*=\s*{_DECLARED_NAME})?"
+# A whole call whose arguments are bare names (no literals) and that is not chained.
+_DECLARED_NAME_ONLY_CALL = re.compile(
+    rf"{_DECLARED_NAME}\(\s*(?:{_DECLARED_CALL_ARGUMENT}(?:\s*,\s*{_DECLARED_CALL_ARGUMENT})*)?\s*\)(?![\w.\[(])"
+)
 _DECLARED_BEARER = re.compile(r"(?i)\bbearer\s+(?P<value>[a-z0-9._~+/=-]+)")
 _DECLARED_PROVIDER_TOKEN = re.compile(
     r"(?i)\b(?:"
@@ -403,9 +408,10 @@ def _contains_sensitive_value(value: Any) -> bool:
 
 def _validate_declared_text(text: str) -> None:
     for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
-        # ``name=name`` passes a variable through a keyword, and ``name = f(...)``
-        # assigns a call result; neither is a credential value.
-        if match.group("value") == match.group("key") or _DECLARED_CALL_VALUE.match(match.group("value")):
+        # ``name=name`` passes a variable through a keyword, and ``name = f(x)``
+        # assigns a call result; neither is a credential value. ``f("literal")``
+        # is: a literal inside the arguments must still be validated.
+        if match.group("value") == match.group("key") or _DECLARED_NAME_ONLY_CALL.match(text, match.start("value")):
             continue
         if not _is_safe_placeholder(match.group("value")):
             raise ValueError("declared output contains a sensitive value")
