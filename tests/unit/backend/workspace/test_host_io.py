@@ -9,7 +9,7 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 from fleet_rlm.paths import UnsafePathError
-from fleet_rlm.workspace.host_io import DaytonaHostIO
+from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaWorkspaceFiles
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 
 
@@ -53,8 +53,6 @@ async def test_volume_proxy_is_workspace_bound_and_rejects_scope_escape() -> Non
     runtime = _Runtime()
     base = DaytonaWorkspaceGateway(
         runtime=runtime,
-        paths=SimpleNamespace(mount_path="/volume", files_root=lambda: "/volume/files"),
-        max_file_bytes=1024,
         map_error=lambda error: error,
     )
     volume = DaytonaWorkspaceVolumeGateway(base, mount_path="/volume")
@@ -83,8 +81,6 @@ async def test_memory_proxy_uses_one_short_lived_sandbox_per_operation() -> None
     runtime = _Runtime()
     base = DaytonaWorkspaceGateway(
         runtime=runtime,
-        paths=SimpleNamespace(mount_path="/volume", files_root=lambda: "/volume/files"),
-        max_file_bytes=4096,
         map_error=lambda error: error,
     )
     dispatcher = SyncBridgeDispatcher()
@@ -109,8 +105,6 @@ async def test_concurrent_host_byte_operations_share_workspace_authority() -> No
     runtime = _Runtime()
     base = DaytonaWorkspaceGateway(
         runtime=runtime,
-        paths=SimpleNamespace(mount_path="/volume", files_root=lambda: "/volume/files"),
-        max_file_bytes=1024,
         map_error=lambda error: error,
     )
     dispatcher = SyncBridgeDispatcher()
@@ -183,3 +177,50 @@ async def test_host_volume_read_uses_overflow_probe_byte() -> None:
         await storage.read(location, max_bytes=5)
 
     volume_fs.aread_bytes.assert_awaited_once_with(location, max_bytes=6)
+
+
+@pytest.mark.asyncio
+async def test_workspace_files_are_stored_on_the_volume_not_the_api_host(tmp_path) -> None:
+    """/api/files sessions must read and write through the I/O Sandbox's Volume mount."""
+
+    class AsyncFs:
+        """The SDK's async filesystem surface, as the sync bridge requires."""
+
+        def __init__(self) -> None:
+            self.files: dict[str, bytes] = {}
+
+        async def get_file_info(self, path: str) -> dict[str, object]:
+            if path in self.files:
+                return {"type": "file", "size": len(self.files[path])}
+            raise FileNotFoundError(path)
+
+        async def download_file(self, path: str) -> bytes:
+            if path not in self.files:
+                raise FileNotFoundError(path)
+            return self.files[path]
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            self.files[path] = bytes(data)
+
+    workspace_id = uuid4()
+    runtime = _Runtime()
+    runtime.filesystem = AsyncFs()  # type: ignore[assignment]
+    mount = tmp_path / "volume"
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    workspace_files = DaytonaWorkspaceFiles(
+        DaytonaWorkspaceGateway(runtime=runtime, map_error=lambda error: error),
+        dispatcher=dispatcher,
+        paths=SimpleNamespace(mount_path=str(mount), files_root=lambda: str(mount / "files")),
+        max_file_bytes=1024,
+    )
+
+    async with workspace_files.open_workspace(workspace_id, purpose="workspace-files-write") as files:
+        await files.write_text("notes/plan.md", "on the Volume")
+    async with workspace_files.open_workspace(workspace_id, purpose="workspace-files-read") as files:
+        page = await files.read_text("notes/plan.md")
+
+    assert runtime.filesystem.files == {f"{mount}/files/notes/plan.md": b"on the Volume"}
+    assert page.content == "on the Volume"
+    assert not mount.exists()
+    assert len(runtime.sandboxes) == 2

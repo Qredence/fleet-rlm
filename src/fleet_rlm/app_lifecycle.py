@@ -284,11 +284,12 @@ async def build_daytona_composition(
     from fleet_rlm.sessions.task import SessionTaskService
     from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
     from fleet_rlm.turns import TurnRuntime
+    from fleet_rlm.workspace.host_io import DaytonaWorkspaceFiles
     from fleet_rlm.workspace.mounted_gateway import (
         DaytonaWorkspaceGateway,
         DaytonaWorkspaceVolumeGateway,
     )
-    from fleet_rlm.workspace.workspace import WorkspaceAccessGateway, WorkspaceFileService
+    from fleet_rlm.workspace.workspace import WorkspaceFileService
 
     resolved = settings
     require_daytona_settings(resolved)
@@ -324,12 +325,7 @@ async def build_daytona_composition(
             execution_timeout_s=resolved.rlm_execution_timeout_s,
             dispatcher=dispatcher,
         )
-        mounted_workspace_gateway = DaytonaWorkspaceGateway(
-            runtime=runtime,
-            paths=volume_paths,
-            max_file_bytes=resolved.max_upload_bytes,
-            map_error=map_provider_error,
-        )
+        mounted_workspace_gateway = DaytonaWorkspaceGateway(runtime=runtime, map_error=map_provider_error)
         gateway = DaytonaWorkspaceVolumeGateway(
             mounted_workspace_gateway,
             mount_path=resolved.volume_mount_path,
@@ -345,7 +341,14 @@ async def build_daytona_composition(
             catalog=artifact_catalog,
             blobs=gateway,
         )
-        workspace_file_service = WorkspaceFileService(cast(WorkspaceAccessGateway, mounted_workspace_gateway))
+        workspace_file_service = WorkspaceFileService(
+            DaytonaWorkspaceFiles(
+                mounted_workspace_gateway,
+                dispatcher=dispatcher,
+                paths=volume_paths,
+                max_file_bytes=resolved.max_upload_bytes,
+            )
+        )
         local_scope = LocalScope()
         session_catalog = SqlAlchemySessionCatalog(session_factory)
         task_service = SessionTaskService(session_catalog, gateway, volume_paths)

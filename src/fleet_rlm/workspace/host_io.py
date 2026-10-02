@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Iterable, Mapping
+from collections.abc import AsyncIterator, Iterable, Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
 from fleet_rlm.paths import UnsafePathError, VolumePaths, validate_mount_path
-from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
+from fleet_rlm.workspace.mounted_gateway import (
+    DaytonaWorkspaceFileSession,
+    DaytonaWorkspaceGateway,
+    DaytonaWorkspaceVolumeGateway,
+)
 from fleet_rlm.workspace.storage import (
     AsyncDaytonaVolumeFS,
+    AsyncStorageSession,
+    AsyncTextStorage,
     DaytonaSandboxVolumeFs,
     DaytonaSandboxWorkspaceStorage,
     WorkspaceMemoryStorage,
@@ -257,6 +264,39 @@ class _HostWorkspaceStorage:
 
     def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         self._call("delete_path", path, expected_sha256=expected_sha256)
+
+
+class DaytonaWorkspaceFiles:
+    """Public Workspace files on the Volume, one host-I/O Sandbox per operation group."""
+
+    def __init__(
+        self,
+        gateway: DaytonaWorkspaceGateway,
+        *,
+        dispatcher: SyncBridgeDispatcher,
+        paths: VolumePaths,
+        max_file_bytes: int,
+    ) -> None:
+        self._gateway = gateway
+        self._dispatcher = dispatcher
+        self._volume_root = str(paths.mount_path)
+        self._root = str(paths.files_root())
+        self._max_file_bytes = max_file_bytes
+
+    @asynccontextmanager
+    async def open_workspace(self, workspace_id: UUID, *, purpose: str) -> AsyncIterator[AsyncStorageSession]:
+        async with self._gateway.open_sandbox(workspace_id, purpose=purpose) as sandbox:
+            view = sync_sandbox(sandbox, asyncio.get_running_loop(), self._dispatcher)
+            try:
+                storage = DaytonaSandboxWorkspaceStorage(
+                    view,
+                    volume_root=self._volume_root,
+                    root=self._root,
+                    max_file_bytes=self._max_file_bytes,
+                )
+                yield DaytonaWorkspaceFileSession(AsyncTextStorage(storage), max_file_bytes=self._max_file_bytes)
+            finally:
+                tombstone_sync_sandbox(view)
 
 
 class DaytonaHostIO:
