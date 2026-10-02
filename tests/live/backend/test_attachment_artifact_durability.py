@@ -1,10 +1,15 @@
-"""Opt-in live proof: staged Attachment + Artifact under Workspace Volume Scope.
+"""Opt-in live proof: Attachments and Artifacts take production's storage path.
 
 Gate: FLEET_LIVE=1
 
-(1) Stage Attachment into Volume scope; readable from Sandbox during the Run.
-(2) Artifact durable blob survives Sandbox replace with remounted same scope;
-    retrieve by id with matching checksum.
+Uses the objects the app composes: durable blobs go to the Workspace Volume
+through short-lived host-I/O Sandboxes; Run copies of Attachments are staged
+in the root Sandbox's Run scratch, where the prepared-context loader reads
+them.
+
+(1) Upload Attachments; stage them for one Run; load them as prepared context.
+(2) Publish an Artifact; replace the root Sandbox; read the Artifact back from
+    the Volume with a matching checksum.
 """
 
 from __future__ import annotations
@@ -28,48 +33,24 @@ from fleet_rlm.attachments import (
     AttachmentRun,
     AttachmentUpload,
     LocalAttachmentCatalog,
-    WorkspaceAttachmentPathPolicy,
 )
+from fleet_rlm.attachments.service import DaytonaRunAttachmentPathPolicy
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox
+from fleet_rlm.daytona.errors import map_provider_error
+from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 from fleet_rlm.daytona.runtime import (
     DEFAULT_IDLE_STOP_SECONDS,
     DaytonaRuntime,
     LeaseRequest,
     sandbox_spec_from_settings,
 )
-from fleet_rlm.paths import VolumePaths
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
-from fleet_rlm.workspace.storage import DaytonaSandboxVolumeFs
+from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
+from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 from tests.live.backend._evidence import candidate_identity, write_receipt
-
-
-class _LiveAttachmentBlob:
-    def __init__(self, volume_fs) -> None:
-        self.volume_fs = volume_fs
-
-    async def write_bytes(self, _workspace_id, logical_path: str, data: bytes) -> None:
-        await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
-
-    async def read_bytes(self, _workspace_id, logical_path: str) -> bytes:
-        return await asyncio.to_thread(self.volume_fs.read_bytes, logical_path)
-
-    async def remove_bytes(self, _workspace_id, logical_path: str) -> None:
-        await asyncio.to_thread(self.volume_fs.remove, logical_path)
-
-
-class _LiveSink:
-    def __init__(self, volume_fs) -> None:
-        self.volume_fs = volume_fs
-
-    async def write_private(self, logical_path: str, data: bytes) -> None:
-        await asyncio.to_thread(self.volume_fs.write_bytes, logical_path, data)
-
-    async def remove_private(self, logical_path: str) -> None:
-        await asyncio.to_thread(self.volume_fs.remove, logical_path)
 
 
 class _Source:
@@ -142,12 +123,22 @@ def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> Simple
         execution_timeout_s=settings.rlm_execution_timeout_s,
         dispatcher=dispatcher,
     )
+    volume_paths = runtime.volume_config.paths()
+    workspace_gateway = DaytonaWorkspaceGateway(
+        runtime=runtime,
+        paths=volume_paths,
+        max_file_bytes=settings.max_upload_bytes,
+        map_error=map_provider_error,
+    )
     return SimpleNamespace(
         runtime=runtime,
         settings=settings,
         bindings=bindings,
         volume_config=runtime.volume_config,
+        volume_paths=volume_paths,
         dispatcher=dispatcher,
+        workspace_gateway=workspace_gateway,
+        volume_gateway=DaytonaWorkspaceVolumeGateway(workspace_gateway, mount_path=runtime.volume_config.mount_path),
     )
 
 
@@ -182,21 +173,34 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         sandbox = await resources.runtime._platform.get(lease.sandbox_id)
         assert sandbox is not None
         assert getattr(sandbox, "snapshot", None) == settings.daytona_snapshot
-        volume_fs = DaytonaSandboxVolumeFs(sync_sandbox(sandbox, asyncio.get_running_loop(), resources.dispatcher))
-        # Paths follow the lease's actual Volume mount, as production storage does.
-        volume_paths = VolumePaths.from_mount(lease.mount_path)
-
+        # Compose storage as app_lifecycle does: durable blobs through host I/O,
+        # Run copies in the root Sandbox's private scratch.
+        host_io = DaytonaHostIO(
+            workspace_id,
+            volume_gateway=resources.volume_gateway,
+            workspace_gateway=resources.workspace_gateway,
+            dispatcher=resources.dispatcher,
+            volume_root=str(resources.volume_paths.mount_path),
+            max_file_bytes=settings.max_upload_bytes,
+        )
+        sink = DaytonaRunStorage(
+            sandbox,
+            dispatcher=resources.dispatcher,
+            paths=resources.volume_paths,
+            host_io=host_io,
+            run_id=run_id,
+        )
         attachment_module = AttachmentLifecycleService(
             catalog=LocalAttachmentCatalog(tmp_path / "attachments"),
-            blobs=_LiveAttachmentBlob(volume_fs),
-            paths=WorkspaceAttachmentPathPolicy(volume_paths),
+            blobs=resources.volume_gateway,
+            paths=DaytonaRunAttachmentPathPolicy(resources.volume_paths),
             max_bytes=1024 * 1024,
         )
         artifact_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
-            volume_paths=volume_paths,
-            volume_fs=volume_fs,
+            volume_paths=resources.volume_paths,
+            volume_fs=sink.volume_fs,
         )
         access = AttachmentAccess(user_id, workspace_id)
         ref = await attachment_module.upload(
@@ -211,7 +215,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             access,
             (ref.id, binary_ref.id),
             AttachmentRun(session_id, run_id),
-            _LiveSink(volume_fs),
+            sink,
         )
         staged = next(item for item in prepared.staged if item.attachment_id == ref.id)
 
@@ -231,7 +235,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
                 )
                 for item in (ref, binary_ref)
             ),
-            mount_root=lease.mount_path,
+            mount_root=sink.scratch_root,
         )
         invocation = lease.interpreter.new_invocation(context_capsule=capsule)
         try:
@@ -320,17 +324,17 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
         sandbox2 = await resources.runtime._platform.get(lease2.sandbox_id)
         assert sandbox2 is not None
         assert getattr(sandbox2, "snapshot", None) == settings.daytona_snapshot
-        volume_fs2 = DaytonaSandboxVolumeFs(sync_sandbox(sandbox2, asyncio.get_running_loop(), resources.dispatcher))
-        remounted = await asyncio.to_thread(volume_fs2.read_bytes, durable)
+        # Read back as ArtifactReader does: from the Volume, through a fresh
+        # host-I/O Sandbox, independent of either root Sandbox.
+        remounted = await resources.volume_gateway.read_bytes(workspace_id, durable)
         assert remounted == ARTIFACT_TEXT.encode("utf-8")
         assert hashlib.sha256(remounted).hexdigest() == art.checksum_sha256
 
-        # Catalog re-read after replace still resolves via Volume Scope when rebound.
         rebound_store = LocalArtifactCatalog(
             tmp_path / "artifacts",
             max_bytes=1024 * 1024,
-            volume_paths=volume_paths,
-            volume_fs=volume_fs2,
+            volume_paths=resources.volume_paths,
+            volume_fs=host_io.volume_fs,
         )
         assert await asyncio.to_thread(
             rebound_store.read_bytes,
@@ -348,7 +352,8 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             "workspace_id": str(workspace_id),
             "volume_id": volume_id,
             "volume_subpath": volume_subpath,
-            "staged_path_prefix": f"{lease.mount_path}/sessions/",
+            "staged_path_prefix": f"{sink.scratch_root}/attachments/",
+            "artifact_durable_path": durable,
             "staged_readable": True,
             "prepared_context_parity": True,
             "context_accesses": list(context_accesses),

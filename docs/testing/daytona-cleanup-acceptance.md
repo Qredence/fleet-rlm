@@ -155,7 +155,10 @@ Defects found by the live gates and fixed in their owners:
   values are still rejected.
 - **Stale live harnesses.** Several live tests had drifted from the runtime:
   - the bridge dispatcher and session-scoped Volume subpath;
-  - the `/workspace` mount;
+  - hand-rolled attachment and artifact storage. The durability test now
+    composes production's objects: durable blobs go to the Workspace Volume
+    through host-I/O Sandboxes, Run copies are staged in `/tmp/fleet/<run>`,
+    and the Artifact is read back from the Volume after replacement;
   - the frozen preparation plan;
   - `close_root_session` never being called;
   - `_bindings` access.
