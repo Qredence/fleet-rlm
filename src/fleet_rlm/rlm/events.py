@@ -38,7 +38,6 @@ from fleet_rlm.rlm.result import (
     _safe_usage_entry,
     observed_usage,
     rlm_termination_mode,
-    sanitize_trace_text,
     truncate_public_text,
     validate_rlm_usage,
 )
@@ -710,17 +709,16 @@ def _execute_observed_tool(
         if guards is not None:
             guards.failed(str(source.name), arguments)
         observer(ToolFailed(trace.call_id, str(source.name), event_view.error(validation=False, exception=exc)))
-        # The public event stays the closed "Tool failed"; the span (observation
-        # only) keeps a bounded, sanitized cause for diagnosis.
-        trace.finish(
-            status="failed",
-            output={
-                "tool_status": "failed",
-                "failure_category": "tool_error",
-                "failure_cause_class": type(exc).__name__[:80],
-                "failure_message": sanitize_trace_text(str(exc), max_len=256),
-            },
-        )
+        # The public event stays the closed "Tool failed". The span records only
+        # message-free causes: exception text can carry unlabeled credentials.
+        output: dict[str, str] = {
+            "tool_status": "failed",
+            "failure_category": "tool_error",
+            "failure_cause_class": type(exc).__name__[:80],
+        }
+        if str(exc).startswith("LLM call limit exceeded"):
+            output["failure_detail"] = "llm_call_limit"
+        trace.finish(status="failed", output=output)
         raise
     return result
 

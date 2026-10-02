@@ -324,7 +324,7 @@ async def test_async_tool_uses_the_composition_bridge_inside_dspy_event_loop() -
     assert [type(event).__name__ for event in observed] == ["ToolStarted", "ToolCompleted"]
 
 
-def test_tool_failure_span_carries_bounded_cause_while_event_stays_closed(
+def test_tool_failure_span_carries_closed_cause_without_exception_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     finished: list[dict[str, Any]] = []
@@ -337,19 +337,30 @@ def test_tool_failure_span_carries_bounded_cause_while_event_stays_closed(
     observed: list[Any] = []
 
     def batched(prompts: list[str]) -> list[str]:
-        raise RuntimeError(
-            f"LLM call limit exceeded: 0 + {len(prompts)} > 32. token=sk-live-secret https://x.example/p?k=1"
-        )
+        if len(prompts) > 1:
+            raise RuntimeError(f"LLM call limit exceeded: 0 + {len(prompts)} > 32. Use Python code instead.")
+        # An unlabeled opaque credential in an exception must never reach the span.
+        raise RuntimeError("upstream rejected AKIAIOSFODNN7EXAMPLEKEY")
 
     wrapped = observe_tool(dspy.Tool(batched), observed.append, ToolEventView.metadata_only())
     with pytest.raises(RuntimeError):
         wrapped(prompts=["a"] * 40)
+    with pytest.raises(RuntimeError):
+        wrapped(prompts=["a"])
 
-    span = finished[-1]
-    assert span["failure_category"] == "tool_error"
-    assert span["failure_cause_class"] == "RuntimeError"
-    assert span["failure_message"].startswith("LLM call limit exceeded: 0 + 40 > 32.")
-    assert "sk-live-secret" not in span["failure_message"]
-    assert "x.example" not in span["failure_message"]
-    assert len(span["failure_message"]) <= 256
+    budget, opaque = finished[-2], finished[-1]
+    assert budget == {
+        "phase_status": "failed",
+        "tool_status": "failed",
+        "failure_category": "tool_error",
+        "failure_cause_class": "RuntimeError",
+        "failure_detail": "llm_call_limit",
+    }
+    assert opaque == {
+        "phase_status": "failed",
+        "tool_status": "failed",
+        "failure_category": "tool_error",
+        "failure_cause_class": "RuntimeError",
+    }
+    assert "AKIA" not in str(finished)
     assert observed[-1].error == "Tool failed"
