@@ -407,9 +407,24 @@ class DaytonaHttpToolBroker:
                 if not self._stopped and self._client is client:
                     response = client.post("/result", content=payload, headers={"Content-Type": "application/json"})
                     if response.status_code != 200:
-                        self._record_delivery_failure(
-                            request, phase="result_delivery", category=f"http_{response.status_code}"
-                        )
+                        benign = self._late_delivery_error(response)
+                        if benign is not None:
+                            # The sandbox already abandoned the call (its wait
+                            # expired and the call moved to _completed) or still
+                            # owns it and resolves it containedly; the action
+                            # has been given its timeout feedback, so a late
+                            # successful result must not fail the whole Turn.
+                            logger.warning(
+                                "sandbox tool result delivered after sandbox abandonment "
+                                "call_id=%s tool_name=%s category=%s",
+                                str(request.get("id") or "")[:128],
+                                str(request.get("tool_name") or "")[:80],
+                                benign,
+                            )
+                        else:
+                            self._record_delivery_failure(
+                                request, phase="result_delivery", category=f"http_{response.status_code}"
+                            )
                     elif succeeded:
                         settled = self._tool_settled
                         if settled is not None:
@@ -419,6 +434,29 @@ class DaytonaHttpToolBroker:
                                 self._record_delivery_failure(request, phase="settlement", category="callback_error")
             except httpx.HTTPError:
                 self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+
+    def _late_delivery_error(self, response: Any) -> str | None:
+        """Classify a non-200 /result response as benign sandbox-side abandonment.
+
+        Returns the benign category when the rejection means the sandbox has
+        already closed out the call without consuming the result ("duplicate
+        call" — its wait expired and the call moved to _completed — or "stale
+        lease", which the sandbox still resolves containedly via its own wait
+        timeout). Anything else ("duplicate result", unparseable bodies, other
+        statuses) is a genuine protocol violation and stays fatal.
+        """
+        if getattr(response, "status_code", None) != 409:
+            return None
+        try:
+            body = json.loads(response.text)
+        except (TypeError, ValueError):
+            return None
+        error = body.get("error") if isinstance(body, dict) else None
+        if error == "duplicate call":
+            return "duplicate_call"
+        if error == "stale lease":
+            return "stale_lease"
+        return None
 
     def _record_delivery_failure(self, request: Mapping[str, Any], *, phase: str, category: str) -> None:
         """Retain a sanitized failed delivery outcome until remote execution settles."""
