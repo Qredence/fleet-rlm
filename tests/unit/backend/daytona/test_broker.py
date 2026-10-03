@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -245,10 +245,12 @@ def test_tool_call_wait_uses_host_wait_bound_not_compute_timeout(
     assert responses[0].json()["stdout"] == "late but in time\n"
 
 
-def _broker_for(base_url: str, headers: dict[str, str], tools: dict[str, object]) -> DaytonaHttpToolBroker:
+def _broker_for(
+    base_url: str, headers: dict[str, str], tools: dict[str, Callable[[], object]]
+) -> DaytonaHttpToolBroker:
     broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
     broker._secret = headers["X-Broker-Secret"]
-    broker.bind_tools(tools)  # type: ignore[arg-type]
+    broker.bind_tools(tools)
     broker._url = base_url
     return broker
 
