@@ -93,8 +93,8 @@ starting this runbook.
 Use this recipe to print the span tree of one Turn. Get the trace ID from
 `/trace` in the TUI or from the MLflow UI.
 
-The supervised server keeps span data behind `mlflow-artifacts:` URIs. MLflow
-resolves these URIs with the global tracking URI, not with the `tracking_uri`
+The supervised server can keep span data behind `mlflow-artifacts:` URIs.
+MLflow resolves these URIs with the global tracking URI, not with the `tracking_uri`
 argument of `MlflowClient`. Thus `MlflowClient(tracking_uri=...)` alone can
 fail with "the tracking URI must be a valid http or https URI". Set the global
 tracking URI before you fetch the trace:
