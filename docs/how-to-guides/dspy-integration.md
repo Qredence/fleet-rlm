@@ -272,11 +272,15 @@ drained before the Root outcome is accepted. Fleet may run independent siblings
 concurrently up to `recursion_max_parallel_children`; the model chooses the
 decomposition, while Fleet controls concurrency.
 
-Child prompts, answers, reasoning, generated code, and provider responses are
-never copied into public Runtime Events. Root traces retain the normal bounded
-readable preview policy, while child traces retain structural metadata only:
-role, model, call index, key/count metadata, usage, duration, failure category,
-and termination mode.
+Child prompts, reasoning, generated code, and provider responses are never
+copied into public Runtime Events; `ChildProgress` carries only a bounded,
+sanitized excerpt of a child's answer (at most 480 characters). Root traces
+retain the normal bounded readable preview policy. Child traces retain
+structural metadata (role, model, call index, key/count metadata, usage,
+duration, failure category, and termination mode) plus the sanitized child
+answer on `RLM.child.result_harvest` and `RLM.recursive_call`, bounded by
+`mlflow.trace_content_max_chars`, and a sanitized, bounded `failure_detail` on
+failed calls, so a recursive Turn can be graded from its trace alone.
 
 ## Delegation lanes
 
