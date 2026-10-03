@@ -4,12 +4,36 @@ from __future__ import annotations
 
 import math
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
 from threading import Lock
 
 DEFAULT_PARSE_RETRIES = 2
 DEFAULT_FINALIZATION_ATTEMPTS = 2
+
+# The monotonic deadline of the sandbox action whose host tool call is being
+# served. The broker sets it on the thread that dispatches host tools, so a
+# tool that waits on other work (recursive children) can finish in time for
+# its result to be delivered.
+_host_action_deadline: ContextVar[float | None] = ContextVar("fleet_host_action_deadline", default=None)
+
+
+@contextmanager
+def host_action_deadline(deadline: float) -> Iterator[None]:
+    """Expose the calling sandbox action's deadline to host tools it dispatches."""
+    token = _host_action_deadline.set(deadline)
+    try:
+        yield
+    finally:
+        _host_action_deadline.reset(token)
+
+
+def current_host_action_deadline() -> float | None:
+    """Return the deadline of the sandbox action being served, if any."""
+    return _host_action_deadline.get()
 
 
 class BudgetDimension(StrEnum):

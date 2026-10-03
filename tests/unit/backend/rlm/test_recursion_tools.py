@@ -1050,7 +1050,9 @@ def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest
     )
 
     started = time.monotonic()
-    with pytest.raises(TimeoutError, match="batch deadline exceeded"):
+    # The batch wait and the child's own refusal share the Turn deadline, so
+    # either may report it first.
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
         executor.batched_tool(tasks=[{"task": "loop"}])
     executor.wait_owned()
 
@@ -1058,6 +1060,150 @@ def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest
     assert time.monotonic() - started < 5
     assert 0 < len(actions) < 200
     assert executor.summary().recursive_children_failed == 1
+
+
+class _ActingChild:
+    """Fake native child: task ``slow`` keeps acting until its next action is
+    refused, then lingers (an in-flight LM call); any other task submits."""
+
+    def __init__(
+        self, interpreter_factory: Callable[[], DaytonaCodeInterpreter], actions: list[int], linger_s: float
+    ) -> None:
+        self._interpreter_factory = interpreter_factory
+        self._actions = actions
+        self._linger_s = linger_s
+
+    def __call__(self, *, prompt: str) -> dspy.Prediction:
+        task = json.loads(prompt)["task"]
+        if task != "slow":
+            return dspy.Prediction(answer=f"{task}-done", evidence=[], gaps=[], result_files=[], trajectory=[])
+        interpreter = self._interpreter_factory()
+        try:
+            for index in range(1000):
+                interpreter.execute(f"value = {index}")
+                self._actions.append(index)
+                time.sleep(0.02)
+        finally:
+            interpreter.shutdown()
+            time.sleep(self._linger_s)
+        return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+
+def _action_bound_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    actions: list[int],
+    *,
+    max_parallel_children: int = 2,
+    call_indexes: list[int] | None = None,
+    events: list[object] | None = None,
+) -> RecursiveRLMExecutor:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    # A one-second margin keeps action deadlines test-sized with slack to spare.
+    monkeypatch.setattr(recursive_calls, "_ACTION_RESULT_MARGIN_S", 1.0)
+    monkeypatch.setattr(
+        recursive_calls,
+        "build_native_rlm",
+        lambda **kwargs: _ActingChild(kwargs["interpreter_factory"], actions, 0.0),  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        if call_indexes is not None:
+            call_indexes.append(call_index)
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=lambda _paths: {},
+        )
+
+    adapter = dspy.JSONAdapter()
+    return RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=max_parallel_children),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 30,
+        observer=events.append if events is not None else None,
+    )
+
+
+def test_batch_returns_ordered_partial_outcomes_before_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    actions: list[int] = []
+    events: list[object] = []
+    executor = _action_bound_executor(monkeypatch, actions, events=events)
+
+    started = time.monotonic()
+    with host_action_deadline(started + 2.0):
+        outcomes = executor.batched_tool(tasks=[{"task": "fast"}, {"task": "slow"}])
+
+    # The batch answers while the calling action still waits for it.
+    assert time.monotonic() < started + 2.0
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("completed", None),
+        ("timed_out", "action_deadline"),
+    ]
+    assert outcomes[0]["answer"] == "fast-done"
+    executor.wait_owned()
+    assert time.monotonic() - started < 5
+    assert 0 < len(actions) < 200
+    terminal = [event.state for event in events if isinstance(event, ChildProgress) and event.state != "running"]
+    assert sorted(terminal) == ["completed", "timed_out"]
+    summary = executor.summary()
+    assert (summary.recursive_children_completed, summary.recursive_children_failed) == (1, 1)
+
+
+def test_queued_child_is_not_started_at_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    call_indexes: list[int] = []
+    executor = _action_bound_executor(monkeypatch, [], max_parallel_children=1, call_indexes=call_indexes)
+
+    with host_action_deadline(time.monotonic() + 2.0):
+        outcomes = executor.batched_tool(tasks=[{"task": "slow"}, {"task": "fast"}])
+
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("timed_out", "action_deadline"),
+        ("not_started", "action_deadline"),
+    ]
+    executor.wait_owned()
+    # The queued child never acquired a Sandbox.
+    assert call_indexes == [1]
+
+
+def test_batch_without_action_time_raises_before_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+    from fleet_rlm.rlm.recursion import RecursiveActionDeadlineError
+
+    executor = _action_bound_executor(monkeypatch, [])
+
+    with host_action_deadline(time.monotonic() + 0.5), pytest.raises(RecursiveActionDeadlineError):
+        executor.batched_tool(tasks=[{"task": "fast"}])
+    assert executor.summary().call_count == 0
+    executor.wait_owned()
+
+
+def test_single_child_returns_timed_out_at_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    executor = _action_bound_executor(monkeypatch, [])
+
+    started = time.monotonic()
+    with host_action_deadline(started + 2.0):
+        result = executor.tool(task="slow", inputs=[])
+
+    assert time.monotonic() < started + 2.0
+    assert (result["status"], result["error_category"]) == ("timed_out", "action_deadline")
+    executor.wait_owned()
 
 
 def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(

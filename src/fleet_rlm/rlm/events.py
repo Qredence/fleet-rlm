@@ -1457,6 +1457,11 @@ class ExecutionTraceAssembler:
             try:
                 prediction = await rlm.acall(**dict(kwargs))
                 if self.recursive_executor is not None:
+                    # An action-bounded recursive call can return partial
+                    # outcomes while its cancelled stragglers still stop; let
+                    # them settle (bounded by the Turn deadline) before the
+                    # Root outcome is accepted.
+                    await asyncio.to_thread(self.recursive_executor.drain_pending_children)
                     self.recursive_executor.raise_if_cleanup_failed()
             except BaseException as exc:
                 record_phase_failure(

@@ -44,7 +44,7 @@ from fleet_rlm.observability.tracing import (
     start_turn_span,
     trace_preview_limit,
 )
-from fleet_rlm.rlm.budget import BudgetDimension
+from fleet_rlm.rlm.budget import BudgetDimension, current_host_action_deadline
 from fleet_rlm.rlm.events import (
     ChildProgress,
     Status,
@@ -92,6 +92,10 @@ class ChildResultError(RLMConfigError):
     def __init__(self, category: str, message: str) -> None:
         super().__init__(message)
         self.category = category
+
+
+class RecursiveActionDeadlineError(TimeoutError):
+    """A recursive call reached the deadline of the sandbox action that made it."""
 
 
 class ChildRuntimeLease(Protocol):
@@ -358,7 +362,15 @@ def run_reserved_batch(
     max_parallel: int,
     on_retain_running: Callable[[set[Future[Any]]], None],
     scheduler: ChildAsyncScheduler,
+    on_deadline: Callable[[RecursiveCallReservation], Any] | None = None,
 ) -> list[Any]:
+    """Run reserved children and return their results in reservation order.
+
+    When the deadline passes with no failures and ``on_deadline`` is given,
+    the batch is cancelled, unfinished children are retained for cleanup and
+    their slots are filled by ``on_deadline`` (ordered partial outcomes);
+    without it, the deadline raises ``TimeoutError``.
+    """
     if not reservations:
         raise ValueError("reserved batch must not be empty")
     del max_parallel
@@ -395,7 +407,12 @@ def run_reserved_batch(
             on_retain_running(not_done)
             if failures:
                 raise RecursiveBatchError() from failures[0]
-            raise TimeoutError("recursive child batch deadline exceeded")
+            if on_deadline is None:
+                raise TimeoutError("recursive child batch deadline exceeded")
+            return [
+                future.result(timeout=0) if future in done else on_deadline(reservation)
+                for reservation, future in zip(reservations, futures, strict=True)
+            ]
         if failures:
             raise RecursiveBatchError() from failures[0]
         answers = [future.result(timeout=0) for future in futures]
@@ -436,6 +453,9 @@ _MAX_CHILD_FAILURE_DETAIL_CHARS = 400
 # there instead of discarding a valid answer. The answer and result_files
 # stay strict.
 _CHILD_PATH_REDACTED_FIELDS = frozenset({"evidence", "gaps"})
+# Time kept back from the calling sandbox action's deadline so a recursive
+# call's (partial) result is delivered while the action is still waiting.
+_ACTION_RESULT_MARGIN_S = 10.0
 _MAX_CHILD_INPUTS = 16
 _MAX_CHILD_MANIFEST_BYTES = 64 * 1024
 
@@ -846,6 +866,8 @@ def _recursive_failure_category(exc: BaseException) -> str:
         return "cleanup_failed"
     if isinstance(exc, ChildResultError):
         return exc.category
+    if isinstance(exc, RecursiveActionDeadlineError):
+        return "action_deadline"
     category = trace_failure_category(exc)
     if category in {"timeout", "unauthorized", "cleanup_failed", "wrap_up_rejected"}:
         return category
@@ -865,14 +887,22 @@ def _bounded_cause_type(value: object) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class _CallDeadline:
-    """The monotonic time by which one recursive call's child work must stop."""
+    """The monotonic time by which one recursive call's child work must stop.
+
+    ``action_bound`` marks a bound set by the calling sandbox action rather
+    than the Turn: such a call returns ordered partial outcomes when it is
+    reached, because the action is still waiting for its result.
+    """
 
     at: float
+    action_bound: bool = False
 
     def expired(self) -> bool:
         return time.monotonic() >= self.at
 
     def error(self) -> TimeoutError:
+        if self.action_bound:
+            return RecursiveActionDeadlineError("recursive call reached its calling action's deadline")
         return TimeoutError("recursive child deadline exceeded")
 
 
@@ -1030,7 +1060,11 @@ class RecursiveRLMExecutor:
 
     def _execute_child(self, request: ChildRequest, *, classify_failures: bool) -> ChildOutcome:
         rendered = _validate_recursive_prompt(request.render(), max_chars=self._options.max_prompt_chars)
+        bound = self._entry_call_deadline()
         self._ensure_authorized()
+        if bound.expired():
+            # Refused before any reservation: no call or child budget is used.
+            raise bound.error()
         self._ensure_no_pending_batch_workers()
         try:
             reservation = self._begin_call(rendered)
@@ -1058,15 +1092,16 @@ class RecursiveRLMExecutor:
                     staged_files=staged_files,
                     source_manifest=source_manifest,
                     source_manifest_sha256=source_manifest_sha256,
+                    deadline=bound,
                 )
             )
             try:
-                outcome = future.result(timeout=max(0.0, self._deadline - time.monotonic()))
+                outcome = future.result(timeout=max(0.0, bound.at - time.monotonic()))
             except TimeoutError:
                 if not future.done():
                     self._scheduler.cancel(future)
                     self._retain_pending_batch_futures({future})
-                raise TimeoutError("recursive child deadline exceeded") from None
+                raise bound.error() from None
         except (asyncio.CancelledError, FutureCancelledError, ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
             raise
         except Exception as exc:
@@ -1141,6 +1176,7 @@ class RecursiveRLMExecutor:
         rendered = tuple(
             _validate_recursive_prompt(req.render(), max_chars=self._options.max_prompt_chars) for req in normalized
         )
+        bound = self._entry_call_deadline()
         prepared: list[tuple[Mapping[str, bytes], list[dict[str, str]], str] | ChildOutcome] = []
         for request in normalized:
             try:
@@ -1163,12 +1199,17 @@ class RecursiveRLMExecutor:
                 )
             else:
                 prepared.append((files, manifest, manifest_sha256))
+        if bound.action_bound and bound.expired():
+            # Refused before any reservation: no call or child budget is used.
+            raise bound.error()
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive call deadline exceeded")
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         reservations = self._begin_batch(rendered)
         self._metrics.record_recursive_batch()
+        entered: set[int] = set()
+        entered_lock = Lock()
 
         def execute(
             reservation: RecursiveCallReservation,
@@ -1179,6 +1220,17 @@ class RecursiveRLMExecutor:
             if isinstance(item, ChildOutcome):
                 return item
             staged_files, source_manifest, source_manifest_sha256 = item
+            if bound.action_bound and bound.expired():
+                # A queued slot reached only after the calling action's
+                # deadline never starts: no lease, no child work.
+                return ChildOutcome(
+                    status="not_started",
+                    source_manifest_sha256=source_manifest_sha256,
+                    error_category="action_deadline",
+                    usage=ChildUsage(child_calls=0),
+                )
+            with entered_lock:
+                entered.add(reservation.call_index)
             local_metrics = DelegationMetrics(parent=self._metrics)
             token = _child_metrics.set(local_metrics)
             try:
@@ -1189,6 +1241,7 @@ class RecursiveRLMExecutor:
                     staged_files=staged_files,
                     source_manifest=source_manifest,
                     source_manifest_sha256=source_manifest_sha256,
+                    deadline=bound,
                 )
             except (asyncio.CancelledError, FutureCancelledError):
                 raise
@@ -1213,26 +1266,51 @@ class RecursiveRLMExecutor:
                 _child_metrics.reset(token)
             return outcome.model_copy(update={"usage": _child_usage(local_metrics)})
 
+        def deadline_outcome(reservation: RecursiveCallReservation) -> ChildOutcome:
+            # A slot still unfinished at the calling action's deadline: a
+            # running child reports timed_out, a queued one never started.
+            item = prepared[reservation.call_index - reservations[0].call_index]
+            if isinstance(item, ChildOutcome):
+                return item
+            with entered_lock:
+                started = reservation.call_index in entered
+            return ChildOutcome(
+                status="timed_out" if started else "not_started",
+                source_manifest_sha256=item[2],
+                error_category="action_deadline",
+                usage=ChildUsage(child_calls=1 if started else 0),
+            )
+
+        batch_options: dict[str, Any] = {}
+        if bound.action_bound:
+            batch_options["on_deadline"] = deadline_outcome
         outcomes = run_reserved_batch(
             reservations,
             execute=execute,
-            deadline_monotonic=self._deadline,
+            deadline_monotonic=bound.at,
             max_parallel=self._options.max_parallel_children,
             on_retain_running=self._retain_pending_batch_futures,
             scheduler=self._scheduler,
+            **batch_options,
         )
         self._ensure_authorized()
         self._last_child_outcomes = tuple(outcomes)
-        self.raise_if_cleanup_failed()
+        self.raise_if_cleanup_failed(allow_pending=bound.action_bound)
         return [outcome.as_dict() for outcome in outcomes]
 
-    def raise_if_cleanup_failed(self) -> None:
+    def raise_if_cleanup_failed(self, *, allow_pending: bool = False) -> None:
+        """Raise on failed cleanup and, unless ``allow_pending``, on unsettled children.
+
+        An action-bounded batch passes ``allow_pending``: it returns while its
+        own cancelled stragglers stop, and they are drained before the Root
+        outcome is accepted.
+        """
         with self._state.lock:
             fatal_cleanup_error = self._state.fatal_cleanup_error
             cleanup_pending = any(not future.done() for future in self._state.pending_batch_futures)
         if fatal_cleanup_error is not None:
             raise ChildRuntimeCleanupError("recursive child cleanup failed") from fatal_cleanup_error
-        if cleanup_pending:
+        if cleanup_pending and not allow_pending:
             raise ChildRuntimeCleanupError("recursive child cleanup is still pending")
         factory_check = getattr(self._child_runtime_factory, "raise_if_cleanup_failed", None)
         if callable(factory_check):
@@ -1310,6 +1388,25 @@ class RecursiveRLMExecutor:
     def _call_deadline(self) -> _CallDeadline:
         return _CallDeadline(self._deadline)
 
+    def _entry_call_deadline(self) -> _CallDeadline:
+        """Bound a recursive call by the Turn and, when tighter, its calling action.
+
+        Read once at tool entry on the thread serving the sandbox action, then
+        passed explicitly: single-call children run in another context.
+        """
+        action = current_host_action_deadline()
+        if action is not None and action - _ACTION_RESULT_MARGIN_S < self._deadline:
+            return _CallDeadline(action - _ACTION_RESULT_MARGIN_S, action_bound=True)
+        return _CallDeadline(self._deadline)
+
+    def drain_pending_children(self, *, deadline: float | None = None) -> None:
+        """Wait, bounded by ``deadline`` (default: the Turn's), for retained children to settle."""
+        until = self._deadline if deadline is None else deadline
+        with self._state.lock:
+            pending = tuple(future for future in self._state.pending_batch_futures if not future.done())
+        if pending:
+            wait(pending, timeout=max(0.0, until - time.monotonic()))
+
     def _ensure_call_authorized(self, batch_cancelled: Event | None, deadline: _CallDeadline | None = None) -> None:
         # Revoked authority wins, then the call deadline, so a child stopped by
         # its deadline reports a timeout rather than a cancelled batch.
@@ -1372,7 +1469,7 @@ class RecursiveRLMExecutor:
             state = "running"
         elif status == "child_not_started":
             state = "not_started"
-        elif failure_category == "timeout":
+        elif failure_category in {"timeout", "action_deadline"}:
             state = "timed_out"
         elif status == "child_failed":
             state = "failed"

@@ -23,6 +23,7 @@ import httpx
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
 from fleet_rlm.json_types import validate_json_value
+from fleet_rlm.rlm.budget import host_action_deadline
 from fleet_rlm.rlm.events import _resolve_awaitable_result
 
 logger = logging.getLogger(__name__)
@@ -261,12 +262,15 @@ class DaytonaHttpToolBroker:
                 outcome.append(exc)
 
         worker = threading.Thread(target=post, daemon=True)
-        worker.start()
-        while worker.is_alive():
-            if self._stopped:
-                break
-            self._poll_once()
-            worker.join(0.05)
+        # Host tools run on this thread while the action waits for them; they
+        # can read when the action's in-sandbox waits expire.
+        with host_action_deadline(time.monotonic() + timeout_s):
+            worker.start()
+            while worker.is_alive():
+                if self._stopped:
+                    break
+                self._poll_once()
+                worker.join(0.05)
         # The remote /execute request owns every outstanding /tool_call.  Do
         # not return (or tear down its broker) until that request has settled,
         # even after a rejected result delivery.  The typed delivery failure is

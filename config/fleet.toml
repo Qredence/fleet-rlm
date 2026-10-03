@@ -50,9 +50,9 @@ max_final_output_chars = 6000
 max_execution_output_chars = 4000
 max_execution_output_bytes = 2000000
 execution_timeout_s = 300
-# 0 derives the child per-action deadline as max(1, int(parent * 0.9)), clamped
-# to the parent, so a recursion batch's in-sandbox wait always outlives its
-# slowest child and a late tool-result delivery stays contained.
+# Upper bound for each child sandbox action; 0 derives max(1, int(parent * 0.9)),
+# clamped to the parent. Recursive calls are additionally bounded by the calling
+# action's deadline and return ordered partial outcomes when it is reached.
 child_execution_timeout_s = 0
 wrap_up_seconds = 300
 finalization_attempts = 2

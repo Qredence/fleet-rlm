@@ -165,6 +165,34 @@ def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
     assert elapsed < 2 + broker_module._EXECUTE_RESPONSE_GRACE_S
 
 
+def test_execute_exposes_the_action_deadline_to_dispatched_host_tools(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    from fleet_rlm.rlm.budget import current_host_action_deadline
+
+    base_url, headers = embedded_server
+    seen: list[float | None] = []
+
+    def answer() -> dict[str, bool]:
+        seen.append(current_host_action_deadline())
+        return {"ok": True}
+
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools({"answer": answer})
+    broker._url = base_url
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        before = time.monotonic()
+        result = broker.execute(broker.setup_source("print(answer())"), {}, timeout_s=4)
+        after = time.monotonic()
+
+    assert "ok" in str(result.get("stdout"))
+    assert len(seen) == 1 and seen[0] is not None
+    assert before + 4 <= seen[0] <= after + 4
+    assert current_host_action_deadline() is None
+
+
 def test_tool_call_uses_execution_deadline(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
