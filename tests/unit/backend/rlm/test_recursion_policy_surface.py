@@ -283,6 +283,22 @@ def test_invocation_factory_scopes_the_child_action_deadline_from_options() -> N
     assert all("timeout_s" not in kwargs for kwargs in inherited.invocation_kwargs)
 
 
+def test_recursive_subtask_instructions_state_the_scratch_relative_contract() -> None:
+    """Children are told where the scratch directory lives, that it is not the
+    cwd, and that declared paths are relative and never absolute; the live
+    T7g children otherwise hunted for it and hard-coded absolute paths."""
+    from fleet_rlm.rlm.recursion import RecursiveSubtaskSignature
+
+    instructions = RecursiveSubtaskSignature.instructions
+    assert "predefined Python variable" in instructions
+    assert "environment variable" in instructions
+    assert "not the current working directory" in instructions
+    assert "os.path.join(FLEET_RUN_SCRATCH, relative_path)" in instructions
+    assert "Never put absolute sandbox paths" in instructions
+    result_files = RecursiveSubtaskSignature.output_fields["result_files"].json_schema_extra["desc"]
+    assert "relative to it" in result_files
+
+
 def test_recursive_options_reject_non_positive_child_timeouts() -> None:
     for value in (0, -5):
         with pytest.raises(RLMConfigError, match="child_execution_timeout_s"):

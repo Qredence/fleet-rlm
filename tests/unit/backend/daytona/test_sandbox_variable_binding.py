@@ -95,6 +95,29 @@ def test_broker_namespace_persists_within_turn_and_resets_for_next_turn(
     assert all(broker.closed for broker in _LocalBroker.instances)
 
 
+def test_run_scratch_setup_exports_the_scratch_path_to_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    from uuid import uuid4
+
+    _LocalBroker.instances.clear()
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
+    # The local broker runs setup in this process: keep directory creation
+    # and the exported variable from leaking past the test.
+    created: list[str] = []
+    monkeypatch.setattr(os, "makedirs", lambda path, **_kwargs: created.append(path))
+    monkeypatch.setenv("FLEET_RUN_SCRATCH", "unrelated-previous-value")
+    child = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock())).new_invocation()
+    scratch = child.bind_run_scratch(uuid4(), call_index=1)
+
+    output = child.execute("import os\nprint(FLEET_RUN_SCRATCH == os.environ['FLEET_RUN_SCRATCH'], FLEET_RUN_SCRATCH)")
+
+    assert output == f"True {scratch}\n"
+    assert created == [scratch]
+    child.shutdown()
+
+
 def test_broker_receives_typed_submit_and_rejects_unserializable_binding(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

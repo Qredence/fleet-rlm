@@ -732,10 +732,13 @@ class _SandboxProcessBackend:
             "if 'context' not in globals(): context = []",
         ]
         if self._run_scratch_path is not None:
+            # Models look for the scratch directory in os.environ as often as
+            # in globals, so expose the same path both ways.
             lines.append(
                 "import os as _fleet_scratch_os; "
                 f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
-                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}; "
+                "_fleet_scratch_os.environ['FLEET_RUN_SCRATCH'] = FLEET_RUN_SCRATCH"
             )
         try:
             result = broker.execute(broker.setup_source("\n\n".join(lines)), {}, timeout_s=timeout)

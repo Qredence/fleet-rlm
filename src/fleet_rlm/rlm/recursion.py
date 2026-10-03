@@ -765,12 +765,18 @@ class _RecursiveState:
 class RecursiveSubtaskSignature(dspy.Signature):
     """Investigate staged local inputs and submit bounded findings.
 
-    The host copies each requested relative input path under
-    ``FLEET_RUN_SCRATCH`` and supplies a source manifest with the SHA-256 of
-    each exact copy. Read inputs with ``open(os.path.join(FLEET_RUN_SCRATCH,
-    path), encoding="utf-8")`` and cite useful locations with their manifest
-    revision. Write declared result files beneath the same scratch directory.
-    Do not assume the root's workspace or sandbox paths exist in this child.
+    ``FLEET_RUN_SCRATCH`` is a predefined Python variable, also exported as
+    the ``FLEET_RUN_SCRATCH`` environment variable, naming this child's
+    private scratch directory; it is not the current working directory. The
+    host copies each requested relative input path under it and supplies a
+    source manifest with the SHA-256 of each exact copy. Read inputs with
+    ``open(os.path.join(FLEET_RUN_SCRATCH, path), encoding="utf-8")`` and cite
+    useful locations by relative path and manifest revision. Write any result
+    file to ``os.path.join(FLEET_RUN_SCRATCH, relative_path)``, creating its
+    parent directories first, and declare it in ``result_files`` by that
+    relative path. Never put absolute sandbox paths in the answer, evidence,
+    gaps, or result_files. Do not assume the root's workspace or sandbox paths
+    exist in this child.
     """
 
     prompt: str = dspy.InputField(
@@ -780,9 +786,13 @@ class RecursiveSubtaskSignature(dspy.Signature):
         )
     )
     answer: str = dspy.OutputField(desc="A concise finding; Root verifies it against evidence")
-    evidence: list[str] = dspy.OutputField(desc="Source locations or revisions supporting the finding")
+    evidence: list[str] = dspy.OutputField(
+        desc="Relative source paths or manifest revisions supporting the finding; no absolute paths"
+    )
     gaps: list[str] = dspy.OutputField(desc="Missing inputs or unresolved questions")
-    result_files: list[str] = dspy.OutputField(desc="Optional relative paths of useful child-local output files")
+    result_files: list[str] = dspy.OutputField(
+        desc="Optional output files written under FLEET_RUN_SCRATCH, as paths relative to it"
+    )
 
 
 _MAX_PROGRESS_INTEGER = 1_000_000
