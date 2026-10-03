@@ -447,12 +447,13 @@ class DaytonaHttpToolBroker:
     def _late_delivery_error(self, response: Any) -> str | None:
         """Classify a non-200 /result response as benign sandbox-side abandonment.
 
-        Returns the benign category when the rejection means the sandbox has
-        already closed out the call without consuming the result ("duplicate
-        call" — its wait expired and the call moved to _completed — or "stale
-        lease", which the sandbox still resolves containedly via its own wait
-        timeout). Anything else ("duplicate result", unparseable bodies, other
-        statuses) is a genuine protocol violation and stays fatal.
+        Only "duplicate call" is benign: the call's wait expired, the sandbox
+        moved it to _completed and already returned the timeout to the action.
+        Everything else stays fatal. A "stale lease" in particular means the
+        call is still pending with its waiter blocked; leases are issued once
+        and never re-issued, so a mismatch is a protocol failure that would
+        otherwise surface only as a silent timeout. "duplicate result",
+        unparseable bodies and other statuses are fatal too.
         """
         if getattr(response, "status_code", None) != 409:
             return None
@@ -463,8 +464,6 @@ class DaytonaHttpToolBroker:
         error = body.get("error") if isinstance(body, dict) else None
         if error == "duplicate call":
             return "duplicate_call"
-        if error == "stale lease":
-            return "stale_lease"
         return None
 
     def _record_delivery_failure(self, request: Mapping[str, Any], *, phase: str, category: str) -> None:

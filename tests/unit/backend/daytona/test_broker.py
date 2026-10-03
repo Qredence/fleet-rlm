@@ -296,13 +296,17 @@ def test_poll_treats_late_duplicate_call_delivery_as_benign(caplog: pytest.LogCa
     assert "category=duplicate_call" in caplog.text
 
 
-def test_poll_treats_stale_lease_delivery_as_benign(caplog: pytest.LogCaptureFixture) -> None:
+def test_poll_records_stale_lease_delivery_as_fatal(caplog: pytest.LogCaptureFixture) -> None:
+    """A stale lease means the call is still pending with its waiter blocked:
+    leases are issued once, so the mismatch is a protocol failure, never a
+    benign late delivery."""
     broker, _ = _poll_with_rejected_result(409, {"error": "stale lease"})
 
     broker._poll_once()
 
-    assert broker._delivery_error is None
-    assert "category=stale_lease" in caplog.text
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+    assert "delivered after sandbox abandonment" not in caplog.text
 
 
 def test_poll_records_duplicate_result_delivery_as_fatal() -> None:
@@ -654,12 +658,12 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
             broker._client = client
             source = _tool_source(port, headers["X-Broker-Secret"])
             outcomes: list[dict[str, object]] = []
-            errors: list[BaseException] = []
+            errors: list[Exception] = []
 
             def _run() -> None:
                 try:
                     outcomes.append(broker.execute(source, {}, timeout_s=5))
-                except BaseException as exc:
+                except Exception as exc:
                     errors.append(exc)
 
             thread = threading.Thread(target=_run, daemon=True)
