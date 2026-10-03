@@ -125,6 +125,9 @@ _prctl(36, 1)
 def _encode(value):
     return json.dumps(value, allow_nan=False).encode("utf-8")
 
+def _result(**fields):
+    return {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None, **fields}
+
 def _connect_worker():
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.connect(_worker_address)
@@ -149,7 +152,7 @@ def _fork_snapshot():
 def _run_action(namespace, request):
     code, variables, timeout_s = request["code"], request["variables"], request["timeout_s"]
     stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__), _BoundedWriter(__MAX_OUTPUT_CHARS__)
-    result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
+    result = _result()
     namespace["_fleet_tool_timeout_s"] = float(timeout_s)
     try:
         namespace.update(variables)
@@ -199,11 +202,10 @@ def _worker_main():
             conn = _connect_worker()
             continue
         conn.send_bytes(_encode({"snapshot": snapshot}))
-        payload = _run_action(namespace, request)
+        conn.send_bytes(_run_action(namespace, request))
         if snapshot:
             with contextlib.suppress(OSError):
                 os.kill(snapshot, signal.SIGKILL); os.waitpid(snapshot, 0)
-        conn.send_bytes(payload)
 
 def _accept_worker(timeout_s):
     deadline = time.monotonic() + timeout_s
@@ -250,35 +252,33 @@ def _execute(code, variables, timeout_s):
     global _worker
     if _worker is None: return None
     conn, pid = _worker
-    snapshot, stopped = None, "exited"
+    snapshot, category = None, "ActionWorkerExit"
     try:
         conn.send_bytes(_encode({"code": code, "variables": variables, "timeout_s": timeout_s}))
         if conn.poll(__WORKER_RESTORE_TIMEOUT_S__):
             snapshot = json.loads(conn.recv_bytes()).get("snapshot")
             if conn.poll(float(timeout_s) + __ACTION_KILL_GRACE_S__): return conn.recv_bytes()
-            stopped = "timeout"
+            category = "ActionTimeout"
     except (EOFError, OSError, ValueError, AttributeError):
         pass
     _worker = None
     _stop_worker(conn, pid)
-    if not isinstance(snapshot, int) or snapshot <= 0: return None
+    if not snapshot: return None
     with contextlib.suppress(OSError):
         os.kill(snapshot, signal.SIGUSR1)
         _worker = _accept_worker(__WORKER_RESTORE_TIMEOUT_S__)
     if _worker is None: return None
-    if stopped == "timeout":
+    if category == "ActionTimeout":
         message = (f"Action exceeded its {float(timeout_s):g} s limit and was stopped. "
                    "Split the work into smaller steps.")
     else:
         message = "Action ended the sandbox worker process."
     message += (" The REPL state is as it was before this action; files and other side effects"
                 " of the action remain, and its output is not available.")
-    return _encode({"stdout": "", "stderr": "", "final": None, "error": message,
-                    "error_category": "ActionTimeout" if stopped == "timeout" else "ActionWorkerExit",
-                    "tool_error": None})
+    return _encode(_result(error=message, error_category=category))
 
 def _send(handler, body, status=200):
-    raw = body if isinstance(body, bytes) else json.dumps(body, allow_nan=False).encode("utf-8")
+    raw = body if isinstance(body, bytes) else _encode(body)
     handler.send_response(status); handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(raw))); handler.end_headers(); handler.wfile.write(raw)
 
