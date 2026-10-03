@@ -408,6 +408,10 @@ _MAX_CHILD_TASK_CHARS = 2_000
 _MAX_CHILD_CONTEXT_CHARS = 2_000
 _MAX_CHILD_PROGRESS_OUTCOME_CHARS = 480
 _MAX_CHILD_FAILURE_DETAIL_CHARS = 400
+# A child's evidence and gaps may cite its own scratch: redact private paths
+# there instead of discarding a valid answer. The answer and result_files
+# stay strict.
+_CHILD_PATH_REDACTED_FIELDS = frozenset({"evidence", "gaps"})
 _MAX_CHILD_INPUTS = 16
 _MAX_CHILD_MANIFEST_BYTES = 64 * 1024
 
@@ -1522,6 +1526,7 @@ class RecursiveRLMExecutor:
             schema_id="fleet.recursive-subtask",
             schema_version="1",
             max_output_chars=self._options.child_max_output_chars,
+            path_redacted_fields=_CHILD_PATH_REDACTED_FIELDS,
         )
         self._ensure_call_authorized(batch_cancelled)
         trajectory = normalize_prediction_trajectory(prediction)
