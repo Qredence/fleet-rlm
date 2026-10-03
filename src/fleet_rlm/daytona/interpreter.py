@@ -9,6 +9,7 @@ import inspect
 import io
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -506,6 +507,7 @@ class _SandboxProcessBackend:
         *,
         timeout_s: int | None = None,
         broker_port: int = DEFAULT_BROKER_PORT,
+        deadline_monotonic: float | None = None,
     ) -> None:
         self._sandbox = sandbox
         if timeout_s is not None and int(timeout_s) <= 0:
@@ -514,6 +516,14 @@ class _SandboxProcessBackend:
                 cause_type="InterpreterConfigurationError",
             )
         self._timeout_s: int | None = int(timeout_s) if timeout_s is not None else None
+        if deadline_monotonic is not None and not math.isfinite(float(deadline_monotonic)):
+            raise DaytonaAdapterError(
+                message="execution deadline must be finite",
+                cause_type="InterpreterConfigurationError",
+            )
+        # An absolute bound for every action of this invocation, for example a
+        # recursive child that must finish before its caller's deadline.
+        self._deadline_monotonic: float | None = float(deadline_monotonic) if deadline_monotonic is not None else None
         if not isinstance(broker_port, int) or isinstance(broker_port, bool) or not 1 <= broker_port <= 65535:
             raise DaytonaAdapterError(
                 message="broker port must be between 1 and 65535; brokerless execution is unsupported",
@@ -664,7 +674,7 @@ class _SandboxProcessBackend:
             # later model actions cannot re-run it.
             loader_source = context_loader_source(trusted_mount_root=mount_root, expected_manifest_sha256=manifest_sha)
             setup_manifest_ids = _bound_manifest_ids(variables, manifest_sha)
-        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        timeout = self._action_timeout()
         for name, value in (variables or {}).items():
             try:
                 validate_json_value(value, path=f"binding {name!r}")
@@ -721,6 +731,13 @@ class _SandboxProcessBackend:
             self._broker.bind_tools(self._bound_tools)
         return self._broker
 
+    def _action_timeout(self) -> int:
+        """Return this action's timeout, clamped to the invocation deadline."""
+        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+        if self._deadline_monotonic is None:
+            return timeout
+        return max(1, min(timeout, int(self._deadline_monotonic - time.monotonic())))
+
     def _install_setup(self, broker: DaytonaHttpToolBroker, timeout: int) -> None:
         """Install the sealed invocation's tools, SUBMIT and defaults once.
 
@@ -732,10 +749,13 @@ class _SandboxProcessBackend:
             "if 'context' not in globals(): context = []",
         ]
         if self._run_scratch_path is not None:
+            # Models look for the scratch directory in os.environ as often as
+            # in globals, so expose the same path both ways.
             lines.append(
                 "import os as _fleet_scratch_os; "
                 f"_fleet_scratch_os.makedirs({self._run_scratch_path!r}, exist_ok=True); "
-                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}"
+                f"FLEET_RUN_SCRATCH = {self._run_scratch_path!r}; "
+                "_fleet_scratch_os.environ['FLEET_RUN_SCRATCH'] = FLEET_RUN_SCRATCH"
             )
         try:
             result = broker.execute(broker.setup_source("\n\n".join(lines)), {}, timeout_s=timeout)
@@ -808,6 +828,7 @@ class DaytonaCodeInterpreter:
         self._no_progress_repair_used = False
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
+        self._action_admission: Callable[[], None] | None = None
 
     def new_invocation(
         self,
@@ -821,6 +842,9 @@ class DaytonaCodeInterpreter:
         tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
         context_capsule: Any | None = None,
         output_contract: FleetOutputContract | None = None,
+        timeout_s: int | None = None,
+        deadline_monotonic: float | None = None,
+        admission: Callable[[], None] | None = None,
     ) -> DaytonaCodeInterpreter:
         """Create an invocation-scoped adapter without retiring its Sandbox.
 
@@ -831,6 +855,11 @@ class DaytonaCodeInterpreter:
         callers pass them through the zero-argument factory supplied to DSPy;
         the retained template never receives per-Run observer, budget,
         request, bridge, tool-settlement, context, or output-contract state.
+        ``timeout_s`` overrides the fresh backend's per-action execution
+        deadline; ``None`` inherits the retained backend's timeout.
+        ``deadline_monotonic`` additionally clamps every action to end by that
+        absolute time, and ``admission`` runs before each action and may raise
+        to refuse it (a recursive child past its call deadline).
         """
         backend = self._backend
         if isinstance(backend, InProcessInterpreterBackend):
@@ -838,8 +867,9 @@ class DaytonaCodeInterpreter:
         elif isinstance(backend, _SandboxProcessBackend):
             fresh_backend = _SandboxProcessBackend(
                 backend.sandbox,
-                timeout_s=backend.timeout_s,
+                timeout_s=timeout_s if timeout_s is not None else backend.timeout_s,
                 broker_port=backend.broker_port,
+                deadline_monotonic=deadline_monotonic,
             )
             if backend._run_scratch_path is not None:
                 fresh_backend.bind_run_scratch(backend._run_scratch_path)
@@ -861,6 +891,7 @@ class DaytonaCodeInterpreter:
         fresh.bind_turn_request(turn_request)
         fresh.bind_async_bridge(async_bridge)
         fresh.bind_tool_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
+        fresh._action_admission = admission
         if context_capsule is not None:
             fresh.bind_context_capsule(context_capsule)
         if output_contract is not None:
@@ -1090,6 +1121,11 @@ class DaytonaCodeInterpreter:
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """Execute one action under single-flight concurrency protection."""
         with self._exclusive_access():
+            admission = self._action_admission
+            if admission is not None:
+                # Outside the provider-error mapping: a refusal (for example
+                # TimeoutError) reaches the owner unchanged and no code runs.
+                admission()
             self._bindings_sealed = True
             return self._execute_once(code, variables)
 

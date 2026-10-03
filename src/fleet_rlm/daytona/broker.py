@@ -23,6 +23,7 @@ import httpx
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, sanitize_provider_message
 from fleet_rlm.json_types import validate_json_value
+from fleet_rlm.rlm.budget import host_action_deadline
 from fleet_rlm.rlm.events import _resolve_awaitable_result
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,11 @@ _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_OUTPUT_CHARS = 64 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
+# The sandbox starts its action clock when /execute arrives, after the host
+# sent it. Waiting a little past timeout_s lets the sandbox's own deadline
+# reply (for example a timed-out tool wait) reach the host as a recoverable
+# action error instead of the host transport timing out first.
+_EXECUTE_RESPONSE_GRACE_S = 10.0
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -249,19 +255,22 @@ class DaytonaHttpToolBroker:
                     client.post(
                         "/execute",
                         json={"code": code, "variables": dict(variables), "timeout_s": timeout_s},
-                        timeout=timeout_s,
+                        timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S,
                     )
                 )
             except BaseException as exc:
                 outcome.append(exc)
 
         worker = threading.Thread(target=post, daemon=True)
-        worker.start()
-        while worker.is_alive():
-            if self._stopped:
-                break
-            self._poll_once()
-            worker.join(0.05)
+        # Host tools run on this thread while the action waits for them; they
+        # can read when the action's in-sandbox waits expire.
+        with host_action_deadline(time.monotonic() + timeout_s):
+            worker.start()
+            while worker.is_alive():
+                if self._stopped:
+                    break
+                self._poll_once()
+                worker.join(0.05)
         # The remote /execute request owns every outstanding /tool_call.  Do
         # not return (or tear down its broker) until that request has settled,
         # even after a rejected result delivery.  The typed delivery failure is
@@ -407,9 +416,24 @@ class DaytonaHttpToolBroker:
                 if not self._stopped and self._client is client:
                     response = client.post("/result", content=payload, headers={"Content-Type": "application/json"})
                     if response.status_code != 200:
-                        self._record_delivery_failure(
-                            request, phase="result_delivery", category=f"http_{response.status_code}"
-                        )
+                        benign = self._late_delivery_error(response)
+                        if benign is not None:
+                            # The sandbox already abandoned the call (its wait
+                            # expired and the call moved to _completed) or still
+                            # owns it and resolves it containedly; the action
+                            # has been given its timeout feedback, so a late
+                            # successful result must not fail the whole Turn.
+                            logger.warning(
+                                "sandbox tool result delivered after sandbox abandonment "
+                                "call_id=%s tool_name=%s category=%s",
+                                str(request.get("id") or "")[:128],
+                                str(request.get("tool_name") or "")[:80],
+                                benign,
+                            )
+                        else:
+                            self._record_delivery_failure(
+                                request, phase="result_delivery", category=f"http_{response.status_code}"
+                            )
                     elif succeeded:
                         settled = self._tool_settled
                         if settled is not None:
@@ -419,6 +443,28 @@ class DaytonaHttpToolBroker:
                                 self._record_delivery_failure(request, phase="settlement", category="callback_error")
             except httpx.HTTPError:
                 self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+
+    def _late_delivery_error(self, response: Any) -> str | None:
+        """Classify a non-200 /result response as benign sandbox-side abandonment.
+
+        Only "duplicate call" is benign: the call's wait expired, the sandbox
+        moved it to _completed and already returned the timeout to the action.
+        Everything else stays fatal. A "stale lease" in particular means the
+        call is still pending with its waiter blocked; leases are issued once
+        and never re-issued, so a mismatch is a protocol failure that would
+        otherwise surface only as a silent timeout. "duplicate result",
+        unparseable bodies and other statuses are fatal too.
+        """
+        if getattr(response, "status_code", None) != 409:
+            return None
+        try:
+            body = json.loads(response.text)
+        except (TypeError, ValueError):
+            return None
+        error = body.get("error") if isinstance(body, dict) else None
+        if error == "duplicate call":
+            return "duplicate_call"
+        return None
 
     def _record_delivery_failure(self, request: Mapping[str, Any], *, phase: str, category: str) -> None:
         """Retain a sanitized failed delivery outcome until remote execution settles."""

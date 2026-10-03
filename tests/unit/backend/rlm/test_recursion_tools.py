@@ -18,6 +18,7 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
+from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
 from fleet_rlm.rlm.events import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.execution import materialize_child_inputs
@@ -291,10 +292,171 @@ def test_child_progress_outcome_is_bounded_and_has_an_explicit_fallback() -> Non
     excerpt = _child_progress_outcome(long_answer, None)
 
     assert excerpt.startswith("Useful finding Useful finding")
-    assert len(excerpt) == 240
+    assert len(excerpt) == 480
     assert excerpt.endswith("...")
+    assert len(excerpt) <= 500
     assert _child_progress_outcome("  \n ", None) == "Child answer unavailable"
     assert _child_progress_outcome(None, "capacity") == "capacity"
+
+
+def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_start_turn_span = start_turn_span
+    captured: dict[str, list[object]] = {}
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        captured.setdefault(name, []).append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            return dspy.Prediction(answer="x" * 600, evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def build(**kwargs: object) -> Child:  # noqa: ARG001
+        return Child()
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    result = executor.tool(task="rich child", inputs=[])
+
+    assert result["status"] == "completed"
+    harvest = captured["RLM.child.result_harvest"][0]
+    assert harvest.outputs["answer"] == "x" * 600
+    assert harvest.outputs["answer_chars"] == 600
+    call_span = captured["RLM.recursive_call"][0]
+    assert call_span.outputs["child_answer_chars"] == 600
+    assert call_span.outputs["child_outcome"] == "x" * 600
+    executor.wait_owned()
+
+
+def test_child_citing_its_absolute_scratch_in_evidence_completes_with_redacted_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scratch = "/tmp/fleet/child-data/7a1b/1"
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            return dspy.Prediction(
+                answer='{"row_count": 39238}',
+                evidence=[f"Read {scratch}/slices/part-01.csv (sha256 8f5f1e64)."],
+                gaps=[f"FLEET_RUN_SCRATCH resolved to {scratch}."],
+                result_files=[],
+                trajectory=[],
+            )
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    result = executor.tool(task="slice one", inputs=[])
+
+    assert result["status"] == "completed"
+    assert result["answer"] == '{"row_count": 39238}'
+    assert list(result["evidence"]) == ["Read [path] (sha256 8f5f1e64)."]
+    assert list(result["gaps"]) == ["FLEET_RUN_SCRATCH resolved to [path]."]
+    assert scratch not in repr(result)
+    executor.wait_owned()
+
+
+def test_child_call_span_records_failure_category_and_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_start_turn_span = start_turn_span
+    captured: dict[str, list[object]] = {}
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        captured.setdefault(name, []).append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            raise ValueError("private-primary-cause sandbox exploded")
+
+    def build(**kwargs: object) -> Child:  # noqa: ARG001
+        return Child()
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+
+    outcomes = executor.batched_tool(tasks=[{"task": "fail"}])
+
+    assert outcomes[0]["status"] == "failed"
+    call_span = captured["RLM.recursive_call"][0]
+    assert call_span.outputs.get("failure_category")
+    assert call_span.outputs["child_error_category"] == "child_failed"
+    assert call_span.outputs["failure_cause_class"]
+    detail = call_span.outputs.get("failure_detail")
+    assert isinstance(detail, str)
+    assert "private-primary-cause" in detail
+    assert len(detail) <= 400
+    executor.wait_owned()
+
+
+def test_child_failure_categories_distinguish_harvest_and_declared_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing declared result file and a rejected declared output reach
+    the parent, the call span and the metrics as distinct categories rather
+    than one generic child failure."""
+    real_start_turn_span = start_turn_span
+    call_spans: list[object] = []
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        if name == "RLM.recursive_call":
+            call_spans.append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            task = json.loads(prompt)["task"]
+            if task == "harvest":
+                return dspy.Prediction(
+                    answer="ok", evidence=[], gaps=[], result_files=["results/answer.json"], trajectory=[]
+                )
+            return dspy.Prediction(answer="password=hunter2-real", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def missing_results(paths: list[str]) -> dict[str, bytes]:
+        raise ValueError(f"child result file is missing or not a file: {paths[0]}")
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=missing_results,
+        )
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
+    executor = _executor(
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        child_runtime_factory=factory,
+    )
+
+    outcomes = executor.batched_tool(tasks=[{"task": "harvest"}, {"task": "declared"}])
+
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("failed", "result_harvest_failed"),
+        ("failed", "declared_output_rejected"),
+    ]
+    by_category = {span.outputs["child_error_category"]: span.outputs for span in call_spans}
+    assert set(by_category) == {"result_harvest_failed", "declared_output_rejected"}
+    assert "results/answer.json" in by_category["result_harvest_failed"]["failure_detail"]
+    assert by_category["declared_output_rejected"]["failure_cause_type"] == "declared_output_rejected"
+    executor.wait_owned()
+    summary = executor.summary()
+    assert (summary.recursive_children_completed, summary.recursive_children_failed) == (0, 2)
 
 
 def test_child_capacity_refusal_is_not_reported_as_a_started_timeout() -> None:
@@ -828,6 +990,210 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     assert "failure_category=unauthorized" in failed[0].message
 
 
+def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A child still running when its call deadline passes is refused at its
+    next action instead of running its whole loop, so quarantined stragglers
+    settle promptly."""
+    actions: list[int] = []
+
+    class LoopingChild:
+        def __init__(self, interpreter_factory: Callable[[], DaytonaCodeInterpreter]) -> None:
+            self._interpreter_factory = interpreter_factory
+
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            interpreter = self._interpreter_factory()
+            try:
+                for index in range(1000):
+                    # Distinct code each pass so the no-progress guard stays out of the way.
+                    interpreter.execute(f"value = {index}")
+                    actions.append(index)
+                    time.sleep(0.02)
+            finally:
+                interpreter.shutdown()
+            return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def build(**kwargs: object) -> LoopingChild:
+        return LoopingChild(kwargs["interpreter_factory"])  # type: ignore[arg-type]
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=lambda _paths: {},
+        )
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 0.5,
+    )
+
+    started = time.monotonic()
+    # The batch wait and the child's own refusal share the Turn deadline, so
+    # either may report it first.
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        executor.batched_tool(tasks=[{"task": "loop"}])
+    executor.wait_owned()
+
+    # Without the per-action refusal the loop runs for about 20 s.
+    assert time.monotonic() - started < 5
+    assert 0 < len(actions) < 200
+    assert executor.summary().recursive_children_failed == 1
+
+
+class _ActingChild:
+    """Fake native child: task ``slow`` keeps acting until its next action is
+    refused, then lingers (an in-flight LM call); any other task submits."""
+
+    def __init__(
+        self, interpreter_factory: Callable[[], DaytonaCodeInterpreter], actions: list[int], linger_s: float
+    ) -> None:
+        self._interpreter_factory = interpreter_factory
+        self._actions = actions
+        self._linger_s = linger_s
+
+    def __call__(self, *, prompt: str) -> dspy.Prediction:
+        task = json.loads(prompt)["task"]
+        if task != "slow":
+            return dspy.Prediction(answer=f"{task}-done", evidence=[], gaps=[], result_files=[], trajectory=[])
+        interpreter = self._interpreter_factory()
+        try:
+            for index in range(1000):
+                interpreter.execute(f"value = {index}")
+                self._actions.append(index)
+                time.sleep(0.02)
+        finally:
+            interpreter.shutdown()
+            time.sleep(self._linger_s)
+        return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+
+def _action_bound_executor(
+    monkeypatch: pytest.MonkeyPatch,
+    actions: list[int],
+    *,
+    max_parallel_children: int = 2,
+    call_indexes: list[int] | None = None,
+    events: list[object] | None = None,
+) -> RecursiveRLMExecutor:
+    # A one-second margin keeps action deadlines test-sized with slack to spare.
+    monkeypatch.setattr("fleet_rlm.rlm.recursion._ACTION_RESULT_MARGIN_S", 1.0)
+    monkeypatch.setattr(
+        "fleet_rlm.rlm.recursion.build_native_rlm",
+        lambda **kwargs: _ActingChild(kwargs["interpreter_factory"], actions, 0.0),  # type: ignore[arg-type]
+    )
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        if call_indexes is not None:
+            call_indexes.append(call_index)
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=lambda _paths: {},
+        )
+
+    adapter = dspy.JSONAdapter()
+    return RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=max_parallel_children),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 30,
+        observer=events.append if events is not None else None,
+    )
+
+
+def test_batch_returns_ordered_partial_outcomes_before_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    actions: list[int] = []
+    events: list[object] = []
+    executor = _action_bound_executor(monkeypatch, actions, events=events)
+
+    started = time.monotonic()
+    with host_action_deadline(started + 2.0):
+        outcomes = executor.batched_tool(tasks=[{"task": "fast"}, {"task": "slow"}])
+
+    # The batch answers while the calling action still waits for it.
+    assert time.monotonic() < started + 2.0
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("completed", None),
+        ("timed_out", "action_deadline"),
+    ]
+    assert outcomes[0]["answer"] == "fast-done"
+    executor.wait_owned()
+    assert time.monotonic() - started < 5
+    assert 0 < len(actions) < 200
+    terminal = [event.state for event in events if isinstance(event, ChildProgress) and event.state != "running"]
+    assert sorted(terminal) == ["completed", "timed_out"]
+    summary = executor.summary()
+    assert (summary.recursive_children_completed, summary.recursive_children_failed) == (1, 1)
+
+
+def test_queued_child_is_not_started_at_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    call_indexes: list[int] = []
+    executor = _action_bound_executor(monkeypatch, [], max_parallel_children=1, call_indexes=call_indexes)
+
+    with host_action_deadline(time.monotonic() + 2.0):
+        outcomes = executor.batched_tool(tasks=[{"task": "slow"}, {"task": "fast"}])
+
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("timed_out", "action_deadline"),
+        ("not_started", "action_deadline"),
+    ]
+    executor.wait_owned()
+    # The queued child never acquired a Sandbox.
+    assert call_indexes == [1]
+
+
+def test_batch_without_action_time_raises_before_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+    from fleet_rlm.rlm.recursion import RecursiveActionDeadlineError
+
+    executor = _action_bound_executor(monkeypatch, [])
+
+    with host_action_deadline(time.monotonic() + 0.5), pytest.raises(RecursiveActionDeadlineError):
+        executor.batched_tool(tasks=[{"task": "fast"}])
+    assert executor.summary().call_count == 0
+    executor.wait_owned()
+
+
+def test_single_child_returns_timed_out_at_the_action_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    executor = _action_bound_executor(monkeypatch, [])
+
+    started = time.monotonic()
+    with host_action_deadline(started + 2.0):
+        result = executor.tool(task="slow", inputs=[])
+
+    assert time.monotonic() < started + 2.0
+    assert (result["status"], result["error_category"]) == ("timed_out", "action_deadline")
+    executor.wait_owned()
+
+
 def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -932,7 +1298,9 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     assert [item["status"] for item in outcomes] == ["failed", "completed"]
     executor.wait_owned()
     assert all(lease.interpreter._shutdown for lease in created)
-    assert executor.summary().recursive_children_completed == 2
+    # Only the successful child counts as completed; the failed one is failed.
+    assert executor.summary().recursive_children_completed == 1
+    assert executor.summary().recursive_children_failed == 1
 
 
 def test_missing_child_input_returns_failed_slot_without_losing_successful_sibling() -> None:
@@ -1316,7 +1684,9 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     assert all(lease.interpreter._shutdown for lease in created)
     assert executor.summary().call_count == 3
     assert executor.summary().recursive_children_started == 1
-    assert executor.summary().recursive_children_completed == 1
+    # The released straggler fails its batch-cancellation check: not completed.
+    assert executor.summary().recursive_children_completed == 0
+    assert executor.summary().recursive_children_failed == 1
 
 
 # --- live child-result capture boundary --------------------------------

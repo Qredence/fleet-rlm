@@ -99,6 +99,68 @@ def test_prediction_result_rejects_concrete_private_material(answer: str, metada
         prediction_result(dspy.Prediction(answer=answer, metadata=metadata), Report)
 
 
+class _ChildFindings(dspy.Signature):
+    answer: str = dspy.OutputField()
+    evidence: list[str] = dspy.OutputField()
+    gaps: list[str] = dspy.OutputField()
+    result_files: list[str] = dspy.OutputField()
+
+
+_CHILD_SCRATCH = "/tmp/fleet/child-data/3f0c/4"
+_REDACTED = frozenset({"evidence", "gaps"})
+
+
+def _child_prediction(**overrides: object) -> dspy.Prediction:
+    fields: dict[str, object] = {
+        "answer": '{"row_count": 117712}',
+        "evidence": [f"Staged copy {_CHILD_SCRATCH}/exports/sweep-ledger.csv matches the manifest."],
+        "gaps": [f"Scratch was located by search at {_CHILD_SCRATCH}."],
+        "result_files": [],
+    }
+    fields.update(overrides)
+    return dspy.Prediction(**fields)
+
+
+def test_prediction_result_redacts_private_paths_only_in_listed_fields() -> None:
+    result = prediction_result(_child_prediction(), _ChildFindings, path_redacted_fields=_REDACTED)
+
+    assert result.display_text == '{"row_count": 117712}'
+    assert result.outputs["evidence"] == ("Staged copy [path] matches the manifest.",)
+    assert result.outputs["gaps"] == ("Scratch was located by search at [path].",)
+    # The documented Volume mount is not private and stays verbatim.
+    mount = prediction_result(
+        _child_prediction(evidence=["Read /home/daytona/fleet/notes.md"]),
+        _ChildFindings,
+        path_redacted_fields=_REDACTED,
+    )
+    assert mount.outputs["evidence"] == ("Read /home/daytona/fleet/notes.md",)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"answer": f"Totals are in {_CHILD_SCRATCH}/results.json"},
+        {"result_files": [f"{_CHILD_SCRATCH}/results.json"]},
+        {"evidence": ["token=abc123secretvalue"]},
+        {"evidence": ["Connect to postgresql://fleet:secret@private.example/fleet"]},
+        {"evidence": [f"{_CHILD_SCRATCH}/cfg?api_key=abc123secretvalue"]},
+        {"gaps": ['Traceback (most recent call last):\n  File "/srv/app.py", line 7']},
+    ],
+)
+def test_prediction_result_redaction_keeps_every_other_rule_strict(overrides: dict[str, object]) -> None:
+    from fleet_rlm.rlm.result import PredictionOutputError
+
+    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
+        prediction_result(_child_prediction(**overrides), _ChildFindings, path_redacted_fields=_REDACTED)
+
+
+def test_prediction_result_without_redacted_fields_still_rejects_evidence_paths() -> None:
+    from fleet_rlm.rlm.result import PredictionOutputError
+
+    with pytest.raises(PredictionOutputError, match="Turn output is invalid"):
+        prediction_result(_child_prediction(), _ChildFindings)
+
+
 def test_prediction_result_outputs_are_deeply_immutable() -> None:
 
     class Report(dspy.Signature):

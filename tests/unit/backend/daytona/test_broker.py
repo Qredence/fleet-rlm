@@ -109,6 +109,90 @@ def test_execute_classifies_request_timeout_without_exposing_transport_detail(
     assert "private endpoint detail" not in str(caught.value)
 
 
+def test_execute_transport_timeout_includes_response_grace() -> None:
+    broker = DaytonaHttpToolBroker(object(), port=1)
+    client = MagicMock()
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"stdout": "", "error": None}
+    client.post.return_value = response
+    broker._client = client
+    broker._url = "http://sandbox.invalid"
+    broker._poll_once = lambda: None  # type: ignore[method-assign]
+
+    broker.execute("pass", {}, timeout_s=7)
+
+    kwargs = client.post.call_args.kwargs
+    assert kwargs["timeout"] == 7 + broker_module._EXECUTE_RESPONSE_GRACE_S
+    assert kwargs["json"]["timeout_s"] == 7
+
+
+@pytest.mark.parametrize("post_expiry_delay_s", [0.0, 0.5])
+def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
+    post_expiry_delay_s: float, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The live late-delivery race, unpatched: a host tool runs past the
+    action deadline. The sandbox times its wait out and replies with the
+    tool error, the late result is dropped as benign, and execute() returns
+    that recoverable outcome instead of a transport timeout."""
+    with _start_embedded_server() as (base_url, headers):
+        port = int(base_url.rsplit(":", 1)[1])
+
+        def answer() -> dict[str, bool]:
+            time.sleep(3)
+            return {"ok": True}
+
+        broker = DaytonaHttpToolBroker(object(), port=port)
+        broker._secret = headers["X-Broker-Secret"]
+        broker.bind_tools({"answer": answer})
+        broker._url = base_url
+        source = broker.setup_source(
+            "import time as _t\n"
+            "try:\n"
+            "    print(answer())\n"
+            "except Exception:\n"
+            f"    _t.sleep({post_expiry_delay_s})\n"
+            "    raise\n"
+        )
+        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+            broker._client = client
+            started = time.monotonic()
+            result = broker.execute(source, {}, timeout_s=2)
+            elapsed = time.monotonic() - started
+
+    assert result["error_category"] == "HTTPError"
+    assert broker._delivery_error is None
+    assert "category=duplicate_call" in caplog.text
+    assert elapsed < 2 + broker_module._EXECUTE_RESPONSE_GRACE_S
+
+
+def test_execute_exposes_the_action_deadline_to_dispatched_host_tools(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    from fleet_rlm.rlm.budget import current_host_action_deadline
+
+    base_url, headers = embedded_server
+    seen: list[float | None] = []
+
+    def answer() -> dict[str, bool]:
+        seen.append(current_host_action_deadline())
+        return {"ok": True}
+
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools({"answer": answer})
+    broker._url = base_url
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        before = time.monotonic()
+        result = broker.execute(broker.setup_source("print(answer())"), {}, timeout_s=4)
+        after = time.monotonic()
+
+    assert "ok" in str(result.get("stdout"))
+    assert len(seen) == 1 and seen[0] is not None
+    assert before + 4 <= seen[0] <= after + 4
+    assert current_host_action_deadline() is None
+
+
 def test_tool_call_uses_execution_deadline(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
@@ -186,15 +270,65 @@ def test_settled_broker_rejects_new_calls_and_unknown_results(
         assert client.post("/result", json={"id": "unknown", "lease": "old", "result": 1}).status_code == 404
 
 
-def test_poll_records_rejected_tool_result_delivery() -> None:
+def _poll_with_rejected_result(status_code: int, body: object | None) -> tuple[DaytonaHttpToolBroker, MagicMock]:
     broker = DaytonaHttpToolBroker(object(), port=1)
     client = MagicMock()
     client.get.return_value.json.return_value = {
         "requests": [{"id": "call-1", "lease": "lease-1", "tool_name": "answer", "args": [], "kwargs": {}}]
     }
-    client.post.return_value.status_code = 409
+    if body is None:
+        # MagicMock().text is not parseable JSON — the unparseable-body shape.
+        client.post.return_value.status_code = status_code
+    else:
+        client.post.return_value = MagicMock(status_code=status_code, text=json.dumps(body))
     broker._client = client
     broker.bind_tools({"answer": lambda: {"ok": True}})
+    return broker, client
+
+
+def test_poll_treats_late_duplicate_call_delivery_as_benign(caplog: pytest.LogCaptureFixture) -> None:
+    broker, _ = _poll_with_rejected_result(409, {"error": "duplicate call"})
+
+    broker._poll_once()
+
+    assert broker._delivery_error is None
+    assert "delivered after sandbox abandonment" in caplog.text
+    assert "category=duplicate_call" in caplog.text
+
+
+def test_poll_records_stale_lease_delivery_as_fatal(caplog: pytest.LogCaptureFixture) -> None:
+    """A stale lease means the call is still pending with its waiter blocked:
+    leases are issued once, so the mismatch is a protocol failure, never a
+    benign late delivery."""
+    broker, _ = _poll_with_rejected_result(409, {"error": "stale lease"})
+
+    broker._poll_once()
+
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+    assert "delivered after sandbox abandonment" not in caplog.text
+
+
+def test_poll_records_duplicate_result_delivery_as_fatal() -> None:
+    broker, _ = _poll_with_rejected_result(409, {"error": "duplicate result"})
+
+    broker._poll_once()
+
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+
+
+def test_poll_records_rejected_tool_result_delivery_with_unparseable_body() -> None:
+    broker, _ = _poll_with_rejected_result(409, None)
+
+    broker._poll_once()
+
+    assert broker._delivery_error is not None
+    assert broker._delivery_error.cause_type == "BrokerDeliveryError"
+
+
+def test_poll_records_server_error_delivery_as_fatal() -> None:
+    broker, _ = _poll_with_rejected_result(500, {"error": "boom"})
 
     broker._poll_once()
 
@@ -413,6 +547,29 @@ def _held_result_server(gate: Path) -> contextlib.AbstractContextManager[tuple[s
     return _start_embedded_server(prefix)
 
 
+def _expired_wait_server(hold: Path) -> contextlib.AbstractContextManager[tuple[str, dict[str, str]]]:
+    """Expire the first timed tool-call wait only once ``hold`` exists.
+
+    The call stays pending while the waiter is held, so the host broker can
+    pick it up; when ``hold`` is touched the wait expires exactly as a deadline
+    hit would (504 + the call moved to _completed), making the host's later
+    result delivery arrive late.
+    """
+    prefix = (
+        "import os as _gate_os, threading as _gate_threading, time as _gate_time\n"
+        "class _ExpireOnceEvent(_gate_threading.Event):\n"
+        "    def wait(self, timeout=None):\n"
+        "        if timeout is not None and not getattr(self, '_expired', False):\n"
+        "            self._expired = True\n"
+        f"            while not _gate_os.path.exists({str(hold)!r}):\n"
+        "                _gate_time.sleep(0.01)\n"
+        "            return False\n"
+        "        return super().wait(timeout)\n"
+        "_gate_threading.Event = _ExpireOnceEvent\n"
+    )
+    return _start_embedded_server(prefix)
+
+
 def _pending_lease(client: httpx.Client) -> tuple[str, str | None]:
     for _ in range(200):
         requests = client.get("/pending").json()["requests"]
@@ -477,3 +634,57 @@ def test_result_requires_an_issued_lease(embedded_server: tuple[str, dict[str, s
     assert delivered.status_code == 200
     assert consumed.status_code == 409
     assert call[0].json() == {"result": "ok"}
+
+
+def test_execute_survives_late_result_delivery_after_wait_expiry(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    hold = tmp_path / "expire-now"
+    with _expired_wait_server(hold) as (base_url, headers):
+        port = int(base_url.rsplit(":", 1)[1])
+        tool_started = threading.Event()
+        tool_release = threading.Event()
+
+        def answer() -> dict[str, bool]:
+            tool_started.set()
+            tool_release.wait(timeout=10)
+            return {"ok": True}
+
+        broker = DaytonaHttpToolBroker(object(), port=port)
+        broker._secret = headers["X-Broker-Secret"]
+        broker.bind_tools({"answer": answer})
+        broker._url = base_url
+        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+            broker._client = client
+            source = _tool_source(port, headers["X-Broker-Secret"])
+            outcomes: list[dict[str, object]] = []
+            errors: list[Exception] = []
+
+            def _run() -> None:
+                try:
+                    outcomes.append(broker.execute(source, {}, timeout_s=5))
+                except Exception as exc:
+                    errors.append(exc)
+
+            thread = threading.Thread(target=_run, daemon=True)
+            thread.start()
+
+            # The broker's poll picks the pending call up and blocks in the tool.
+            assert tool_started.wait(timeout=5)
+            # Expire the sandbox-side wait: the call moves to _completed and the
+            # action sees a 504, exactly as a deadline hit would. The hold-loop
+            # polls every 10ms, so this bounded sleep guarantees the expiry is
+            # processed before the late result is released.
+            hold.touch()
+            time.sleep(0.1)
+
+            # The late host result now arrives for an already-completed call.
+            tool_release.set()
+            thread.join(timeout=10)
+
+    assert not errors, f"execute raised: {errors!r}"
+    assert outcomes, "execute never returned a response"
+    assert outcomes[0]["error_category"] == "HTTPError"
+    assert broker._delivery_error is None
+    assert "delivered after sandbox abandonment" in caplog.text
+    assert "category=duplicate_call" in caplog.text

@@ -54,6 +54,22 @@ def test_metrics_track_recursive_batch_lifecycle_and_peak_width() -> None:
     assert snapshot.as_dict()["peak_child_concurrency"] == 2
 
 
+def test_metrics_count_failed_children_separately_and_release_their_slot() -> None:
+    metrics = DelegationMetrics()
+    metrics.child_started()
+    metrics.child_started()
+    metrics.child_failed()
+    metrics.child_completed()
+    metrics.child_started()
+
+    snapshot = metrics.snapshot()
+    assert snapshot.recursive_children_started == 3
+    assert snapshot.recursive_children_completed == 1
+    assert snapshot.recursive_children_failed == 1
+    assert snapshot.peak_child_concurrency == 2
+    assert snapshot.as_dict()["recursive_children_failed"] == 1
+
+
 def test_token_usage_normalizer_accepts_both_supported_alias_families() -> None:
     assert normalize_lm_token_usage({"input_tokens": 11, "output_tokens": 7}) == {
         "input_tokens": 11,

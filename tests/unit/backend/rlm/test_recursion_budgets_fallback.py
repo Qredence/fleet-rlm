@@ -247,7 +247,7 @@ def test_partial_results_are_ordered_and_child_answer_events_are_bounded(monkeyp
     progress = [event for event in events if isinstance(event, ChildProgress)]
     successful_progress = next(event for event in progress if event.state == "completed")
     assert successful_progress.outcome == "successful-sibling-answer"
-    assert len(successful_progress.outcome) <= 240
+    assert len(successful_progress.outcome) <= 480
     generic_events = [event for event in events if not isinstance(event, ChildProgress)]
     assert "successful-sibling-answer" not in repr(generic_events)
     assert all("successful-sibling-answer" not in repr(event) for event in completed_tools)

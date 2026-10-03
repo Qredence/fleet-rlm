@@ -406,7 +406,31 @@ def _contains_sensitive_value(value: Any) -> bool:
     return bool(value) if isinstance(value, (list, tuple, dict)) else True
 
 
-def _validate_declared_text(text: str) -> None:
+_DECLARED_PATH_TRAILING = ".,;:)]}"
+
+
+def _is_allowlisted_declared_path(path: str) -> bool:
+    return path == "/home/daytona/fleet" or path.startswith("/home/daytona/fleet/")
+
+
+def redact_declared_private_paths(text: str) -> str:
+    """Replace private host paths the declared-output rules reject with ``[path]``.
+
+    Trailing punctuation the rule ignores and the allowlisted Volume mount
+    are kept, so redaction changes nothing else in the text.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        raw = match.group(0)
+        path = raw.rstrip(_DECLARED_PATH_TRAILING)
+        if _is_allowlisted_declared_path(path):
+            return raw
+        return "[path]" + raw[len(path) :]
+
+    return _DECLARED_PRIVATE_PATH.sub(replace, text)
+
+
+def _validate_declared_text(text: str, *, allow_private_paths: bool = False) -> None:
     for match in _DECLARED_SECRET_ASSIGNMENT.finditer(text):
         # ``name=name`` passes a variable through a keyword, and ``name = f(x)``
         # assigns a call result; neither is a credential value. ``f("literal")``
@@ -422,35 +446,45 @@ def _validate_declared_text(text: str) -> None:
         raise ValueError("declared output contains a provider credential")
     if _DSNISH.search(text):
         raise ValueError("declared output contains a connection string")
-    for match in _DECLARED_PRIVATE_PATH.finditer(text):
-        path = match.group(0).rstrip(".,;:)]}")
-        if path != "/home/daytona/fleet" and not path.startswith("/home/daytona/fleet/"):
-            raise ValueError("declared output contains a private host path")
+    if not allow_private_paths:
+        for match in _DECLARED_PRIVATE_PATH.finditer(text):
+            if not _is_allowlisted_declared_path(match.group(0).rstrip(_DECLARED_PATH_TRAILING)):
+                raise ValueError("declared output contains a private host path")
     if _DECLARED_STACK_DUMP.search(text):
         raise ValueError("declared output contains a stack dump")
     if _DECLARED_PROMPT_DUMP.search(text):
         raise ValueError("declared output contains a system-prompt dump")
 
 
-def validate_declared_public_value(value: Any, *, depth: int = 0) -> None:
+def validate_declared_public_value(value: Any, *, depth: int = 0, allow_private_paths: bool = False) -> None:
     if depth >= 16:
         raise ValueError("declared output nesting is too deep")
     if value is None or isinstance(value, (bool, int, float)):
         return
     if isinstance(value, str):
-        _validate_declared_text(value)
+        _validate_declared_text(value, allow_private_paths=allow_private_paths)
         return
     if isinstance(value, Mapping):
         for key, item in value.items():
             if _is_sensitive_key(key) and _contains_sensitive_value(item):
                 raise ValueError("declared output contains a sensitive structured field")
-            validate_declared_public_value(item, depth=depth + 1)
+            validate_declared_public_value(item, depth=depth + 1, allow_private_paths=allow_private_paths)
         return
     if isinstance(value, (list, tuple)):
         for item in value:
-            validate_declared_public_value(item, depth=depth + 1)
+            validate_declared_public_value(item, depth=depth + 1, allow_private_paths=allow_private_paths)
         return
     raise ValueError("declared output contains a non-JSON value")
+
+
+def _redact_declared_paths_in(value: object) -> object:
+    if isinstance(value, str):
+        return redact_declared_private_paths(value)
+    if isinstance(value, Mapping):
+        return {key: _redact_declared_paths_in(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_declared_paths_in(item) for item in value]
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -542,7 +576,15 @@ def prediction_result(
     schema_id: str = "fleet.default",
     schema_version: str = "1",
     max_output_chars: int = 10_000,
+    path_redacted_fields: frozenset[str] = frozenset(),
 ) -> PredictionResult:
+    """Validate a native Prediction against its signature and public-output rules.
+
+    ``path_redacted_fields`` names top-level outputs whose private host paths
+    are redacted to ``[path]`` instead of rejected. Every other rule still
+    applies to those fields' original text, so a credential inside a path
+    still rejects the output; with no names given, behavior is unchanged.
+    """
     outputs: dict[str, JsonValue] = {}
     try:
         for name, field in signature.output_fields.items():
@@ -568,16 +610,38 @@ def prediction_result(
     if not isinstance(display, str) or not display.strip():
         raise PredictionOutputError(cause_type="answer_missing")
     result = PredictionResult(display, outputs, schema_id, schema_version)
+    _raise_if_output_too_large(result, max_output_chars)
+    try:
+        if path_redacted_fields:
+            for name, value in result.outputs.items():
+                if _is_sensitive_key(name) and _contains_sensitive_value(value):
+                    raise ValueError("declared output contains a sensitive structured field")
+                validate_declared_public_value(value, depth=1, allow_private_paths=name in path_redacted_fields)
+        else:
+            validate_declared_public_value(result.outputs)
+    except ValueError:
+        raise PredictionOutputError(cause_type="declared_output_rejected") from None
+    if not path_redacted_fields:
+        return result
+    plain = cast(dict[str, object], _plain_json(result.outputs))
+    redacted = {
+        name: _redact_declared_paths_in(value) if name in path_redacted_fields else value
+        for name, value in plain.items()
+    }
+    display_text = result.display_text
+    if "answer" in path_redacted_fields:
+        display_text = redact_declared_private_paths(display_text)
+    result = PredictionResult(display_text, cast(dict[str, JsonValue], redacted), schema_id, schema_version)
+    _raise_if_output_too_large(result, max_output_chars)
+    return result
+
+
+def _raise_if_output_too_large(result: PredictionResult, max_output_chars: int) -> None:
     plain_outputs = _plain_json(result.outputs)
     encoded = json.dumps(plain_outputs, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     if len(encoded) > max_output_chars:
         preview = sanitize_public_text(result.display_text, max_len=400)
         raise PredictionOutputTooLargeError(output_chars=len(encoded), output_preview=preview)
-    try:
-        validate_declared_public_value(result.outputs)
-    except ValueError:
-        raise PredictionOutputError(cause_type="declared_output_rejected") from None
-    return result
 
 
 @dataclass(frozen=True, slots=True)

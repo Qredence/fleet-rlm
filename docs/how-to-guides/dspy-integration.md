@@ -261,16 +261,26 @@ characters, and at most four child workers concurrently. A child request beyond
 `RLM_NATIVE_CHILD_DEPTH = 1` uses one bounded plain Sub Model query instead of
 creating a grandchild Sandbox.
 
-`rlm_query_batched` validates and reserves every prompt before starting work,
-preserves input ordering, and uses all-or-nothing failure semantics. Fleet may
-run independent siblings concurrently up to `recursion_max_parallel_children`;
-the model chooses the decomposition, while Fleet controls concurrency.
+`rlm_query_batched` validates and reserves every prompt before starting work
+and preserves input ordering. Each slot settles to its own outcome: an ordinary
+child failure is reported in its slot while its siblings' answers survive,
+while revoked authority or failed cleanup fails the whole batch. A batch that
+would outlast the sandbox action that called it returns before that action's
+deadline: unfinished slots report `timed_out` (running) or `not_started`
+(queued) with `error_category: action_deadline`, and the stopped children are
+drained before the Root outcome is accepted. Fleet may run independent siblings
+concurrently up to `recursion_max_parallel_children`; the model chooses the
+decomposition, while Fleet controls concurrency.
 
-Child prompts, answers, reasoning, generated code, and provider responses are
-never copied into public Runtime Events. Root traces retain the normal bounded
-readable preview policy, while child traces retain structural metadata only:
-role, model, call index, key/count metadata, usage, duration, failure category,
-and termination mode.
+Child prompts, reasoning, generated code, and provider responses are never
+copied into public Runtime Events; `ChildProgress` carries only a bounded,
+sanitized excerpt of a child's answer (at most 480 characters). Root traces
+retain the normal bounded readable preview policy. Child traces retain
+structural metadata (role, model, call index, key/count metadata, usage,
+duration, failure category, and termination mode) plus the sanitized child
+answer on `RLM.child.result_harvest` and `RLM.recursive_call`, bounded by
+`mlflow.trace_content_max_chars`, and a sanitized, bounded `failure_detail` on
+failed calls, so a recursive Turn can be graded from its trace alone.
 
 ## Delegation lanes
 

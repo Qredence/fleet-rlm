@@ -115,6 +115,92 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
     assert all(not isinstance(detail, Status) for detail in stream.outcome.execution_details)
 
 
+@pytest.mark.asyncio
+async def test_root_completion_drains_action_deadline_stragglers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An action-bounded batch returns partial outcomes while a cancelled
+    straggler is still stopping; the Root may submit at once, and its outcome
+    is accepted only after that straggler settles and its lease closes."""
+    import json
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion._ACTION_RESULT_MARGIN_S", 1.0)
+    # The deadline is read once at tool entry: give the calling action 2 s from then.
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.current_host_action_deadline", lambda: time.monotonic() + 2.0)
+    straggler_settled = threading.Event()
+
+    class Child:
+        def __init__(self, interpreter_factory) -> None:
+            self._interpreter_factory = interpreter_factory
+
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            if json.loads(prompt)["task"] == "fast":
+                return dspy.Prediction(answer="fast-done", evidence=[], gaps=[], result_files=[], trajectory=[])
+            interpreter = self._interpreter_factory()
+            try:
+                for index in range(1000):
+                    interpreter.execute(f"value = {index}")
+                    time.sleep(0.02)
+            finally:
+                interpreter.shutdown()
+                # An in-flight LM call outlives the refusal of the next action.
+                time.sleep(0.5)
+                straggler_settled.set()
+            return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    monkeypatch.setattr(
+        "fleet_rlm.rlm.recursion.build_native_rlm", lambda **kwargs: Child(kwargs["interpreter_factory"])
+    )
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _program: True)
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {
+                "reasoning": "batch",
+                "code": (
+                    "answers = rlm_query_batched("
+                    "tasks=[{'task': 'fast', 'inputs': []}, {'task': 'slow', 'inputs': []}])"
+                ),
+            },
+            {"reasoning": "submit", "code": "SUBMIT(answer='/'.join(item['status'] for item in answers))"},
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="cross-check",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iters=4, max_llm_calls=4),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2, max_parallel_children=2),
+            child_runtime_factory=lambda call_index, *, profile="semantic-child": _child_lease(
+                call_index, profile=profile
+            ),
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+
+    stream = RLMRunner().stream(context)
+    events = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded, events
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.answer == "completed/timed_out"
+    assert straggler_settled.is_set()
+
+
 def _child_lease(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
     """Create a child runtime lease for a recursive test invocation.
 

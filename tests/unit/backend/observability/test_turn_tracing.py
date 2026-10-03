@@ -1305,8 +1305,11 @@ def test_recursive_child_span_records_bounded_metadata(monkeypatch: pytest.Monke
     assert recursive_outputs[-1]["termination_mode"] == "typed_submit"
     assert recursive_outputs[-1]["child_iterations"] == 1
     assert recursive_outputs[-1]["phase_status"] == "completed"
+    # The completed call span carries the sanitized child outcome so a Turn is
+    # diagnosable from the trace alone.
+    assert recursive_outputs[-1]["child_outcome"] == "child-ok"
+    assert recursive_outputs[-1]["child_answer_chars"] == len("child-ok")
     assert "classify selected row" not in str(recursive_inputs)
-    assert "child-ok" not in str(recursive_outputs)
 
 
 def test_recursive_child_span_marks_shutdown_failure(monkeypatch: pytest.MonkeyPatch) -> None:

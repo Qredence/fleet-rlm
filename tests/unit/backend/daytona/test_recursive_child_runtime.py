@@ -32,26 +32,42 @@ class _Fs:
     directories: set[str] = field(default_factory=set)
     contents: dict[str, bytes] = field(default_factory=dict)
     symlinks: set[str] = field(default_factory=set)
+    list_calls: list[tuple[str, int | None]] = field(default_factory=list)
 
-    async def list_files(self, _root: str, *, depth: int | None) -> list[SimpleNamespace]:
+    async def list_files(self, root: str, *, depth: int | None = None) -> list[SimpleNamespace]:
         """
-        List all tracked files and directories using unbounded traversal.
+        List entries beneath ``root`` the way the Daytona server does.
 
-        Parameters:
-            _root (str): Root path for the listing.
-            depth (int | None): Must be `None` to request unbounded traversal.
-
-        Returns:
-            list[SimpleNamespace]: File entries followed by directory entries, with each group sorted by path.
+        ``depth=None`` sends no depth, so the server default of one level
+        applies; intermediate directories of deeper files are listed as
+        directories. A root with nothing beneath it is not found.
         """
-        assert depth is None
-        return [
-            *[
-                SimpleNamespace(path=path, is_dir=False, mode="120777" if path in self.symlinks else "100644")
-                for path in sorted(self.files)
-            ],
-            *[SimpleNamespace(path=path, is_dir=True, mode="040755") for path in sorted(self.directories)],
-        ]
+        self.list_calls.append((root, depth))
+        levels = 1 if depth is None else depth
+        prefix = root.rstrip("/") + "/"
+        known = sorted({*self.files, *self.directories})
+        if root not in self.directories and not any(path.startswith(prefix) for path in known):
+            raise FileNotFoundError(root)
+        entries: dict[str, SimpleNamespace] = {}
+        for path in known:
+            if not path.startswith(prefix):
+                continue
+            parts = path[len(prefix) :].split("/")
+            for level in range(1, min(len(parts), levels) + 1):
+                candidate = prefix + "/".join(parts[:level])
+                is_file = level == len(parts) and path in self.files
+                mode = "100644" if is_file else "040755"
+                entries.setdefault(
+                    candidate,
+                    SimpleNamespace(
+                        path=candidate,
+                        name=parts[level - 1],
+                        is_dir=not is_file,
+                        size=len(self.contents.get(candidate, b"")) if is_file else 0,
+                        mode="120777" if candidate in self.symlinks else mode,
+                    ),
+                )
+        return list(entries.values())
 
     async def get_file_info(self, path: str) -> SimpleNamespace:
         if path in {"/", "/tmp"}:
@@ -187,12 +203,9 @@ async def test_child_scope_purge_removes_nested_files_and_directories() -> None:
 
     assert fs.files == set()
     assert fs.directories == set()
-    assert fs.deleted == [
-        f"{root}/nested/deep/file.txt",
-        f"{root}/top.txt",
-        f"{root}/nested/deep",
-        f"{root}/nested",
-    ]
+    # The server lists one level, so nested content goes with its
+    # top-level directory's recursive delete.
+    assert fs.deleted == [f"{root}/top.txt", f"{root}/nested"]
 
 
 @pytest.mark.asyncio
@@ -449,6 +462,60 @@ async def test_child_lease_stages_and_harvests_files_in_its_private_directory() 
 
     with pytest.raises(ValueError, match="safely relative"):
         await asyncio.to_thread(lease.read_result_files, ["../outside"])
+    await asyncio.to_thread(lease.close)
+
+
+async def _semantic_child_lease(child_fs: _Fs) -> ChildRuntimeLease:
+    run_id = uuid4()
+    factory = make_daytona_child_factory(
+        loop=asyncio.get_running_loop(),
+        platform=_Platform(_Sandbox("semantic-child", child_fs)),
+        admission=DaytonaAdmission(max_active_leases=1),
+        volume_id="shared-volume",
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        run_id=run_id,
+        deadline=asyncio.get_running_loop().time() + 30,
+        execution_timeout_s=30,
+        execution_output_cap=1000,
+    )
+    lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    await asyncio.to_thread(lease.stage_files, {"slices/part-01.csv": b"txn_id\n"})
+    return lease
+
+
+@pytest.mark.asyncio
+async def test_child_lease_harvests_nested_declared_result_files() -> None:
+    child_fs = _Fs(set())
+    lease = await _semantic_child_lease(child_fs)
+    root = lease.data_path
+    # A child that runs os.makedirs(os.path.join(FLEET_RUN_SCRATCH, "results")).
+    child_fs.directories.add(f"{root}/results")
+    for relative, content in {"results/answer.json": b'{"row_count": 1}', "flat.json": b"{}"}.items():
+        child_fs.files.add(f"{root}/{relative}")
+        child_fs.contents[f"{root}/{relative}"] = content
+
+    result = await asyncio.to_thread(lease.read_result_files, ["results/answer.json", "flat.json"])
+
+    assert result == {"results/answer.json": b'{"row_count": 1}', "flat.json": b"{}"}
+    harvest_listings = [call for call in child_fs.list_calls if call[0].startswith(root)]
+    assert sorted(harvest_listings) == [(root, 1), (f"{root}/results", 1)]
+    await asyncio.to_thread(lease.close)
+
+
+@pytest.mark.asyncio
+async def test_child_lease_rejects_missing_nested_result_and_declared_directory() -> None:
+    child_fs = _Fs(set())
+    lease = await _semantic_child_lease(child_fs)
+    root = lease.data_path
+    child_fs.directories.add(f"{root}/results")
+
+    with pytest.raises(ValueError, match=r"missing or not a file: results/missing\.json"):
+        await asyncio.to_thread(lease.read_result_files, ["results/missing.json"])
+    with pytest.raises(ValueError, match=r"missing or not a file: absent/answer\.json"):
+        await asyncio.to_thread(lease.read_result_files, ["absent/answer.json"])
+    with pytest.raises(ValueError, match="missing or not a file: results"):
+        await asyncio.to_thread(lease.read_result_files, ["results"])
     await asyncio.to_thread(lease.close)
 
 
