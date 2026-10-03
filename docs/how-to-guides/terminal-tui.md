@@ -144,7 +144,8 @@ committed Artifact with content-length and SHA-256 verification;
 `/artifacts` lists Artifact ids in the conversation. `/redo` resubmits the last
 prompt with a fresh idempotency key, and `/reload` re-fetches committed Turns
 for the current Session without switching Sessions. `/trace` prints the full
-MLflow trace ID of the current Run. `/feedback up [comment]` or
+MLflow trace ID of the current Run; to print its span tree from a script, see
+[Inspect a trace from a script](../reference/cli.md#inspect-a-trace-from-a-script). `/feedback up [comment]` or
 `/feedback down [comment]` records one human assessment for the most recent
 durable assistant execution trace and prints the selected trace ID in the
 confirmation.
