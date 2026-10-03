@@ -3955,23 +3955,45 @@ class DaytonaRuntime:
                 validated_paths = _validate_child_relative_paths(paths)
 
                 async def read() -> Mapping[str, bytes]:
-                    await _assert_no_child_symlink(_sandbox_filesystem(sandbox), child_files_path)
-                    entries = await list_files(sandbox, child_files_path, depth=None)
-                    if len(entries) > _CHILD_RESULT_MAX_ENTRIES:
-                        raise ValueError("child result directory contains too many entries")
-                    by_path: dict[str, Any] = {}
-                    for entry in entries:
-                        path = getattr(entry, "path", None)
-                        if isinstance(path, str):
+                    fs = _sandbox_filesystem(sandbox)
+                    await _assert_no_child_symlink(fs, child_files_path)
+                    # Daytona lists one level when no depth is sent, so a
+                    # root-only listing never sees nested declared files.
+                    # Look up each declared file in its own parent instead.
+                    listings: dict[str, dict[str, Any]] = {}
+
+                    async def parent_entries(parent: str) -> dict[str, Any]:
+                        cached = listings.get(parent)
+                        if cached is not None:
+                            return cached
+                        try:
+                            entries = await list_files(sandbox, parent, depth=1)
+                        except Exception as exc:
+                            if not _is_not_found(exc):
+                                raise
+                            entries = []
+                        if len(entries) > _CHILD_RESULT_MAX_ENTRIES:
+                            raise ValueError("child result directory contains too many entries")
+                        by_path: dict[str, Any] = {}
+                        for entry in entries:
+                            path = getattr(entry, "path", None)
+                            if not isinstance(path, str) or not path:
+                                name = getattr(entry, "name", None)
+                                if not isinstance(name, str) or not name:
+                                    continue
+                                path = f"{parent}/{name}"
                             by_path[path.rstrip("/")] = entry
+                        listings[parent] = by_path
+                        return by_path
+
                     output: dict[str, bytes] = {}
                     total = 0
                     for relative in validated_paths:
                         target = f"{child_files_path}/{relative}"
-                        entry = by_path.get(target)
+                        await _assert_no_child_symlink(fs, child_files_path, relative, allow_missing=True)
+                        entry = (await parent_entries(str(PurePosixPath(target).parent))).get(target)
                         if entry is None or bool(getattr(entry, "is_dir", False)):
                             raise ValueError(f"child result file is missing or not a file: {relative}")
-                        await _assert_no_child_symlink(_sandbox_filesystem(sandbox), child_files_path, relative)
                         if _file_info_is_symlink(entry):
                             raise ValueError("child result path contains an unsafe symlink")
                         declared_size = getattr(entry, "size", None)
