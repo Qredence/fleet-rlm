@@ -449,9 +449,9 @@ _MAX_CHILD_TASK_CHARS = 2_000
 _MAX_CHILD_CONTEXT_CHARS = 2_000
 _MAX_CHILD_PROGRESS_OUTCOME_CHARS = 480
 _MAX_CHILD_FAILURE_DETAIL_CHARS = 400
-# A child's evidence and gaps may cite its own scratch: redact private paths
-# there instead of discarding a valid answer. The answer and result_files
-# stay strict.
+# A child's evidence and gaps may cite its own scratch: those paths become
+# scratch-relative, and other private paths there are redacted instead of
+# discarding a valid answer. The answer and result_files stay strict.
 _CHILD_PATH_REDACTED_FIELDS = frozenset({"evidence", "gaps"})
 # Time kept back from the calling sandbox action's deadline so a recursive
 # call's (partial) result is delivered while the action is still waiting.
@@ -1588,6 +1588,7 @@ class RecursiveRLMExecutor:
         bound = deadline or self._call_deadline()
         self._ensure_call_authorized(batch_cancelled, bound)
         child_models = self._models.fork_for_child()
+        scratch_roots: list[str] = []
 
         def invocation_factory() -> CodeInterpreter:
             new_invocation = getattr(lease.interpreter, "new_invocation", None)
@@ -1614,7 +1615,9 @@ class RecursiveRLMExecutor:
                 bind_scratch = getattr(interpreter, "bind_run_scratch", None)
                 if not callable(bind_scratch):
                     raise RLMConfigError("recursive child cannot bind its private scratch")
-                bind_scratch(self._parent_run_id, call_index=call.call_index)
+                scratch_root = bind_scratch(self._parent_run_id, call_index=call.call_index)
+                if isinstance(scratch_root, str):
+                    scratch_roots.append(scratch_root)
             return interpreter
 
         invocation_factory.__dict__["execution_instructions"] = (
@@ -1700,6 +1703,7 @@ class RecursiveRLMExecutor:
             schema_version="1",
             max_output_chars=self._options.child_max_output_chars,
             path_redacted_fields=_CHILD_PATH_REDACTED_FIELDS,
+            path_relative_to=scratch_roots[-1] if scratch_roots else None,
         )
         self._ensure_call_authorized(batch_cancelled, bound)
         trajectory = normalize_prediction_trajectory(prediction)
