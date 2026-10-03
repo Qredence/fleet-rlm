@@ -34,32 +34,25 @@ const skills = Array.from({ length: 14 }, (_, index) => ({
 
 const settings = {
   revision: "a".repeat(64),
-  active_profile: "daytona",
+
   restart_required: true,
-  scopes: [
+  fields: [
     {
-      name: "defaults",
-      fields: [
-        {
-          path: "rlm.verbose",
-          group: "RLM",
-          label: "DSPy host verbose logging",
-          value: true,
-          editor: "boolean",
-          choices: [],
-          environment_overridden: false,
-          origin: "default",
-          can_reset: false,
-        },
-      ],
+      path: "rlm.verbose",
+      group: "RLM",
+      label: "DSPy host verbose logging",
+      value: true,
+      editor: "boolean",
+      choices: [],
+      environment_overridden: false,
     },
   ],
 } satisfies FleetSettingsPolicy;
 
-function defaultsField(): FleetSettingsPolicy["scopes"][number]["fields"][number] {
-  const field = settings.scopes[0]?.fields[0];
+function defaultsField(): FleetSettingsPolicy["fields"][number] {
+  const field = settings.fields[0];
   if (!field) {
-    throw new Error("expected settings.scopes[0].fields[0]");
+    throw new Error("expected settings.fields[0]");
   }
   return field;
 }
@@ -407,36 +400,26 @@ describe("PiCommandPresenter", () => {
   function editableSettings(): FleetSettingsPolicy {
     return {
       revision: "a".repeat(64),
-      active_profile: "daytona",
-      default_profile: "daytona",
+
       restart_required: true,
-      scopes: [
+      fields: [
         {
-          name: "daytona",
-          fields: [
-            {
-              path: "rlm.max_iters",
-              group: "RLM",
-              label: "Max iterations",
-              value: 4,
-              editor: "number" as const,
-              choices: [],
-              environment_overridden: false,
-              origin: "inherited",
-              can_reset: false,
-            },
-            {
-              path: "rlm.verbose",
-              group: "RLM",
-              label: "Verbose logging",
-              value: false,
-              editor: "boolean" as const,
-              choices: [],
-              environment_overridden: false,
-              origin: "inherited",
-              can_reset: false,
-            },
-          ],
+          path: "rlm.max_iters",
+          group: "RLM",
+          label: "Max iterations",
+          value: 4,
+          editor: "number" as const,
+          choices: [],
+          environment_overridden: false,
+        },
+        {
+          path: "rlm.verbose",
+          group: "RLM",
+          label: "Verbose logging",
+          value: false,
+          editor: "boolean" as const,
+          choices: [],
+          environment_overridden: false,
         },
       ],
     };
@@ -507,23 +490,17 @@ describe("PiCommandPresenter", () => {
       notify,
     );
     const settings = editableSettings();
-    const [originalScope] = settings.scopes;
-    if (!originalScope || originalScope.fields.length < 2) {
+    if (settings.fields.length < 2) {
       throw new Error("expected editable settings fields");
     }
-    const [maxItersField, verboseField] = originalScope.fields;
+    const [maxItersField, verboseField] = settings.fields;
     if (!maxItersField || !verboseField) throw new Error("expected editable settings fields");
     const refreshed = {
       ...settings,
       revision: "b".repeat(64),
-      scopes: [
-        {
-          ...originalScope,
-          fields: [
-            { ...maxItersField, value: 8 },
-            { ...verboseField, value: true },
-          ],
-        },
+      fields: [
+        { ...maxItersField, value: 8 },
+        { ...verboseField, value: true },
       ],
     };
     const save = vi.fn<SettingsSaveCallback>().mockResolvedValue(refreshed);
@@ -533,7 +510,7 @@ describe("PiCommandPresenter", () => {
     const text = () => stripAnsi(screen.render(80).join("\n"));
     expect(text()).toContain("Fleet settings");
 
-    // Open the scope, edit the number field: "4" -> "8"
+    // Open the RLM category, edit the number field: "4" -> "8"
     screen.handleInput(ENTER);
     screen.handleInput(ENTER);
     screen.handleInput("\u007f");
@@ -555,8 +532,8 @@ describe("PiCommandPresenter", () => {
     expect(save.mock.calls[0]?.[0]).toEqual({
       revision: "a".repeat(64),
       updates: [
-        { scope: "daytona", path: "rlm.max_iters", value: 8 },
-        { scope: "daytona", path: "rlm.verbose", value: true },
+        { path: "rlm.max_iters", value: 8 },
+        { path: "rlm.verbose", value: true },
       ],
     });
 
@@ -574,19 +551,12 @@ describe("PiCommandPresenter", () => {
       new ConversationStore(),
     );
     const settings = editableSettings();
-    const [originalScope] = settings.scopes;
-    if (!originalScope) throw new Error("expected editable settings scope");
-    const [maxItersField, verboseField] = originalScope.fields;
+    const [maxItersField, verboseField] = settings.fields;
     if (!maxItersField || !verboseField) throw new Error("expected editable settings fields");
     const refreshed = {
       ...settings,
       revision: "b".repeat(64),
-      scopes: [
-        {
-          ...originalScope,
-          fields: [{ ...maxItersField, value: 8 }, verboseField],
-        },
-      ],
+      fields: [{ ...maxItersField, value: 8 }, verboseField],
     };
     let resolveSave: ((policy: FleetSettingsPolicy) => void) | undefined;
     const pendingSave = new Promise<FleetSettingsPolicy>((resolve) => {
@@ -623,7 +593,7 @@ describe("PiCommandPresenter", () => {
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1]?.[0]).toEqual({
       revision: "b".repeat(64),
-      updates: [{ scope: "daytona", path: "rlm.verbose", value: true }],
+      updates: [{ path: "rlm.verbose", value: true }],
     });
 
     screen.handleInput(ESCAPE);
@@ -678,7 +648,7 @@ describe("PiCommandPresenter", () => {
     await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
     expect(save.mock.calls[0]?.[0]).toEqual({
       revision: "a".repeat(64),
-      updates: [{ scope: "daytona", path: "rlm.verbose", value: true }],
+      updates: [{ path: "rlm.verbose", value: true }],
     });
     screen.handleInput(ESCAPE);
     await expect(result).resolves.toBeNull();

@@ -26,20 +26,16 @@ export type CommandContext = {
 
 export type SettingsUpdate = {
   revision: string;
-  scope: string;
   path: string;
-  value: string | number | boolean | string[] | null;
+  value: string | number | boolean | string[];
 };
 
 export type SettingsBatchUpdate = {
   revision: string;
   updates: Array<{
-    scope: string;
     path: string;
-    value?: string | number | boolean | string[] | null;
-    unset?: boolean;
+    value: string | number | boolean | string[];
   }>;
-  defaultProfile?: string;
 };
 
 /**
@@ -69,11 +65,6 @@ export interface CommandPresenter {
     save?: SettingsSaveCallback,
   ): Promise<SettingsUpdate | null>;
   chooseTheme(themes: string[], current: string | undefined): Promise<string | null>;
-  chooseProfile(
-    profiles: string[],
-    active: string | undefined,
-    selected: string | undefined,
-  ): Promise<string | null>;
 }
 
 export type CommandHandler = (args: string[], ctx: CommandContext) => Promise<void> | void;

@@ -3,33 +3,24 @@
 ## Commands
 
 ```bash
-uv run fleet cli [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
+uv run fleet cli [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind] [-- <pi-tui args>]
 uv run fleet doctor daytona
-uv run fleet web [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind]
-uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--profile NAME] [--reload] [--allow-non-loopback-bind]
+uv run fleet web [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
+uv run fleet-rlm serve-api [--host 127.0.0.1] [--port 8000] [--reload] [--allow-non-loopback-bind]
 ```
 
 Fleet has no caller authentication. Launchers default to `127.0.0.1` and reject
 non-loopback hosts (`0.0.0.0`, LAN addresses, hostnames other than `localhost`)
 unless `--allow-non-loopback-bind` is supplied deliberately.
-Set `[config] default_profile` in `config/fleet.toml` to a Daytona profile before
-starting a backend. The TUI `/profiles` command edits that key interactively for
-the next restart. `fleet cli` accepts only profiles whose run
-environment is `daytona`; any other selection fails before database preflight,
-MLflow startup, or backend spawning. The
-launcher starts the backend in its own process group, waits up to 90 seconds for
-Daytona readiness, and runs pi-tui in the foreground. Node 22.19+, pnpm, the
-installed TUI workspace, and an unused port are required.
+Edit the single `config/fleet.toml` configuration before starting a backend.
+`fleet cli` requires `runtime.environment = "daytona"` and checks the database
+before MLflow startup or backend spawning. The launcher starts the backend in
+its own process group, waits for Daytona readiness, and runs pi-tui in the
+foreground. Node 22.19+, pnpm, the installed TUI workspace, and an unused port
+are required. `--reload` uses Uvicorn's import-string launcher with the same
+configuration file. Fleet configuration profile flags are no longer accepted.
 
-Use `--profile NAME` when a launcher must select a policy explicitly. The
-selected TOML profile is validated before provider, database, Daytona, or TUI
-process initialization; environment variables can provide only values named by
-that profile. Omitting `--profile` preserves the committed
-`config.default_profile` behavior. An explicit profile cannot be combined with
-`--reload`, because an in-memory validated settings object cannot be carried
-safely into a Uvicorn reloader process.
-
-For the shipped `daytona-recursive` policy, `fleet cli`
+With the shipped local tracing configuration, `fleet cli`
 starts the installed MLflow server on
 `127.0.0.1:5001` with one worker, SQLite metadata under
 `.fleet_rlm/mlflow/mlflow.db`, and artifacts under
@@ -118,8 +109,8 @@ uv run fleet cli -- artifact <artifact-uuid> --output ./result.bin
 Artifact mode downloads content, checks length and SHA-256, fsyncs a temporary
 file, and atomically renames it. It does not start the interactive screen.
 
-`fleet web` and `fleet-rlm serve-api` are backend-only and use the profile
-selected by `[config] default_profile`, unless `--profile NAME` is supplied.
+`fleet web` and `fleet-rlm serve-api` are backend-only and load the same
+single TOML configuration.
 The standalone
 `pnpm --dir tools/fleet-tui start -- [options]` command connects pi-tui to an
 already-running API.

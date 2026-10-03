@@ -31,7 +31,7 @@ describe("tuiUsage", () => {
   it("lists every registered slash command", () => {
     const usage = tuiUsage();
     for (const spec of listCommands()) expect(usage).toContain(spec.usage.split(" ", 1)[0]);
-    expect(usage).toContain("/profiles");
+    expect(usage).not.toContain("/profiles");
     expect(usage).toContain("/settings");
     expect(usage).toContain("/volume");
     expect(usage).toContain("/rename");
