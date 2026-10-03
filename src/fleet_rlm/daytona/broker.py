@@ -31,6 +31,11 @@ _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_OUTPUT_CHARS = 64 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
+# The sandbox starts its action clock when /execute arrives, after the host
+# sent it. Waiting a little past timeout_s lets the sandbox's own deadline
+# reply (for example a timed-out tool wait) reach the host as a recoverable
+# action error instead of the host transport timing out first.
+_EXECUTE_RESPONSE_GRACE_S = 10.0
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -249,7 +254,7 @@ class DaytonaHttpToolBroker:
                     client.post(
                         "/execute",
                         json={"code": code, "variables": dict(variables), "timeout_s": timeout_s},
-                        timeout=timeout_s,
+                        timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S,
                     )
                 )
             except BaseException as exc:

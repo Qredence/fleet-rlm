@@ -109,6 +109,62 @@ def test_execute_classifies_request_timeout_without_exposing_transport_detail(
     assert "private endpoint detail" not in str(caught.value)
 
 
+def test_execute_transport_timeout_includes_response_grace() -> None:
+    broker = DaytonaHttpToolBroker(object(), port=1)
+    client = MagicMock()
+    response = MagicMock(status_code=200)
+    response.json.return_value = {"stdout": "", "error": None}
+    client.post.return_value = response
+    broker._client = client
+    broker._url = "http://sandbox.invalid"
+    broker._poll_once = lambda: None  # type: ignore[method-assign]
+
+    broker.execute("pass", {}, timeout_s=7)
+
+    kwargs = client.post.call_args.kwargs
+    assert kwargs["timeout"] == 7 + broker_module._EXECUTE_RESPONSE_GRACE_S
+    assert kwargs["json"]["timeout_s"] == 7
+
+
+@pytest.mark.parametrize("post_expiry_delay_s", [0.0, 0.5])
+def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
+    post_expiry_delay_s: float, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The live late-delivery race, unpatched: a host tool runs past the
+    action deadline. The sandbox times its wait out and replies with the
+    tool error, the late result is dropped as benign, and execute() returns
+    that recoverable outcome instead of a transport timeout."""
+    with _start_embedded_server() as (base_url, headers):
+        port = int(base_url.rsplit(":", 1)[1])
+
+        def answer() -> dict[str, bool]:
+            time.sleep(3)
+            return {"ok": True}
+
+        broker = DaytonaHttpToolBroker(object(), port=port)
+        broker._secret = headers["X-Broker-Secret"]
+        broker.bind_tools({"answer": answer})
+        broker._url = base_url
+        source = broker.setup_source(
+            "import time as _t\n"
+            "try:\n"
+            "    print(answer())\n"
+            "except Exception:\n"
+            f"    _t.sleep({post_expiry_delay_s})\n"
+            "    raise\n"
+        )
+        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+            broker._client = client
+            started = time.monotonic()
+            result = broker.execute(source, {}, timeout_s=2)
+            elapsed = time.monotonic() - started
+
+    assert result["error_category"] == "HTTPError"
+    assert broker._delivery_error is None
+    assert "category=duplicate_call" in caplog.text
+    assert elapsed < 2 + broker_module._EXECUTE_RESPONSE_GRACE_S
+
+
 def test_tool_call_uses_execution_deadline(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
