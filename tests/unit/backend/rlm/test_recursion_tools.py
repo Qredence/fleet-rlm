@@ -997,6 +997,69 @@ def test_recursive_tool_discards_result_when_authority_is_revoked_after_executio
     assert "failure_category=unauthorized" in failed[0].message
 
 
+def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A child still running when its call deadline passes is refused at its
+    next action instead of running its whole loop, so quarantined stragglers
+    settle promptly."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    actions: list[int] = []
+
+    class LoopingChild:
+        def __init__(self, interpreter_factory: Callable[[], DaytonaCodeInterpreter]) -> None:
+            self._interpreter_factory = interpreter_factory
+
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            interpreter = self._interpreter_factory()
+            try:
+                for index in range(1000):
+                    # Distinct code each pass so the no-progress guard stays out of the way.
+                    interpreter.execute(f"value = {index}")
+                    actions.append(index)
+                    time.sleep(0.02)
+            finally:
+                interpreter.shutdown()
+            return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def build(**kwargs: object) -> LoopingChild:
+        return LoopingChild(kwargs["interpreter_factory"])  # type: ignore[arg-type]
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=lambda _paths: {},
+        )
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    adapter = dspy.JSONAdapter()
+    executor = RecursiveRLMExecutor(
+        models=RLMModelBundle(
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+            dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter),
+        ),
+        options=RecursiveRLMOptions(max_calls=1, max_parallel_children=1),
+        child_runtime_factory=factory,
+        deadline=time.monotonic() + 0.5,
+    )
+
+    started = time.monotonic()
+    with pytest.raises(TimeoutError, match="batch deadline exceeded"):
+        executor.batched_tool(tasks=[{"task": "loop"}])
+    executor.wait_owned()
+
+    # Without the per-action refusal the loop runs for about 20 s.
+    assert time.monotonic() - started < 5
+    assert 0 < len(actions) < 200
+    assert executor.summary().recursive_children_failed == 1
+
+
 def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

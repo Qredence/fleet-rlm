@@ -387,6 +387,47 @@ def test_new_invocation_rejects_non_positive_timeout_override() -> None:
     assert caught.value.cause_type == "InterpreterConfigurationError"
 
 
+def test_new_invocation_deadline_clamps_each_action_timeout() -> None:
+    import time
+
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
+
+    retained = DaytonaCodeInterpreter(
+        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
+    )
+
+    near = retained.new_invocation(deadline_monotonic=time.monotonic() + 30)
+    assert 28 <= near._backend._action_timeout() <= 30
+    far = retained.new_invocation(deadline_monotonic=time.monotonic() + 10_000)
+    assert far._backend._action_timeout() == 300
+    past = retained.new_invocation(deadline_monotonic=time.monotonic() - 5)
+    assert past._backend._action_timeout() == 1
+    assert retained._backend._action_timeout() == 300
+    with pytest.raises(DaytonaAdapterError, match="deadline must be finite"):
+        retained.new_invocation(deadline_monotonic=float("nan"))
+
+
+def test_new_invocation_admission_refuses_the_next_action() -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+
+    refused = {"now": False}
+
+    def admission() -> None:
+        if refused["now"]:
+            raise TimeoutError("recursive child deadline exceeded")
+
+    child = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()).new_invocation(admission=admission)
+    child.execute("value = 1")
+    refused["now"] = True
+    # The refusal reaches the caller unchanged and the refused code never runs.
+    with pytest.raises(TimeoutError, match="deadline exceeded"):
+        child.execute("value = 2")
+    refused["now"] = False
+    assert child.execute("print(value)") == "1\n"
+    child.shutdown()
+
+
 def test_async_host_tool_without_bridge_fails_without_creating_loop() -> None:
     from dspy.primitives.code_interpreter import CodeInterpreterError
 

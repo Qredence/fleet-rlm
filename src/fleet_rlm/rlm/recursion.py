@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import inspect
 import json
 import time
@@ -862,6 +863,19 @@ def _bounded_cause_type(value: object) -> str | None:
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class _CallDeadline:
+    """The monotonic time by which one recursive call's child work must stop."""
+
+    at: float
+
+    def expired(self) -> bool:
+        return time.monotonic() >= self.at
+
+    def error(self) -> TimeoutError:
+        return TimeoutError("recursive child deadline exceeded")
+
+
 # Exceptions that keep their own meaning when they cross a child result step.
 _CHILD_RESULT_CONTROL_ERRORS: tuple[type[BaseException], ...] = (
     ChildRuntimeAuthorizationError,
@@ -1293,10 +1307,20 @@ class RecursiveRLMExecutor:
         if time.monotonic() >= self._deadline:
             raise TimeoutError("recursive child deadline exceeded")
 
-    def _ensure_call_authorized(self, batch_cancelled: Event | None) -> None:
+    def _call_deadline(self) -> _CallDeadline:
+        return _CallDeadline(self._deadline)
+
+    def _ensure_call_authorized(self, batch_cancelled: Event | None, deadline: _CallDeadline | None = None) -> None:
+        # Revoked authority wins, then the call deadline, so a child stopped by
+        # its deadline reports a timeout rather than a cancelled batch.
+        if self._is_authorized is not None and not self._is_authorized():
+            raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
+        if deadline is not None and deadline.expired():
+            raise deadline.error()
         if batch_cancelled is not None and batch_cancelled.is_set():
             raise ChildRuntimeAuthorizationError("recursive child batch is no longer authorized")
-        self._ensure_authorized()
+        if time.monotonic() >= self._deadline:
+            raise TimeoutError("recursive child deadline exceeded")
 
     def _ensure_no_pending_batch_workers(self) -> None:
         with self._state.lock:
@@ -1462,25 +1486,28 @@ class RecursiveRLMExecutor:
         source_manifest: list[dict[str, str]],
         source_manifest_sha256: str,
         batch_cancelled: Event | None = None,
+        deadline: _CallDeadline | None = None,
     ) -> tuple[ChildOutcome, dict[str, object], str | None, str | None]:
-        self._ensure_call_authorized(batch_cancelled)
-        if time.monotonic() >= self._deadline:
-            raise TimeoutError("recursive child deadline exceeded")
+        bound = deadline or self._call_deadline()
+        self._ensure_call_authorized(batch_cancelled, bound)
         child_models = self._models.fork_for_child()
 
         def invocation_factory() -> CodeInterpreter:
             new_invocation = getattr(lease.interpreter, "new_invocation", None)
             if not callable(new_invocation):
                 raise RLMConfigError("recursive child requires an invocation-scoped interpreter factory")
+            accepted = inspect.signature(new_invocation).parameters
+            invocation_kwargs: dict[str, Any] = {"turn_budget": child_models.budget, "turn_request": None}
             child_timeout = self._options.child_execution_timeout_s
-            if child_timeout is not None and "timeout_s" in inspect.signature(new_invocation).parameters:
-                interpreter = new_invocation(
-                    turn_budget=child_models.budget,
-                    turn_request=None,
-                    timeout_s=child_timeout,
-                )
-            else:
-                interpreter = new_invocation(turn_budget=child_models.budget, turn_request=None)
+            if child_timeout is not None and "timeout_s" in accepted:
+                invocation_kwargs["timeout_s"] = child_timeout
+            # Every child action must end by the call deadline, and the next
+            # action is refused once it passes or the batch is cancelled.
+            if "deadline_monotonic" in accepted:
+                invocation_kwargs["deadline_monotonic"] = bound.at
+            if "admission" in accepted:
+                invocation_kwargs["admission"] = functools.partial(self._ensure_call_authorized, batch_cancelled, bound)
+            interpreter = new_invocation(**invocation_kwargs)
             bind_output_contract(
                 interpreter,
                 RecursiveSubtaskSignature,
@@ -1521,7 +1548,7 @@ class RecursiveRLMExecutor:
             interpreter_factory=invocation_factory,
             verbose=False,
         )
-        self._ensure_call_authorized(batch_cancelled)
+        self._ensure_call_authorized(batch_cancelled, bound)
         with dspy.context(
             lm=child_models.root_lm,
             adapter=FleetJSONAdapter(budget=child_models.budget),
@@ -1577,7 +1604,7 @@ class RecursiveRLMExecutor:
             max_output_chars=self._options.child_max_output_chars,
             path_redacted_fields=_CHILD_PATH_REDACTED_FIELDS,
         )
-        self._ensure_call_authorized(batch_cancelled)
+        self._ensure_call_authorized(batch_cancelled, bound)
         trajectory = normalize_prediction_trajectory(prediction)
         child_iterations = len(trajectory)
         latest_step = trajectory[-1] if trajectory else None
@@ -1665,7 +1692,7 @@ class RecursiveRLMExecutor:
             persist_started_at = time.monotonic()
             try:
                 for path in paths:
-                    self._ensure_call_authorized(batch_cancelled)
+                    self._ensure_call_authorized(batch_cancelled, bound)
                     try:
                         references.append(self._result_writer(call.call_index, path, files[path]))
                     except _CHILD_RESULT_CONTROL_ERRORS:
@@ -1849,9 +1876,11 @@ class RecursiveRLMExecutor:
         staged_files: Mapping[str, bytes],
         source_manifest: list[dict[str, str]],
         source_manifest_sha256: str,
+        deadline: _CallDeadline | None = None,
     ) -> ChildOutcome:
-        if time.monotonic() >= self._deadline:
-            raise TimeoutError("recursive child deadline exceeded")
+        bound = deadline or self._call_deadline()
+        if bound.expired():
+            raise bound.error()
         call = self._start_call(reservation)
         lease: ChildRuntimeLease | None = None
         failed = False
@@ -1868,7 +1897,7 @@ class RecursiveRLMExecutor:
         child_started = False
         child_budget_reserved = False
         try:
-            self._ensure_call_authorized(batch_cancelled)
+            self._ensure_call_authorized(batch_cancelled, bound)
             skills = self._loaded_skills()
             if len(skills) > 4 or any(not isinstance(skill, SkillDefinition) for skill in skills):
                 raise RLMConfigError("loaded child Skill snapshot is invalid")
@@ -1967,7 +1996,7 @@ class RecursiveRLMExecutor:
                     },
                 )
             self._metrics.record_delegated_input_bytes(sum(len(data) for data in child_files.values()))
-            self._ensure_call_authorized(batch_cancelled)
+            self._ensure_call_authorized(batch_cancelled, bound)
             outcome, completion_outputs, child_code_excerpt, child_output_excerpt = self._run_native_child(
                 request,
                 call,
@@ -1977,6 +2006,7 @@ class RecursiveRLMExecutor:
                 source_manifest,
                 source_manifest_sha256,
                 batch_cancelled,
+                bound,
             )
             child_answer = outcome.answer
             child_evidence = outcome.evidence

@@ -275,6 +275,10 @@ def test_invocation_factory_scopes_the_child_action_deadline_from_options() -> N
     assert executor.tool(task="bounded child", inputs=[])["answer"] == "child-ok"
     assert spy.invocation_kwargs
     assert all(kwargs.get("timeout_s") == 45 for kwargs in spy.invocation_kwargs)
+    # Each child invocation is bound to its call deadline and re-checks
+    # authority, the deadline and batch cancellation before every action.
+    assert all(isinstance(kwargs.get("deadline_monotonic"), float) for kwargs in spy.invocation_kwargs)
+    assert all(callable(kwargs.get("admission")) for kwargs in spy.invocation_kwargs)
 
     inherited = _SpyInvocationFactory()
     executor = _executor(root_actions, inherited, options=RecursiveRLMOptions())
