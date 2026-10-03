@@ -122,11 +122,9 @@ async def test_root_completion_drains_action_deadline_stragglers(monkeypatch: py
     is accepted only after that straggler settles and its lease closes."""
     import json
 
-    import fleet_rlm.rlm.recursion as recursive_calls
-
-    monkeypatch.setattr(recursive_calls, "_ACTION_RESULT_MARGIN_S", 1.0)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion._ACTION_RESULT_MARGIN_S", 1.0)
     # The deadline is read once at tool entry: give the calling action 2 s from then.
-    monkeypatch.setattr(recursive_calls, "current_host_action_deadline", lambda: time.monotonic() + 2.0)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.current_host_action_deadline", lambda: time.monotonic() + 2.0)
     straggler_settled = threading.Event()
 
     class Child:
@@ -148,8 +146,10 @@ async def test_root_completion_drains_action_deadline_stragglers(monkeypatch: py
                 straggler_settled.set()
             return dspy.Prediction(answer="never", evidence=[], gaps=[], result_files=[], trajectory=[])
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **kwargs: Child(kwargs["interpreter_factory"]))
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _program: True)
+    monkeypatch.setattr(
+        "fleet_rlm.rlm.recursion.build_native_rlm", lambda **kwargs: Child(kwargs["interpreter_factory"])
+    )
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _program: True)
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [

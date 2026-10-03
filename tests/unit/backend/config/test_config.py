@@ -12,6 +12,7 @@ from pydantic import SecretStr, ValidationError
 from fleet_rlm.config.loader import (
     active_profile_contract,
     load_profile_environment_contracts,
+    load_runtime_settings,
 )
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 
@@ -513,8 +514,6 @@ def test_child_execution_timeout_must_not_exceed_the_parent_deadline() -> None:
 def test_child_execution_timeout_resolves_from_the_committed_toml(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import fleet_rlm.config.loader as config
-
     policy = tmp_path / "fleet.toml"
     _policy(policy)
     policy.write_text(
@@ -524,9 +523,9 @@ def test_child_execution_timeout_resolves_from_the_committed_toml(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+    monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
 
-    settings = config.load_runtime_settings()
+    settings = load_runtime_settings()
     assert settings.rlm_child_execution_timeout_s == 45
 
 

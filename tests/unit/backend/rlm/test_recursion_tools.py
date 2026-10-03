@@ -18,6 +18,7 @@ import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
+from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
 from fleet_rlm.rlm.events import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.execution import materialize_child_inputs
@@ -299,9 +300,7 @@ def test_child_progress_outcome_is_bounded_and_has_an_explicit_fallback() -> Non
 
 
 def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.recursion as recursive_calls
-
-    real_start_turn_span = recursive_calls.start_turn_span
+    real_start_turn_span = start_turn_span
     captured: dict[str, list[object]] = {}
 
     def capture_span(name: str, **kwargs: object):
@@ -316,9 +315,9 @@ def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.M
     def build(**kwargs: object) -> Child:  # noqa: ARG001
         return Child()
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
-    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
 
     result = executor.tool(task="rich child", inputs=[])
@@ -336,8 +335,6 @@ def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.M
 def test_child_citing_its_absolute_scratch_in_evidence_completes_with_redacted_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import fleet_rlm.rlm.recursion as recursive_calls
-
     scratch = "/tmp/fleet/child-data/7a1b/1"
 
     class Child:
@@ -350,8 +347,8 @@ def test_child_citing_its_absolute_scratch_in_evidence_completes_with_redacted_p
                 trajectory=[],
             )
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
 
     result = executor.tool(task="slice one", inputs=[])
@@ -365,9 +362,7 @@ def test_child_citing_its_absolute_scratch_in_evidence_completes_with_redacted_p
 
 
 def test_child_call_span_records_failure_category_and_detail(monkeypatch: pytest.MonkeyPatch) -> None:
-    import fleet_rlm.rlm.recursion as recursive_calls
-
-    real_start_turn_span = recursive_calls.start_turn_span
+    real_start_turn_span = start_turn_span
     captured: dict[str, list[object]] = {}
 
     def capture_span(name: str, **kwargs: object):
@@ -382,9 +377,9 @@ def test_child_call_span_records_failure_category_and_detail(monkeypatch: pytest
     def build(**kwargs: object) -> Child:  # noqa: ARG001
         return Child()
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
-    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
     executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
 
     outcomes = executor.batched_tool(tasks=[{"task": "fail"}])
@@ -407,9 +402,7 @@ def test_child_failure_categories_distinguish_harvest_and_declared_output(
     """A missing declared result file and a rejected declared output reach
     the parent, the call span and the metrics as distinct categories rather
     than one generic child failure."""
-    import fleet_rlm.rlm.recursion as recursive_calls
-
-    real_start_turn_span = recursive_calls.start_turn_span
+    real_start_turn_span = start_turn_span
     call_spans: list[object] = []
 
     def capture_span(name: str, **kwargs: object):
@@ -442,9 +435,9 @@ def test_child_failure_categories_distinguish_harvest_and_declared_output(
             _read_result_files=missing_results,
         )
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
-    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.start_turn_span", capture_span)
     executor = _executor(
         [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
         options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
@@ -1001,8 +994,6 @@ def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest
     """A child still running when its call deadline passes is refused at its
     next action instead of running its whole loop, so quarantined stragglers
     settle promptly."""
-    import fleet_rlm.rlm.recursion as recursive_calls
-
     actions: list[int] = []
 
     class LoopingChild:
@@ -1036,8 +1027,8 @@ def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest
             _read_result_files=lambda _paths: {},
         )
 
-    monkeypatch.setattr(recursive_calls, "build_native_rlm", build)
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
     adapter = dspy.JSONAdapter()
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(
@@ -1097,16 +1088,13 @@ def _action_bound_executor(
     call_indexes: list[int] | None = None,
     events: list[object] | None = None,
 ) -> RecursiveRLMExecutor:
-    import fleet_rlm.rlm.recursion as recursive_calls
-
     # A one-second margin keeps action deadlines test-sized with slack to spare.
-    monkeypatch.setattr(recursive_calls, "_ACTION_RESULT_MARGIN_S", 1.0)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion._ACTION_RESULT_MARGIN_S", 1.0)
     monkeypatch.setattr(
-        recursive_calls,
-        "build_native_rlm",
+        "fleet_rlm.rlm.recursion.build_native_rlm",
         lambda **kwargs: _ActingChild(kwargs["interpreter_factory"], actions, 0.0),  # type: ignore[arg-type]
     )
-    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
         if call_indexes is not None:
