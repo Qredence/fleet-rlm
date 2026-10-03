@@ -7,7 +7,7 @@ from pathlib import PurePosixPath
 from typing import Annotated, Any, NoReturn
 from uuid import UUID
 
-from fastapi import APIRouter, File, Query, Response, UploadFile
+from fastapi import APIRouter, File, Header, Query, Response, UploadFile
 
 from fleet_rlm.api.dependencies import (
     ArtifactReaderDep,
@@ -350,20 +350,50 @@ def _to_artifact_response(ref: ArtifactRef) -> ArtifactResponse:
     )
 
 
+def _artifact_etag(ref: ArtifactRef) -> str:
+    return f'"{ref.checksum_sha256}"'
+
+
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    if if_none_match is None:
+        return False
+    candidates = [value.strip() for value in if_none_match.split(",")]
+    return any(value == "*" or value.removeprefix("W/") == etag for value in candidates)
+
+
+def _not_modified(etag: str) -> Response:
+    return Response(status_code=304, headers={"ETag": etag})
+
+
+_ETAG_HEADER: dict[str, Any] = {
+    "description": 'SHA-256 of the artifact bytes, quoted (e.g. "hex")',
+    "schema": {"type": "string"},
+}
+_NOT_MODIFIED_RESPONSE: dict[str, Any] = {
+    "description": "Artifact matches If-None-Match",
+    "headers": {"ETag": _ETAG_HEADER},
+}
+_IfNoneMatch = Annotated[str | None, Header(alias="If-None-Match")]
+
+
 @artifacts_router.get(
     "/{artifact_id}",
     response_model=ArtifactResponse,
     operation_id="get_artifact",
     responses={
+        200: {"headers": {"ETag": _ETAG_HEADER}},
+        304: _NOT_MODIFIED_RESPONSE,
         404: {"description": "Artifact not found"},
         503: {"description": "Artifact storage is unavailable"},
     },
 )
 async def get_artifact(
     artifact_id: UUID,
+    response: Response,
     identity: LocalScopeDep,
     reader: ArtifactReaderDep,
-) -> ArtifactResponse:
+    if_none_match: _IfNoneMatch = None,
+) -> ArtifactResponse | Response:
     try:
         ref = await reader.metadata(
             ArtifactAccess(identity.user_id, identity.workspace_id),
@@ -373,6 +403,10 @@ async def get_artifact(
         raise http_error(404, "artifact_not_found", "Artifact not found") from exc
     except Exception as exc:
         raise http_error(503, "artifact_unavailable", "Artifact storage is unavailable") from exc
+    etag = _artifact_etag(ref)
+    if _etag_matches(if_none_match, etag):
+        return _not_modified(etag)
+    response.headers["ETag"] = etag
     return _to_artifact_response(ref)
 
 
@@ -385,14 +419,12 @@ async def get_artifact(
             "description": "Artifact bytes with integrity headers",
             "headers": {
                 "Content-Disposition": {"schema": {"type": "string"}},
-                "ETag": {
-                    "description": 'SHA-256 of the artifact bytes, quoted (e.g. "hex")',
-                    "schema": {"type": "string"},
-                },
+                "ETag": _ETAG_HEADER,
                 "Content-Length": {"schema": {"type": "integer"}},
                 "X-Content-Type-Options": {"schema": {"type": "string"}},
             },
         },
+        304: _NOT_MODIFIED_RESPONSE,
         404: {"description": "Artifact not found"},
         503: {"description": "Artifact storage is unavailable"},
     },
@@ -401,6 +433,7 @@ async def download_artifact(
     artifact_id: UUID,
     identity: LocalScopeDep,
     reader: ArtifactReaderDep,
+    if_none_match: _IfNoneMatch = None,
 ) -> Response:
     try:
         content = await reader.content(
@@ -414,6 +447,9 @@ async def download_artifact(
     except Exception as exc:
         raise http_error(503, "artifact_unavailable", "Artifact storage is unavailable") from exc
 
+    etag = _artifact_etag(ref)
+    if _etag_matches(if_none_match, etag):
+        return _not_modified(etag)
     extension = {"text": ".txt", "markdown": ".md", "json": ".json"}[ref.kind]
     stem = _SAFE_FILENAME.sub("-", ref.title or "artifact").strip(".-") or "artifact"
     filename = f"{stem}{extension}"
@@ -431,7 +467,7 @@ async def download_artifact(
         media_type=ref.media_type,
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
-            "ETag": f'"{ref.checksum_sha256}"',
+            "ETag": etag,
             "X-Content-Type-Options": "nosniff",
         },
     )
