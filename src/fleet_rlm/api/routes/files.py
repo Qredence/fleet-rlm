@@ -369,6 +369,10 @@ _ETAG_HEADER: dict[str, Any] = {
     "description": 'SHA-256 of the artifact bytes, quoted (e.g. "hex")',
     "schema": {"type": "string"},
 }
+_NOT_MODIFIED_RESPONSE: dict[str, Any] = {
+    "description": "Artifact matches If-None-Match",
+    "headers": {"ETag": _ETAG_HEADER},
+}
 _IfNoneMatch = Annotated[str | None, Header(alias="If-None-Match")]
 
 
@@ -378,10 +382,7 @@ _IfNoneMatch = Annotated[str | None, Header(alias="If-None-Match")]
     operation_id="get_artifact",
     responses={
         200: {"headers": {"ETag": _ETAG_HEADER}},
-        304: {
-            "description": "Artifact matches If-None-Match",
-            "headers": {"ETag": _ETAG_HEADER},
-        },
+        304: _NOT_MODIFIED_RESPONSE,
         404: {"description": "Artifact not found"},
         503: {"description": "Artifact storage is unavailable"},
     },
@@ -423,10 +424,7 @@ async def get_artifact(
                 "X-Content-Type-Options": {"schema": {"type": "string"}},
             },
         },
-        304: {
-            "description": "Artifact matches If-None-Match",
-            "headers": {"ETag": _ETAG_HEADER},
-        },
+        304: _NOT_MODIFIED_RESPONSE,
         404: {"description": "Artifact not found"},
         503: {"description": "Artifact storage is unavailable"},
     },
