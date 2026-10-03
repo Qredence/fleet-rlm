@@ -79,13 +79,84 @@ starting this runbook.
    ```
 
    Verify trace retrieval from a fresh MLflow client process using a known
-   trace ID, and confirm the existing artifact location is unchanged. Check
-   both the execution and preparation traces when phase links are enabled.
+   trace ID (see [Inspect a trace from a script](#inspect-a-trace-from-a-script)),
+   and confirm the existing artifact location is unchanged. Check both the
+   execution and preparation traces when phase links are enabled.
 5. If rollback is required, stop Fleet and all MLflow writers again. Preserve
    the upgraded database as an investigation copy, restore the verified
    pre-upgrade database, and restart with the previous lock and dependency
    environment. Do not discard the upgraded copy until the investigation is
    complete.
+
+### Inspect a trace from a script
+
+Use this recipe to print the span tree of one Turn. Get the trace ID from
+`/trace` in the TUI or from the MLflow UI.
+
+The supervised server can keep span data behind `mlflow-artifacts:` URIs.
+MLflow resolves these URIs with the global tracking URI, not with the `tracking_uri`
+argument of `MlflowClient`. Thus `MlflowClient(tracking_uri=...)` alone can
+fail with "the tracking URI must be a valid http or https URI". Set the global
+tracking URI before you fetch the trace:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5001
+uv run python - "$TRACE_ID" <<'EOF'
+import sys
+
+import mlflow
+
+trace = mlflow.get_trace(sys.argv[1])
+children = {}
+for span in trace.data.spans:
+    children.setdefault(span.parent_id, []).append(span)
+
+
+def show(parent_id, depth=0):
+    for span in sorted(children.get(parent_id, []), key=lambda s: s.start_time_ns):
+        print(f"{'  ' * depth}{span.name} [{span.status.status_code.value}]")
+        show(span.span_id, depth + 1)
+
+
+show(None)
+EOF
+```
+
+When the server is stopped, read the store directly. Open the database in
+read-only mode so that the script cannot change the store. Run this from the
+repository root:
+
+```bash
+uv run python - "$TRACE_ID" <<'EOF'
+import sqlite3
+import sys
+
+db = sqlite3.connect("file:.fleet_rlm/mlflow/mlflow.db?mode=ro", uri=True)
+rows = db.execute(
+    "SELECT span_id, parent_span_id, name, status FROM spans "
+    "WHERE trace_id = ? ORDER BY start_time_unix_nano",
+    (sys.argv[1],),
+).fetchall()
+children = {}
+for span_id, parent_id, name, status in rows:
+    children.setdefault(parent_id, []).append((span_id, name, status))
+
+
+def show(parent_id, depth=0):
+    for span_id, name, status in children.get(parent_id, []):
+        print(f"{'  ' * depth}{name} [{status}]")
+        show(span_id, depth + 1)
+
+
+show(None)
+EOF
+```
+
+The `spans` table holds only traces that MLflow tagged with
+`mlflow.trace.spansLocation=TRACKING_STORE`. For other traces, the span data is
+in `.fleet_rlm/mlflow/artifacts/<experiment_id>/traces/<trace_id>/artifacts/traces.json`.
+The `content` column of each `spans` row holds the full span JSON, which
+includes attributes and events.
 
 ### Recommended Trace V4 view
 
