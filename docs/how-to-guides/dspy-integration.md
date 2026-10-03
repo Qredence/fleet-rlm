@@ -20,6 +20,14 @@ separate validation gates.
   Turn. Each later Turn starts a fresh broker namespace, even when it reuses
   the healthy Root Sandbox. Session Workspace files under `/workspace` remain
   durable across Turns and Sandbox replacement.
+- The broker runs each action in a worker process and stops an action that
+  runs past its execution timeout. Before each action, the worker keeps a
+  paused copy of itself. After a stop, that copy becomes the worker, so
+  variables, imports, and functions are as they were before the stopped
+  action. Files and other side effects of the stopped action remain, and its
+  output is not available. The model receives a recoverable `ActionTimeout`
+  execution error and can retry with smaller steps. An action that ends the
+  worker process receives `ActionWorkerExit` in the same way.
 - Every Turn receives the complete committed `dspy.History` for its claimed
   Session checkpoint. It contains only canonical `{"request": ..., "answer": ...}`
   records; hidden reasoning, Tool output, and failed Turns are excluded.
