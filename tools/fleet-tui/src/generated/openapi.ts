@@ -1983,7 +1983,9 @@ export interface operations {
     get_artifact: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
             path: {
                 artifact_id: string;
             };
@@ -1994,11 +1996,22 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description SHA-256 of the artifact bytes, quoted (e.g. "hex") */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactResponse"];
                 };
+            };
+            /** @description Artifact matches If-None-Match */
+            304: {
+                headers: {
+                    /** @description SHA-256 of the artifact bytes, quoted (e.g. "hex") */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Artifact not found */
             404: {
@@ -2032,7 +2045,9 @@ export interface operations {
     download_artifact: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
             path: {
                 artifact_id: string;
             };
@@ -2048,6 +2063,15 @@ export interface operations {
                     ETag?: string;
                     "Content-Length"?: number;
                     "X-Content-Type-Options"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Artifact matches If-None-Match */
+            304: {
+                headers: {
+                    /** @description SHA-256 of the artifact bytes, quoted (e.g. "hex") */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
