@@ -1546,6 +1546,14 @@ def _convert_to_volume_files(raw_entries: Any, *, max_files: int | None = None) 
     return tuple(results)
 
 
+def _is_sdk_file_not_found(exc: BaseException) -> bool:
+    # The Volume FS exposes the SDK's typed file-absence error. A generic 404
+    # can also mean a missing Sandbox or provider route, and must remain
+    # visible to the lifecycle owner.
+    exc_type = type(exc)
+    return exc_type.__module__ == "daytona.common.errors" and exc_type.__name__ == "DaytonaFileNotFoundError"
+
+
 class AsyncDaytonaVolumeFS:
     """Async adapter forwarding volume storage calls to sandbox.fs."""
 
@@ -1567,16 +1575,16 @@ class AsyncDaytonaVolumeFS:
         if not callable(list_fn):
             return ()
         try:
-            res = list_fn(logical_root, depth=max_depth)
-        except TypeError:
             try:
+                res = list_fn(logical_root, depth=max_depth)
+            except TypeError:
                 res = list_fn(logical_root)
-            except Exception:
-                return ()
-        except Exception:
-            return ()
-        if inspect.isawaitable(res):
-            res = await res
+            if inspect.isawaitable(res):
+                res = await res
+        except Exception as exc:
+            if _is_sdk_file_not_found(exc):
+                raise FileNotFoundError(logical_root) from exc
+            raise
         return _convert_to_volume_files(res, max_files=max_files)
 
     async def read_bytes(self, logical_path: str, *, max_bytes: int | None = None) -> bytes:
@@ -1590,11 +1598,7 @@ class AsyncDaytonaVolumeFS:
             if inspect.isawaitable(res):
                 res = await res
         except Exception as exc:
-            # The Volume FS exposes the SDK's typed file-absence error here.
-            # A generic 404 can also mean a missing Sandbox or provider route,
-            # and must remain visible to the lifecycle owner.
-            exc_type = type(exc)
-            if exc_type.__module__ == "daytona.common.errors" and exc_type.__name__ == "DaytonaFileNotFoundError":
+            if _is_sdk_file_not_found(exc):
                 raise FileNotFoundError(logical_path) from exc
             raise
         if isinstance(res, str):

@@ -148,7 +148,7 @@ _DECLARED_ERRORS: tuple[tuple[str, str, frozenset[int]], ...] = (
     ("/api/settings", "patch", frozenset({409, 422, 503})),
     ("/api/skills", "get", frozenset({503})),
     ("/api/skills/{skill_id}", "get", frozenset({404, 503})),
-    ("/api/volume/tree", "get", frozenset({400, 503})),
+    ("/api/volume/tree", "get", frozenset({400, 503, 504})),
     ("/health/ready", "get", frozenset({503})),
 )
 
