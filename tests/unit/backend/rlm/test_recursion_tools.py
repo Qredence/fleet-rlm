@@ -955,32 +955,32 @@ def test_recursive_tool_closes_lease_when_authority_is_revoked_after_acquisition
     assert "cleanup_status=completed" in failed[0].message
 
 
-def test_recursive_tool_discards_result_when_authority_is_revoked_after_execution() -> None:
-    checks = 0
+def test_recursive_tool_discards_result_when_authority_is_revoked_after_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child that finishes after its Turn loses authority must not deliver its result."""
+    revoked = threading.Event()
     created: list[DaytonaCodeInterpreter] = []
     events: list[object] = []
 
-    def is_authorized() -> bool:
-        """
-        Determines whether authorization remains valid for the next check.
+    class RevokingChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
+            revoked.set()
+            return dspy.Prediction(answer="child-secret", evidence=[], gaps=[], result_files=[], trajectory=[])
 
-        Returns:
-                bool: `True` for the first six checks and `False` thereafter.
-        """
-        nonlocal checks
-        checks += 1
-        return checks < 7
-
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: RevokingChild())
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
     executor = _executor(
-        [{"reasoning": "submit", "code": "SUBMIT(answer='child-secret', evidence=[], gaps=[], result_files=[])"}],
+        [],
         factory_calls=created,
         observer=events.append,
-        is_authorized=is_authorized,
+        is_authorized=lambda: not revoked.is_set(),
     )
 
     with pytest.raises(RuntimeError, match="no longer authorized"):
         executor.tool(task="revoked after execution", inputs=[])
 
+    assert revoked.is_set()
     assert len(created) == 1
     assert created[0]._shutdown
     assert "child-secret" not in repr(events)
