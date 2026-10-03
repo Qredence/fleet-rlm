@@ -332,30 +332,38 @@ def test_child_harvest_and_call_spans_carry_answer_content(monkeypatch: pytest.M
     executor.wait_owned()
 
 
-def test_child_citing_its_absolute_scratch_in_evidence_completes_with_redacted_paths(
+def test_child_citing_its_absolute_scratch_in_evidence_completes_with_relative_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    scratch = "/tmp/fleet/child-data/7a1b/1"
+    parent_run_id = str(uuid4())
+    scratch = f"/tmp/fleet/child-data/{parent_run_id}/1"
 
     class Child:
         def __call__(self, *, prompt: str) -> dspy.Prediction:  # noqa: ARG002
             return dspy.Prediction(
                 answer='{"row_count": 39238}',
-                evidence=[f"Read {scratch}/slices/part-01.csv (sha256 8f5f1e64)."],
+                evidence=[
+                    f"Read {scratch}/slices/part-01.csv (sha256 8f5f1e64).",
+                    "Skipped /tmp/fleet/other/part-02.csv.",
+                ],
                 gaps=[f"FLEET_RUN_SCRATCH resolved to {scratch}."],
                 result_files=[],
                 trajectory=[],
             )
 
-    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", lambda **_kwargs: Child())
+    def build(**kwargs: object) -> Child:
+        kwargs["interpreter_factory"]()  # type: ignore[operator]
+        return Child()
+
+    monkeypatch.setattr("fleet_rlm.rlm.recursion.build_native_rlm", build)
     monkeypatch.setattr("fleet_rlm.rlm.recursion.is_native_rlm", lambda _child: True)
-    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}])
+    executor = _executor([{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}], parent_run_id=parent_run_id)
 
     result = executor.tool(task="slice one", inputs=[])
 
     assert result["status"] == "completed"
     assert result["answer"] == '{"row_count": 39238}'
-    assert list(result["evidence"]) == ["Read [path] (sha256 8f5f1e64)."]
+    assert list(result["evidence"]) == ["Read slices/part-01.csv (sha256 8f5f1e64).", "Skipped [path]."]
     assert list(result["gaps"]) == ["FLEET_RUN_SCRATCH resolved to [path]."]
     assert scratch not in repr(result)
     executor.wait_owned()

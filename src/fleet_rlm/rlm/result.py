@@ -413,19 +413,30 @@ def _is_allowlisted_declared_path(path: str) -> bool:
     return path == "/home/daytona/fleet" or path.startswith("/home/daytona/fleet/")
 
 
-def redact_declared_private_paths(text: str) -> str:
+def _path_relative_to(path: str, root: str | None) -> str | None:
+    if not root or not path.startswith(root + "/"):
+        return None
+    relative = path[len(root) + 1 :]
+    if not relative or ".." in relative.split("/"):
+        return None
+    return relative
+
+
+def redact_declared_private_paths(text: str, *, relative_to: str | None = None) -> str:
     """Replace private host paths the declared-output rules reject with ``[path]``.
 
     Trailing punctuation the rule ignores and the allowlisted Volume mount
-    are kept, so redaction changes nothing else in the text.
+    are kept, so redaction changes nothing else in the text. A path below
+    ``relative_to`` becomes its path relative to that root instead.
     """
+    root = relative_to.rstrip("/") if relative_to else None
 
     def replace(match: re.Match[str]) -> str:
         raw = match.group(0)
         path = raw.rstrip(_DECLARED_PATH_TRAILING)
         if _is_allowlisted_declared_path(path):
             return raw
-        return "[path]" + raw[len(path) :]
+        return (_path_relative_to(path, root) or "[path]") + raw[len(path) :]
 
     return _DECLARED_PRIVATE_PATH.sub(replace, text)
 
@@ -477,13 +488,13 @@ def validate_declared_public_value(value: Any, *, depth: int = 0, allow_private_
     raise ValueError("declared output contains a non-JSON value")
 
 
-def _redact_declared_paths_in(value: object) -> object:
+def _redact_declared_paths_in(value: object, relative_to: str | None) -> object:
     if isinstance(value, str):
-        return redact_declared_private_paths(value)
+        return redact_declared_private_paths(value, relative_to=relative_to)
     if isinstance(value, Mapping):
-        return {key: _redact_declared_paths_in(item) for key, item in value.items()}
+        return {key: _redact_declared_paths_in(item, relative_to) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_redact_declared_paths_in(item) for item in value]
+        return [_redact_declared_paths_in(item, relative_to) for item in value]
     return value
 
 
@@ -577,6 +588,7 @@ def prediction_result(
     schema_version: str = "1",
     max_output_chars: int = 10_000,
     path_redacted_fields: frozenset[str] = frozenset(),
+    path_relative_to: str | None = None,
 ) -> PredictionResult:
     """Validate a native Prediction against its signature and public-output rules.
 
@@ -584,6 +596,7 @@ def prediction_result(
     are redacted to ``[path]`` instead of rejected. Every other rule still
     applies to those fields' original text, so a credential inside a path
     still rejects the output; with no names given, behavior is unchanged.
+    In those fields, a path below ``path_relative_to`` becomes relative to it.
     """
     outputs: dict[str, JsonValue] = {}
     try:
@@ -625,12 +638,12 @@ def prediction_result(
         return result
     plain = cast(dict[str, object], _plain_json(result.outputs))
     redacted = {
-        name: _redact_declared_paths_in(value) if name in path_redacted_fields else value
+        name: _redact_declared_paths_in(value, path_relative_to) if name in path_redacted_fields else value
         for name, value in plain.items()
     }
     display_text = result.display_text
     if "answer" in path_redacted_fields:
-        display_text = redact_declared_private_paths(display_text)
+        display_text = redact_declared_private_paths(display_text, relative_to=path_relative_to)
     result = PredictionResult(display_text, cast(dict[str, JsonValue], redacted), schema_id, schema_version)
     _raise_if_output_too_large(result, max_output_chars)
     return result
