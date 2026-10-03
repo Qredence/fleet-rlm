@@ -392,11 +392,78 @@ def test_child_call_span_records_failure_category_and_detail(monkeypatch: pytest
     assert outcomes[0]["status"] == "failed"
     call_span = captured["RLM.recursive_call"][0]
     assert call_span.outputs.get("failure_category")
+    assert call_span.outputs["child_error_category"] == "child_failed"
+    assert call_span.outputs["failure_cause_class"]
     detail = call_span.outputs.get("failure_detail")
     assert isinstance(detail, str)
     assert "private-primary-cause" in detail
     assert len(detail) <= 400
     executor.wait_owned()
+
+
+def test_child_failure_categories_distinguish_harvest_and_declared_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing declared result file and a rejected declared output reach
+    the parent, the call span and the metrics as distinct categories rather
+    than one generic child failure."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    real_start_turn_span = recursive_calls.start_turn_span
+    call_spans: list[object] = []
+
+    def capture_span(name: str, **kwargs: object):
+        handle = real_start_turn_span(name, **kwargs)
+        if name == "RLM.recursive_call":
+            call_spans.append(handle)
+        return handle
+
+    class Child:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            task = json.loads(prompt)["task"]
+            if task == "harvest":
+                return dspy.Prediction(
+                    answer="ok", evidence=[], gaps=[], result_files=["results/answer.json"], trajectory=[]
+                )
+            return dspy.Prediction(answer="password=hunter2-real", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    def missing_results(paths: list[str]) -> dict[str, bytes]:
+        raise ValueError(f"child result file is missing or not a file: {paths[0]}")
+
+    def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
+        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        return ChildRuntimeLease(
+            interpreter,
+            f"child-{call_index}",
+            "test-volume",
+            f"recursive/test-workspace/test-run/{call_index}",
+            interpreter.shutdown,
+            _stage_files=lambda _files: None,
+            _read_result_files=missing_results,
+        )
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: Child())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    monkeypatch.setattr(recursive_calls, "start_turn_span", capture_span)
+    executor = _executor(
+        [{"reasoning": "unused", "code": "SUBMIT(answer='unused')"}],
+        options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
+        child_runtime_factory=factory,
+    )
+
+    outcomes = executor.batched_tool(tasks=[{"task": "harvest"}, {"task": "declared"}])
+
+    assert [(item["status"], item["error_category"]) for item in outcomes] == [
+        ("failed", "result_harvest_failed"),
+        ("failed", "declared_output_rejected"),
+    ]
+    by_category = {span.outputs["child_error_category"]: span.outputs for span in call_spans}
+    assert set(by_category) == {"result_harvest_failed", "declared_output_rejected"}
+    assert "results/answer.json" in by_category["result_harvest_failed"]["failure_detail"]
+    assert by_category["declared_output_rejected"]["failure_cause_type"] == "declared_output_rejected"
+    executor.wait_owned()
+    summary = executor.summary()
+    assert (summary.recursive_children_completed, summary.recursive_children_failed) == (0, 2)
 
 
 def test_child_capacity_refusal_is_not_reported_as_a_started_timeout() -> None:
@@ -1034,7 +1101,9 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     assert [item["status"] for item in outcomes] == ["failed", "completed"]
     executor.wait_owned()
     assert all(lease.interpreter._shutdown for lease in created)
-    assert executor.summary().recursive_children_completed == 2
+    # Only the successful child counts as completed; the failed one is failed.
+    assert executor.summary().recursive_children_completed == 1
+    assert executor.summary().recursive_children_failed == 1
 
 
 def test_missing_child_input_returns_failed_slot_without_losing_successful_sibling() -> None:
@@ -1418,7 +1487,9 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
     assert all(lease.interpreter._shutdown for lease in created)
     assert executor.summary().call_count == 3
     assert executor.summary().recursive_children_started == 1
-    assert executor.summary().recursive_children_completed == 1
+    # The released straggler fails its batch-cancellation check: not completed.
+    assert executor.summary().recursive_children_completed == 0
+    assert executor.summary().recursive_children_failed == 1
 
 
 # --- live child-result capture boundary --------------------------------

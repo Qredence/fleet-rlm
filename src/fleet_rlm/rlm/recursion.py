@@ -32,10 +32,11 @@ from fleet_rlm.daytona.errors import (
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeNotStartedError,
+    DaytonaAdapterError,
 )
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.json_types import JsonValue
-from fleet_rlm.observability.diagnostics import trace_failure_category
+from fleet_rlm.observability.diagnostics import trace_failure_category, trace_failure_details
 from fleet_rlm.observability.tracing import (
     dspy_turn_callbacks,
     rlm_callback_parent,
@@ -60,6 +61,7 @@ from fleet_rlm.rlm.program import (
     build_native_rlm,
 )
 from fleet_rlm.rlm.result import (
+    PredictionOutputError,
     RLMConfigError,
     normalize_prediction_trajectory,
     prediction_result,
@@ -77,6 +79,18 @@ _CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 
 class ChildInputFailureError(RuntimeError):
     """A selected child input was unavailable without losing Run authority."""
+
+
+class ChildResultError(RLMConfigError):
+    """A finished child's result failed its contract, harvest, or persistence step.
+
+    ``category`` is a closed, content-free label the parent and traces see in
+    place of a generic child failure.
+    """
+
+    def __init__(self, category: str, message: str) -> None:
+        super().__init__(message)
+        self.category = category
 
 
 class ChildRuntimeLease(Protocol):
@@ -133,6 +147,7 @@ class DelegationMetricsSnapshot:
     recursive_batch_calls: int = 0
     recursive_children_started: int = 0
     recursive_children_completed: int = 0
+    recursive_children_failed: int = 0
     peak_child_concurrency: int = 0
     delegated_input_bytes: int = 0
     lm_call_counts: tuple[tuple[str, int, int], ...] = ()
@@ -150,6 +165,7 @@ class DelegationMetricsSnapshot:
             "recursive_batch_calls": self.recursive_batch_calls,
             "recursive_children_started": self.recursive_children_started,
             "recursive_children_completed": self.recursive_children_completed,
+            "recursive_children_failed": self.recursive_children_failed,
             "peak_child_concurrency": self.peak_child_concurrency,
             "delegated_input_bytes": self.delegated_input_bytes,
             "lm_call_counts": [
@@ -191,6 +207,7 @@ class DelegationMetrics:
         self._recursive_batch_calls = 0
         self._recursive_children_started = 0
         self._recursive_children_completed = 0
+        self._recursive_children_failed = 0
         self._active_children = 0
         self._peak_child_concurrency = 0
         self._delegated_input_bytes = 0
@@ -250,6 +267,11 @@ class DelegationMetrics:
             self._recursive_children_completed += 1
             self._active_children = max(0, self._active_children - 1)
 
+    def child_failed(self) -> None:
+        with self._lock:
+            self._recursive_children_failed += 1
+            self._active_children = max(0, self._active_children - 1)
+
     def snapshot(self) -> DelegationMetricsSnapshot:
         with self._lock:
             calls = tuple(sorted((role, depth, count) for (role, depth), count in self._lm_calls.items()))
@@ -276,6 +298,7 @@ class DelegationMetrics:
                 recursive_batch_calls=self._recursive_batch_calls,
                 recursive_children_started=self._recursive_children_started,
                 recursive_children_completed=self._recursive_children_completed,
+                recursive_children_failed=self._recursive_children_failed,
                 peak_child_concurrency=self._peak_child_concurrency,
                 delegated_input_bytes=self._delegated_input_bytes,
                 lm_call_counts=calls,
@@ -725,6 +748,7 @@ class RecursiveCallSummary:
     recursive_batch_calls: int = 0
     recursive_children_started: int = 0
     recursive_children_completed: int = 0
+    recursive_children_failed: int = 0
     peak_child_concurrency: int = 0
     delegation_metrics: DelegationMetricsSnapshot = field(default_factory=DelegationMetricsSnapshot)
 
@@ -748,6 +772,7 @@ class RecursiveCallSummary:
             recursive_batch_calls=snapshot.recursive_batch_calls,
             recursive_children_started=snapshot.recursive_children_started,
             recursive_children_completed=snapshot.recursive_children_completed,
+            recursive_children_failed=snapshot.recursive_children_failed,
             peak_child_concurrency=snapshot.peak_child_concurrency,
             delegation_metrics=snapshot,
         )
@@ -818,8 +843,32 @@ def _recursive_failure_category(exc: BaseException) -> str:
         return "unauthorized"
     if isinstance(exc, ChildRuntimeCleanupError):
         return "cleanup_failed"
+    if isinstance(exc, ChildResultError):
+        return exc.category
     category = trace_failure_category(exc)
-    return category if category in {"timeout", "unauthorized", "cleanup_failed", "wrap_up_rejected"} else "child_failed"
+    if category in {"timeout", "unauthorized", "cleanup_failed", "wrap_up_rejected"}:
+        return category
+    if isinstance(exc, PredictionOutputError):
+        return _bounded_cause_type(exc.cause_type) or "prediction_output_invalid"
+    if isinstance(exc, DaytonaAdapterError):
+        return "sandbox_error"
+    return "child_failed"
+
+
+def _bounded_cause_type(value: object) -> str | None:
+    """Return a code-defined cause identifier, or None for anything else."""
+    if isinstance(value, str) and 0 < len(value) <= 64 and value.isidentifier():
+        return value
+    return None
+
+
+# Exceptions that keep their own meaning when they cross a child result step.
+_CHILD_RESULT_CONTROL_ERRORS: tuple[type[BaseException], ...] = (
+    ChildRuntimeAuthorizationError,
+    ChildRuntimeCleanupError,
+    TimeoutError,
+    FutureCancelledError,
+)
 
 
 def _as_cleanup_error(exc: BaseException) -> ChildRuntimeCleanupError:
@@ -1550,20 +1599,23 @@ class RecursiveRLMExecutor:
             or not isinstance(evidence, (list, tuple))
             or not isinstance(gaps, (list, tuple))
         ):
-            raise RLMConfigError("child result contract is invalid")
+            raise ChildResultError("result_contract_invalid", "child result contract is invalid")
         if not isinstance(result_paths, (list, tuple)) or len(result_paths) > 16:
-            raise RLMConfigError("child result files are invalid")
+            raise ChildResultError("result_contract_invalid", "child result files are invalid")
         if any(not isinstance(item, str) or len(item) > 512 for item in (*evidence, *gaps)):
-            raise RLMConfigError("child evidence contract is invalid")
+            raise ChildResultError("result_contract_invalid", "child evidence contract is invalid")
         evidence_items = tuple(item for item in evidence if isinstance(item, str))
         gap_items = tuple(item for item in gaps if isinstance(item, str))
         paths = tuple(item for item in result_paths if isinstance(item, str))
         if len(paths) != len(result_paths):
-            raise RLMConfigError("child result files must be text paths")
+            raise ChildResultError("result_contract_invalid", "child result files must be text paths")
         if len(paths) != len(set(paths)):
-            raise RLMConfigError("child result files must be unique")
+            raise ChildResultError("result_contract_invalid", "child result files must be unique")
         for path in paths:
-            _validate_child_path(path)
+            try:
+                _validate_child_path(path)
+            except ValueError as exc:
+                raise ChildResultError("result_contract_invalid", "child result file path is invalid") from exc
         files: Mapping[str, bytes] = {}
         harvest_span = start_turn_span(
             "RLM.child.result_harvest",
@@ -1572,9 +1624,14 @@ class RecursiveRLMExecutor:
         harvest_started_at = time.monotonic()
         try:
             if paths:
-                files = lease.read_result_files(paths)
+                try:
+                    files = lease.read_result_files(paths)
+                except _CHILD_RESULT_CONTROL_ERRORS:
+                    raise
+                except Exception as exc:
+                    raise ChildResultError("result_harvest_failed", str(exc)) from exc
                 if set(files) != set(paths) or any(not isinstance(data, bytes) for data in files.values()):
-                    raise RLMConfigError("child runtime returned invalid result files")
+                    raise ChildResultError("result_harvest_failed", "child runtime returned invalid result files")
             harvest_span.finish(
                 phase_status="completed",
                 outputs={
@@ -1596,11 +1653,11 @@ class RecursiveRLMExecutor:
             raise
         total_result_bytes = len(result.display_text.encode("utf-8")) + sum(map(len, files.values()))
         if total_result_bytes > _MAX_CHILD_RESULT_BYTES:
-            raise RLMConfigError("child result exceeds configured bound")
+            raise ChildResultError("result_contract_invalid", "child result exceeds configured bound")
         references: list[str] = []
         if files:
             if self._result_writer is None:
-                raise RLMConfigError("parent Run result persistence is unavailable")
+                raise ChildResultError("result_persist_failed", "parent Run result persistence is unavailable")
             persist_span = start_turn_span(
                 "RLM.child.result_persist",
                 inputs={"call_index": call.call_index, "file_count": len(paths)},
@@ -1609,7 +1666,12 @@ class RecursiveRLMExecutor:
             try:
                 for path in paths:
                     self._ensure_call_authorized(batch_cancelled)
-                    references.append(self._result_writer(call.call_index, path, files[path]))
+                    try:
+                        references.append(self._result_writer(call.call_index, path, files[path]))
+                    except _CHILD_RESULT_CONTROL_ERRORS:
+                        raise
+                    except Exception as exc:
+                        raise ChildResultError("result_persist_failed", str(exc)) from exc
                 persist_span.finish(
                     phase_status="completed",
                     outputs={
@@ -1676,13 +1738,16 @@ class RecursiveRLMExecutor:
                     self._state.fatal_cleanup_error = exc
         with self._state.lock:
             self._state.termination_modes.append("child_error")
-        call.span.finish(
-            phase_status="failed",
-            outputs={
-                "failure_category": trace_failure_category(exc),
-                "failure_detail": sanitize_public_text(str(exc), max_len=_MAX_CHILD_FAILURE_DETAIL_CHARS),
-            },
-        )
+        outputs: dict[str, object] = {
+            "failure_category": trace_failure_category(exc),
+            "child_error_category": failure_category,
+            "failure_cause_class": trace_failure_details(exc).get("failure_cause_class", "Unknown"),
+            "failure_detail": sanitize_public_text(str(exc), max_len=_MAX_CHILD_FAILURE_DETAIL_CHARS),
+        }
+        cause_type = _bounded_cause_type(getattr(exc, "cause_type", None))
+        if cause_type is not None:
+            outputs["failure_cause_type"] = cause_type
+        call.span.finish(phase_status="failed", outputs=outputs)
         return failure_category
 
     def _finalize_call(
@@ -1936,6 +2001,7 @@ class RecursiveRLMExecutor:
             failure_category = self._record_primary_failure(call, exc)
             raise
         finally:
+            finalized = False
             try:
                 self._finalize_call(
                     call,
@@ -1952,9 +2018,12 @@ class RecursiveRLMExecutor:
                     child_code_excerpt=child_code_excerpt,
                     child_output_excerpt=child_output_excerpt,
                 )
+                finalized = True
             finally:
-                if child_started:
+                if child_started and finalized and not failed:
                     self._metrics.child_completed()
+                elif child_started:
+                    self._metrics.child_failed()
 
 
 __all__ = [
