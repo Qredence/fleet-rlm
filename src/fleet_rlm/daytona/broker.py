@@ -37,6 +37,9 @@ _DEFAULT_TOOL_TIMEOUT_S = 120
 # reply (for example a timed-out tool wait) reach the host as a recoverable
 # action error instead of the host transport timing out first.
 _EXECUTE_RESPONSE_GRACE_S = 10.0
+# A timed-out host tool keeps running and can still apply its side effect, so
+# the action must not treat the timeout as proof that nothing happened.
+_TOOL_CALL_TIMEOUT_MESSAGE = "tool call timed out; it may have applied, check before retrying"
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -163,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             if not event.wait(wait_s):
                 with _lock:
                     _pending.pop(call_id, None); _results.pop(call_id, None); _completed.add(call_id)
-                _send(self, {"error": "tool call timed out"}, 504); return
+                _send(self, {"error": "tool call timed out", "tool_error": {"category": "ToolCallTimeout", "message": __TOOL_CALL_TIMEOUT_MESSAGE__, "call_id": call_id}}, 504); return
             with _lock:
                 result = _results.pop(call_id, {"tool_error": {"category": "missing_result", "message": "tool result unavailable", "call_id": call_id}})
                 _pending.pop(call_id, None); _completed.add(call_id)
@@ -329,6 +332,7 @@ class DaytonaHttpToolBroker:
             .replace("__MAX_REQUEST_BYTES__", str(_MAX_REQUEST_BYTES))
             .replace("__MAX_OUTPUT_CHARS__", str(_MAX_OUTPUT_CHARS))
             .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(_DEFAULT_TOOL_TIMEOUT_S))
+            .replace("__TOOL_CALL_TIMEOUT_MESSAGE__", repr(_TOOL_CALL_TIMEOUT_MESSAGE))
         )
         try:
             from daytona import SessionExecuteRequest
@@ -494,10 +498,19 @@ class DaytonaHttpToolBroker:
             signature.append(f"{parameter.name}{default}")
             kwargs.append(f"{parameter.name!r}: {parameter.name}")
         return f"""def {name}({", ".join(signature)}):
-    import json as _json, urllib.request as _request, uuid as _uuid
-    _payload = _json.dumps({{"id": _uuid.uuid4().hex, "tool_name": {name!r}, "args": [], "kwargs": {{{", ".join(kwargs)}}}}}).encode()
+    import json as _json, urllib.error as _error, urllib.request as _request, uuid as _uuid
+    _call_id = _uuid.uuid4().hex
+    _payload = _json.dumps({{"id": _call_id, "tool_name": {name!r}, "args": [], "kwargs": {{{", ".join(kwargs)}}}}}).encode()
     _req = _request.Request("http://127.0.0.1:{self._port}/tool_call", data=_payload, headers={{"Content-Type": "application/json", "X-Broker-Secret": {self._secret!r}}}, method="POST")
-    with _request.urlopen(_req, timeout=float(globals().get('_fleet_tool_timeout_s', 120))) as _response: _reply = _json.loads(_response.read())
+    try:
+        with _request.urlopen(_req, timeout=float(globals().get('_fleet_tool_timeout_s', 120))) as _response: _reply = _json.loads(_response.read())
+    except _error.HTTPError as _exc:
+        try: _reply = _json.loads(_exc.read())
+        except Exception: _reply = None
+        if not isinstance(_reply, dict) or not isinstance(_reply.get("tool_error"), dict): raise
+    except (TimeoutError, _error.URLError) as _exc:
+        if not isinstance(getattr(_exc, "reason", _exc), TimeoutError): raise
+        _reply = {{"tool_error": {{"category": "ToolCallTimeout", "message": {_TOOL_CALL_TIMEOUT_MESSAGE!r}, "call_id": _call_id}}}}
     if "tool_error" in _reply:
         _failure = _reply["tool_error"]
         raise _FleetToolCallError(_failure)
