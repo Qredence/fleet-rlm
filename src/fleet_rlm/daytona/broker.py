@@ -37,6 +37,12 @@ _DEFAULT_TOOL_TIMEOUT_S = 120
 # reply (for example a timed-out tool wait) reach the host as a recoverable
 # action error instead of the host transport timing out first.
 _EXECUTE_RESPONSE_GRACE_S = 10.0
+# The sandbox stops an action that has not settled this long after its
+# deadline, then restores the pre-action worker within the restore timeout.
+# Both fit inside the host's response grace, so a runaway action reaches the
+# host as a recoverable action error.
+_ACTION_KILL_GRACE_S = 2.0
+_WORKER_RESTORE_TIMEOUT_S = 5.0
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -48,12 +54,13 @@ def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, os, sys, threading, time, uuid
+import contextlib, hmac, io, json, os, signal, socket, sys, tempfile, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from multiprocessing.connection import Connection
 from socketserver import ThreadingMixIn
 
 _secret = __SECRET__
-_pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
+_pending, _results, _completed = {}, {}, set()
 _lock, _execution_lock = threading.Lock(), threading.Lock()
 _active_deadline = None
 if os.path.isdir("/workspace"):
@@ -86,8 +93,192 @@ class _BoundedWriter(io.StringIO):
         value = super().getvalue()
         return value + "\n...[sandbox output truncated]" if self._truncated else value
 
+# Actions run in a worker process that owns the REPL namespace, so the broker
+# can stop an action that runs past its deadline.  Before each action the
+# worker forks a paused snapshot of itself.  A completed action discards the
+# snapshot.  When the broker stops the worker, it resumes the snapshot as the
+# next worker: the namespace is as it was before the stopped action, and files
+# or other side effects of that action remain.
+_worker_address = os.path.join(tempfile.mkdtemp(prefix="flb-"), "w.sock")
+_worker_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+_worker_listener.bind(_worker_address); _worker_listener.listen(4)
+_worker, _broker_pid = None, os.getpid()
+
+def _prctl(option, value):
+    with contextlib.suppress(Exception):
+        import ctypes
+        ctypes.CDLL(None).prctl(option, value, 0, 0, 0)
+
+def _exit_with_broker():
+    # PR_SET_PDEATHSIG: a worker must not outlive the broker that feeds it.
+    _prctl(1, signal.SIGKILL)
+
+class _Resume(Exception): pass
+
+def _resume(*_):
+    raise _Resume()
+
+# PR_SET_CHILD_SUBREAPER: a resumed snapshot outlives the worker that forked
+# it, so the broker becomes its parent and reaps it.
+_prctl(36, 1)
+
+def _encode(value):
+    return json.dumps(value, allow_nan=False).encode("utf-8")
+
+def _connect_worker():
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.connect(_worker_address)
+    conn = Connection(sock.detach())
+    conn.send_bytes(_encode({"secret": _secret, "pid": os.getpid()}))
+    return conn
+
+def _fork_snapshot():
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})
+    try:
+        pid = os.fork()
+    except OSError:
+        pid = None
+    if pid == 0:
+        os.setpgid(0, 0)
+        return 0
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+    if pid:
+        with contextlib.suppress(OSError): os.setpgid(pid, pid)
+    return pid
+
+def _run_action(namespace, request):
+    code, variables, timeout_s = request["code"], request["variables"], request["timeout_s"]
+    stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__), _BoundedWriter(__MAX_OUTPUT_CHARS__)
+    result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
+    namespace["_fleet_tool_timeout_s"] = float(timeout_s)
+    try:
+        namespace.update(variables)
+        try:
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr): exec(compile(code, "<fleet-rlm>", "exec"), namespace, namespace)
+        except BaseException as exc:
+            value = getattr(exc, "value", None)
+            if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict): result["final"] = value
+            else:
+                failure = getattr(exc, "fleet_tool_error", None)
+                if isinstance(failure, dict):
+                    result["tool_error"] = failure
+                    result["error"] = failure["message"]
+                    result["error_category"] = failure["category"]
+                else:
+                    result.update(error=str(exc)[:2000], error_category=type(exc).__name__)
+    finally:
+        result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
+    try:
+        return _encode(result)
+    except (TypeError, ValueError):
+        result.update(final=None, error="action result is not JSON serializable", error_category="ResultEncodingError")
+        return _encode(result)
+
+def _worker_main():
+    namespace = {"__name__": "__fleet_rlm_repl__"}
+    conn = _connect_worker()
+    while True:
+        try:
+            request = json.loads(conn.recv_bytes())
+        except EOFError:
+            os._exit(0)
+        snapshot = _fork_snapshot()
+        if snapshot == 0:
+            conn.close()
+            previous = signal.signal(signal.SIGUSR1, _resume)
+            try:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGUSR1})
+                while True:
+                    time.sleep(1.0)
+                    os.kill(_broker_pid, 0)
+            except _Resume:
+                signal.signal(signal.SIGUSR1, previous)
+            except ProcessLookupError:
+                os._exit(0)
+            _exit_with_broker()
+            conn = _connect_worker()
+            continue
+        conn.send_bytes(_encode({"snapshot": snapshot}))
+        payload = _run_action(namespace, request)
+        if snapshot:
+            with contextlib.suppress(OSError):
+                os.kill(snapshot, signal.SIGKILL); os.waitpid(snapshot, 0)
+        conn.send_bytes(payload)
+
+def _accept_worker(timeout_s):
+    deadline = time.monotonic() + timeout_s
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0: return None
+        _worker_listener.settimeout(remaining)
+        try:
+            sock, _ = _worker_listener.accept()
+        except OSError:
+            return None
+        conn = Connection(sock.detach())
+        try:
+            if conn.poll(max(0.0, deadline - time.monotonic())):
+                hello = json.loads(conn.recv_bytes(1024))
+                if hmac.compare_digest(str(hello.get("secret", "")), _secret) and isinstance(hello.get("pid"), int):
+                    return conn, hello["pid"]
+        except (EOFError, OSError, ValueError, AttributeError):
+            pass
+        conn.close()
+
+def _spawn_worker():
+    pid = os.fork()
+    if pid == 0:
+        try:
+            os.setpgid(0, 0); _exit_with_broker(); _worker_listener.close(); _worker_main()
+        finally:
+            os._exit(1)
+    with contextlib.suppress(OSError): os.setpgid(pid, pid)
+    return _accept_worker(__WORKER_RESTORE_TIMEOUT_S__)
+
+def _stop_worker(conn, pid):
+    with contextlib.suppress(OSError): conn.close()
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        with contextlib.suppress(OSError): os.kill(pid, signal.SIGKILL)
+    with contextlib.suppress(OSError): os.waitpid(pid, 0)
+    with contextlib.suppress(OSError):
+        while os.waitpid(-1, os.WNOHANG)[0]: pass
+
+def _execute(code, variables, timeout_s):
+    # Return the encoded action result, or None when no worker can run actions.
+    global _worker
+    if _worker is None: return None
+    conn, pid = _worker
+    snapshot, stopped = None, "exited"
+    try:
+        conn.send_bytes(_encode({"code": code, "variables": variables, "timeout_s": timeout_s}))
+        if conn.poll(__WORKER_RESTORE_TIMEOUT_S__):
+            snapshot = json.loads(conn.recv_bytes()).get("snapshot")
+            if conn.poll(float(timeout_s) + __ACTION_KILL_GRACE_S__): return conn.recv_bytes()
+            stopped = "timeout"
+    except (EOFError, OSError, ValueError, AttributeError):
+        pass
+    _worker = None
+    _stop_worker(conn, pid)
+    if not isinstance(snapshot, int) or snapshot <= 0: return None
+    with contextlib.suppress(OSError):
+        os.kill(snapshot, signal.SIGUSR1)
+        _worker = _accept_worker(__WORKER_RESTORE_TIMEOUT_S__)
+    if _worker is None: return None
+    if stopped == "timeout":
+        message = (f"Action exceeded its {float(timeout_s):g} s limit and was stopped. "
+                   "Split the work into smaller steps.")
+    else:
+        message = "Action ended the sandbox worker process."
+    message += (" The REPL state is as it was before this action; files and other side effects"
+                " of the action remain, and its output is not available.")
+    return _encode({"stdout": "", "stderr": "", "final": None, "error": message,
+                    "error_category": "ActionTimeout" if stopped == "timeout" else "ActionWorkerExit",
+                    "tool_error": None})
+
 def _send(handler, body, status=200):
-    raw = json.dumps(body, allow_nan=False).encode("utf-8")
+    raw = body if isinstance(body, bytes) else json.dumps(body, allow_nan=False).encode("utf-8")
     handler.send_response(status); handler.send_header("Content-Type", "application/json")
     handler.send_header("Content-Length", str(len(raw))); handler.end_headers(); handler.wfile.write(raw)
 
@@ -121,35 +312,17 @@ class Handler(BaseHTTPRequestHandler):
             if (not isinstance(code, str) or not isinstance(variables, dict) or isinstance(timeout_s, bool)
                     or not isinstance(timeout_s, (int, float)) or timeout_s <= 0):
                 _send(self, {"error": "invalid execution"}, 400); return
-            stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__), _BoundedWriter(__MAX_OUTPUT_CHARS__)
-            result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
-            try:
-                with _execution_lock:
+            with _execution_lock:
+                with _lock:
+                    global _active_deadline
+                    _active_deadline = time.monotonic() + float(timeout_s)
+                try:
+                    payload = _execute(code, variables, timeout_s)
+                finally:
                     with _lock:
-                        global _active_deadline
-                        _active_deadline = time.monotonic() + float(timeout_s)
-                        _namespace["_fleet_tool_timeout_s"] = float(timeout_s)
-                    try:
-                        _namespace.update(variables)
-                        try:
-                            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr): exec(compile(code, "<fleet-rlm>", "exec"), _namespace, _namespace)
-                        except BaseException as exc:
-                            value = getattr(exc, "value", None)
-                            if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict): result["final"] = value
-                            else:
-                                failure = getattr(exc, "fleet_tool_error", None)
-                                if isinstance(failure, dict):
-                                    result["tool_error"] = failure
-                                    result["error"] = failure["message"]
-                                    result["error_category"] = failure["category"]
-                                else:
-                                    result.update(error=str(exc)[:2000], error_category=type(exc).__name__)
-                    finally:
-                        with _lock:
-                            _active_deadline = None
-            finally:
-                result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
-            _send(self, result); return
+                        _active_deadline = None
+            if payload is None: _send(self, {"error": "sandbox worker unavailable"}, 503); return
+            _send(self, payload); return
         if self.path == "/tool_call":
             call_id = str(data.get("id") or uuid.uuid4().hex); event = threading.Event()
             with _lock:
@@ -183,6 +356,8 @@ class Handler(BaseHTTPRequestHandler):
         _send(self, {"error": "not found"}, 404)
 
 class Server(ThreadingMixIn, HTTPServer): daemon_threads = True
+_worker = _spawn_worker()
+if _worker is None: sys.exit("sandbox worker failed to start")
 Server(("0.0.0.0", __PORT__), Handler).serve_forever()
 """
 
@@ -329,6 +504,8 @@ class DaytonaHttpToolBroker:
             .replace("__MAX_REQUEST_BYTES__", str(_MAX_REQUEST_BYTES))
             .replace("__MAX_OUTPUT_CHARS__", str(_MAX_OUTPUT_CHARS))
             .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(_DEFAULT_TOOL_TIMEOUT_S))
+            .replace("__ACTION_KILL_GRACE_S__", str(_ACTION_KILL_GRACE_S))
+            .replace("__WORKER_RESTORE_TIMEOUT_S__", str(_WORKER_RESTORE_TIMEOUT_S))
         )
         try:
             from daytona import SessionExecuteRequest
