@@ -45,6 +45,27 @@ async def test_volume_read_maps_typed_missing_file_without_swallowing_provider_f
         await volume.read_bytes("/volume/task.json")
 
 
+@pytest.mark.asyncio
+async def test_volume_listing_maps_typed_missing_root_without_swallowing_provider_failure() -> None:
+    class MissingFs:
+        async def list_files(self, _path: str, *, depth: int) -> list[object]:
+            del depth
+            raise DaytonaFileNotFoundError("missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingFs()))
+    with pytest.raises(FileNotFoundError):
+        await volume.list_files("/volume/workspaces/missing")
+
+    class MissingProviderRouteFs:
+        async def list_files(self, _path: str, *, depth: int) -> list[object]:
+            del depth
+            raise DaytonaNotFoundError("provider route missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingProviderRouteFs()))
+    with pytest.raises(DaytonaNotFoundError, match="provider route missing"):
+        await volume.list_files("/volume")
+
+
 # --- from test_workspace_volume_gateway.py ----------------------------
 class _FakeFs:
     def __init__(self, *, fail_upload: bool = False) -> None:

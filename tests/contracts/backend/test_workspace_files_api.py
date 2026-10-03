@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import logging
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import NAMESPACE_URL, uuid5
 
+import pytest
 from fastapi.testclient import TestClient
 
 from fleet_rlm.config.settings import Settings
@@ -92,8 +96,6 @@ def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
     app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
     workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
 
-    import asyncio
-
     with TestClient(app) as client:
         gateway = app.state.runtime_inventory.route_services.workspace_volume_gateway
         assert gateway is not None
@@ -110,8 +112,6 @@ def test_volume_tree_returns_relative_logical_paths(tmp_path: Path) -> None:
 def test_volume_tree_is_not_truncated_when_file_count_equals_requested_limit(tmp_path: Path) -> None:
     app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
     workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
-
-    import asyncio
 
     with TestClient(app) as client:
         gateway = app.state.runtime_inventory.route_services.workspace_volume_gateway
@@ -160,6 +160,89 @@ def test_volume_tree_root_alias_retains_root_directories(tmp_path: Path) -> None
 
     assert response.status_code == 200
     assert response.json()["directories"] == ["artifacts", "attachments", "files", "projects", "sessions"]
+
+
+def test_volume_tree_resolves_own_workspace_subpath_to_mount_root(tmp_path: Path) -> None:
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
+    workspace_id = uuid5(NAMESPACE_URL, "fleet-rlm/local-workspace")
+
+    with TestClient(app) as client:
+        gateway = app.state.runtime_inventory.route_services.workspace_volume_gateway
+        assert gateway is not None
+        asyncio.run(gateway.write_bytes(workspace_id, "/home/daytona/fleet/sessions/a/turn.json", b"{}"))
+        root = client.get("/api/volume/tree", params={"root": f"workspaces/{workspace_id}"})
+        nested = client.get("/api/volume/tree", params={"root": f"workspaces/{workspace_id}/sessions"})
+
+    assert root.status_code == 200
+    assert root.json() == {
+        "paths": ["sessions/a/turn.json"],
+        "directories": ["artifacts", "attachments", "files", "projects", "sessions"],
+        "truncated": False,
+    }
+    assert nested.status_code == 200
+    assert nested.json()["paths"] == ["sessions/a/turn.json"]
+
+
+def _volume_tree_app(tmp_path: Path, list_files: object) -> object:
+    from fleet_rlm.api.dependencies import get_workspace_volume_gateway
+
+    app = create_testing_app(settings=Settings(run_environment="daytona", data_root=str(tmp_path)))
+    app.dependency_overrides[get_workspace_volume_gateway] = lambda: SimpleNamespace(list_files=list_files)
+    return app
+
+
+def test_volume_tree_maps_missing_root_to_invalid_request(tmp_path: Path) -> None:
+    async def list_files(*_args: object, **_kwargs: object) -> tuple[object, ...]:
+        raise FileNotFoundError("/home/daytona/fleet/workspaces/other")
+
+    with TestClient(_volume_tree_app(tmp_path, list_files)) as client:
+        response = client.get("/api/volume/tree", params={"root": "workspaces/other"})
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "volume_tree_invalid"
+
+
+def test_volume_tree_logs_sanitized_cause_of_unavailable_volume(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def list_files(*_args: object, **_kwargs: object) -> tuple[object, ...]:
+        raise RuntimeError("secret provider detail")
+
+    with (
+        caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.files"),
+        TestClient(_volume_tree_app(tmp_path, list_files)) as client,
+    ):
+        response = client.get("/api/volume/tree")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "volume_unavailable"
+    assert "volume_tree_unavailable cause_type=unknown" in caplog.text
+    assert "RuntimeError" in caplog.text
+    assert "secret provider detail" not in caplog.text
+
+
+def test_volume_tree_bounds_root_listing_time(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from fleet_rlm.api.routes import files
+
+    async def list_files(*_args: object, **_kwargs: object) -> tuple[object, ...]:
+        await asyncio.sleep(10)
+        return ()
+
+    monkeypatch.setattr(files, "_VOLUME_TREE_TIMEOUT_SECONDS", 0.01)
+    with (
+        caplog.at_level(logging.WARNING, logger="fleet_rlm.api.routes.files"),
+        TestClient(_volume_tree_app(tmp_path, list_files)) as client,
+    ):
+        response = client.get("/api/volume/tree", params={"root": "."})
+
+    assert response.status_code == 504
+    assert response.json()["code"] == "volume_timeout"
+    assert "volume_tree_timeout" in caplog.text
 
 
 def test_workspace_files_stat_reports_content_checksum_and_directory_entries(tmp_path: Path) -> None:
