@@ -859,3 +859,37 @@ def test_prepare_evaluation_searches_all_ages_and_rejects_duplicates(monkeypatch
     else:
         assert benchmark.prepare_evaluation(args)["dataset_id"] == "old-dataset"
     create.assert_not_called()
+
+
+def test_benchmark_policy_reads_single_configuration_fields() -> None:
+    from scripts.benchmarks.run_rlm_latency import _active_policy
+
+    client = SimpleNamespace(
+        get=lambda *_args, **_kwargs: _Response(
+            payload={
+                "revision": "a" * 64,
+                "restart_required": True,
+                "fields": [
+                    {"path": "llm.root.model", "value": "root-model"},
+                    {"path": "llm.sub.model", "value": "sub-model"},
+                    {"path": "rlm.recursion_enabled", "value": False},
+                    {"path": "rlm.max_llm_calls", "value": 32},
+                ],
+            }
+        )
+    )
+    policy = _active_policy(client)
+    assert policy["root_model"] == "root-model"
+    assert policy["sub_model"] == "sub-model"
+    assert policy["recursion_enabled"] is False
+    assert "profile" not in policy
+
+
+def test_benchmark_policy_rejects_removed_profile_response() -> None:
+    from scripts.benchmarks.run_rlm_latency import _active_policy
+
+    client = SimpleNamespace(
+        get=lambda *_args, **_kwargs: _Response(payload={"active_profile": "daytona", "scopes": []})
+    )
+    with pytest.raises(BenchmarkError, match="configuration fields"):
+        _active_policy(client)

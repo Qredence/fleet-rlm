@@ -1,7 +1,7 @@
 """ASGI entrypoints for the canonical Fleet RLM backend.
 
-The default ``app`` uses ``[config] default_profile`` from ``config/fleet.toml``.
-The supported runtime profile is Daytona.
+The default ``app`` uses the single policy in ``config/fleet.toml``.
+The supported runtime environment is Daytona.
 """
 
 from __future__ import annotations

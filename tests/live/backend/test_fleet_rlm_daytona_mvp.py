@@ -1035,6 +1035,8 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
             "mlflow_tracing_enabled": True,
         }
     )
+    if settings.rlm_recursion_enabled:
+        pytest.fail("Native-only semantic verification requires rlm.recursion_enabled=false in config/fleet.toml")
     started_at = datetime.now(UTC)
     started_at_text = started_at.isoformat()
     candidate = _candidate_metadata(settings)

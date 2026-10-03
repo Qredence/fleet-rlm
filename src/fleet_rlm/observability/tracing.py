@@ -6,7 +6,7 @@ backend is unavailable, the backend continues without traces.
 
 Fleet TOML policy (resolved through ``Settings``):
     mlflow.tracing_enabled  - master gate (field default false; committed
-                              [defaults.mlflow] policy enables it by default)
+                              [mlflow] policy enables it by default)
     mlflow.experiment_name  - experiment passed to set_experiment
     mlflow.tracking_uri     - tracking target
     mlflow.expose_trace_id  - surface trace ids on Turn SSE metadata

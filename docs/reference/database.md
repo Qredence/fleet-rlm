@@ -2,19 +2,15 @@
 
 Canonical Run Environment set: `daytona`.
 
-Set a Daytona profile in `config/fleet.toml` before starting this backend. The
-committed profiles and their provider environment names are listed in the
-[profile matrix](profile-matrix.md):
+The single `config/fleet.toml` policy selects Daytona sandbox execution,
+stock `dspy.LM` calls, and a durable Session Workspace Volume. See the
+[environment reference](configuration-environment.md) for its declared inputs.
+Startup requires the configured database URL at Alembic head; SQLite and
+PostgreSQL are supported. Explicit Lakebase preflight enforces the production
+TLS and `fleet_app` role requirements.
 
-| Profile | Code execution | LLM calls | Durable volume | Auth/scope |
-| --- | --- | --- | --- | --- |
-| `daytona-native` (default) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable; child recursion disabled |
-| `daytona-recursive` (opt-in) | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | local/disposable; bounded child recursion enabled |
-| `daytona-managed` | Daytona Sandbox Code Interpreter | real `dspy.LM` | Workspace Volume | TLS Lakebase `fleet_app` |
-
-Daytona is the full Fleet solution with Workspace Volume Scope and Turn Commit
-promotion. Private deterministic tests use an in-memory composition and do not
-represent another public runtime profile.
+Private deterministic tests use an in-memory composition and do not represent
+another public runtime environment.
 
 Alembic owns the baseline and incremental revisions under `migrations/versions/`.
 For a new database, apply the full chain; for an existing deployment, review
@@ -37,6 +33,6 @@ test/offline helpers may call `create_tables`; all other environments must use
 Alembic.
 
 Migration tooling reads `FLEET_DATABASE_URL` directly, even if a custom runtime
-profile names a different database variable. Keep both targets aligned; see
+configuration names a different database variable. Keep both targets aligned; see
 the [migration README](../../migrations/README.md). MLflow owns a separate
 tracking schema and has its own [upgrade procedure](cli.md#upgrade-the-local-mlflow-store-to-316).
