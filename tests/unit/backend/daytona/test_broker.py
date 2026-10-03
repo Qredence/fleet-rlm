@@ -122,8 +122,10 @@ def test_execute_transport_timeout_includes_response_grace() -> None:
     broker.execute("pass", {}, timeout_s=7)
 
     kwargs = client.post.call_args.kwargs
-    assert kwargs["timeout"] == 7 + broker_module._EXECUTE_RESPONSE_GRACE_S
+    # Without a host-wait deadline, host waits keep the action timeout as their bound.
+    assert kwargs["timeout"] == pytest.approx(7 + 7 + broker_module._EXECUTE_RESPONSE_GRACE_S)
     assert kwargs["json"]["timeout_s"] == 7
+    assert kwargs["json"]["host_wait_s"] == pytest.approx(7)
 
 
 @pytest.mark.parametrize("post_expiry_delay_s", [0.0, 0.5])
@@ -211,6 +213,104 @@ def test_tool_call_uses_execution_deadline(
         thread.join(timeout=2)
     assert responses and responses[0].status_code == 200
     assert time.monotonic() - started < 1
+
+
+def test_tool_call_wait_uses_host_wait_bound_not_compute_timeout(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    source = _tool_source(int(base_url.rsplit(":", 1)[1]), headers["X-Broker-Secret"])
+    responses: list[httpx.Response] = []
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        thread = threading.Thread(
+            target=lambda: responses.append(
+                client.post(
+                    "/execute",
+                    json={"code": source, "variables": {}, "timeout_s": 0.3, "host_wait_s": 3},
+                    timeout=5,
+                )
+            ),
+            daemon=True,
+        )
+        thread.start()
+        call_id, lease = _pending_lease(client)
+        # The wait outlives the 0.3 s compute timeout, and the clock stays paused.
+        time.sleep(1)
+        paused = client.get("/pending").json()["remaining_s"]
+        delivered = client.post("/result", json={"id": call_id, "lease": lease, "result": "late but in time"})
+        thread.join(timeout=5)
+
+    assert 0 < paused <= 0.3
+    assert delivered.status_code == 200
+    assert responses[0].json()["stdout"] == "late but in time\n"
+
+
+def _broker_for(base_url: str, headers: dict[str, str], tools: dict[str, object]) -> DaytonaHttpToolBroker:
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools(tools)  # type: ignore[arg-type]
+    broker._url = base_url
+    return broker
+
+
+def test_execute_lets_a_long_host_tool_outlast_the_compute_timeout(
+    embedded_server: tuple[str, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A recursion batch longer than execution_timeout_s completes inside the host-wait bound."""
+    from fleet_rlm.rlm.budget import current_host_action_deadline
+
+    monkeypatch.setattr(broker_module, "_EXECUTE_RESPONSE_GRACE_S", 0.5)
+    base_url, headers = embedded_server
+    seen: list[float | None] = []
+
+    def batch() -> dict[str, bool]:
+        seen.append(current_host_action_deadline())
+        time.sleep(2.5)
+        return {"ok": True}
+
+    broker = _broker_for(base_url, headers, {"batch": batch})
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        started = time.monotonic()
+        wait_deadline = started + 10
+        result = broker.execute(
+            broker.setup_source("print(batch())"), {}, timeout_s=1, host_wait_deadline=wait_deadline
+        )
+        elapsed = time.monotonic() - started
+
+    assert result["error"] is None
+    assert "ok" in result["stdout"]
+    assert elapsed >= 2.5
+    assert seen == [wait_deadline]
+
+
+def test_execute_still_stops_runaway_compute_after_a_host_tool(
+    embedded_server: tuple[str, dict[str, str]], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Paused waits do not hide runaway code: compute after the tool still times out."""
+    monkeypatch.setattr(broker_module, "_EXECUTE_RESPONSE_GRACE_S", 0.5)
+    base_url, headers = embedded_server
+
+    def batch() -> dict[str, bool]:
+        time.sleep(1.5)
+        return {"ok": True}
+
+    broker = _broker_for(base_url, headers, {"batch": batch})
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        started = time.monotonic()
+        with pytest.raises(DaytonaAdapterError) as caught:
+            broker.execute(
+                broker.setup_source("batch()\nimport time\ntime.sleep(60)"),
+                {},
+                timeout_s=1,
+                host_wait_deadline=started + 30,
+            )
+        elapsed = time.monotonic() - started
+
+    assert caught.value.cause_type == "BrokerExecutionTimeout"
+    # 1.5 s of host wait plus 1 s of compute plus the grace, far below the 30 s host-wait ceiling.
+    assert 1.5 + 1 <= elapsed < 1.5 + 1 + 0.5 + 1.5
 
 
 def test_health_probe_requires_the_invocation_secret(

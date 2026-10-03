@@ -543,6 +543,11 @@ class _SandboxProcessBackend:
         self._tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None
         self._tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None
         self._run_scratch_path: str | None = None
+        self._turn_wait_deadline: float | None = None
+
+    def bind_turn_wait_deadline(self, deadline: float | None) -> None:
+        """Bind the Turn's deadline less its wrap-up reserve; host tool waits end by then."""
+        self._turn_wait_deadline = deadline
 
     def bind_run_scratch(self, path: str) -> None:
         """Bind one validated Run-local or child-local scratch directory."""
@@ -686,7 +691,9 @@ class _SandboxProcessBackend:
         if loader_source:
             code = f"{loader_source}\n\n{code}"
         try:
-            result = broker.execute(code, variables or {}, timeout_s=timeout)
+            result = broker.execute(
+                code, variables or {}, timeout_s=timeout, host_wait_deadline=self._host_wait_deadline()
+            )
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -737,6 +744,11 @@ class _SandboxProcessBackend:
         if self._deadline_monotonic is None:
             return timeout
         return max(1, min(timeout, int(self._deadline_monotonic - time.monotonic())))
+
+    def _host_wait_deadline(self) -> float | None:
+        """Return when this action's host tool waits must end, if a Turn or invocation deadline binds it."""
+        bounds = [b for b in (self._turn_wait_deadline, self._deadline_monotonic) if b is not None]
+        return min(bounds) if bounds else None
 
     def _install_setup(self, broker: DaytonaHttpToolBroker, timeout: int) -> None:
         """Install the sealed invocation's tools, SUBMIT and defaults once.
@@ -987,6 +999,12 @@ class DaytonaCodeInterpreter:
         with self._binding_mutation():
             self._turn_budget = budget
             self._output_budget_exhausted = False
+            bind_wait = getattr(self._backend, "bind_turn_wait_deadline", None)
+            if callable(bind_wait):
+                wait_deadline = None
+                if budget is not None and budget.deadline is not None:
+                    wait_deadline = budget.deadline - budget.limits.finalization_seconds
+                bind_wait(wait_deadline)
 
     def bind_turn_request(self, request: str | None) -> None:
         with self._binding_mutation():

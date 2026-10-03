@@ -51,7 +51,7 @@ class _LocalBroker:
     def setup_source(self, source: str) -> str:
         return source
 
-    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
+    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int, **_: Any) -> dict[str, Any]:
         assert timeout_s > 0
         self.calls.append(code)
         self.namespace.update(json.loads(json.dumps(variables, ensure_ascii=False, allow_nan=False)))
@@ -447,7 +447,7 @@ def test_setup_is_installed_once_and_actions_carry_only_model_code(monkeypatch: 
 
 def test_setup_failure_stops_before_model_code(monkeypatch: pytest.MonkeyPatch) -> None:
     class FailingSetupBroker(_LocalBroker):
-        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
+        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int, **_: Any) -> dict[str, Any]:
             if not self.calls:
                 self.calls.append(code)
                 return {"stdout": "", "stderr": "", "error": "setup exploded", "final": None}

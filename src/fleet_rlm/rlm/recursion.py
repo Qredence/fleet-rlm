@@ -453,8 +453,9 @@ _MAX_CHILD_FAILURE_DETAIL_CHARS = 400
 # there instead of discarding a valid answer. The answer and result_files
 # stay strict.
 _CHILD_PATH_REDACTED_FIELDS = frozenset({"evidence", "gaps"})
-# Time kept back from the calling sandbox action's deadline so a recursive
-# call's (partial) result is delivered while the action is still waiting.
+# Time kept back from the calling sandbox action's host-wait deadline so a
+# recursive call's (partial) result is delivered while the action is still
+# waiting.
 _ACTION_RESULT_MARGIN_S = 10.0
 _MAX_CHILD_INPUTS = 16
 _MAX_CHILD_MANIFEST_BYTES = 64 * 1024

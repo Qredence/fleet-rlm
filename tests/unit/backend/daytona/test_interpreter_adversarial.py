@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -42,6 +43,7 @@ from fleet_rlm.daytona.runtime import (
     read_file,
     write_file,
 )
+from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
 from fleet_rlm.rlm.result import RunNoProgressError
 from tests.support.session_manager import make_daytona_runtime
 
@@ -95,16 +97,21 @@ class TestInterpreterTimeoutsAndLimits:
         assert error.value.cause_type == "InterpreterConfigurationError"
 
     def test_timeout_is_forwarded_to_broker(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        observed: list[int] = []
+        observed: list[tuple[int, float | None]] = []
 
-        def execute(_broker: Any, _code: str, _variables: Any, *, timeout_s: int) -> dict[str, Any]:
-            observed.append(timeout_s)
+        def execute(
+            _broker: Any, _code: str, _variables: Any, *, timeout_s: int, host_wait_deadline: float | None = None
+        ) -> dict[str, Any]:
+            observed.append((timeout_s, host_wait_deadline))
             return {"stdout": "done\n"}
 
         monkeypatch.setattr(DaytonaHttpToolBroker, "execute", execute)
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=42))
+        turn_deadline = time.monotonic() + 1_000
+        interpreter.bind_turn_budget(TurnBudget(deadline=turn_deadline, limits=BudgetLimits(finalization_seconds=100)))
         assert interpreter.execute("print('done')") == "done\n"
-        assert observed == [42, 42]  # one-time setup, then the action
+        # One-time setup, then the action; host waits end by the Turn deadline less wrap-up.
+        assert observed == [(42, None), (42, turn_deadline - 100)]
 
     def test_empty_and_oversized_code_are_rejected(self) -> None:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), max_code_chars=100)
