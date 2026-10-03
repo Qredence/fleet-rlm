@@ -33,9 +33,9 @@ _MAX_REQUEST_BYTES = 2 * 1024 * 1024
 _MAX_OUTPUT_CHARS = 64 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
 # The sandbox starts its action clock when /execute arrives, after the host
-# sent it. Waiting a little past timeout_s lets the sandbox's own deadline
-# reply (for example a timed-out tool wait) reach the host as a recoverable
-# action error instead of the host transport timing out first.
+# sent it. Waiting a little past the sandbox's own deadline lets its reply
+# (for example a timed-out tool wait) reach the host as a recoverable action
+# error instead of the host transport timing out first.
 _EXECUTE_RESPONSE_GRACE_S = 10.0
 
 
@@ -55,7 +55,10 @@ from socketserver import ThreadingMixIn
 _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
 _lock, _execution_lock = threading.Lock(), threading.Lock()
-_active_deadline = None
+# The executing action's clock. Only sandbox compute counts against its
+# deadline: the clock pauses while a host tool call is in flight, and each
+# host wait is bounded by the separate host_wait_deadline.
+_clock = None
 if os.path.isdir("/workspace"):
     os.chdir("/workspace")
 
@@ -86,6 +89,9 @@ class _BoundedWriter(io.StringIO):
         value = super().getvalue()
         return value + "\n...[sandbox output truncated]" if self._truncated else value
 
+def _compute_remaining(clock, now):
+    return clock["deadline"] - (clock["paused_since"] if clock["in_flight"] else now)
+
 def _send(handler, body, status=200):
     raw = json.dumps(body, allow_nan=False).encode("utf-8")
     handler.send_response(status); handler.send_header("Content-Type", "application/json")
@@ -109,7 +115,9 @@ class Handler(BaseHTTPRequestHandler):
                     if request["lease"] is not None: continue
                     request["lease"] = uuid.uuid4().hex
                     out.append({"id": call_id, "lease": request["lease"], "tool_name": request["tool_name"], "args": request["args"], "kwargs": request["kwargs"]})
-            _send(self, {"requests": out}); return
+                clock = _clock
+                remaining_s = None if clock is None else _compute_remaining(clock, time.monotonic())
+            _send(self, {"requests": out, "remaining_s": remaining_s}); return
         _send(self, {"error": "not found"}, 404)
     def do_POST(self):
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
@@ -118,17 +126,19 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/execute":
             code, variables = data.get("code"), data.get("variables") or {}
             timeout_s = data.get("timeout_s", __DEFAULT_TOOL_TIMEOUT_S__)
-            if (not isinstance(code, str) or not isinstance(variables, dict) or isinstance(timeout_s, bool)
-                    or not isinstance(timeout_s, (int, float)) or timeout_s <= 0):
+            host_wait_s = data.get("host_wait_s", timeout_s)
+            if (not isinstance(code, str) or not isinstance(variables, dict)
+                    or any(isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0 for v in (timeout_s, host_wait_s))):
                 _send(self, {"error": "invalid execution"}, 400); return
             stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__), _BoundedWriter(__MAX_OUTPUT_CHARS__)
             result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
             try:
                 with _execution_lock:
                     with _lock:
-                        global _active_deadline
-                        _active_deadline = time.monotonic() + float(timeout_s)
-                        _namespace["_fleet_tool_timeout_s"] = float(timeout_s)
+                        global _clock
+                        now = time.monotonic()
+                        _clock = {"deadline": now + float(timeout_s), "host_wait_deadline": now + float(host_wait_s), "in_flight": 0, "paused_since": None}
+                        _namespace["_fleet_tool_timeout_s"] = max(float(timeout_s), float(host_wait_s))
                     try:
                         _namespace.update(variables)
                         try:
@@ -146,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                                     result.update(error=str(exc)[:2000], error_category=type(exc).__name__)
                     finally:
                         with _lock:
-                            _active_deadline = None
+                            _clock = None
             finally:
                 result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
             _send(self, result); return
@@ -155,12 +165,19 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 if call_id in _pending or call_id in _results or call_id in _completed:
                     _send(self, {"error": "duplicate call"}, 409); return
-                if _active_deadline is None or time.monotonic() >= _active_deadline:
+                clock, now = _clock, time.monotonic()
+                if clock is None or _compute_remaining(clock, now) <= 0:
                     _send(self, {"error": "invocation is not executing"}, 409); return
                 _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": None, "event": event}
-                deadline = _active_deadline
-            wait_s = max(0.0, deadline - time.monotonic()) if deadline is not None else __DEFAULT_TOOL_TIMEOUT_S__
-            if not event.wait(wait_s):
+                if not clock["in_flight"]: clock["paused_since"] = now
+                clock["in_flight"] += 1
+                wait_s = max(0.0, clock["host_wait_deadline"] - now)
+            woke = event.wait(wait_s)
+            with _lock:
+                clock["in_flight"] -= 1
+                if not clock["in_flight"]:
+                    clock["deadline"] += time.monotonic() - clock["paused_since"]; clock["paused_since"] = None
+            if not woke:
                 with _lock:
                     _pending.pop(call_id, None); _results.pop(call_id, None); _completed.add(call_id)
                 _send(self, {"error": "tool call timed out"}, 504); return
@@ -242,20 +259,45 @@ class DaytonaHttpToolBroker:
             + submit_source
         )
 
-    def execute(self, code: str, variables: Mapping[str, Any], *, timeout_s: int) -> Any:
+    def execute(
+        self,
+        code: str,
+        variables: Mapping[str, Any],
+        *,
+        timeout_s: int,
+        host_wait_deadline: float | None = None,
+    ) -> Any:
+        """Run one action; ``timeout_s`` bounds sandbox compute only.
+
+        The action clock pauses while a host tool call is in flight. Each host
+        wait ends by ``host_wait_deadline`` (never earlier than ``timeout_s``
+        after the start), so a long host tool does not spend the compute budget.
+        """
         self._ensure_started()
         assert self._client is not None
         self._delivery_error = None
         client = self._client
         outcome: list[httpx.Response | BaseException] = []
+        started = time.monotonic()
+        wait_until = max(started + timeout_s, host_wait_deadline or started)
+        host_wait_s = wait_until - started
+        # Compute plus every paused wait cannot outlast this ceiling.
+        ceiling = started + timeout_s + host_wait_s + _EXECUTE_RESPONSE_GRACE_S
+        transport_deadline = started + timeout_s + _EXECUTE_RESPONSE_GRACE_S
+        timed_out = False
 
         def post() -> None:
             try:
                 outcome.append(
                     client.post(
                         "/execute",
-                        json={"code": code, "variables": dict(variables), "timeout_s": timeout_s},
-                        timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S,
+                        json={
+                            "code": code,
+                            "variables": dict(variables),
+                            "timeout_s": timeout_s,
+                            "host_wait_s": host_wait_s,
+                        },
+                        timeout=ceiling - started,
                     )
                 )
             except BaseException as exc:
@@ -264,12 +306,21 @@ class DaytonaHttpToolBroker:
         worker = threading.Thread(target=post, daemon=True)
         # Host tools run on this thread while the action waits for them; they
         # can read when the action's in-sandbox waits expire.
-        with host_action_deadline(time.monotonic() + timeout_s):
+        with host_action_deadline(wait_until):
             worker.start()
             while worker.is_alive():
                 if self._stopped:
                     break
-                self._poll_once()
+                remaining_s = self._poll_once()
+                now = time.monotonic()
+                if remaining_s is not None:
+                    # Follow the sandbox's clock: it stays still while a host
+                    # tool call is in flight and falls during compute.
+                    transport_deadline = min(ceiling, now + remaining_s + _EXECUTE_RESPONSE_GRACE_S)
+                if now >= transport_deadline:
+                    # Runaway compute: give up as a transport timeout would.
+                    timed_out = True
+                    break
                 worker.join(0.05)
         # The remote /execute request owns every outstanding /tool_call.  Do
         # not return (or tear down its broker) until that request has settled,
@@ -278,7 +329,7 @@ class DaytonaHttpToolBroker:
         delivery_error = self._delivery_error
         if delivery_error is not None:
             raise delivery_error
-        if outcome and isinstance(outcome[0], httpx.TimeoutException):
+        if timed_out or (outcome and isinstance(outcome[0], httpx.TimeoutException)):
             raise DaytonaAdapterError(
                 message="sandbox execution request timed out", cause_type="BrokerExecutionTimeout"
             ) from None
@@ -357,14 +408,17 @@ class DaytonaHttpToolBroker:
             ) from exc
         raise DaytonaAdapterError(message="sandbox tool broker did not become healthy", cause_type="BrokerStartupError")
 
-    def _poll_once(self) -> None:
+    def _poll_once(self) -> float | None:
+        """Serve pending tool calls; return the action's remaining compute seconds when the sandbox reports it."""
         client = self._client
         if self._stopped or client is None:
-            return
+            return None
         try:
-            requests = client.get("/pending").json().get("requests", [])
-        except (httpx.HTTPError, ValueError):
-            return
+            pending = client.get("/pending").json()
+            requests = pending.get("requests", [])
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
+        remaining_s = pending.get("remaining_s")
         for request in requests:
             name = str(request.get("tool_name") or "")
             arguments = dict(request.get("kwargs") or {})
@@ -443,6 +497,9 @@ class DaytonaHttpToolBroker:
                                 self._record_delivery_failure(request, phase="settlement", category="callback_error")
             except httpx.HTTPError:
                 self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+        if isinstance(remaining_s, (int, float)) and not isinstance(remaining_s, bool):
+            return float(remaining_s)
+        return None
 
     def _late_delivery_error(self, response: Any) -> str | None:
         """Classify a non-200 /result response as benign sandbox-side abandonment.

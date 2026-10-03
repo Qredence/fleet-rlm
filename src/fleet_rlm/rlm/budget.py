@@ -14,8 +14,10 @@ from threading import Lock
 DEFAULT_PARSE_RETRIES = 2
 DEFAULT_FINALIZATION_ATTEMPTS = 2
 
-# The monotonic deadline of the sandbox action whose host tool call is being
-# served. The broker sets it on the thread that dispatches host tools, so a
+# The monotonic time at which the sandbox action being served stops waiting
+# for its host tool calls. Waits do not spend the action's compute budget, so
+# this follows the Turn deadline less its wrap-up reserve, not the action
+# timeout. The broker sets it on the thread that dispatches host tools, so a
 # tool that waits on other work (recursive children) can finish in time for
 # its result to be delivered.
 _host_action_deadline: ContextVar[float | None] = ContextVar("fleet_host_action_deadline", default=None)
@@ -23,7 +25,7 @@ _host_action_deadline: ContextVar[float | None] = ContextVar("fleet_host_action_
 
 @contextmanager
 def host_action_deadline(deadline: float) -> Iterator[None]:
-    """Expose the calling sandbox action's deadline to host tools it dispatches."""
+    """Expose the calling sandbox action's host-wait deadline to host tools it dispatches."""
     token = _host_action_deadline.set(deadline)
     try:
         yield
@@ -32,7 +34,7 @@ def host_action_deadline(deadline: float) -> Iterator[None]:
 
 
 def current_host_action_deadline() -> float | None:
-    """Return the deadline of the sandbox action being served, if any."""
+    """Return the host-wait deadline of the sandbox action being served, if any."""
     return _host_action_deadline.get()
 
 

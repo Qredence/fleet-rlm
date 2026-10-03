@@ -51,8 +51,10 @@ max_execution_output_chars = 4000
 max_execution_output_bytes = 2000000
 execution_timeout_s = 300
 # Upper bound for each child sandbox action; 0 derives max(1, int(parent * 0.9)),
-# clamped to the parent. Recursive calls are additionally bounded by the calling
-# action's deadline and return ordered partial outcomes when it is reached.
+# clamped to the parent. execution_timeout_s counts sandbox compute only: the
+# action clock pauses while a host tool call is in flight, and each host wait
+# ends by the Turn deadline less wrap_up_seconds. Recursive calls end by that
+# host-wait deadline and return ordered partial outcomes when it is reached.
 child_execution_timeout_s = 0
 wrap_up_seconds = 300
 finalization_attempts = 2
