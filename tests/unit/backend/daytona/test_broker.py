@@ -40,6 +40,8 @@ def _start_embedded_server(prefix: str = "") -> Iterator[tuple[str, dict[str, st
         .replace("__MAX_REQUEST_BYTES__", str(broker_module._MAX_REQUEST_BYTES))
         .replace("__MAX_OUTPUT_CHARS__", str(broker_module._MAX_OUTPUT_CHARS))
         .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(broker_module._DEFAULT_TOOL_TIMEOUT_S))
+        .replace("__ACTION_KILL_GRACE_S__", str(broker_module._ACTION_KILL_GRACE_S))
+        .replace("__WORKER_RESTORE_TIMEOUT_S__", str(broker_module._WORKER_RESTORE_TIMEOUT_S))
     )
     process = subprocess.Popen(
         [sys.executable, "-c", source],
@@ -688,3 +690,81 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
     assert broker._delivery_error is None
     assert "delivered after sandbox abandonment" in caplog.text
     assert "category=duplicate_call" in caplog.text
+
+
+def test_action_kill_and_restore_fit_inside_the_host_response_grace() -> None:
+    assert (
+        broker_module._ACTION_KILL_GRACE_S + broker_module._WORKER_RESTORE_TIMEOUT_S
+        < broker_module._EXECUTE_RESPONSE_GRACE_S
+    )
+
+
+def _attached_broker(base_url: str, headers: dict[str, str], tools: dict[str, object]) -> DaytonaHttpToolBroker:
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    broker.bind_tools(tools)  # type: ignore[arg-type]
+    broker._url = base_url
+    return broker
+
+
+def test_runaway_action_is_stopped_and_the_repl_resumes_from_its_pre_action_state(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    broker = _attached_broker(base_url, headers, {"answer": lambda: {"ok": True}})
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        assert broker.execute(broker.setup_source("value = 1"), {}, timeout_s=5)["error"] is None
+        started = time.monotonic()
+        stopped = broker.execute("value = 2\nwhile True:\n    pass\n", {}, timeout_s=1)
+        elapsed = time.monotonic() - started
+        after = broker.execute("print(value, answer()['ok'])", {}, timeout_s=5)
+        again = broker.execute("value += 1\nprint(value)", {}, timeout_s=5)
+
+    assert stopped["error_category"] == "ActionTimeout"
+    assert "exceeded its 1 s limit" in stopped["error"]
+    assert "Split the work into smaller steps" in stopped["error"]
+    assert elapsed < 1 + broker_module._EXECUTE_RESPONSE_GRACE_S
+    assert (after["error"], after["stdout"]) == (None, "1 True\n")
+    assert (again["error"], again["stdout"]) == (None, "2\n")
+
+
+def test_action_that_ends_the_worker_process_is_recoverable(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    broker = _attached_broker(base_url, headers, {})
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        assert broker.execute("value = 1", {}, timeout_s=5)["error"] is None
+        ended = broker.execute("import os\nvalue = 2\nos._exit(3)", {}, timeout_s=5)
+        after = broker.execute("print(value)", {}, timeout_s=5)
+
+    assert ended["error_category"] == "ActionWorkerExit"
+    assert (after["error"], after["stdout"]) == (None, "1\n")
+
+
+def test_runaway_action_reaches_native_rlm_as_a_recoverable_execution_error(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    from dspy import CodeExecutionError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
+
+    base_url, headers = embedded_server
+    backend = sandbox_backend(object(), timeout_s=1)
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+
+        def attach() -> DaytonaHttpToolBroker:
+            if backend._broker is None:
+                backend._broker = _attached_broker(base_url, headers, backend._bound_tools)
+                backend._broker._client = client
+            return backend._broker
+
+        backend._ensure_broker = attach
+        with pytest.raises(CodeExecutionError, match="exceeded its 1 s limit") as caught:
+            interpreter.execute("while True:\n    pass\n")
+        assert interpreter.execute("print('still running')") == "still running\n"
+
+    assert caught.value.category == "ActionTimeout"
