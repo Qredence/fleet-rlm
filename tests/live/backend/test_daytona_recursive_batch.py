@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
-from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import runtime as recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
@@ -36,8 +36,9 @@ from tests.live.backend._mvp_support import live_runtime
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
+_CONFIGURED_MODELS = load_configuration_environment_contract()
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", _CONFIGURED_MODELS.root_model)
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", _CONFIGURED_MODELS.sub_model)
 _CONTRACT_ID = "fleet.daytona-recursive-batch"
 _TOKEN_A = "BATCH_TOKEN_ALPHA"
 _TOKEN_B = "BATCH_TOKEN_BETA"
@@ -227,25 +228,14 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "batch-fleet.toml"
-    target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")
-    policy_source = (
-        (_REPO_ROOT / "config" / "fleet.toml")
-        .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona-native"', 'default_profile = "daytona-recursive"', 1)
-    )
-    if target_profile != "daytona-recursive":
-        policy_source = policy_source.replace(
-            'default_profile = "daytona-recursive"', f'default_profile = "{target_profile}"', 1
-        )
-    copied_policy.write_text(policy_source, encoding="utf-8")
+    copied_policy.write_text((_REPO_ROOT / "config" / "fleet.toml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
     try:
         policy = require_live_execution()
     except FleetConfigurationError:
         pytest.fail("Recursive batch canary requires runtime.live_enabled=true")
-    target_profile = os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive")
-    if active_profile(policy) != target_profile or policy.run_environment != "daytona":
-        pytest.fail("Recursive batch canary requires the selected daytona profile")
+    if policy.run_environment != "daytona":
+        pytest.fail("Recursive batch canary requires runtime.environment=daytona")
     if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,
@@ -506,8 +496,6 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One real sibling survives an injected ordinary failure after the first lease is acquired."""
-    if os.environ.get("FLEET_LIVE_PROFILE", "daytona-recursive") != "daytona-recursive":
-        pytest.fail("P6D.4 partial canary requires the daytona-recursive profile")
     settings = _load_live_settings(tmp_path, monkeypatch)
     ledger = _PartialProofLedger()
     child_evidence = _ChildEvidence()
@@ -624,7 +612,7 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
         {
             "schema": "fleet.p6d4-partial/v1",
             "candidate": candidate_identity(),
-            "profile": "daytona-recursive",
+            "recursion_enabled": True,
             "root_model": settings.root_model,
             "sub_model": settings.sub_model,
             "trace_id": trace_id,

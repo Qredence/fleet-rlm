@@ -160,7 +160,7 @@ render cost (`transcript.bench.ts`), and cleanup.
 ## Documentation and bundled Skills
 
 For authored guides and agent instructions, run `make check-docs` and
-`git diff --check`. The documentation gate checks the generated profile matrix,
+`git diff --check`. The documentation gate checks the generated configuration environment reference,
 internal documentation links and reachability, CLI/OpenAPI sanity, the root
 agent-guide line budget, guide/Claude-import integrity, documented Make targets,
 development-skill reference reachability, and script inventory/help. It does not verify every
@@ -197,7 +197,7 @@ accounting in individual pytest modules.
 | --- | --- | --- |
 | Context containment and whole-Sandbox deletion | `test_daytona_containment.py`, `test_daytona_deletion_lifecycle.py`; explicitly requested bounded evidence | Provider process survival and deletion observation cannot be inferred from fake responses. |
 | Snapshot image package and import contract | `scripts/daytona_snapshot.py verify-runtime`; disposable Sandbox result | The selected immutable image must expose its baked Python and dependency contract in Daytona. This does not exercise Fleet's API or RLM path. |
-| Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The native lane enables MLflow tracing, so it also requires a reachable tracking server at the configured `mlflow.tracking_uri` (the default profile uses `http://127.0.0.1:5001`) and fails, rather than skips, when that server is down: a lane certifying one `RLM.execute` span must not pass with none. The receipt includes cleanup evidence and does not certify recursion or containment. |
+| Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The native lane enables MLflow tracing, so it also requires a reachable tracking server at the configured `mlflow.tracking_uri` (the shipped configuration uses `http://127.0.0.1:5001`) and fails, rather than skips, when that server is down: a lane certifying one `RLM.execute` span must not pass with none. The receipt includes cleanup evidence and does not certify recursion or containment. |
 | Recursive two-child batch canary | `scripts/live_recursive_batch_canary.py`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
 | Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
@@ -234,7 +234,7 @@ previously reported `per_turn` may now report `retained_session`. A missing,
 partial, slower, or cleanup-failing receipt retains Session Sandboxes.
 
 The native verifier loads `.env` with `override=False`, so existing process
-exports win. It requires the `daytona-native` profile and explicit model IDs:
+exports win. It requires the `rlm.recursion_enabled = false` setting and explicit model IDs:
 
 ```bash
 export FLEET_LIVE=1
@@ -248,7 +248,7 @@ This verifier records the native semantic-call contract and attachment/artifact
 durability contract at the exact candidate SHA. It does not establish
 recursive execution, containment, release readiness, or deployment. Run the
 recursive canary separately when its evidence is authorized and needed; the
-[profile matrix](../reference/profile-matrix.md) lists profile environment
+[configuration environment reference](../reference/configuration-environment.md) lists configuration environment
 requirements. Historical receipts do not prove a later tip.
 
 ## Security, packaging, and release

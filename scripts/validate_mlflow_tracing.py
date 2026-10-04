@@ -38,7 +38,7 @@ def _tracing_settings() -> Settings:
     """Load one selected Fleet policy with complete local or managed tracing."""
     settings = load_runtime_settings()
     if not settings.mlflow_tracing_enabled or not settings.mlflow_tracking_uri or not settings.mlflow_experiment_name:
-        raise RuntimeError("selected Fleet TOML profile must enable MLflow tracing with an experiment")
+        raise RuntimeError("Fleet TOML configuration must enable MLflow tracing with an experiment")
     if settings.mlflow_tracking_uri == "databricks":
         managed_values = {
             "mlflow.trace_catalog": settings.mlflow_trace_catalog,
@@ -47,7 +47,7 @@ def _tracing_settings() -> Settings:
             "mlflow.tracing_sql_warehouse_id": settings.mlflow_tracing_sql_warehouse_id,
         }
         if any(not value for value in managed_values.values()):
-            raise RuntimeError("selected Fleet TOML profile has incomplete Managed Databricks MLflow settings")
+            raise RuntimeError("Fleet TOML configuration has incomplete Managed Databricks MLflow settings")
     return settings
 
 

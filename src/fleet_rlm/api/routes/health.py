@@ -74,10 +74,7 @@ settings_router = APIRouter(prefix="/api/settings", tags=["settings"])
 def _settings_response(snapshot) -> SettingsPolicyResponse:
     return SettingsPolicyResponse(
         revision=snapshot.revision,
-        active_profile=snapshot.active_profile,
-        default_profile=snapshot.default_profile,
-        available_profiles=list(snapshot.available_profiles),
-        scopes=list(snapshot.scopes),
+        fields=list(snapshot.fields),
     )
 
 
@@ -108,36 +105,13 @@ def get_settings_policy(policy: ConfigPolicyDep) -> SettingsPolicyResponse:
 )
 def patch_settings_policy(body: SettingsPolicyPatchRequest, policy: ConfigPolicyDep) -> SettingsPolicyResponse:
     try:
-        if body.profile is not None:
-            result = _settings_response(policy.set_default_profile(body.profile, revision=body.revision))
-            update_kind = "profile"
-            properties = {"update_kind": update_kind}
-        elif body.updates or body.default_profile is not None:
-            result = _settings_response(
-                policy.apply(
-                    updates=tuple(
-                        PolicyMutation(
-                            scope=update.scope,
-                            path=update.path,
-                            value=update.value,
-                            unset=update.unset,
-                        )
-                        for update in body.updates
-                    ),
-                    default_profile=body.default_profile,
-                    revision=body.revision,
-                )
+        result = _settings_response(
+            policy.apply(
+                updates=tuple(PolicyMutation(path=update.path, value=update.value) for update in body.updates),
+                revision=body.revision,
             )
-            update_kind = "batch"
-            properties = {"update_kind": update_kind, "update_count": len(body.updates)}
-        else:
-            if body.scope is None or body.path is None or body.value is None:
-                raise http_error(422, "settings_policy_invalid", "Settings value is invalid")
-            result = _settings_response(
-                policy.update(scope=body.scope, path=body.path, value=body.value, revision=body.revision)
-            )
-            update_kind = "field"
-            properties = {"update_kind": update_kind, "scope": body.scope, "path": body.path}
+        )
+        properties = {"update_kind": "batch", "update_count": len(body.updates)}
         capture("settings_policy_updated", properties=properties)
         return result
     except PolicyConflictError as exc:

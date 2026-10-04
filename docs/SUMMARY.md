@@ -2,8 +2,8 @@
 
 Current guides, active migration records, and historical baselines are grouped
 in [Documentation Home](index.md). Retained broker-backed execution is the sole
-supported runtime; Fleet child RLM tools follow the selected policy and are
-enabled only when the opt-in `daytona-recursive` profile is selected. A dated
+supported runtime; Fleet child RLM tools follow the single configuration and are
+enabled by the shipped `rlm.recursion_enabled = true` setting. A dated
 decision or passing receipt is scoped to its recorded revision and is not
 current production certification.
 
@@ -22,7 +22,7 @@ current production certification.
   * [P41 behavior freeze](reference/behavior-freeze.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
-  * [Runtime Profile Matrix](reference/profile-matrix.md)
+  * [Configuration Environment Reference](reference/configuration-environment.md)
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)

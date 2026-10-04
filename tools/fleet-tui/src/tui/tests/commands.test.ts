@@ -263,23 +263,17 @@ describe("command handlers", () => {
     const { ctx } = makeContext();
     ctx.client.getSettings = vi.fn().mockResolvedValue({
       revision: "a".repeat(64),
-      active_profile: "daytona",
-      default_profile: "daytona",
+
       restart_required: true,
-      scopes: [
+      fields: [
         {
-          name: "daytona",
-          fields: [
-            {
-              path: "llm.base_url",
-              group: "LLM",
-              label: "Base URL",
-              value: undefined,
-              editor: "text",
-              choices: [],
-              environment_overridden: false,
-            },
-          ],
+          path: "llm.base_url",
+          group: "LLM",
+          label: "Base URL",
+          value: undefined,
+          editor: "text",
+          choices: [],
+          environment_overridden: false,
         },
       ],
     });
@@ -440,136 +434,8 @@ describe("command handlers", () => {
     expect(ctx.store.getState().pendingSkillSelections).toEqual([]);
   });
 
-  function makePolicy(
-    overrides: Partial<import("../../fleet-api-client.js").FleetSettingsPolicy> = {},
-  ) {
-    return {
-      revision: "a".repeat(64),
-      active_profile: "daytona",
-      default_profile: "daytona",
-      available_profiles: ["daytona", "daytona-bench"],
-      restart_required: true,
-      scopes: [],
-      ...overrides,
-    };
-  }
-
-  it("/profiles prints a read-only list without a presenter", async () => {
-    const { ctx } = makeContext();
-    ctx.client.getSettings = vi.fn().mockResolvedValue(makePolicy());
-    const profiles = listCommands().find((c) => c.name === "profiles");
-    expect(profiles).toBeDefined();
-    if (profiles) await profiles.handler([], ctx);
-    const sys = ctx.store.getState().messages.find((m) => m.kind === "text" && m.role === "system");
-    expect(sys?.kind).toBe("text");
-    if (sys?.kind === "text") {
-      expect(sys.text).toContain("daytona-bench");
-      expect(sys.text).toContain("current: daytona");
-      expect(sys.text).toContain("daytona (current)");
-    }
-  });
-
-  it("/profiles distinguishes the running and restart-selected profiles", async () => {
-    const { ctx } = makeContext();
-    ctx.client.getSettings = vi
-      .fn()
-      .mockResolvedValue(
-        makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" }),
-      );
-    const profiles = listCommands().find((c) => c.name === "profiles");
-    if (profiles) await profiles.handler([], ctx);
-
-    const message = ctx.store.getState().messages.at(-1);
-    expect(message).toMatchObject({ kind: "text", role: "system" });
-    if (message?.kind === "text") {
-      expect(message.text).toContain("running: daytona; selected: daytona-bench");
-      expect(message.text).toContain("daytona (running)");
-      expect(message.text).toContain("daytona-bench (selected)");
-    }
-  });
-
-  it("/profiles opens the profile picker and PATCHes on selection", async () => {
-    const { ctx } = makeContext();
-    const policy = makePolicy();
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.setProfile = vi
-      .fn()
-      .mockResolvedValue(makePolicy({ default_profile: "daytona-bench" }));
-    const chooseProfile = vi.fn().mockResolvedValue("daytona-bench");
-    const ctxWithPresenter: CommandContext = { ...ctx, presenter: { chooseProfile } as never };
-    const profiles = listCommands().find((c) => c.name === "profiles");
-    if (profiles) await profiles.handler([], ctxWithPresenter);
-    expect(chooseProfile).toHaveBeenCalledWith(policy.available_profiles, "daytona", "daytona");
-    expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona-bench", policy.revision);
-    const sys = ctx.store.getState().messages.find((m) => m.kind === "text" && m.role === "system");
-    if (sys?.kind === "text") {
-      expect(sys.text).toContain("Profile set to 'daytona-bench'");
-      expect(sys.text).toContain("Restart Fleet to apply");
-    }
-  });
-
-  it("/profiles skips PATCH when selection is unchanged or cancelled", async () => {
-    const { ctx } = makeContext();
-    const policy = makePolicy();
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.setProfile = vi.fn();
-    const profiles = listCommands().find((c) => c.name === "profiles");
-
-    if (profiles) {
-      await profiles.handler([], {
-        ...ctx,
-        presenter: { chooseProfile: vi.fn().mockResolvedValue("daytona") } as never,
-      });
-      await profiles.handler([], {
-        ...ctx,
-        presenter: { chooseProfile: vi.fn().mockResolvedValue(null) } as never,
-      });
-    }
-    expect(ctx.client.setProfile).not.toHaveBeenCalled();
-  });
-
-  it("/profiles can revert a pending selection to the running profile", async () => {
-    const { ctx } = makeContext();
-    const policy = makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" });
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.setProfile = vi.fn().mockResolvedValue(makePolicy());
-    const chooseProfile = vi.fn().mockResolvedValue("daytona");
-    const profiles = listCommands().find((c) => c.name === "profiles");
-
-    if (profiles) {
-      await profiles.handler([], {
-        ...ctx,
-        presenter: { chooseProfile } as never,
-      });
-    }
-
-    expect(chooseProfile).toHaveBeenCalledWith(
-      policy.available_profiles,
-      "daytona",
-      "daytona-bench",
-    );
-    expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona", policy.revision);
-  });
-
-  it("/profiles treats cancellation and reselecting the pending default as no-ops", async () => {
-    const { ctx } = makeContext();
-    const policy = makePolicy({ active_profile: "daytona", default_profile: "daytona-bench" });
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.setProfile = vi.fn();
-    const profiles = listCommands().find((c) => c.name === "profiles");
-
-    if (profiles) {
-      await profiles.handler([], {
-        ...ctx,
-        presenter: { chooseProfile: vi.fn().mockResolvedValue("daytona-bench") } as never,
-      });
-      await profiles.handler([], {
-        ...ctx,
-        presenter: { chooseProfile: vi.fn().mockResolvedValue(null) } as never,
-      });
-    }
-
-    expect(ctx.client.setProfile).not.toHaveBeenCalled();
+  it("does not register the removed profile command", () => {
+    expect(listCommands().some((command) => command.name === "profiles")).toBe(false);
   });
 });
 
@@ -1249,24 +1115,17 @@ describe("interactive success notifications", () => {
   function policyFixture() {
     return {
       revision: "a".repeat(64),
-      active_profile: "daytona",
-      default_profile: "daytona",
-      available_profiles: ["daytona", "daytona-bench"],
+
       restart_required: true,
-      scopes: [
+      fields: [
         {
-          name: "daytona",
-          fields: [
-            {
-              path: "rlm.max_iters",
-              group: "RLM",
-              label: "Max iterations",
-              value: 4,
-              editor: "number",
-              choices: [],
-              environment_overridden: false,
-            },
-          ],
+          path: "rlm.max_iters",
+          group: "RLM",
+          label: "Max iterations",
+          value: 4,
+          editor: "number",
+          choices: [],
+          environment_overridden: false,
         },
       ],
     } as const;
@@ -1299,10 +1158,9 @@ describe("interactive success notifications", () => {
     const notify = vi.fn();
     const policy = policyFixture();
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.updateSettings = vi.fn().mockResolvedValue({ ...policy, revision: "b".repeat(64) });
+    ctx.client.applySettings = vi.fn().mockResolvedValue({ ...policy, revision: "b".repeat(64) });
     const update: SettingsUpdate = {
       revision: policy.revision,
-      scope: "daytona",
       path: "rlm.max_iters",
       value: 8,
     };
@@ -1315,7 +1173,9 @@ describe("interactive success notifications", () => {
       });
     }
 
-    expect(ctx.client.updateSettings).toHaveBeenCalledWith(update);
+    expect(ctx.client.applySettings).toHaveBeenCalledWith(update.revision, [
+      { path: update.path, value: update.value },
+    ]);
     expect(notify).toHaveBeenCalledWith(
       expect.stringContaining("Saved rlm.max_iters to config/fleet.toml"),
     );
@@ -1326,10 +1186,9 @@ describe("interactive success notifications", () => {
     const { ctx } = makeContext();
     const policy = policyFixture();
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.updateSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.applySettings = vi.fn().mockResolvedValue(policy);
     const update: SettingsUpdate = {
       revision: policy.revision,
-      scope: "daytona",
       path: "rlm.max_iters",
       value: 8,
     };
@@ -1345,7 +1204,7 @@ describe("interactive success notifications", () => {
     const policy = policyFixture();
     const fresh = { ...policy, revision: "c".repeat(64) };
     ctx.client.getSettings = vi.fn().mockResolvedValueOnce(policy).mockResolvedValueOnce(fresh);
-    ctx.client.updateSettings = vi
+    ctx.client.applySettings = vi
       .fn()
       .mockRejectedValue(
         new FleetApiError(409, "Settings changed", "req-1", "settings_revision_conflict"),
@@ -1358,7 +1217,6 @@ describe("interactive success notifications", () => {
           if (!save) return null;
           savedPolicy = await save({
             revision: policy.revision,
-            scope: "daytona",
             path: "rlm.max_iters",
             value: 8,
           });
@@ -1380,12 +1238,11 @@ describe("interactive success notifications", () => {
     const { ctx } = makeContext();
     const policy = policyFixture();
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.updateSettings = vi
+    ctx.client.applySettings = vi
       .fn()
       .mockRejectedValue(new FleetApiError(422, "Settings value is invalid"));
     const update: SettingsUpdate = {
       revision: policy.revision,
-      scope: "daytona",
       path: "rlm.max_iters",
       value: 8,
     };
@@ -1399,10 +1256,9 @@ describe("interactive success notifications", () => {
     const { ctx } = makeContext();
     const policy = policyFixture();
     ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.updateSettings = vi.fn().mockResolvedValue(policy);
+    ctx.client.applySettings = vi.fn().mockResolvedValue(policy);
     const update: SettingsUpdate = {
       revision: policy.revision,
-      scope: "daytona",
       path: "rlm.max_iters",
       value: 8,
     };
@@ -1411,25 +1267,10 @@ describe("interactive success notifications", () => {
     const settings = listCommands().find((c) => c.name === "settings");
     if (settings) await settings.handler([], { ...ctx, presenter, notify });
 
-    expect(ctx.client.updateSettings).toHaveBeenCalledWith(update);
+    expect(ctx.client.applySettings).toHaveBeenCalledWith(update.revision, [
+      { path: update.path, value: update.value },
+    ]);
     expect(notify).toHaveBeenCalledWith(expect.stringContaining("Saved"));
-    expect(systemTexts(ctx)).toHaveLength(0);
-  });
-
-  it("/profiles flashes the selection instead of a transcript message when interactive", async () => {
-    const { ctx } = makeContext();
-    const notify = vi.fn();
-    const policy = policyFixture();
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.setProfile = vi
-      .fn()
-      .mockResolvedValue({ ...policy, default_profile: "daytona-bench" });
-    const presenter = { chooseProfile: vi.fn().mockResolvedValue("daytona-bench") } as never;
-    const profiles = listCommands().find((c) => c.name === "profiles");
-    if (profiles) await profiles.handler([], { ...ctx, notify, presenter });
-
-    expect(ctx.client.setProfile).toHaveBeenCalledWith("daytona-bench", policy.revision);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Profile set to 'daytona-bench'"));
     expect(systemTexts(ctx)).toHaveLength(0);
   });
 

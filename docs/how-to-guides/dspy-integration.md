@@ -112,15 +112,13 @@ separate validation gates.
   REPL code must treat `[]` as "no prepared context" and trust the
   `attachments` metadata over claims inside the request text instead of
   probing for context that was never staged.
-- The committed profiles use the OpenAI-compatible Chat Completion format:
+- The single configuration uses the OpenAI-compatible Chat Completion format:
   each Root/Sub role supplies a provider base URL, an API-key environment
   reference, and a provider-native model id. The request goes to the provider's
   `/chat/completions` endpoint with `model_type="chat"`; no provider-specific
-  routing header is required. The default Root and Sub roles use Alibaba
-  DashScope (MaaS) and are capped at 16,384 output tokens; the managed profile
-  uses Databricks. The
-  exact credential and endpoint names are policy-derived in [the profile
-  matrix](../reference/profile-matrix.md). This LM response limit is distinct
+  routing header is required. Root and Sub use Databricks Unity AI Gateway
+  and are capped at 16,384 output tokens. The exact credential and endpoint
+  names are policy-derived in [the configuration environment reference](../reference/configuration-environment.md). This LM response limit is distinct
   from `dspy.RLM.max_output_chars`, which bounds REPL output retained in
   recursive history.
 - Fleet constructs its Root, Sub, and probe LMs as stock `dspy.LM` objects on
@@ -164,14 +162,12 @@ Fleet's `RLMOptions` mirrors the pinned DSPy 3.4.0 constructor fields:
 
 The generic `RLMOptions`/DSPy constructor fallback for Root is `20` iterations,
 `50` semantic prompts, and `10,000` output characters. The shipped
-`daytona-recursive` policy uses `12`, `32`, and `6,000` for the effective Root
+single configuration uses `12`, `32`, and `6,000` for the effective Root
 budget; the child policy remains `8`, `12`, and `4,000`. Fleet's
 `max_execution_output_chars`, Turn deadline, recursive call budget, and child
 concurrency are separate controls. The shipped Root and Sub provider roles pass
 `num_retries = 3` to `dspy.LM`, so retries are DSPy's native retry loop with
-exponential backoff; omitted custom-role values inherit that shipped default.
-The typed settings default is also `3` when the policy omits the field from
-both defaults and the selected profile.
+exponential backoff; omitted role values use the typed settings default of `3`.
 `rlm.verbose` controls host logging only;
 operator-visible reasoning, code, output, and recursive status use Fleet's
 Runtime Events and trajectory reconciliation.
@@ -258,10 +254,9 @@ the model never to repeat an identical interpreter action.
 
 ## Recursive harness limits
 
-The shipped default profile is `daytona-native`, with recursion disabled.
-The opt-in `daytona-recursive` profile enables Fleet child-RLM tools; native
-`llm_query` / `llm_query_batched` remain the semantic delegation path. Set
-`rlm.recursion_enabled = false` on a comparison profile to disable the bounded
+The shipped single configuration enables Fleet child-RLM tools; native
+`llm_query` / `llm_query_batched` remain available for semantic judgments. Set
+`rlm.recursion_enabled = false` and restart Fleet to disable the bounded
 recursive Tool and instruction. When enabled, one native child level is allowed,
 with four reserved child calls per Turn, a 50,000-character delegated prompt
 bound, eight child iterations, twelve child LM calls, 4,000 child output
@@ -372,11 +367,10 @@ a small text Attachment is materialized through the Volume capsule, native
 `llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
 reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
 finishes the Turn, and Turn-owned broker, Sandbox, and Volume resources clean
-up. This canary explicitly requires the opt-in `daytona-recursive` profile;
-the shipped default remains `daytona-native`.
+up. This canary requires native-only configuration unless an explicit Session
+snapshot is supplied for the aggregate candidate-certification path.
 
-For the canary, set `[config] default_profile` to `"daytona-recursive"` in
-`config/fleet.toml` and set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
+For that aggregate canary, set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
 immutable Daytona snapshot name, then run:
 
 ```bash
@@ -389,7 +383,7 @@ uv run pytest -q -n 0 --timeout=900 \
 The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
 Daytona and model credentials. The evidence-path variable must be exported in
 the process environment before pytest starts. The immutable snapshot variable
-is required to admit the recursive profile for this test. The test loads
+is required to admit a recursion-enabled configuration for this test. The test loads
 `.env` with `override=False`; operator exports retain precedence. A passing
 canary is evidence for this test only and does not promote or release the
 candidate. Replace the snapshot example with the candidate's immutable Daytona
@@ -400,8 +394,8 @@ snapshot name, which must end in `-v` followed by a positive integer.
 The native verifier runs two current contracts against one committed candidate:
 the native single and ordered batch semantic-call path through FastAPI, and the
 staged Attachment / durable Artifact contract across Sandbox replacement.
-It requires explicit live authorization, `runtime.live_enabled`, the
-`daytona-native` profile, bounded Root and Sub model IDs, configured provider
+It requires explicit live authorization, `runtime.live_enabled`,
+`rlm.recursion_enabled = false`, bounded Root and Sub model IDs, configured provider
 credentials, and a clean tracked non-`main` candidate.
 
 ```bash
@@ -424,8 +418,8 @@ deployment.
 The separate recursive canary runs two native DSPy child RLMs from one ordered
 Root batch, verifies observed concurrency and child trace hierarchy, reuses the
 Root on a second Turn, and requires child cleanup and restored admission. It
-selects the opt-in `daytona-recursive` policy through an isolated policy copy;
-the shipped default remains `daytona-native`. It requires `FLEET_LIVE=1`,
+loads an unchanged copy of the single configuration and requires recursion
+enabled; it never silently enables children. It also requires `FLEET_LIVE=1`,
 enabled live policy, configured Daytona/model credentials, and a clean tracked
 non-`main` candidate.
 
@@ -474,7 +468,7 @@ correct answer.
 ### Running the routing matrix
 
 Use the offline reducer and plan receipts in normal validation, and invoke the opt-in
-live lane only when the selected Fleet profile and Daytona credentials are available:
+live lane only when the Fleet configuration and Daytona credentials are available:
 
 ```bash
 uv run python scripts/benchmarks/run_routing_eval.py   --output .scratch/p12/routing-plan.json

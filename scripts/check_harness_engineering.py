@@ -16,7 +16,7 @@ SAFE_SCRIPT_HELP = frozenset(
         "check_repo_hygiene.py",
         "check_codebase_tree.py",
         "check_dependency_boundaries.py",
-        "generate_profile_matrix.py",
+        "generate_configuration_reference.py",
         "generate_stream_fixture.py",
         "generate_tui_chunk_validation.py",
         "openapi_tools.py",
