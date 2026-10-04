@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 from dotenv import load_dotenv
 
-from fleet_rlm.config.loader import active_profile_contract, load_profile_environment_contracts, load_runtime_settings
+from fleet_rlm.config.loader import load_configuration_environment_contract, load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.runtime import DaytonaRuntime
 from fleet_rlm.turn_preparation import TurnPreparationPlan
@@ -24,9 +24,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 
 
-_SECRET_NAMES = tuple(
-    name for contract in load_profile_environment_contracts() for name in contract.provider_environment_names
-)
+_SECRET_NAMES = load_configuration_environment_contract().provider_environment_names
 
 
 _CLEANUP_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
@@ -63,7 +61,7 @@ def _live_settings(tmp_path: Path) -> Settings:
     _load_repo_env()
     if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
         pytest.skip("Set FLEET_LIVE=1 for the complete Daytona MVP proof")
-    required_environment = active_profile_contract().provider_environment_names
+    required_environment = load_configuration_environment_contract().provider_environment_names
     missing = [name for name in required_environment if not os.environ.get(name)]
     if missing:
         pytest.fail("Live Daytona MVP proof missing required credentials: " + ", ".join(missing))

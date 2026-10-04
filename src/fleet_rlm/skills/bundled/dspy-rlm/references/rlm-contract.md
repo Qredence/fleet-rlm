@@ -67,10 +67,8 @@ Session Workspace.
 | `max_output_chars` | 10000 | Truncates **REPL step output** fed back into the loop (not a silent truncate of SUBMIT) |
 
 These are the generic DSPy constructor and `RLMOptions` fallback values, not
-the effective policy for every Fleet profile. The shipped `daytona-recursive`
-profile currently uses Root values `12`, `32`, and `6000`; its child RLM values
-are `8`, `12`, and `4000`. Treat `config/fleet.toml` as authoritative when a
-different profile is selected.
+the effective Fleet policy. The single shipped configuration uses Root values `12`, `32`, and `6000`; its child RLM values
+are `8`, `12`, and `4000`. Treat `config/fleet.toml` as authoritative for the runtime configuration.
 
 Fleet uses DSPy 3.4.0's `max_iters` spelling end-to-end: `RLMOptions.max_iters`,
 `Settings.rlm_max_iters`, and the TOML policy key `rlm.max_iters` are passed
@@ -110,7 +108,7 @@ keyword-only.
   preserves the pinned action grammar; exhausted repair is an
   `adapter_parse_error`. RLM action output contains
   `reasoning` and `code`; `completed` is internal loop state, not a Signature
-  output field. The selected `daytona-recursive` Root and Sub Models
+  output field. The configured Root and Sub Models
   (through the policy-configured Databricks Chat Completions gateway) cap Root
 and Sub at 16,384 output tokens with no
 reasoning-effort override. This is separate from `max_output_chars`, which

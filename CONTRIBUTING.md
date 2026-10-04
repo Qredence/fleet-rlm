@@ -21,12 +21,12 @@ make check
 For a focused change, run its relevant `uv run pytest -q` tests and the
 matching validation lane from [AGENTS.md](AGENTS.md#work-and-validate-safely).
 `make check-docs` covers authored documentation, repository guidance, and the
-generated profile-matrix check. The [testing strategy](docs/how-to-guides/testing-strategy.md)
+generated configuration-environment check. The [testing strategy](docs/how-to-guides/testing-strategy.md)
 explains suite selection and what the non-live gate proves.
 
 To run a real Session, follow the [optional live setup](README.md#run-a-live-local-session).
-The selected profile names its secrets in `config/fleet.toml`; the
-[profile matrix](docs/reference/profile-matrix.md) lists the exact environment
+The configuration names its secrets in `config/fleet.toml`; the
+[configuration environment reference](docs/reference/configuration-environment.md) lists the exact environment
 variables. Fleet's database must be migrated explicitly before serving. Use
 local `.env` files or an authorized secret manager; never commit credentials
 or use a Daytona API key as an API bearer token.
@@ -58,7 +58,7 @@ commands above.
   owns the literal package map; `scripts/README.md` inventories supported
   top-level helpers.
 - Regenerate OpenAPI and TUI HTTP types with `make api-sync`, stream fixtures
-  with `make stream-sync`, and the profile matrix with `make profile-matrix`.
+  with `make stream-sync`, and the configuration environment reference with `make config-reference`.
   Do not hand-edit their outputs.
 - Bundled Skill Markdown is shipped runtime content. Check its catalog,
   manifests, resources, and contract tests when changing it.

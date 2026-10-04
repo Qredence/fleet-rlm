@@ -2,7 +2,7 @@
 
 Initialised once in the FastAPI lifespan and shared across the process.
 The client is optional and policy-controlled: the selected ``config/fleet.toml``
-profile decides whether analytics are enabled and which environment variable
+configuration decides whether analytics are enabled and which environment variable
 holds the project token. A disabled or unconfigured client is a no-op so the
 app always boots cleanly.
 
