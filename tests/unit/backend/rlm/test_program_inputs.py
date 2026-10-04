@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -16,17 +17,24 @@ import dspy
 import pytest
 
 from fleet_rlm.rlm.program import (
+    TOOL_RLM_INSTRUCTIONS,
+    WORKSPACE_MUTATION_RLM_INSTRUCTIONS,
     AttachmentContextCapsule,
     AttachmentContextEntry,
     AttachmentInput,
     FleetRLMSignature,
+    RLMModelBundle,
+    RLMOptions,
     SessionContextInput,
     SkillCardInput,
     build_rlm_input_kwargs,
+    root_signature_for_recursion,
 )
 from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import SessionHistory, TurnInput
+from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
 from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
@@ -482,3 +490,248 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
     assert not hasattr(prepared.execution, "history")
 
     await prepared.aclose()
+
+
+# --- from test_program_instructions.py --------------------------------
+def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> None:
+    absent = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
+    present = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        tool_names=frozenset({"append_workspace_text"}),
+    ).instructions
+    publish_only = root_signature_for_recursion(
+        FleetRLMSignature,
+        recursion_enabled=False,
+        tool_names=frozenset({"publish_workspace_artifact"}),
+    ).instructions
+
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS not in absent
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in present
+    assert WORKSPACE_MUTATION_RLM_INSTRUCTIONS in publish_only
+    assert "named write or publish remains" in present
+    assert "Files outside the mounted ``/workspace`` are not Session Workspace" in present
+
+
+def test_tool_instructions_require_sandbox_research_and_bounded_precision() -> None:
+    assert "SHA-256" in TOOL_RLM_INSTRUCTIONS
+    assert "sys.executable -m pip" in TOOL_RLM_INSTRUCTIONS
+    assert "smallest" in TOOL_RLM_INSTRUCTIONS and "guard band" in TOOL_RLM_INSTRUCTIONS
+    assert "never recompute a cached prefix" in TOOL_RLM_INSTRUCTIONS
+    assert "pass that string unchanged" in TOOL_RLM_INSTRUCTIONS
+    assert "pass them unchanged and in the given order" in TOOL_RLM_INSTRUCTIONS
+    assert "do not omit listed accumulator updates" in TOOL_RLM_INSTRUCTIONS
+    assert "request as unused text" in TOOL_RLM_INSTRUCTIONS
+
+
+def test_default_signature_orders_capabilities_before_semantic_calls() -> None:
+    instructions = FleetRLMSignature.instructions
+    ordered_markers = (
+        "Python standard library",
+        "Load Session History, Skills, Attachments, URL content, or Session Workspace content only",
+        "llm_query(prompt)",
+        "llm_query_batched(prompts)",
+        "exactly one typed ``SUBMIT``",
+    )
+    positions = tuple(instructions.index(marker) for marker in ordered_markers)
+    assert positions == tuple(sorted(positions))
+
+
+def test_workspace_capability_declares_temporary_durable_and_commit_gated_state() -> None:
+    daytona = DAYTONA_WORKSPACE_CAPABILITY.instructions
+    unavailable = UNAVAILABLE_WORKSPACE_CAPABILITY.instructions
+
+    for marker in ("REPL variables", "sandbox-local files", "immediately durable", "Turn Commit"):
+        assert marker in daytona
+    assert "unavailable" in unavailable
+    assert "REPL variables" in unavailable
+
+
+def test_native_builder_threads_host_tool_dispatch_into_the_signature() -> None:
+    options = RLMOptions(max_iters=1, max_llm_calls=1)
+    without = build_native_rlm_for_test(signature=FleetRLMSignature, options=options, host_tool_dispatch=False)
+    with_dispatch = build_native_rlm_for_test(signature=FleetRLMSignature, options=options, host_tool_dispatch=True)
+
+    assert "Fleet recursion or Workspace host tool" in without.signature.instructions
+    assert "Fleet recursion or Workspace host tool" not in with_dispatch.signature.instructions
+
+
+def test_nondefault_observation_budget_preserves_the_original_signature() -> None:
+    program = build_native_rlm_for_test(
+        signature=FleetRLMSignature,
+        options=RLMOptions(max_iters=1, max_llm_calls=1, max_output_chars=6_000),
+    )
+
+    assert program.signature is FleetRLMSignature
+
+
+# --- from test_program_factory.py -------------------------------------
+class _CopyableLM:
+    """Minimal copyable role-LM double: isolates history and records call kwargs."""
+
+    def __init__(self) -> None:
+        self.history: list[object] = []
+        self.calls: list[dict[str, object]] = []
+
+    def copy(self) -> _CopyableLM:
+        return _CopyableLM()
+
+    def forward(self, **kwargs: object) -> object:
+        self.calls.append(dict(kwargs))
+        return object()
+
+
+def test_model_bundle_forks_isolated_child_lms() -> None:
+    root = _CopyableLM()
+    sub = _CopyableLM()
+    bundle = RLMModelBundle(root, sub)
+
+    first = bundle.fork_for_child()
+    second = bundle.fork_for_child()
+
+    assert first.root_lm is not root
+    assert first.sub_lm is not sub
+    assert first.root_lm is not second.root_lm
+    assert first.sub_lm is not second.sub_lm
+    assert first.root_lm.history is not second.root_lm.history
+    assert first.root_lm._fleet_can_finalize is False
+    assert first.sub_lm._fleet_can_finalize is False
+    assert not hasattr(root, "_fleet_can_finalize")
+    assert not hasattr(sub, "_fleet_can_finalize")
+
+
+@pytest.mark.asyncio
+async def test_turn_bound_lm_preserves_dspy_sync_async_usage_and_callbacks():
+    from collections.abc import AsyncIterator, Iterator
+    from typing import Any
+
+    from dspy.clients.engines.base import validate_request
+    from dspy.lm15 import Request, Response, response_from_openai_chat, response_to_events
+    from dspy.utils.callback import BaseCallback
+
+    class Callback(BaseCallback):
+        def __init__(self):
+            self.starts = []
+
+        def on_lm_start(self, call_id, instance, inputs):
+            del call_id, inputs
+            self.starts.append(instance.model)
+
+    class OkEngine:
+        def complete(self, request: Request) -> Response:
+            validate_request(request)
+            return response_from_openai_chat(
+                {
+                    "model": "test/script",
+                    "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+                }
+            )
+
+        def stream(self, request: Request) -> Iterator[Any]:
+            return response_to_events(self.complete(request))
+
+        def close(self) -> None:
+            pass
+
+    class AsyncOkEngine:
+        def __init__(self, sync: OkEngine) -> None:
+            self.sync = sync
+
+        async def complete(self, request: Request) -> Response:
+            return self.sync.complete(request)
+
+        async def stream(self, request: Request) -> AsyncIterator[Any]:
+            for event in self.sync.stream(request):
+                yield event
+
+        async def aclose(self) -> None:
+            pass
+
+    sync_engine = OkEngine()
+    callback = Callback()
+    source = dspy.LM(
+        "test/script",
+        model_type="chat",
+        cache=False,
+        engine=sync_engine,
+        async_engine=AsyncOkEngine(sync_engine),
+        callbacks=[callback],
+    )
+    bound = RLMModelBundle(source, source).bind_turn().root_lm
+    assert bound("sync") == ["ok"]
+    assert await bound.acall("async") == ["ok"]
+    assert len(bound.history) == 2
+    assert bound.history[-1]["usage"]["total_tokens"] == 3
+    assert source.history == []
+    assert callback.starts == ["test/script", "test/script"]
+
+
+def test_turn_binding_isolates_role_copies_and_marks_finalization() -> None:
+    from fleet_rlm.rlm.budget import TurnBudget
+
+    root = _CopyableLM()
+    sub = _CopyableLM()
+    source = RLMModelBundle(root, sub)
+    budget = TurnBudget(deadline=None)
+    bound = source.bind_turn(budget=budget)
+
+    bound.root_lm.forward(prompt="root")
+    bound.sub_lm.forward(prompt="sub")
+
+    assert bound is not source
+    assert bound.root_lm is not root
+    assert bound.sub_lm is not sub
+    assert root.calls == []
+    assert sub.calls == []
+    assert bound.root_lm._fleet_can_finalize is True
+    assert bound.sub_lm._fleet_can_finalize is False
+    assert bound.budget is budget
+    assert source.budget is None
+
+
+def test_turn_binding_without_budget_inherits_the_source_budget() -> None:
+    from fleet_rlm.rlm.budget import TurnBudget
+
+    budget = TurnBudget(deadline=None)
+    source = RLMModelBundle(_CopyableLM(), _CopyableLM(), budget=budget)
+
+    assert source.bind_turn().budget is budget
+
+
+def test_sequential_and_concurrent_turn_bindings_return_fresh_copies() -> None:
+    source = RLMModelBundle(_CopyableLM(), _CopyableLM())
+
+    def call(_index: int) -> RLMModelBundle:
+        return source.bind_turn()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first, second = list(executor.map(call, (0, 1)))
+
+    assert first.root_lm is not second.root_lm
+    assert first.sub_lm is not second.sub_lm
+    assert first.root_lm.history is not second.root_lm.history
+    assert not hasattr(source.root_lm, "_fleet_can_finalize")
+    assert not hasattr(source.sub_lm, "_fleet_can_finalize")
+
+
+def _tool(name):
+    return dspy.Tool(lambda: "ok", name=name)
+
+
+@pytest.mark.parametrize("name", ["llm_query"])
+def test_native_builder_rejects_namespace_collisions(name):
+    with pytest.raises(RLMConfigError):
+        build_native_rlm_for_test(signature="question -> answer", options=RLMOptions(), tools=[_tool(name)])
+
+
+def test_native_builder_rejects_duplicate_names_and_keeps_authorized_tools():
+    rlm = build_native_rlm_for_test(signature="question -> answer", options=RLMOptions(), tools=[_tool("read_data")])
+
+    assert set(rlm.tools) == {"read_data"}
+    with pytest.raises(RLMConfigError, match="duplicate"):
+        build_native_rlm_for_test(
+            signature="question -> answer",
+            options=RLMOptions(),
+            tools=[_tool("read_data"), _tool("read_data")],
+        )

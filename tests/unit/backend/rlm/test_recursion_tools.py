@@ -15,6 +15,7 @@ from uuid import uuid4
 
 import dspy
 import pytest
+from pydantic import ValidationError
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
@@ -1711,3 +1712,39 @@ def test_live_batch_capture_retains_order_and_typed_results(monkeypatch: pytest.
     result = executor._call_children_batched([{"task": "first"}, {"task": "second"}])
     assert result is outcomes
     assert evidence.batch_answers == ["first", "second"]
+
+
+def test_child_request_carries_small_task_and_relative_references() -> None:
+    request = ChildRequest.from_mapping(
+        {
+            "task": "Inspect the parser and callers",
+            "inputs": ["projects/repo/src/parser.py", "projects/repo/tests"],
+            "context": "Focus on error handling.",
+        }
+    )
+    assert request.inputs == ("projects/repo/src/parser.py", "projects/repo/tests")
+    assert "error handling" in request.render()
+    assert request.serialized_bytes < 1_000
+
+
+@pytest.mark.parametrize(
+    "inputs",
+    [
+        "projects/repo/src",
+        ["/absolute/path"],
+        ["projects/repo/../other"],
+        ["https://example.com/source"],
+        ["projects/repo/%2e%2e/secret"],
+        ["projects\\repo\\source"],
+        ["projects/repo/source", "projects/repo/source"],
+        ["projects/repo//source"],
+    ],
+)
+def test_child_request_rejects_invalid_or_ambiguous_inputs(inputs: object) -> None:
+    with pytest.raises((ValueError, ValidationError)):
+        ChildRequest.from_mapping({"task": "Inspect", "inputs": inputs})
+
+
+def test_child_request_rejects_model_authored_runtime_policy() -> None:
+    with pytest.raises((ValueError, ValidationError)):
+        ChildRequest.from_mapping({"task": "Inspect", "inputs": [], "max_children": 100, "credentials": "grant access"})

@@ -25,7 +25,10 @@ from fleet_rlm.rlm.budget import (
     TurnBudget,
     TurnBudgetExhausted,
 )
+from fleet_rlm.rlm.execution import _public_failure_message
 from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions, _retry_correction_feedback
+from fleet_rlm.rlm.recursion import _recursive_failure_category
+from fleet_rlm.rlm.submit_validation import is_finalization_action, normalize_action_code
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
@@ -699,3 +702,76 @@ def test_unparseable_wrap_up_responses_terminate_at_the_finalization_ceiling() -
     assert summary["wrap_up_entered"] is True
     assert summary["wrap_up_attempts"] == 2
     assert summary["wrap_up_rejection_reason"] == "unparseable_json"
+
+
+def test_normalize_action_code_treats_quote_style_as_equivalent() -> None:
+    double = 'single_result = llm_query("Return exactly ROOT")'
+    single = "single_result = llm_query('Return exactly ROOT')"
+    assert normalize_action_code(double) == normalize_action_code(single)
+
+
+def test_normalize_action_code_strips_markdown_fences() -> None:
+    fenced = "```python\nx = 1\n```"
+    unfenced = "x = 1"
+    assert normalize_action_code(fenced) == normalize_action_code(unfenced)
+
+
+def test_normalize_action_code_handles_non_strings_and_syntax_errors() -> None:
+    assert normalize_action_code(None) == ""
+    assert normalize_action_code(123) == "123"
+    assert normalize_action_code("def syntax error ((") == "def syntax error (("
+
+
+@pytest.mark.parametrize("name", ["SUBMIT", "str"])
+def test_finalization_cannot_replace_runtime_bindings(name: str) -> None:
+    assert not is_finalization_action(f"{name} = 'value'\nSUBMIT(answer='done')")
+
+
+def test_answer_bindings_remain_supported() -> None:
+    assert is_finalization_action("answer = str(42)\nSUBMIT(answer=answer)")
+
+
+def test_recursive_finalization_keeps_specific_diagnostic() -> None:
+    assert _recursive_failure_category(FinalizationExhausted()) == "wrap_up_rejected"
+
+
+@pytest.mark.parametrize(
+    "completion",
+    ["I'll read any workspace attachments briefly."],
+)
+def test_stock_json_adapter_rejects_non_json_action_grammars(completion: str) -> None:
+    with pytest.raises(AdapterParseError) as raised:
+        dspy.JSONAdapter().parse(_ActionSignature, completion)
+
+    assert raised.value.adapter_name == "JSONAdapter"
+
+
+def test_nested_provider_404_is_classified_and_redacted() -> None:
+    class _ProviderNotFoundError(Exception):
+        status_code = 404
+
+        def __str__(self) -> str:
+            return "NotFoundError https://workspace.example/api token=super-secret"
+
+    try:
+        raise RuntimeError(
+            "LMUnsupportedModelError: [openai/databricks-deepseek-v4-flash-0731] Error code: 404"
+        ) from _ProviderNotFoundError()
+    except RuntimeError as raised:
+        diagnostic = normalize_turn_failure(raised)
+        assert diagnostic.cause_type == "provider_not_found"
+        assert diagnostic.provider_status_category == "4xx"
+        assert diagnostic.message == "provider endpoint not found"
+        assert _public_failure_message(raised) == "Provider endpoint not found; check model and base URL"
+        assert "super-secret" not in diagnostic.message
+        assert "workspace.example" not in diagnostic.message
+
+
+def test_unrelated_404_keeps_the_generic_failure_fallback() -> None:
+    error = RuntimeError("HTTP 404 while reading a Workspace URL")
+
+    diagnostic = normalize_turn_failure(error)
+
+    assert diagnostic.cause_type == "unknown"
+    assert diagnostic.provider_status_category == "none"
+    assert _public_failure_message(error) == "Turn failed"

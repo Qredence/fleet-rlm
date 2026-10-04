@@ -26,10 +26,12 @@ from fleet_rlm.rlm.execution import (
     RLMExecutionContext,
     RLMRunner,
     RunIdentity,
+    RunToolGuards,
     SessionView,
     WorkerOwnership,
     start_rlm_worker,
 )
+from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
@@ -916,3 +918,150 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
     assert not hasattr(context, "turn_store")
     with pytest.raises(FrozenInstanceError):
         context.session.request = "changed"  # type: ignore[misc]
+
+
+def test_child_progress_is_a_bounded_snapshot() -> None:
+    from fleet_rlm.rlm.events import ChildProgress
+
+    detail = ChildProgress("run:call-2", "Search official docs", "completed", 1200, "Found two sources", "complete")
+    assert detail.kind == "child.progress"
+    assert detail.child_id == "run:call-2"
+    with pytest.raises(ValueError, match="elapsed_ms"):
+        ChildProgress("c1", "Task", "failed", -1)
+    with pytest.raises(ValueError, match="task_label"):
+        ChildProgress("c1", " ", "failed", 1)
+
+
+def test_event_recorder_wraps_typed_details_in_an_immutable_ordered_envelope() -> None:
+    from fleet_rlm.rlm.events import EventRecorder, RunStarted, TextDelta
+
+    run_id = uuid4()
+    session_id = uuid4()
+    recorder = EventRecorder(run_id=run_id, session_id=session_id)
+
+    first = recorder.record(RunStarted(delivery="live"))
+    second = recorder.record(TextDelta(text="hello"))
+
+    assert first.kind == "run.started"
+    assert first.sequence == 1
+    assert second.sequence == 2
+    assert second.detail == TextDelta(text="hello")
+    assert first.run_id == second.run_id == run_id
+    assert first.session_id == second.session_id == session_id
+    with pytest.raises(FrozenInstanceError):
+        second.sequence = 3  # type: ignore[misc]
+
+
+def test_event_recorder_rejects_second_or_post_terminal_details() -> None:
+    from fleet_rlm.rlm.events import EventRecorder, EventSequenceError, RunCompleted, TextDelta
+
+    recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
+    recorder.record(RunCompleted(checkpoint_version=3, delivery="live"))
+
+    with pytest.raises(EventSequenceError):
+        recorder.record(TextDelta(text="late"))
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    ["Explain README.md and https://example.com/report."],
+)
+def test_read_only_prose_never_seeds_workspace_mutation_obligations(prompt: str) -> None:
+    del prompt
+    assert RunToolGuards().integrity.unresolved == ()
+
+
+def test_failed_reads_do_not_create_integrity_obligations() -> None:
+    guards = RunToolGuards()
+
+    guards.failed("read_workspace_text", {"path": "README.md"})
+    guards.failed("read_project_text", {"path": "fleet-rlm/review.md"})
+
+    assert guards.integrity.unresolved == ()
+
+
+def test_mutations_remain_scoped_to_their_actual_target() -> None:
+    guards = RunToolGuards()
+
+    guards.failed("write_workspace_text", {"path": "notes/report.md", "content": "draft"})
+    guards.completed("write_workspace_text", {"path": "notes/other.md", "content": "done"}, {"ok": True})
+
+    assert guards.integrity.unresolved == ("session_workspace:notes/report.md",)
+
+
+def test_successful_append_edit_delete_and_publish_settle_mutations() -> None:
+    guards = RunToolGuards()
+    mutations = (
+        ("append_workspace_text", {"path": "notes/a.md", "content": "x"}),
+        ("edit_workspace_text", {"path": "notes/b.md", "old": "x", "new": "y"}),
+        ("delete_workspace_path", {"path": "notes/c.md"}),
+        ("publish_workspace_artifact", {"path": "notes/d.md", "kind": "markdown"}),
+        ("edit_project_text", {"path": "fleet-rlm/e.md", "old": "x", "new": "y"}),
+        ("delete_project_path", {"path": "fleet-rlm/f.md"}),
+    )
+
+    for tool_name, arguments in mutations:
+        guards.failed(tool_name, arguments)
+        guards.completed(tool_name, arguments, {"ok": True})
+
+    assert guards.integrity.unresolved == ()
+
+
+def test_identical_tool_results_warn_once_without_terminally_failing_a_turn() -> None:
+    guards = RunToolGuards()
+    arguments = {"offset": 22, "limit": 5}
+    eof = {"next_offset": None, "done": True, "messages": []}
+
+    assert guards.completed("read_session_history", arguments, eof) is None
+    assert guards.completed("read_session_history", arguments, eof) == "repeated tool call produced no progress"
+    assert guards.completed("read_session_history", arguments, eof) is None
+
+
+@pytest.mark.asyncio
+async def test_owned_effect_preserves_success_and_repeated_settlement() -> None:
+    effect = OwnedEffect.start(asyncio.sleep(0, result="ok"))
+
+    first = await effect.settle()
+    second = await effect.settle()
+
+    assert first.done is True
+    assert first.pending is False
+    assert first.timed_out is False
+    assert first.result() == "ok"
+    assert second.result() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_owned_effect_preserves_failure_on_repeated_settlement() -> None:
+    async def fail() -> str:
+        raise ValueError("owned effect failed")
+
+    effect = OwnedEffect.start(fail())
+
+    with pytest.raises(ValueError, match="owned effect failed"):
+        await effect.settle()
+    with pytest.raises(ValueError, match="owned effect failed"):
+        await effect.settle()
+
+
+@pytest.mark.asyncio
+async def test_waiter_cancellation_does_not_cancel_owned_effect() -> None:
+    release = asyncio.Event()
+
+    async def work() -> str:
+        await release.wait()
+        return "settled"
+
+    effect = OwnedEffect.start(work())
+    waiter = asyncio.create_task(effect.settle())
+    await asyncio.sleep(0)
+    waiter.cancel()
+    await asyncio.sleep(0)
+
+    assert waiter.done() is False
+    assert effect.done() is False
+
+    release.set()
+    settled = await waiter
+    assert settled.result() == "settled"
+    assert effect.done() is True

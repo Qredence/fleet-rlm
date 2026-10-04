@@ -4,19 +4,29 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import re
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
 
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.errors import DaytonaAdapterError
+from fleet_rlm.daytona.interpreter import (
+    BackendExecutionResult,
+    DaytonaCodeInterpreter,
+    InProcessInterpreterBackend,
+    OutputCallback,
+)
 from fleet_rlm.rlm.events import ToolEventView, observe_tool
+from fleet_rlm.rlm.execution import RLMProviderContractError, probe_root_lm
 from fleet_rlm.rlm.output_contract import bind_output_contract
-from fleet_rlm.rlm.program import RLMOptions
+from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions
 from fleet_rlm.rlm.result import prediction_result
 from tests.support.native_rlm import build_native_rlm_for_test
+from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM
 
 
 def _use_context_span_mock(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1332,3 +1342,246 @@ def test_prediction_output_cause_type_rejects_unbounded_labels() -> None:
 
     with pytest.raises(TypeError):
         PredictionOutputError()  # type: ignore[call-arg]  # cause_type is required
+
+
+_FIXTURES = Path(__file__).parents[3] / "fixtures" / "rlm"
+_EXPECTED = ({"A": 7, "B": 7, "C": 8, "D": 12, "E": 2}, 6, ("D",))
+
+
+def _interpret(request: str) -> tuple[dict[str, int], int, tuple[str, ...]]:
+    registers = dict.fromkeys("ABCDE", 0)
+    true_count = 0
+    instructions = re.findall(r"(?m)^(\d+)\. (ADD|SUB|COPY|SWAP|IFPOS|IFEVEN|DOUBLE|MOD) (.+)$", request)
+    assert [int(number) for number, _, _ in instructions] == list(range(1, 41))
+
+    def execute(operation: str, operands: str) -> None:
+        nonlocal true_count
+        parts = operands.split()
+        x = parts[0].rstrip(":")
+        assert x in registers
+        if operation in {"IFPOS", "IFEVEN"}:
+            condition = registers[x] > 0 if operation == "IFPOS" else registers[x] % 2 == 0
+            if condition:
+                true_count += 1
+                inner_operation, inner_operands = operands.split(": ", 1)[1].split(" ", 1)
+                execute(inner_operation, inner_operands)
+        elif operation == "ADD":
+            registers[x] += int(parts[1])
+        elif operation == "SUB":
+            registers[x] -= int(parts[1])
+        elif operation == "COPY":
+            registers[x] = registers[parts[1]]
+        elif operation == "SWAP":
+            registers[x], registers[parts[1]] = registers[parts[1]], registers[x]
+        elif operation == "DOUBLE":
+            registers[x] *= 2
+        elif operation == "MOD":
+            registers[x] %= int(parts[1])
+        else:
+            raise AssertionError(operation)
+
+    for _, operation, operands in instructions:
+        execute(operation, operands)
+    largest = max(registers.values())
+    return registers, true_count, tuple(name for name, value in registers.items() if value == largest)
+
+
+@pytest.mark.parametrize("name", ["register_trace_exact.txt"])
+def test_register_request_oracle(name: str) -> None:
+    request = (_FIXTURES / name).read_text()
+    assert _interpret(request) == _EXPECTED
+
+
+def test_exact_trace_retains_trailing_text() -> None:
+    request = (_FIXTURES / "register_trace_exact.txt").read_text()
+    assert "</parameter>\n</invoke>" in request
+    assert "Want me to:" in request
+
+
+def test_fenced_python_actions_fail_closed() -> None:
+    from dspy.utils.exceptions import AdapterParseError
+
+    lm = _ScriptedLM(["```python\nprint(request)\n```"])
+    with pytest.raises(AdapterParseError), dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        dspy.Predict(_IterationActionSignature)(iteration="1/12")
+    assert len(lm.calls) == 3
+
+
+_PI_REQUEST = "Tell me the 1492252th digits after the decimal point of Pi"
+_EXPECTED_DIGIT = "5"
+
+
+def test_pi_answer_submits_after_bounded_verification() -> None:
+    class Actions:
+        def __init__(self) -> None:
+            self.codes: list[str] = []
+
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            if not self.codes:
+                code = (
+                    f"pi_digit = {_EXPECTED_DIGIT!r}\n"
+                    f"reference_digit = {_EXPECTED_DIGIT!r}\n"
+                    "assert pi_digit == reference_digit\n"
+                    "print(pi_digit)"
+                )
+            else:
+                code = "SUBMIT(answer=pi_digit)"
+            self.codes.append(code)
+            return dspy.Prediction(reasoning="Use the bounded check, then submit", code=code)
+
+    actions = Actions()
+    rlm = dspy.RLM("request -> answer: str", max_iters=2)
+    rlm.generate_action = actions
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    try:
+        prediction = asyncio.run(rlm.acall(interpreter_factory=lambda: interpreter, request=_PI_REQUEST))
+    finally:
+        interpreter.shutdown()
+
+    assert prediction.answer == _EXPECTED_DIGIT
+    assert prediction.trajectory[0]["output"].strip() == _EXPECTED_DIGIT
+    assert actions.codes[-1] == "SUBMIT(answer=pi_digit)"
+    assert len(actions.codes) == 2
+    assert all("Decimal" not in code and "Gauss" not in code for code in actions.codes)
+
+
+def test_valid_pi_submit_action_needs_no_parse_repair() -> None:
+    lm = _ScriptedLM(['{"reasoning":"bounded check passed","code":"SUBMIT(answer=\'5\')"}'])
+
+    with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
+        action = dspy.Predict(_IterationActionSignature)(iteration="2/2")
+
+    assert action.code == "SUBMIT(answer='5')"
+    assert len(lm.calls) == 1
+
+
+def test_broker_timeout_stops_native_rlm_and_closes_interpreter() -> None:
+    class Actions:
+        calls = 0
+
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            self.calls += 1
+            return dspy.Prediction(reasoning="compute", code="print('working')")
+
+    class TimedOutBackend:
+        closed = False
+
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
+            raise DaytonaAdapterError("sandbox execution request timed out", cause_type="BrokerExecutionTimeout")
+
+        def close(self) -> None:
+            self.closed = True
+
+    actions = Actions()
+    backend = TimedOutBackend()
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    rlm = dspy.RLM("request -> answer: str", max_iters=2)
+    rlm.generate_action = actions
+    try:
+        with pytest.raises(DaytonaAdapterError):
+            asyncio.run(rlm.acall(interpreter_factory=lambda: interpreter, request=_PI_REQUEST))
+    finally:
+        interpreter.shutdown()
+
+    assert actions.calls == 1
+    assert backend.closed
+
+
+def _probe_interpreter():
+    return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+
+def _probe_child_runtime(call_index: int, *, profile: str = "semantic-child"):
+    del profile
+    from fleet_rlm.daytona.runtime import ChildRuntimeLease
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    return ChildRuntimeLease(
+        interpreter=interpreter,
+        sandbox_id=f"provider-probe-{call_index}",
+        volume_id="in-process",
+        volume_subpath=f"recursive/provider-probe/run/{call_index}",
+        _close=interpreter.shutdown,
+    )
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_requires_multiple_native_actions_and_typed_submit() -> None:
+    lm = dspy.utils.DummyLM(
+        [
+            {"reasoning": "initialize", "code": "marker = 'probe-slice'"},
+            {"reasoning": "delegate", "code": "child = rlm_query(task='Classify', inputs=[], context=marker)"},
+            {
+                "reasoning": "child submit",
+                "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+            },
+            {"reasoning": "submit", "code": "SUBMIT(answer=child['answer'])"},
+        ],
+        adapter=dspy.JSONAdapter(),
+    )
+
+    result = await probe_root_lm(lm, interpreter_factory=_probe_interpreter, child_runtime_factory=_probe_child_runtime)
+
+    assert result.iterations == 3
+    assert result.termination_mode == "typed_submit"
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_rejects_unparseable_native_provider_output() -> None:
+    lm = dspy.utils.DummyLM(
+        [{"answer": "provider-native tool tokens"}],
+        adapter=dspy.JSONAdapter(),
+    )
+
+    with pytest.raises(RLMProviderContractError, match="unparseable"):
+        await probe_root_lm(lm, interpreter_factory=_probe_interpreter, child_runtime_factory=_probe_child_runtime)
+
+
+@pytest.mark.asyncio
+async def test_provider_probe_reports_native_extraction_fallback_for_forced_final_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.execution as provider_probe
+
+    class FakeRecursiveExecutor:
+        def __init__(self, *args, **kwargs) -> None:
+            del args, kwargs
+            self.tool = object()
+
+        def summary(self) -> SimpleNamespace:
+            return SimpleNamespace(call_count=1)
+
+        def wait_owned(self) -> None:
+            pass
+
+    class FakeRLM:
+        def __call__(self, *, interpreter_factory, **kwargs):
+            assert callable(interpreter_factory)
+            assert "probe" in kwargs
+            return SimpleNamespace(
+                trajectory=["step-1", "step-2", "step-3"],
+                answer="child-ok",
+                final_reasoning="Extract forced final output",
+            )
+
+    def build_fake_rlm(*_args, **_kwargs):
+        return FakeRLM()
+
+    monkeypatch.setattr(provider_probe, "RecursiveRLMExecutor", FakeRecursiveExecutor)
+    monkeypatch.setattr(provider_probe, "build_native_rlm", build_fake_rlm)
+
+    result = await provider_probe.probe_root_lm(
+        dspy.utils.DummyLM([], adapter=dspy.JSONAdapter()),
+        interpreter_factory=_probe_interpreter,
+        child_runtime_factory=_probe_child_runtime,
+    )
+
+    assert result.iterations == 3
+    assert result.termination_mode == "native_extraction_fallback"
