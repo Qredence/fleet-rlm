@@ -394,7 +394,7 @@ credentials, and a clean tracked non-`main` candidate.
 export FLEET_LIVE=1
 export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
 export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
-uv run python scripts/live_daytona_verify.py \
+uv run python scripts/live_daytona_verify.py native \
   --output .scratch/live/native-daytona-run-001.json
 ```
 
@@ -416,7 +416,7 @@ enabled live policy, configured Daytona/model credentials, and a clean tracked
 non-`main` candidate.
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/live_recursive_batch_canary.py \
+FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py recursive-batch \
   --output /tmp/fleet-rlm-recursive-batch-run-001.json
 ```
 

@@ -16,6 +16,7 @@ EXPECTED_DAYTONA_MODULES = {
     "errors.py",
     "interpreter.py",
     "runtime.py",
+    "specs.py",
 }
 
 

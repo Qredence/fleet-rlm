@@ -94,8 +94,8 @@ def test_quality_graph_runs_shared_checks_once(tmp_path: Path) -> None:
     result, commands = _run_fake_tools(tmp_path, "check", "check-release")
     assert result.returncode == 0, result.stderr
     for command in (
-        ["run", "python", "scripts/openapi_tools.py", "check"],
-        ["run", "python", "scripts/generate_stream_fixture.py", "check"],
+        ["run", "python", "scripts/contracts.py", "api", "check"],
+        ["run", "python", "scripts/contracts.py", "stream", "check"],
         ["run", "python", "scripts/check_repo_hygiene.py"],
     ):
         assert commands.count(command) == 1
@@ -139,3 +139,4 @@ def test_release_build_waits_for_successful_checks(tmp_path: Path, fail_lint: bo
     else:
         assert result.returncode == 0, result.stderr
         assert commands.count(["build"]) == 1
+        assert any(command[:4] == ["run", "python", "scripts/validate_release.py", "normalize"] for command in commands)

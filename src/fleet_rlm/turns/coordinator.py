@@ -1,40 +1,33 @@
-"""Turn use case: begin, prepare, execute, settle, project, and close."""
+"""Turn coordinator: claim, prepare, execute, settle, and cleanup flow."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, replace
-from typing import Any, Protocol, Self, TypeAlias, TypeVar
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import Any
 from uuid import UUID
 
+import fleet_rlm.turns
 from fleet_rlm.observability.tracing import (
     annotate_trace_io,
-    annotate_turn_metadata,
-    record_settlement_status,
     record_turn_stop_reason,
     turn_phase_span,
     turn_trace,
 )
 from fleet_rlm.observability.turn_capture import EventCapture, EventCaptureSource
 from fleet_rlm.rlm.events import (
-    PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
-    RunCancelled,
     RunCompleted,
     RunFailed,
-    RunFailedMessage,
     RunStarted,
-    RunTimedOut,
     RuntimeEvent,
     SkillLoaded,
     Status,
 )
-from fleet_rlm.rlm.execution import RLMExecutionContext
-from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor, RunCleanupUnavailableError
+from fleet_rlm.rlm.ownership import RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.rlm.result import (
     RLMOutcome,
     RLMUsage,
@@ -42,7 +35,7 @@ from fleet_rlm.rlm.result import (
     project_outcome_prediction,
 )
 from fleet_rlm.sessions.committed_turn_events import CommittedTurnEventProjector
-from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import (
     CancelResult,
     ClaimedRun,
@@ -56,457 +49,38 @@ from fleet_rlm.sessions.run_state import (
     RunSettlement,
     RunStateError,
 )
-from fleet_rlm.turn_preparation import (
+from fleet_rlm.turns.models import (
+    _PREPARATION_CLEANUP_TIMEOUT_S,
+    ClaimHeartbeat,
+    OpenTurnCommand,
+    RunEventStream,
+    RunRunner,
+    _attach_preparation_trace_id,
+    _ClaimLost,
+    _close_stream_owned,
+    _defer_stream_runtime,
+    _ExecutionState,
+    _FinalizationWait,
+    _heartbeat_claim_lost,
+    _mark_capture_stop,
+    _mark_stream_runtime,
+    _PreparationState,
+    _record_settlement,
+    _release_stream_runtime,
+    _with_trace_id,
+    shield_cleanup,
+    stop_heartbeat,
+)
+from fleet_rlm.turns.preparation import (
     PreparedTurn,
     RunPreparation,
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
 )
-from fleet_rlm.turn_settlement import RunLifecycle
-
-T = TypeVar("T")
-
-
-def _mark_capture_stop(capture: EventCapture | None, reason: str) -> None:
-    """Record a non-terminal stop reason on the active Turn capture, if any."""
-    if capture is None:
-        return
-    try:
-        capture.mark_stop_reason(reason)
-    except Exception:
-        logger.warning("Turn capture stop reason failed", exc_info=True)
-
-
-@dataclass(frozen=True, slots=True)
-class OpenTurnCommand:
-    """Validated Turn intent after local-scope and schema validation."""
-
-    access: TurnAccess
-    session_id: UUID
-    input: TurnInput
-    idempotency_key: str
-    proposed_run_id: UUID
-
-    def __post_init__(self) -> None:
-        key = self.idempotency_key
-        if (
-            not isinstance(key, str)
-            or not 1 <= len(key) <= 128
-            or key != key.strip()
-            or not key.isprintable()
-            or any(char.isspace() for char in key)
-        ):
-            raise ValueError("idempotency_key must contain 1..128 printable non-whitespace characters")
-
-
-@dataclass(slots=True)
-class ClaimHeartbeat:
-    task: asyncio.Task[None]
-    lost: asyncio.Event
-    definitive_loss: bool = False
-
-
-async def shield_cleanup(awaitable: Awaitable[T]) -> T:
-    """Complete an awaitable despite caller cancellation."""
-    effect = OwnedEffect.start(awaitable)
-    settled = await effect.settle()
-    if settled.caller_cancelled:
-        raise asyncio.CancelledError
-    return settled.result()
-
-
-async def stop_heartbeat(heartbeat: ClaimHeartbeat | None) -> None:
-    if heartbeat is None:
-        return
-    heartbeat.task.cancel()
-    await asyncio.gather(heartbeat.task, return_exceptions=True)
-
+from fleet_rlm.turns.settlement import RunLifecycle
+from fleet_rlm.turns.stream import OpenedTurnStream, terminal
 
 logger = logging.getLogger(__name__)
-
-
-class RunEventStream(Protocol):
-    """Async observation stream owned by the TurnRuntime."""
-
-    def __aiter__(self) -> Self: ...
-
-    async def __anext__(self) -> RuntimeEvent: ...
-
-    @property
-    def outcome(self) -> RLMOutcome | None: ...
-
-    async def aclose(self) -> None: ...
-
-    async def wait_owned(self) -> None: ...
-
-
-class RunRunner(Protocol):
-    def stream(self, context: RLMExecutionContext) -> RunEventStream: ...
-
-
-class OpenedTurnStream:
-    """TurnRuntime-owned stream handle with cancellation-resistant close."""
-
-    def __init__(
-        self,
-        run_id: UUID | None,
-        events: AsyncIterator[RuntimeEvent] | None = None,
-        *,
-        prepared: PreparedTurn | None = None,
-        open_task: asyncio.Task[OpenedTurnStream] | None = None,
-    ) -> None:
-        self.run_id = run_id
-        self._events = events
-        self._prepared = prepared
-        self._open_task = open_task
-        self._opened_owner: OpenedTurnStream | None = None
-        self._iterator: AsyncIterator[RuntimeEvent] | None = events
-        self._opened_resource: Any | None = None
-        self._iter_started = False
-        self._close_task: asyncio.Task[None] | None = None
-        self._close_lock = asyncio.Lock()
-        self._close_complete = False
-        self._open_error: BaseException | None = None
-
-    def __aiter__(self) -> Self:
-        return self
-
-    async def __anext__(self) -> RuntimeEvent:
-        await self._resolve_open()
-        if self._opened_owner is not None:
-            return await self._opened_owner.__anext__()
-        if self._iterator is None:
-            raise StopAsyncIteration
-        self._iter_started = True
-        return await self._iterator.__anext__()
-
-    async def wait_open(self, *, timeout: float | None = None) -> OpenedTurnStream | None:
-        """Wait for TurnRuntime preparation without cancelling its owned task."""
-        if self._events is not None:
-            return self
-        if self._open_task is None and self._opened_owner is None:
-            return self
-        try:
-            if timeout is None:
-                await self._resolve_open()
-            else:
-                async with asyncio.timeout(max(0.0, timeout)):
-                    await self._resolve_open()
-        except TimeoutError:
-            return None
-        return self
-
-    async def _resolve_open(self) -> None:
-        if self._opened_owner is not None:
-            await self._opened_owner.wait_open()
-            return
-        if self._events is not None or self._open_task is None:
-            return
-        try:
-            opened = await asyncio.shield(self._open_task)
-        except BaseException as exc:
-            self._open_error = exc
-            raise
-        if isinstance(opened, OpenedTurnStream):
-            self.run_id = opened.run_id
-            self._opened_owner = opened
-            await opened.wait_open()
-            self.run_id = opened.run_id
-            return
-        self.run_id = getattr(opened, "run_id", None)
-        self._opened_resource = opened
-        self._events = opened
-        self._iterator = opened.__aiter__()
-
-    async def _close_owned(self) -> None:
-        try:
-            await self._resolve_open()
-        except asyncio.CancelledError:
-            current_task = asyncio.current_task()
-            if current_task is not None and current_task.cancelling():
-                raise
-            if self._events is None:
-                return
-            raise
-        except BaseException:
-            # The caller's open path owns the original failure. There are no
-            # prepared resources to close when opening never produced a stream.
-            if self._events is None:
-                return
-            raise
-        if self._opened_owner is not None:
-            await self._opened_owner.aclose()
-            return
-        if self._iterator is None:
-            return
-        close_error: BaseException | None = None
-
-        def remember(exc: BaseException) -> None:
-            nonlocal close_error
-            if close_error is None:
-                close_error = exc
-
-        if not self._iter_started:
-            self._iter_started = True
-            try:
-                # Prime and close the Turn generator in the same Context. Its
-                # tracing scope may span multiple yields and must reset the
-                # ContextVar tokens in the Context where they were created.
-                await self._iterator.__anext__()
-            except StopAsyncIteration:
-                pass
-            except BaseException as exc:
-                remember(exc)
-        close = getattr(self._iterator, "aclose", None)
-        if close is not None:
-            try:
-                await close()
-            except BaseException as exc:
-                remember(exc)
-        opened_close = getattr(self._opened_resource, "aclose", None)
-        if opened_close is not None and self._opened_resource is not self._iterator:
-            try:
-                await shield_cleanup(opened_close())
-            except BaseException as exc:
-                remember(exc)
-        if close_error is not None:
-            raise close_error
-
-    async def aclose(self) -> None:
-        """Close once and shield the complete TurnRuntime settlement."""
-        async with self._close_lock:
-            if self._close_complete:
-                return
-            if self._close_task is None:
-                current_task = asyncio.current_task()
-                get_context = getattr(current_task, "get_context", None)
-                context = get_context() if callable(get_context) else None
-                if context is None:
-                    # Python versions without Task.get_context cannot move a
-                    # suspended traced generator into another Context safely.
-                    current_task = asyncio.current_task()
-                    caller_cancelled = False
-                    while True:
-                        try:
-                            await self._close_owned()
-                            break
-                        except asyncio.CancelledError:
-                            if current_task is None or not current_task.cancelling():
-                                raise
-                            caller_cancelled = True
-                            current_task.uncancel()
-                    self._close_complete = True
-                    if caller_cancelled:
-                        raise asyncio.CancelledError
-                    return
-                self._close_task = asyncio.create_task(
-                    self._close_owned(),
-                    name="fleet-turn-stream-close",
-                    context=context,
-                )
-            await shield_cleanup(self._close_task)
-            self._close_complete = True
-
-    @property
-    def outcome(self) -> RLMOutcome | None:
-        if self._opened_owner is not None:
-            return self._opened_owner.outcome
-        return getattr(self._events, "outcome", None)
-
-    async def wait_owned(self) -> None:
-        await self._resolve_open()
-        if self._opened_owner is not None:
-            await self._opened_owner.wait_owned()
-
-
-def _attach_preparation_trace_id(
-    prepared: PreparedTurn,
-    trace_id: str | None,
-    span_id: str | None = None,
-) -> PreparedTurn:
-    """
-    Attach a preparation trace identifier for internal phase correlation.
-
-    Parameters:
-        prepared (PreparedTurn): Prepared run to annotate.
-        trace_id (str | None): Preparation trace identifier, if available.
-        span_id (str | None): Internal preparation span identifier, if available.
-
-    Returns:
-        PreparedTurn: The annotated run, or the original run when no identifier is
-        provided or annotation is unsupported.
-    """
-    if not trace_id:
-        return prepared
-    try:
-        return replace(
-            prepared,
-            preparation_trace_id=trace_id,
-            preparation_span_id=span_id,
-        )  # type: ignore[type-var]
-    except (TypeError, AttributeError, ValueError):
-        return prepared
-
-
-_PREPARATION_CLEANUP_TIMEOUT_S = 1.0
-
-
-@dataclass(slots=True)
-class _PreparationState:
-    run: ClaimedRun
-    heartbeat: ClaimHeartbeat | None
-    preparation_task: asyncio.Task[PreparedTurn] | None = None
-    heartbeat_lost: asyncio.Task[bool] | None = None
-    quarantine: set[asyncio.Task[Any]] | None = None
-    cleanup_error: BaseException | None = None
-
-    def __post_init__(self) -> None:
-        if self.quarantine is None:
-            self.quarantine = set()
-
-
-def terminal(
-    recorder: EventRecorder,
-    receipt: CommittedTurnReceipt | FailedRunReceipt,
-    *,
-    trace_id: str | None = None,
-) -> RuntimeEvent:
-    """Project one durable settlement into the live terminal event."""
-    if isinstance(receipt, CommittedTurnReceipt):
-        return recorder.record(
-            RunCompleted(
-                checkpoint_version=receipt.checkpoint_version,
-                delivery="live",
-                trace_id=trace_id,
-            )
-        )
-    if receipt.terminal_status == "cancelled":
-        return recorder.record(RunCancelled())
-    if receipt.terminal_status == "timeout":
-        return recorder.record(RunTimedOut())
-    if receipt.failure_code == "preparation_failed":
-        return recorder.record(RunFailed(code="preparation_failed", message="Turn could not be prepared"))
-    if receipt.failure_code == "commit_failed":
-        return recorder.record(RunFailed(code="commit_failed", message="Turn could not be committed"))
-    message = receipt.public_message.strip() if receipt.public_message else ""
-    public_message: RunFailedMessage
-    if message == "Turn output is too large":
-        public_message = "Turn output is too large"
-    elif message == "Turn output is invalid":
-        public_message = "Turn output is invalid"
-    elif message == PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE:
-        public_message = PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE
-    else:
-        public_message = "Turn failed"
-    return recorder.record(RunFailed(code="execution_failed", message=public_message))
-
-
-async def _wait_stream_owned(stream: RunEventStream) -> None:
-    wait_owned = getattr(stream, "wait_owned", None)
-    if callable(wait_owned):
-        await wait_owned()
-
-
-async def _close_stream_owned(
-    stream: RunEventStream | None,
-    remember: Callable[[BaseException], None],
-) -> None:
-    """Close and wait for one provider stream while retaining the first failure."""
-    if stream is None:
-        return
-    try:
-        await stream.aclose()
-    except BaseException as exc:
-        remember(exc)
-    try:
-        await _wait_stream_owned(stream)
-    except BaseException as exc:
-        remember(exc)
-
-
-def _defer_stream_runtime(stream: RunEventStream | None) -> None:
-    """Tell a resident Runner to hold its Session lane through cleanup."""
-    if stream is None:
-        return
-    defer = getattr(stream, "defer_runtime_release", None)
-    if callable(defer):
-        defer()
-
-
-def _mark_stream_runtime(stream: RunEventStream | None, *, committed: bool) -> None:
-    """Record the durable outcome on a resident runtime token when supported."""
-    if stream is None:
-        return
-    method = getattr(stream, "mark_committed" if committed else "mark_tainted", None)
-    if callable(method):
-        method()
-
-
-async def _release_stream_runtime(
-    stream: RunEventStream | None,
-    remember: Callable[[BaseException], None],
-) -> None:
-    """Release a resident Session lane after all prepared resources settle."""
-    if stream is None:
-        return
-    release = getattr(stream, "release_runtime", None)
-    if callable(release):
-        try:
-            await release()
-        except BaseException as exc:
-            remember(exc)
-
-
-@dataclass(slots=True)
-class _ExecutionState:
-    recorder: EventRecorder
-    heartbeat: ClaimHeartbeat | None
-    claim_loss_waiter: asyncio.Task[bool] | None
-    pending_event: asyncio.Task[RuntimeEvent] | None = None
-    stream: RunEventStream | None = None
-    finalization_task: asyncio.Task[RunSettlement] | None = None
-    cleanup_task: asyncio.Task[None] | None = None
-    settled: bool = False
-    cleanup_handed_off: bool = False
-
-
-class _ClaimLost:
-    """Internal marker returned when the claim-loss waiter wins a race."""
-
-
-_FinalizationWait: TypeAlias = RunSettlement | _ClaimLost | None
-
-
-def _record_settlement(receipt: RunSettlement) -> RunSettlement:
-    """Annotate the active trace with the durable Fleet settlement result."""
-    if isinstance(receipt, CommittedTurnReceipt):
-        record_settlement_status("completed", durable=True)
-    elif isinstance(receipt, FailedRunReceipt):
-        record_settlement_status(receipt.terminal_status, durable=receipt.durable)
-    return receipt
-
-
-def _heartbeat_claim_lost(state: _ExecutionState) -> bool:
-    return state.heartbeat is not None and state.heartbeat.lost.is_set()
-
-
-def _with_trace_id(event: RuntimeEvent, trace_id: str | None) -> RuntimeEvent:
-    if not trace_id:
-        return event
-    detail = event.detail
-    if isinstance(detail, RunStarted) and detail.trace_id is None:
-        return replace(event, detail=RunStarted(delivery=detail.delivery, trace_id=trace_id))
-    if isinstance(detail, RunCompleted) and detail.trace_id is None:
-        return replace(
-            event,
-            detail=RunCompleted(
-                checkpoint_version=detail.checkpoint_version,
-                delivery=detail.delivery,
-                duration_ms=detail.duration_ms,
-                trace_id=trace_id,
-            ),
-        )
-    return event
 
 
 class TurnRuntime:
@@ -886,7 +460,7 @@ class TurnRuntime:
                     async for event in execution_events:
                         if isinstance(event.detail, SkillLoaded):
                             loaded_skill_versions.add(f"{event.detail.skill_id}@{event.detail.version}")
-                            annotate_turn_metadata(
+                            fleet_rlm.turns.annotate_turn_metadata(
                                 {"fleet.skill_loaded_versions": ",".join(sorted(loaded_skill_versions))}
                             )
                         if capture is not None:

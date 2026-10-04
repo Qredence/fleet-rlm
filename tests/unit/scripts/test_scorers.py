@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from scripts.benchmarks.scorers import (
+from scripts.benchmarks.judges import (
     BUILTIN_SCORER_NAMES,
     CUSTOM_SCORER_NAMES,
     DEFAULT_GUIDELINES,

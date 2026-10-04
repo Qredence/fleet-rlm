@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
-from scripts.check_docs_quality import (
-    CANONICAL_ENVIRONMENT_DOCS,
-    check_canonical_environment_sets,
+from scripts.check_repo_hygiene import (
+    DOCS_CANONICAL_ENVIRONMENT_DOCS as CANONICAL_ENVIRONMENT_DOCS,
+)
+from scripts.check_repo_hygiene import (
+    docs_check_archived_paths,
+)
+from scripts.check_repo_hygiene import (
+    docs_check_canonical_environment_sets as check_canonical_environment_sets,
 )
 
 
@@ -53,3 +59,13 @@ def test_canonical_environment_sets_report_a_missing_declaration(tmp_path: Path)
     assert check_canonical_environment_sets(tmp_path) == [
         "missing canonical Run Environment declaration in ARCHITECTURE.md; expected ['daytona']"
     ]
+
+
+def test_ignored_local_archive_directory_does_not_fail_documentation_checks(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    docs_root = tmp_path / "docs"
+    ignored = docs_root / "plans"
+    ignored.mkdir(parents=True)
+    (ignored / "local-plan.md").write_text("local only\n", encoding="utf-8")
+
+    assert docs_check_archived_paths(docs_root) == []

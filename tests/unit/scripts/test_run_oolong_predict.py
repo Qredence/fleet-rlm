@@ -485,6 +485,7 @@ async def test_live_rows_receive_independent_deadlines_and_budgets(monkeypatch: 
     async def fake_release(*_args: object, **_kwargs: object) -> None:
         return None
 
+    runner._load_adapter()
     monkeypatch.setattr(runner, "resolve_datapoints", lambda **_kwargs: rows)
     monkeypatch.setattr("fleet_rlm.daytona.runtime.acquire_ephemeral_interpreter", fake_acquire)
     monkeypatch.setattr(runner, "stage_attachment_context_on_lease", fake_stage)
@@ -627,6 +628,15 @@ def test_dry_cli_rejects_invalid_limit(tmp_path: Path) -> None:
     assert runner.main(["--output", str(output), "--limit", "0"]) == 2
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["status"] == "failed"
+
+
+def test_receipt_collision_preserves_existing_file_without_loading_live_adapter(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / "receipt.json"
+    output.write_text("prior receipt", encoding="utf-8")
+    monkeypatch.setattr(runner, "_load_adapter", lambda: pytest.fail("must not load adapter"))
+
+    assert runner.main(["--output", str(output), "--live"]) == 2
+    assert output.read_text(encoding="utf-8") == "prior receipt"
 
 
 def test_real_dataset_requires_test_split() -> None:

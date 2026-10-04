@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_dependency_boundaries import check_dependency_boundaries
+from scripts.check_architecture import deps_check_dependency_boundaries as check_dependency_boundaries
 
 
 def _write(root: Path, relative: str, source: str) -> None:

@@ -68,7 +68,8 @@ def test_help_is_inert() -> None:
         check=False,
     )
     assert result.returncode == 0
-    assert "--output" in result.stdout
+    assert "native" in result.stdout
+    assert "recursive-batch" in result.stdout
     assert "--session-snapshot" not in result.stdout
 
 
@@ -81,7 +82,7 @@ def test_missing_live_authorization_writes_a_bounded_failure_without_running_pyt
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
     monkeypatch.setattr(verifier, "_load_repo_env", lambda: pytest.fail("authorization must be checked first"))
 
-    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    assert verifier.main(["native", "--output", str(output)]) == verifier.EXIT_PRECONDITION
     receipt = json.loads(output.read_text(encoding="utf-8"))
     assert receipt["schema"] == verifier.RECEIPT_SCHEMA
     assert receipt["failure"] == {"category": "precondition_failed", "phase": "live_authorization"}
@@ -93,7 +94,7 @@ def test_output_receipt_is_write_once(tmp_path: Path, monkeypatch: pytest.Monkey
     output.write_text("keep", encoding="utf-8")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
 
-    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    assert verifier.main(["native", "--output", str(output)]) == verifier.EXIT_PRECONDITION
     assert output.read_text(encoding="utf-8") == "keep"
 
 
@@ -127,6 +128,8 @@ def test_disabled_live_policy_stops_before_candidate_inspection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    verifier._load_native_integrations()
+    monkeypatch.setattr(verifier, "_load_native_integrations", lambda: None)
     output = tmp_path / "receipt.json"
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -138,7 +141,7 @@ def test_disabled_live_policy_stops_before_candidate_inspection(
     )
     monkeypatch.setattr(verifier, "_candidate", lambda: pytest.fail("policy failure must precede candidate checks"))
 
-    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    assert verifier.main(["native", "--output", str(output)]) == verifier.EXIT_PRECONDITION
     assert json.loads(output.read_text(encoding="utf-8"))["failure"]["phase"] == "policy_or_candidate"
 
 
@@ -215,6 +218,8 @@ def test_native_verifier_refuses_configured_recursion_before_candidate_inspectio
 ) -> None:
     from fleet_rlm.config.settings import Settings
 
+    verifier._load_native_integrations()
+    monkeypatch.setattr(verifier, "_load_native_integrations", lambda: None)
     output = tmp_path / "receipt.json"
     monkeypatch.setenv("FLEET_LIVE", "1")
     monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
@@ -223,7 +228,7 @@ def test_native_verifier_refuses_configured_recursion_before_candidate_inspectio
     monkeypatch.setattr(
         verifier, "_candidate", lambda: pytest.fail("recursion guard must run before candidate inspection")
     )
-    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    assert verifier.main(["native", "--output", str(output)]) == verifier.EXIT_PRECONDITION
     assert json.loads(output.read_text(encoding="utf-8"))["failure"]["phase"] == "policy_or_candidate"
 
 
@@ -232,6 +237,7 @@ def test_native_configuration_contract_requires_explicit_recursion_disabled(
 ) -> None:
     from fleet_rlm.config.loader import load_configuration_environment_contract
 
+    verifier._load_native_integrations()
     content = Path("config/fleet.toml").read_text(encoding="utf-8")
     policy = tmp_path / "fleet.toml"
     policy.write_text(content.replace("recursion_enabled = true", "recursion_enabled = false"), encoding="utf-8")

@@ -16,7 +16,7 @@ import {
  * 2. Backend runtime projector — src/fleet_rlm/api/sse.py (AISDKUIProjector)
  * 3. Backend reload projection — src/fleet_rlm/api/ui_message.py
  * 4. This runtime validator    — tables REGENERATED from openapi.yaml by
- *    scripts/generate_tui_chunk_validation.py (imported below)
+ *    scripts/contracts.py api generate (imported below)
  *
  * The validator is the STRICTEST consumer: a backend emission that violates
  * it throws mid-stream ("Fleet API returned an invalid AI SDK UI stream

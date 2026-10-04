@@ -2,7 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_codebase_tree import check_codebase_tree, check_test_layout
+import pytest
+
+from scripts.check_architecture import (
+    main,
+)
+from scripts.check_architecture import (
+    tree_check_codebase_tree as check_codebase_tree,
+)
+from scripts.check_architecture import (
+    tree_check_test_layout as check_test_layout,
+)
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -44,3 +54,8 @@ def test_small_file_outside_exempt_lanes_is_reported(tmp_path: Path) -> None:
     violations = check_test_layout(tmp_path)
 
     assert any("test_tiny.py" in item and "1 case(s)" in item for item in violations)
+
+
+@pytest.mark.parametrize("lane", ["tree", "dependencies", "all"])
+def test_architecture_cli_dispatches_each_check_lane(lane: str) -> None:
+    assert main([lane]) == 0

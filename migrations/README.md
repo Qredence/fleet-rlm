@@ -7,7 +7,7 @@ From the repository root, set `FLEET_DATABASE_URL` to the same database selected
 by the runtime policy, then run:
 
 ```bash
-uv run python scripts/db_init.py
+uv run python scripts/database.py upgrade
 uv run alembic check
 ```
 

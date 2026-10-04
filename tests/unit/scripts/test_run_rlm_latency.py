@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from scripts.benchmarks import run_rlm_latency as runner
 from scripts.benchmarks.run_rlm_latency import (
     CORRECTNESS_DESCRIPTION,
     CORRECTNESS_INSTRUCTIONS,
@@ -733,6 +734,22 @@ def test_parser_supports_seeded_corpus_workloads() -> None:
 
     assert args.workload == "corpus-chain-v1"
     assert args.corpus_seed == 1
+
+
+def test_parser_rejects_flags_from_other_commands() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["benchmark", "--scorers", "response_present", "--output", "receipt.json"])
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["phase6-plan", "--mlflow-url", "http://localhost", "--output", "plan.json"])
+
+
+def test_existing_receipt_is_rejected_before_loading_credentials(tmp_path, monkeypatch) -> None:
+    output = tmp_path / "kept.json"
+    output.write_text("prior receipt", encoding="utf-8")
+    monkeypatch.setattr(runner, "_load_repository_env", lambda: pytest.fail("must reject before environment loading"))
+
+    assert main(["benchmark", "--output", str(output)]) == 2
+    assert output.read_text(encoding="utf-8") == "prior receipt"
 
 
 def test_live_benchmark_preflight_rejects_missing_operator_limits() -> None:

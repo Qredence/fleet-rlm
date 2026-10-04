@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.check_agents_md_freshness import AgentsMdValidator
+from scripts.check_repo_hygiene import AgentsMdValidator
 
 
 def _write(path: Path, content: str) -> None:

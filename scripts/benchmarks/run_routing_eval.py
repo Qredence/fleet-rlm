@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import sys
 import tempfile
 import time
 from collections.abc import Iterator, Mapping, Sequence
@@ -18,29 +19,48 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from alembic import command as alembic_command
-from alembic.config import Config as AlembicConfig
-from dotenv import load_dotenv
-from fastapi.testclient import TestClient
-from httpx import Response
-
-from fleet_rlm.app import create_app
-from fleet_rlm.config.loader import require_live_execution
-from fleet_rlm.optimization.routing import (
-    CURATED_ROUTING_SCENARIOS,
-    RoutingFacts,
-    RoutingScenario,
-    classify_routing_facts,
-    score_routing_execution,
-    summarize_scores,
-)
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.benchmarks.campaign import write_receipt_once
+
 RECEIPT_SCHEMA = "fleet.routing-eval-live/v1"
 
 
 class RoutingEvalError(RuntimeError):
     """Bounded routing evaluation failure."""
+
+
+def _load_routing_support() -> None:
+    """Load routing policy after CLI parsing so help stays credential and tracing free."""
+    global CURATED_ROUTING_SCENARIOS, RoutingFacts, RoutingScenario
+    global classify_routing_facts, score_routing_execution, summarize_scores
+    from fleet_rlm.optimization.routing import (
+        CURATED_ROUTING_SCENARIOS as CURATED_ROUTING_SCENARIOS_VALUE,
+    )
+    from fleet_rlm.optimization.routing import (
+        RoutingFacts as RoutingFactsType,
+    )
+    from fleet_rlm.optimization.routing import (
+        RoutingScenario as RoutingScenarioType,
+    )
+    from fleet_rlm.optimization.routing import (
+        classify_routing_facts as classify,
+    )
+    from fleet_rlm.optimization.routing import (
+        score_routing_execution as score,
+    )
+    from fleet_rlm.optimization.routing import (
+        summarize_scores as summarize,
+    )
+
+    CURATED_ROUTING_SCENARIOS = CURATED_ROUTING_SCENARIOS_VALUE
+    RoutingFacts = RoutingFactsType
+    RoutingScenario = RoutingScenarioType
+    classify_routing_facts = classify
+    score_routing_execution = score
+    summarize_scores = summarize
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _selected_scenarios(names: Sequence[str]) -> tuple[RoutingScenario, ...]:
+    _load_routing_support()
     available = {scenario.name: scenario for scenario in CURATED_ROUTING_SCENARIOS}
     if not names:
         return CURATED_ROUTING_SCENARIOS
@@ -63,7 +84,7 @@ def _selected_scenarios(names: Sequence[str]) -> tuple[RoutingScenario, ...]:
     return tuple(available[name] for name in names)
 
 
-def _sse_chunks(response: Response) -> Iterator[dict[str, Any]]:
+def _sse_chunks(response: Any) -> Iterator[dict[str, Any]]:
     for line in response.iter_lines():
         if not line.startswith("data: "):
             continue
@@ -80,6 +101,7 @@ def _sse_chunks(response: Response) -> Iterator[dict[str, Any]]:
 
 def facts_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> RoutingFacts:
     """Reduce public SSE chunks to tool, recursion, and latency aggregates."""
+    _load_routing_support()
     counts: dict[str, int] = {}
     max_recursive_depth = 0
     recursive_prompt_chars = 0
@@ -170,7 +192,7 @@ def answer_from_public_chunks(chunks: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _run_live_turn(
-    client: TestClient,
+    client: Any,
     scenario: RoutingScenario,
     *,
     timeout_seconds: int,
@@ -217,12 +239,12 @@ def _run_live_turn(
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
     if ".scratch" not in path.parts:
         raise RoutingEvalError("routing receipts must remain below .scratch")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_receipt_once(path, payload)
 
 
 def validate_receipt(payload: Mapping[str, Any]) -> Mapping[str, Any]:
     """Fail closed when receipt shape or classifier facts drift."""
+    _load_routing_support()
     if payload.get("schema") != RECEIPT_SCHEMA or not isinstance(payload.get("runs"), list):
         raise RoutingEvalError("routing receipt is malformed")
     runs = payload["runs"]
@@ -276,7 +298,18 @@ def _base_receipt(runs: list[Mapping[str, Any]], *, live: bool, repeats: int) ->
 
 
 def _run_live(args: argparse.Namespace, scenarios: tuple[RoutingScenario, ...]) -> dict[str, object]:
+    if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
+        raise RoutingEvalError("FLEET_LIVE=1 is required for live routing evaluation")
+    from dotenv import load_dotenv
+
     load_dotenv(REPO_ROOT / ".env", override=False)
+    from alembic import command as alembic_command
+    from alembic.config import Config as AlembicConfig
+    from fastapi.testclient import TestClient
+
+    from fleet_rlm.app import create_app
+    from fleet_rlm.config.loader import require_live_execution
+
     settings = require_live_execution()
     if not settings.rlm_recursion_enabled:
         raise RoutingEvalError("QRE-130 requires the selected profile to enable recursive execution")
@@ -351,6 +384,13 @@ def _run_live(args: argparse.Namespace, scenarios: tuple[RoutingScenario, ...]) 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    output = args.output.expanduser().resolve()
+    if ".scratch" not in output.parts:
+        print("routing receipts must remain below .scratch", file=__import__("sys").stderr)
+        return 2
+    if output.exists():
+        print("routing receipt already exists; refusing to replace it", file=__import__("sys").stderr)
+        return 2
     try:
         scenarios = _selected_scenarios(args.scenario)
         if not 1 <= args.repeat <= 8 or args.timeout_seconds < 1:
@@ -372,10 +412,10 @@ def main(argv: list[str] | None = None) -> int:
                 repeats=args.repeat,
             )
         validate_receipt(receipt) if args.live else None
-        _write_json(args.output.expanduser().resolve(), receipt)
+        _write_json(output, receipt)
         return 0
     except Exception as exc:
-        print(f"routing evaluation failed: {exc}", file=__import__("sys").stderr)
+        print(f"routing evaluation failed: {type(exc).__name__}", file=__import__("sys").stderr)
         return 2
 
 

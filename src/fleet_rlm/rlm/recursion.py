@@ -878,6 +878,20 @@ def _recursive_failure_category(exc: BaseException) -> str:
     return "child_failed"
 
 
+def _failure_outcome(
+    exc: BaseException,
+    *,
+    manifest_sha256: str | None = None,
+    usage: ChildUsage | None = None,
+) -> ChildOutcome:
+    return ChildOutcome(
+        status="timed_out" if isinstance(exc, TimeoutError) else "failed",
+        source_manifest_sha256=manifest_sha256,
+        error_category=_recursive_failure_category(exc),
+        usage=usage or ChildUsage(),
+    )
+
+
 def _bounded_cause_type(value: object) -> str | None:
     """Return a code-defined cause identifier, or None for anything else."""
     if isinstance(value, str) and 0 < len(value) <= 64 and value.isidentifier():
@@ -1076,10 +1090,7 @@ class RecursiveRLMExecutor:
             self._ensure_authorized()
             if not classify_failures:
                 raise
-            return ChildOutcome(
-                status="timed_out" if isinstance(exc, TimeoutError) else "failed",
-                error_category=_recursive_failure_category(exc),
-            )
+            return _failure_outcome(exc)
         self._ensure_authorized()
         self._ensure_no_pending_batch_workers()
         local_metrics = DelegationMetrics(parent=self._metrics)
@@ -1107,10 +1118,9 @@ class RecursiveRLMExecutor:
         except Exception as exc:
             if not classify_failures:
                 raise
-            outcome = ChildOutcome(
-                status="timed_out" if isinstance(exc, TimeoutError) else "failed",
-                source_manifest_sha256=source_manifest_sha256,
-                error_category=_recursive_failure_category(exc),
+            outcome = _failure_outcome(
+                exc,
+                manifest_sha256=source_manifest_sha256,
                 usage=_child_usage(local_metrics),
             )
         finally:
@@ -1191,12 +1201,7 @@ class RecursiveRLMExecutor:
                 raise
             except Exception as exc:
                 self._ensure_authorized()
-                prepared.append(
-                    ChildOutcome(
-                        status="timed_out" if isinstance(exc, TimeoutError) else "failed",
-                        error_category=_recursive_failure_category(exc),
-                    )
-                )
+                prepared.append(_failure_outcome(exc))
             else:
                 prepared.append((files, manifest, manifest_sha256))
         if bound.action_bound and bound.expired():
@@ -1243,23 +1248,17 @@ class RecursiveRLMExecutor:
                     source_manifest_sha256=source_manifest_sha256,
                     deadline=bound,
                 )
-            except (asyncio.CancelledError, FutureCancelledError):
+            except (
+                asyncio.CancelledError,
+                FutureCancelledError,
+                ChildRuntimeAuthorizationError,
+                ChildRuntimeCleanupError,
+            ):
                 raise
-            except (ChildRuntimeAuthorizationError, ChildRuntimeCleanupError):
-                raise
-            except TimeoutError as exc:
-                category = _recursive_failure_category(exc)
-                return ChildOutcome(
-                    status="timed_out",
-                    source_manifest_sha256=source_manifest_sha256,
-                    error_category=category,
-                    usage=_child_usage(local_metrics),
-                )
             except Exception as exc:
-                return ChildOutcome(
-                    status="failed",
-                    source_manifest_sha256=source_manifest_sha256,
-                    error_category=_recursive_failure_category(exc),
+                return _failure_outcome(
+                    exc,
+                    manifest_sha256=source_manifest_sha256,
                     usage=_child_usage(local_metrics),
                 )
             finally:
@@ -2153,6 +2152,24 @@ class RecursiveRLMExecutor:
                     self._metrics.child_failed()
 
 
+def predict(
+    signature: type[dspy.Signature] | str,
+    *,
+    lm: dspy.LM | None = None,
+    **inputs: Any,
+) -> dspy.Prediction:
+    """Execute a typed, single-step DSPy prediction without full RLM recursion.
+
+    Useful inside REPL actions or subtasks when a bounded semantic step needs
+    structured, typed inputs and outputs (e.g. classification, extraction, summary).
+    """
+    predictor = dspy.Predict(signature)
+    if lm is not None:
+        with dspy.context(lm=lm):
+            return predictor(**inputs)
+    return predictor(**inputs)
+
+
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
     "ChildAsyncScheduler",
@@ -2174,5 +2191,6 @@ __all__ = [
     "RecursiveSubtaskSignature",
     "TokenUsageStatus",
     "normalize_lm_token_usage",
+    "predict",
     "run_reserved_batch",
 ]

@@ -157,7 +157,7 @@ override them. The shipped configuration enables recursion. Set `rlm.recursion_e
 and restart Fleet for native-only operation. Native-only verification refuses
 an enabled recursive policy; recursive canaries require recursion enabled.
 Alembic-head compatibility is checked by application/supervisor readiness and
-by `scripts/lakebase_preflight.py` before production traffic moves.
+by `scripts/database.py preflight` before production traffic moves.
 When recursion is enabled, each child receives a fresh, dedicated Daytona
 Sandbox. The active `rlm_query` executor selects the volume-less
 `semantic-child` profile and stages only selected, authorized files in private
@@ -272,7 +272,7 @@ when the supervised command supplies the local API URL.
 Copy `.env.example`, inspect `config/fleet.toml`, and fill the variables named by
 its configuration. Set `FLEET_LLM_BASE_URL` to your workspace gateway base;
 never commit `.env` or credentials. Initialize Fleet's database explicitly with
-`uv run python scripts/db_init.py` before startup.
+`uv run python scripts/database.py upgrade` before startup.
 
 Existing schema-version-1 files fail with a migration message. For a custom
 file, manually merge the desired profile's overrides into its defaults, then

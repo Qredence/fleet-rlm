@@ -13,7 +13,7 @@ uv run fleet cli --port 8000    # LLM key + Daytona key + database required
 ```
 
 `fleet cli` verifies that the configured database is at Alembic head. Initialize
-or upgrade it explicitly with `uv run python scripts/db_init.py`; the supervisor
+or upgrade it explicitly with `uv run python scripts/database.py upgrade`; the supervisor
 never migrates automatically. `uv run fleet doctor daytona` performs an opt-in
 disposable provider/mount/interpreter probe.
 

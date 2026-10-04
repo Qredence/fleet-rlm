@@ -14,12 +14,12 @@ from types import SimpleNamespace
 
 import pytest
 
-_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "live_recursive_batch_canary.py"
+_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "live_daytona_verify.py"
 _LIVE_CANARY = Path(__file__).resolve().parents[3] / "tests" / "live" / "backend" / "test_daytona_recursive_batch.py"
 
 
 def _module():
-    spec = importlib.util.spec_from_file_location("live_recursive_batch_canary", _SCRIPT)
+    spec = importlib.util.spec_from_file_location("live_daytona_verify_canary", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -63,7 +63,7 @@ def test_help_is_side_effect_free() -> None:
     result = subprocess.run([sys.executable, str(_SCRIPT), "--help"], capture_output=True, text=True, check=False)
 
     assert result.returncode == 0
-    assert "--output" in result.stdout
+    assert "recursive-batch" in result.stdout
 
 
 def test_live_authorization_is_required_before_pytest(tmp_path: Path) -> None:
@@ -71,7 +71,7 @@ def test_live_authorization_is_required_before_pytest(tmp_path: Path) -> None:
     output = tmp_path / "receipt.json"
 
     result = subprocess.run(
-        [sys.executable, str(_SCRIPT), "--output", str(output)],
+        [sys.executable, str(_SCRIPT), "recursive-batch", "--output", str(output)],
         capture_output=True,
         text=True,
         env=environment,
@@ -98,7 +98,7 @@ def test_dirty_candidate_is_rejected_before_pytest(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(module.subprocess, "run", git)
     with pytest.raises(RuntimeError, match="clean tracked candidate"):
-        module._require_clean_candidate()
+        module.canary__require_clean_candidate()
 
     assert [call[1] for call in calls] == ["branch", "rev-parse", "status"]
 
@@ -111,7 +111,7 @@ def test_receipt_validation_requires_trace_hierarchy(tmp_path: Path) -> None:
     output.write_text(json.dumps(receipt), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="root and child traces"):
-        module._validate_receipt(output)
+        module.canary__validate_receipt(output)
 
 
 def test_receipt_validation_accepts_complete_evidence(tmp_path: Path) -> None:
@@ -119,7 +119,7 @@ def test_receipt_validation_accepts_complete_evidence(tmp_path: Path) -> None:
     output = tmp_path / "receipt.json"
     output.write_text(json.dumps(_valid_receipt()), encoding="utf-8")
 
-    module._validate_receipt(output)
+    module.canary__validate_receipt(output)
 
 
 def test_receipt_validation_rejects_a_different_candidate(tmp_path: Path) -> None:
@@ -130,7 +130,7 @@ def test_receipt_validation_rejects_a_different_candidate(tmp_path: Path) -> Non
     output.write_text(json.dumps(receipt), encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="clean candidate"):
-        module._validate_receipt(output)
+        module.canary__validate_receipt(output)
 
 
 def test_trace_hierarchy_rejects_wrong_parentage() -> None:

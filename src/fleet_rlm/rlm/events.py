@@ -1299,17 +1299,15 @@ def record_phase_failure(
         "delegation_metrics": summary.delegation_metrics.as_dict(),
         "token_usage_status": summary.delegation_metrics.token_usage_status,
     }
-    if last_lm_call:
-        outputs["last_lm_call"] = dict(last_lm_call)
-    parse_profile = _adapter_parse_profile(exc)
-    if parse_profile:
-        merged_last_call = dict(last_lm_call) if last_lm_call else {}
+    merged_last_call = dict(last_lm_call or {})
+    if parse_profile := _adapter_parse_profile(exc):
         merged_last_call.update(parse_profile)
+    if merged_last_call:
         outputs["last_lm_call"] = merged_last_call
     if wrap_up:
-        outputs.update(dict(wrap_up))
+        outputs.update(wrap_up)
     if repair:
-        outputs.update(dict(repair))
+        outputs.update(repair)
     output_diag = getattr(exc, "output_chars", None)
     if isinstance(output_diag, int):
         outputs["output_diagnostic"] = {
@@ -2136,30 +2134,32 @@ def _lm_input_profile(inputs: Mapping[str, Any], *, include_previews: bool = Tru
     return profile
 
 
+def _extract_mapping(value: object) -> Mapping[str, Any] | None:
+    if value is None:
+        return None
+    if isinstance(value, Mapping):
+        return value
+    if callable(dump := getattr(value, "model_dump", None)):
+        with contextlib.suppress(Exception):
+            res = dump()
+            if isinstance(res, Mapping):
+                return res
+    raw = getattr(value, "__dict__", None)
+    return raw if isinstance(raw, dict) else None
+
+
 def _to_output_mapping(outputs: Any) -> Mapping[str, Any] | None:
-    if isinstance(outputs, Mapping):
-        return outputs
     if isinstance(outputs, str):
         return {"content": outputs}
     if isinstance(outputs, Sequence) and not isinstance(outputs, (str, bytes, bytearray)):
         merged: dict[str, Any] = {}
         for item in outputs:
             if isinstance(item, str):
-                existing = merged.get("content")
-                merged["content"] = item if not isinstance(existing, str) else existing + item
+                merged["content"] = (merged.get("content") or "") + item
             elif isinstance(item, Mapping):
-                for key, value in item.items():
-                    merged[str(key)] = value
+                merged.update(item)
         return merged or None
-    model_dump = getattr(outputs, "model_dump", None)
-    if callable(model_dump):
-        try:
-            dumped = model_dump()
-            if isinstance(dumped, Mapping):
-                return dumped
-        except Exception:
-            pass
-    return None
+    return _extract_mapping(outputs)
 
 
 def _lm_output_profile(outputs: Any, *, include_previews: bool = True) -> dict[str, JsonValue]:
@@ -2180,25 +2180,12 @@ def _lm_output_profile(outputs: Any, *, include_previews: bool = True) -> dict[s
 
 
 def _mapping_from_usage_value(value: object) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        return dict(value) if value else None
-    dump = getattr(value, "model_dump", None)
-    if callable(dump):
-        try:
-            dumped = dump()
-            if isinstance(dumped, Mapping) and dumped:
-                return dict(dumped)
-        except Exception:
-            pass
-    raw = getattr(value, "__dict__", None)
-    return dict(raw) if isinstance(raw, dict) and raw else None
+    res = _extract_mapping(value)
+    return dict(res) if res else None
 
 
 def _usage_from_history_entry(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    usage = _mapping_from_usage_value(entry.get("usage"))
-    if usage:
+    if usage := _mapping_from_usage_value(entry.get("usage")):
         return usage
     response = entry.get("response")
     if response is None:
@@ -2247,28 +2234,25 @@ def _lm_max_tokens(instance: Any) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
 
 
+def _history_entry_matches_outputs(entry: Mapping[str, Any], outputs: object) -> bool:
+    return outputs is not None and entry.get("outputs") is outputs
+
+
 def _latest_lm_telemetry(instance: Any, history_length: int | None, outputs: object = None) -> dict[str, JsonValue]:
     history = getattr(instance, "history", None)
     if not isinstance(history, Sequence) or isinstance(history, (str, bytes, bytearray)):
         return {}
     start = history_length if history_length is not None else max(0, len(history) - 1)
     candidates = [entry for entry in history[start:] if isinstance(entry, Mapping)]
-    matching = [entry for entry in candidates if outputs is not None and entry.get("outputs") is outputs]
+    matching = [entry for entry in candidates if _history_entry_matches_outputs(entry, outputs)]
     selected = matching or (candidates if len(candidates) == 1 else [])
     for entry in reversed(selected):
-        usage = _usage_from_history_entry(entry)
-        if not isinstance(usage, Mapping) or not usage:
-            continue
-        with contextlib.suppress(ValueError):
-            observed = {k: v for k, v in usage.items() if v is not None}
-            sanitized = _safe_usage_entry(observed, path="lm_usage", filter_unknown=True)
-            if sanitized:
-                return cast(dict[str, JsonValue], sanitized)
+        if usage := _usage_from_history_entry(entry):
+            with contextlib.suppress(ValueError):
+                observed = {k: v for k, v in usage.items() if v is not None}
+                if sanitized := _safe_usage_entry(observed, path="lm_usage", filter_unknown=True):
+                    return cast(dict[str, JsonValue], sanitized)
     return {}
-
-
-def _history_entry_matches_outputs(entry: Mapping[str, Any], outputs: object) -> bool:
-    return outputs is not None and entry.get("outputs") is outputs
 
 
 def _mlflow_token_usage(usage: Mapping[str, JsonValue]) -> dict[str, JsonValue]:

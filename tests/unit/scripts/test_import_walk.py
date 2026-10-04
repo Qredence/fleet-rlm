@@ -3,7 +3,15 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from scripts.import_walk import iter_imports, matches, resolve_from_import
+from scripts.check_architecture import (
+    walker_iter_imports as iter_imports,
+)
+from scripts.check_architecture import (
+    walker_matches as matches,
+)
+from scripts.check_architecture import (
+    walker_resolve_from_import as resolve_from_import,
+)
 
 
 def test_matches_trailing_underscore_prefix_rule() -> None:

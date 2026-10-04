@@ -97,7 +97,7 @@ termination to forced stop after five seconds.
 
 Before starting Daytona, `fleet cli` verifies the configured database is at the
 canonical Alembic head. It never applies migrations. Recover with
-`uv run python scripts/db_init.py` and retry.
+`uv run python scripts/database.py upgrade` and retry.
 
 Forward terminal options after `--`:
 

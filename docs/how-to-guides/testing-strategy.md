@@ -198,11 +198,11 @@ accounting in individual pytest modules.
 | Context containment and whole-Sandbox deletion | `test_daytona_containment.py`, `test_daytona_deletion_lifecycle.py`; explicitly requested bounded evidence | Provider process survival and deletion observation cannot be inferred from fake responses. |
 | Snapshot image package and import contract | `scripts/daytona_snapshot.py verify-runtime`; disposable Sandbox result | The selected immutable image must expose its baked Python and dependency contract in Daytona. This does not exercise Fleet's API or RLM path. |
 | Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The native lane enables MLflow tracing, so it also requires a reachable tracking server at the configured `mlflow.tracking_uri` (the shipped configuration uses `http://127.0.0.1:5001`) and fails, rather than skips, when that server is down: a lane certifying one `RLM.execute` span must not pass with none. The receipt includes cleanup evidence and does not certify recursion or containment. |
-| Recursive two-child batch canary | `scripts/live_recursive_batch_canary.py`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
+| Recursive two-child batch canary | `scripts/live_daytona_verify.py recursive-batch`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
 | Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
-| PostgreSQL contention and migration rehearsal | `scripts/benchmarks/certify_postgres.py --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
-| Configured MLflow export | `scripts/benchmarks/certify_mlflow.py --backend configured`; JSON receipt | Backend authentication, export and retrieval cannot be proved by fail-soft unit mocks. |
+| PostgreSQL contention and migration rehearsal | `scripts/database.py certify-postgres --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
+| Configured MLflow export | `scripts/benchmarks/certify_mlflow.py certify --backend configured`; JSON receipt | Backend authentication, export and retrieval cannot be proved by fail-soft unit mocks. |
 | Matched quality/performance | Existing benchmark campaign helpers and fixed dataset; comparison receipt | Real model quality, latency and cost require matched provider runs. Fixture-only Phase 6 cases are not a completed campaign. |
 
 The live pytest opt-out contract is exercised in an isolated subprocess: all
@@ -240,7 +240,7 @@ exports win. It requires the `rlm.recursion_enabled = false` setting and explici
 export FLEET_LIVE=1
 export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
 export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
-uv run python scripts/live_daytona_verify.py \
+uv run python scripts/live_daytona_verify.py native \
   --output .scratch/live/native-daytona.json
 ```
 

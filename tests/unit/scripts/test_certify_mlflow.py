@@ -48,6 +48,17 @@ def test_write_once_refuses_replacement(certification, tmp_path: Path) -> None:
         certification._write_once(path, {"schema": "different"})
 
 
+def test_certify_dispatch_rejects_an_occupied_receipt_before_loading_integrations(
+    certification, monkeypatch, tmp_path: Path
+) -> None:
+    output = tmp_path / "kept.json"
+    output.write_text("prior receipt", encoding="utf-8")
+    monkeypatch.setattr(certification, "_load_integrations", lambda: pytest.fail("must reject before execution"))
+
+    assert certification.main(["certify", "--output", str(output)]) == 2
+    assert output.read_text(encoding="utf-8") == "prior receipt"
+
+
 def test_trace_linkage_checks_tags_trace_ids_and_parent_relationships(certification) -> None:
     session_id = str(uuid4())
     run_id = str(uuid4())
@@ -90,6 +101,8 @@ def test_trace_linkage_checks_tags_trace_ids_and_parent_relationships(certificat
 
 @pytest.mark.asyncio
 async def test_run_trace_fails_closed_without_current_handle_identity(certification, monkeypatch) -> None:
+    certification._load_integrations()
+
     @contextmanager
     def no_trace(*_args, **_kwargs):
         yield SimpleNamespace(trace_id=None)
@@ -127,6 +140,26 @@ def test_token_aggregation_rejects_missing_or_double_counted_usage(certification
 def test_token_aggregation_requires_exact_observed_counts(certification):
     assert certification._expected_token_usage({"input_tokens": 6, "output_tokens": 4, "total_tokens": 10})
     assert not certification._expected_token_usage({"input_tokens": 6.0, "output_tokens": 4, "total_tokens": 10})
+
+
+@pytest.mark.parametrize(
+    ("info", "expected"),
+    [
+        (
+            SimpleNamespace(token_usage={"input_tokens": 40, "total_tokens": 40}),
+            {"input_tokens": 40, "total_tokens": 40},
+        ),
+        (
+            SimpleNamespace(request_metadata={"mlflow.trace.tokenUsage": '{"input_tokens": 40, "total_tokens": 40}'}),
+            {"input_tokens": 40, "total_tokens": 40},
+        ),
+        (SimpleNamespace(request_metadata={"mlflow.trace.tokenUsage": "not-json"}), None),
+        (SimpleNamespace(request_metadata={"mlflow.trace.tokenUsage": "[1, 2]"}), None),
+        (SimpleNamespace(request_metadata=[]), None),
+    ],
+)
+def test_trace_token_usage_extracts_only_mapping_aggregates(certification, info, expected):
+    assert certification._trace_token_usage(info) == expected
 
 
 def _fault_report(certification):
@@ -184,7 +217,7 @@ def test_main_retains_receipt_and_reports_incomplete_checks(certification, monke
         },
     )
     output = tmp_path / "proof.json"
-    assert certification.main(["--output", str(output)]) == exit_code
+    assert certification.main(["certify", "--output", str(output)]) == exit_code
     proof = certification.json.loads(output.read_text())
     assert proof["certification"]["passed"] is passed
     assert proof["promotion"]["eligible"] is False

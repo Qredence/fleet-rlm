@@ -11,6 +11,7 @@ import hashlib
 import io
 import os
 import subprocess
+import sys
 import tarfile
 import time
 import zipfile
@@ -20,10 +21,24 @@ import pytest
 import yaml
 
 from scripts import circleci_trigger_release as trigger
-from scripts.normalize_release_artifacts import normalize_release_artifacts
+from scripts.validate_release import artifact_normalize_release_artifacts as normalize_release_artifacts
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CIRCLECI_CONFIG = REPO_ROOT / ".circleci" / "config.yml"
+RELEASE_VALIDATOR = REPO_ROOT / "scripts" / "validate_release.py"
+
+
+def test_release_normalize_subcommand_help_is_inert() -> None:
+    result = subprocess.run(
+        [sys.executable, str(RELEASE_VALIDATOR), "normalize", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--dist-dir" in result.stdout
+    assert "--epoch" in result.stdout
 
 
 # --- from test_circleci_trigger_release.py ----------------------------

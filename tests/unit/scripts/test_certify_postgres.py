@@ -1,11 +1,23 @@
 """Contention receipts must not promote omitted, failed or ambiguous evidence."""
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 from xml.etree.ElementTree import Element, SubElement, tostring
 
 import pytest
 
-from scripts.benchmarks.certify_postgres import SCENARIOS, preflight, summarize_report
+from scripts import database
+from scripts.database import (
+    POSTGRES_SCENARIOS as SCENARIOS,
+)
+from scripts.database import (
+    postgres_preflight as preflight,
+)
+from scripts.database import (
+    postgres_summarize_report as summarize_report,
+)
 
 
 def _report():
@@ -64,8 +76,41 @@ def test_preflight_requires_explicit_exclusive_target(monkeypatch):
     preflight()
 
 
+def test_database_operations_have_inert_operation_help() -> None:
+    script = Path(database.__file__).resolve()
+    for operation in ("upgrade", "import-sqlite", "preflight", "certify-postgres"):
+        result = subprocess.run(
+            [sys.executable, str(script), operation, "--help"], capture_output=True, text=True, check=False
+        )
+        assert result.returncode == 0, result.stderr
+        assert "usage:" in result.stdout.lower()
+
+
+def test_postgres_certification_never_runs_database_migrations(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(database, "postgres_preflight", lambda: None)
+    monkeypatch.setattr(
+        database.subprocess,
+        "check_output",
+        lambda command, **_kwargs: "a" * 40 if command[1] == "rev-parse" else "",
+    )
+    monkeypatch.setattr(
+        database.subprocess,
+        "run",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(OSError("pytest lane unavailable")),
+    )
+    monkeypatch.setattr(
+        database.command,
+        "upgrade",
+        lambda *_args, **_kwargs: pytest.fail("certification must never migrate its database"),
+    )
+    receipt = tmp_path / "postgres.json"
+
+    assert database.postgres_main(["--receipt", str(receipt)]) == 1
+    assert json.loads(receipt.read_text(encoding="utf-8"))["schema"] == "fleet.adr006-postgres-contention/v2"
+
+
 def test_query_plans_retain_structure_without_literals():
-    from scripts.benchmarks.certify_postgres import project_query_plan
+    from scripts.database import postgres_project_query_plan as project_query_plan
 
     raw = {
         "Node Type": "Index Scan",

@@ -586,6 +586,84 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
 
 
 @pytest.mark.asyncio
+async def test_workspace_io_warm_lease_reuses_resident_sandbox_and_closes_on_aclose(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sandbox = SimpleNamespace(id="io-warm")
+
+    async def refresh_data() -> None:
+        return None
+
+    sandbox.refresh_data = refresh_data
+    create_count = 0
+    deleted: list[str] = []
+
+    class Platform:
+        async def create(self, **_kwargs: object) -> object:
+            nonlocal create_count
+            create_count += 1
+            return sandbox
+
+        async def delete(self, sandbox_id: str) -> None:
+            deleted.append(sandbox_id)
+
+        async def get(self, _sandbox_id: str) -> object | None:
+            return None if deleted else sandbox
+
+    async def confirm(**_kwargs: object) -> AbsenceConfirmation | AbsenceTimeout:
+        return AbsenceConfirmation(sandbox.id, ("absent",), 0.0)
+
+    async def volume_id(*_args: object) -> str:
+        return "volume"
+
+    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
+    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
+    monkeypatch.setattr(
+        runtime_module, "_create_daytona_sandbox", lambda _platform, _expected, **_kwargs: platform.create(**_kwargs)
+    )
+
+    async def layout(*_args: object) -> None:
+        return None
+
+    monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
+    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
+    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+
+    admission = DaytonaAdmission(max_active_leases=2)
+    platform = Platform()
+    runtime = make_daytona_runtime(
+        platform=platform,
+        volume_client=object(),
+        volume_config=SimpleNamespace(paths=object),
+        admission=admission,
+    )
+    ws_id = uuid4()
+
+    # First call creates the warm sandbox
+    async with runtime.open_workspace_sandbox(ws_id, purpose="mem-read", reuse_warm=True) as acquired1:
+        assert acquired1 is sandbox
+        assert create_count == 1
+        assert not deleted
+
+    # Not deleted on exit of contextmanager
+    assert not deleted
+    assert ws_id in runtime._warm_workspace_io_sandboxes
+
+    # Second call reuses the existing warm sandbox without creating a new one
+    async with runtime.open_workspace_sandbox(ws_id, purpose="mem-append", reuse_warm=True) as acquired2:
+        assert acquired2 is sandbox
+        assert create_count == 1
+        assert not deleted
+
+    # Calling aclose() cleanly terminates and confirms deletion of the warm sandbox
+    assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)
+    assert sandbox.id in deleted
+    assert not runtime._warm_workspace_io_sandboxes
+
+
+@pytest.mark.asyncio
 async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

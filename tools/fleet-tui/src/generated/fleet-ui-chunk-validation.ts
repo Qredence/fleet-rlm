@@ -1,5 +1,5 @@
 /**
- * REGENERATED from openapi.yaml by scripts/generate_tui_chunk_validation.py.
+ * REGENERATED from openapi.yaml by scripts/contracts.py api generate.
  * Do not hand-edit — run `make api-sync`. The dataAlternatives
  * snake_case/camelCase id tolerances are the generator's declared input.
  */

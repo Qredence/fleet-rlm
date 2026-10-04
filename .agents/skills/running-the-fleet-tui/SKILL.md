@@ -11,12 +11,12 @@ Use the maintained terminal client when a check needs a real end-to-end Turn —
 live provider calls, a real Sandbox, settlement, and a durable trace — rather
 than a pytest lane. The
 [terminal TUI guide](../../../docs/how-to-guides/terminal-tui.md) owns launch,
-`scripts/db_init.py`, configuration, Session resume, the backend/client split, and the
+`scripts/database.py upgrade`, configuration, Session resume, the backend/client split, and the
 full slash-command list; read it for those and do not restate them here.
 
 ## Preconditions
 
-- Run `uv run python scripts/db_init.py` before the first launch. The supervisor
+- Run `uv run python scripts/database.py upgrade` before the first launch. The supervisor
   verifies Alembic head and never migrates, so a stale database fails the launch.
 - Inspect the single `config/fleet.toml` policy before launching. The shipped
   configuration enables bounded children; edit `/settings` or TOML and restart

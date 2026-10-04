@@ -43,8 +43,8 @@ def test_logical_or_missing_mlflow_backend_is_unknown(uri: str | None) -> None:
     [
         *[(table, "SELECT") for table in _REQUIRED_SELECT_TABLES],
         ("fleet_sessions", "INSERT"),
-        ("fleet_users", "INSERT"),
-        ("fleet_workspaces", "INSERT"),
+        ("fleet_runs", "INSERT"),
+        ("fleet_artifacts", "INSERT"),
     ],
 )
 async def test_managed_preflight_rejects_role_without_runtime_dml(
@@ -116,8 +116,8 @@ def test_preflight_receipt_defaults_missing_dml_privileges_to_false() -> None:
     )
 
     fleet_dml = observed.as_dict()["privileges"]["fleet_dml"]
-    assert fleet_dml["fleet_users:insert"] is False
-    assert fleet_dml["fleet_workspaces:insert"] is False
+    assert fleet_dml["fleet_sessions:insert"] is False
+    assert fleet_dml["fleet_runs:insert"] is False
 
     fleet_select = observed.as_dict()["privileges"]["fleet_select"]
     assert fleet_select["fleet_sessions"] is True
@@ -136,7 +136,7 @@ async def test_revision_mismatch_is_wrapped_with_remediation(monkeypatch: pytest
     with pytest.raises(DatabaseCompatibilityError) as error:
         await ensure_database_compatible("postgresql+asyncpg://u:p@h/db", repo_root=Path("/repo"))
 
-    assert str(error.value) == "Fleet database is not at Alembic head; run `uv run python scripts/db_init.py`"
+    assert str(error.value) == "Fleet database is not at Alembic head; run `uv run python scripts/database.py upgrade`"
 
 
 @pytest.mark.asyncio

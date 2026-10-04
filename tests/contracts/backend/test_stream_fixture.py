@@ -20,7 +20,8 @@ FIXTURE = ROOT / "tools" / "fleet-tui" / "src" / "tests" / "fixtures" / "turn-st
 
 
 def _generate_streams():
-    from scripts.generate_stream_fixture import _render, generate_streams
+    from scripts.contracts import stream__render as _render
+    from scripts.contracts import stream_generate_streams as generate_streams
 
     return generate_streams(), _render
 
@@ -34,6 +35,12 @@ def test_turn_stream_fixture_is_current() -> None:
     assert FIXTURE.read_text(encoding="utf-8") == render(streams), (
         "TUI turn-stream fixture is stale; run `make stream-sync`"
     )
+
+
+def test_contract_stream_dispatch_runs_the_check_lane() -> None:
+    from scripts.contracts import main
+
+    assert main(["stream", "check"]) == 0
 
 
 def test_emitted_chunks_are_fully_documented_by_openapi() -> None:

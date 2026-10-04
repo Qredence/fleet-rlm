@@ -491,11 +491,11 @@ def test_flush_tracing_terminates_async_exporter(monkeypatch: pytest.MonkeyPatch
     assert calls.flush_args == [{"terminate": True}]
 
 
-# --- from test_validate_mlflow_tracing.py -----------------------------
+# --- smoke lane of scripts/benchmarks/certify_mlflow.py ----------------
 @pytest.fixture
 def verifier() -> ModuleType:
-    path = Path(__file__).parents[4] / "scripts" / "validate_mlflow_tracing.py"
-    spec = importlib.util.spec_from_file_location("validate_mlflow_tracing", path)
+    path = Path(__file__).parents[4] / "scripts" / "benchmarks" / "certify_mlflow.py"
+    spec = importlib.util.spec_from_file_location("certify_mlflow_smoke", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -559,15 +559,18 @@ def test_main_emits_and_retrieves_local_trace(
 
     mlflow.get_trace = get_trace  # type: ignore[attr-defined]
     monkeypatch.setitem(sys.modules, "mlflow", mlflow)
-    monkeypatch.setattr(verifier, "_load_repository_env", lambda: None)
-    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings)
-    monkeypatch.setattr(verifier, "configure_tracing", lambda _settings: setattr(calls, "configure", 1) or True)
-    monkeypatch.setattr(verifier, "is_tracing_active", lambda: True)
-    monkeypatch.setattr(verifier, "flush_tracing", lambda: setattr(calls, "flush", 1))
-    monkeypatch.setattr(verifier, "reset_tracing", lambda: setattr(calls, "reset", 1))
-    monkeypatch.setattr(sys, "argv", ["validate_mlflow_tracing.py"])
+    monkeypatch.setattr(verifier, "_load_tracing_integrations", lambda: None)
+    monkeypatch.setattr(verifier, "smoke__load_repository_env", lambda: None)
+    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings, raising=False)
+    monkeypatch.setattr(
+        verifier, "configure_tracing", lambda _settings: setattr(calls, "configure", 1) or True, raising=False
+    )
+    monkeypatch.setattr(verifier, "is_tracing_active", lambda: True, raising=False)
+    monkeypatch.setattr(verifier, "flush_tracing", lambda: setattr(calls, "flush", 1), raising=False)
+    monkeypatch.setattr(verifier, "reset_tracing", lambda: setattr(calls, "reset", 1), raising=False)
+    monkeypatch.setattr(sys, "argv", ["certify_mlflow.py", "smoke"])
 
-    assert verifier.main() == 0
+    assert verifier.main(["smoke"]) == 0
     assert calls.configure == 1
     assert calls.flush == 1
     assert calls.reset == 1

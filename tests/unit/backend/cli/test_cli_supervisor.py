@@ -198,13 +198,15 @@ def test_daytona_database_preflight_maps_revision_mismatch(
     )
 
     async def reject_database(*_args: object, **_kwargs: object) -> None:
-        raise DatabaseCompatibilityError("Fleet database is not at Alembic head; run uv run python scripts/db_init.py")
+        raise DatabaseCompatibilityError(
+            "Fleet database is not at Alembic head; run uv run python scripts/database.py upgrade"
+        )
 
     monkeypatch.setattr(supervisor, "ensure_database_compatible", reject_database)
 
     with pytest.raises(
         supervisor.SupervisorError,
-        match=r"Fleet database is not at Alembic head; run uv run python scripts/db_init\.py",
+        match=r"Fleet database is not at Alembic head; run uv run python scripts/database\.py upgrade",
     ):
         _VALIDATE_DAYTONA_DATABASE(tmp_path)
 

@@ -12,7 +12,7 @@ upgraded database. The supervisor verifies Alembic head and never migrates
 automatically:
 
 ```bash
-uv run python scripts/db_init.py
+uv run python scripts/database.py upgrade
 uv run fleet cli --port 8000
 ```
 

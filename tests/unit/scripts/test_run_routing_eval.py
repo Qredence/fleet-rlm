@@ -94,3 +94,24 @@ def test_dry_run_writes_an_isolated_plan_without_live_credentials(tmp_path: Path
     ]
     with pytest.raises(runner.RoutingEvalError, match="unknown routing scenarios"):
         runner._selected_scenarios(("unknown",))
+
+
+def test_help_does_not_import_routing_integrations() -> None:
+    import subprocess
+    import sys
+
+    script = Path(runner.__file__).resolve()
+    result = subprocess.run([sys.executable, str(script), "--help"], capture_output=True, text=True, check=False)
+    assert result.returncode == 0
+    assert "--live" in result.stdout
+    assert "MLflow agent" not in result.stderr
+
+
+def test_receipt_collision_preserves_existing_file_before_routing_import(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / ".scratch" / "routing.json"
+    output.parent.mkdir()
+    output.write_text("prior receipt", encoding="utf-8")
+    monkeypatch.setattr(runner, "_load_routing_support", lambda: pytest.fail("must reject before import"))
+
+    assert runner.main(["--output", str(output), "--live"]) == 2
+    assert output.read_text(encoding="utf-8") == "prior receipt"

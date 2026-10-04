@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.check_harness_engineering import HarnessChecker
+from scripts.check_repo_hygiene import HarnessChecker
 
 PREFLIGHT = Path(__file__).resolve().parents[3] / ".codex/cloud-preflight.zsh"
 
@@ -126,6 +126,4 @@ def test_cloud_preflight_runs_harness_only_without_skip(tmp_path: Path) -> None:
 
     checked = _preflight(repo, env=env)
     assert checked.returncode == 0, checked.stderr
-    assert uv_log.read_text(encoding="utf-8").strip() == (
-        "run python scripts/check_harness_engineering.py --skip-script-help"
-    )
+    assert uv_log.read_text(encoding="utf-8").strip() == ("run python scripts/check_repo_hygiene.py --skip-script-help")

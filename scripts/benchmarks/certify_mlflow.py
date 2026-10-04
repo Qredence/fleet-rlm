@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Run the bounded MLflow 3.16 certification lane.
 
-The command is deliberately separate from the normal tracing smoke test.  It
-exercises Fleet's turn trace, DSPy autolog, the certification LM engine,
+The certification lane exercises Fleet's turn trace, DSPy autolog, the certification LM engine,
 feedback, privacy projection, concurrent/repeated lifecycles, and
 fresh-process sampling.
 With ``--fault-checks`` it runs existing behavior-owned SDK/lifecycle fault
@@ -35,30 +34,10 @@ from pathlib import Path
 from typing import Any, cast
 from uuid import UUID, uuid4
 
-import dspy
-from dotenv import load_dotenv
-from dspy.clients.engines.base import validate_request
-from dspy.lm15 import Request, Response, response_from_openai_chat, response_to_events
-
-from fleet_rlm.config.loader import load_runtime_settings
-from fleet_rlm.observability.feedback import TraceFeedbackNotFoundError, TraceFeedbackService
-from fleet_rlm.observability.tracing import (
-    annotate_trace_io,
-    configure_tracing,
-    flush_tracing,
-    is_tracing_active,
-    reset_tracing,
-    turn_phase_span,
-    turn_trace,
-)
-from fleet_rlm.rlm.events import _RLMTraceCallback
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from scripts.benchmarks.annotate_traces import _trace_token_usage
-from scripts.benchmarks.campaign import write_receipt_once
 
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _SCHEMA = "fleet.mlflow-certification/v1"
@@ -73,6 +52,52 @@ _MLFLOW_LM_SPAN = "LM.__call__"
 _ROOT_LM_SPAN = "RLM.root_lm"
 
 
+def _load_tracing_integrations() -> None:
+    """Load Fleet tracing APIs only after a tracing command accepts its arguments."""
+    global load_runtime_settings, annotate_trace_io, configure_tracing, flush_tracing
+    global is_tracing_active, reset_tracing, turn_phase_span, turn_trace
+    from fleet_rlm.config.loader import load_runtime_settings as load_runtime_settings_fn
+    from fleet_rlm.observability.tracing import annotate_trace_io as annotate_trace_io_fn
+    from fleet_rlm.observability.tracing import configure_tracing as configure_tracing_fn
+    from fleet_rlm.observability.tracing import flush_tracing as flush_tracing_fn
+    from fleet_rlm.observability.tracing import is_tracing_active as is_tracing_active_fn
+    from fleet_rlm.observability.tracing import reset_tracing as reset_tracing_fn
+    from fleet_rlm.observability.tracing import turn_phase_span as turn_phase_span_fn
+    from fleet_rlm.observability.tracing import turn_trace as turn_trace_fn
+
+    load_runtime_settings = load_runtime_settings_fn
+    annotate_trace_io = annotate_trace_io_fn
+    configure_tracing = configure_tracing_fn
+    flush_tracing = flush_tracing_fn
+    is_tracing_active = is_tracing_active_fn
+    reset_tracing = reset_tracing_fn
+    turn_phase_span = turn_phase_span_fn
+    turn_trace = turn_trace_fn
+
+
+def _load_integrations() -> None:
+    """Load DSPy and Fleet certification APIs after command parsing."""
+    global dspy, validate_request, response_from_openai_chat, response_to_events
+    global TraceFeedbackNotFoundError, TraceFeedbackService, _RLMTraceCallback
+    _load_tracing_integrations()
+    import dspy as dspy_module
+    from dspy.clients.engines.base import validate_request as validate_request_fn
+    from dspy.lm15 import response_from_openai_chat as response_from_openai_chat_fn
+    from dspy.lm15 import response_to_events as response_to_events_fn
+
+    from fleet_rlm.observability.feedback import TraceFeedbackNotFoundError as LoadedTraceFeedbackNotFoundError
+    from fleet_rlm.observability.feedback import TraceFeedbackService as LoadedTraceFeedbackService
+    from fleet_rlm.rlm.events import _RLMTraceCallback as trace_callback
+
+    dspy = dspy_module
+    validate_request = validate_request_fn
+    response_from_openai_chat = response_from_openai_chat_fn
+    response_to_events = response_to_events_fn
+    TraceFeedbackNotFoundError = LoadedTraceFeedbackNotFoundError
+    TraceFeedbackService = LoadedTraceFeedbackService
+    _RLMTraceCallback = trace_callback
+
+
 class CertificationError(RuntimeError):
     """Raised when a requested certification lane cannot run safely."""
 
@@ -80,7 +105,7 @@ class CertificationError(RuntimeError):
 class _CertificationEngine:
     """Deterministic completion source used to exercise DSPy autolog safely."""
 
-    def complete(self, request: Request) -> Response:
+    def complete(self, request: Any) -> Any:
         validate_request(request)
         return response_from_openai_chat(
             {
@@ -90,7 +115,7 @@ class _CertificationEngine:
             }
         )
 
-    def stream(self, request: Request) -> Iterator[Any]:
+    def stream(self, request: Any) -> Iterator[Any]:
         return response_to_events(self.complete(request))
 
     def close(self) -> None:
@@ -103,10 +128,10 @@ class _AsyncCertificationEngine:
     def __init__(self, sync: _CertificationEngine) -> None:
         self.sync = sync
 
-    async def complete(self, request: Request) -> Response:
+    async def complete(self, request: Any) -> Any:
         return self.sync.complete(request)
 
-    async def stream(self, request: Request) -> AsyncIterator[Any]:
+    async def stream(self, request: Any) -> AsyncIterator[Any]:
         for event in self.sync.stream(request):
             yield event
 
@@ -201,6 +226,8 @@ def _backend_version(uri: str) -> str | None:
 
 def _write_once(path: Path, payload: dict[str, object]) -> str:
     """Write one canonical receipt and refuse to replace an existing one."""
+    from scripts.benchmarks.campaign import write_receipt_once
+
     try:
         return write_receipt_once(path, payload, max_bytes=_MAX_RECEIPT_BYTES)
     except FileExistsError as exc:
@@ -229,6 +256,26 @@ def _settings_for_backend(args: argparse.Namespace) -> Any:
     if args.sql_warehouse_id:
         updates["mlflow_tracing_sql_warehouse_id"] = args.sql_warehouse_id
     return settings.model_copy(update=updates)
+
+
+def _trace_token_usage(info: Any) -> Mapping[str, Any] | None:
+    """Read MLflow's authoritative aggregate across supported trace versions."""
+    token_usage = getattr(info, "token_usage", None)
+    if isinstance(token_usage, Mapping):
+        return token_usage
+    request_metadata = getattr(info, "request_metadata", None)
+    if not isinstance(request_metadata, Mapping):
+        return None
+    value = request_metadata.get("mlflow.trace.tokenUsage")
+    if isinstance(value, Mapping):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+        return parsed if isinstance(parsed, Mapping) else None
+    return None
 
 
 def _trace_payload(trace: Any) -> str:
@@ -562,6 +609,7 @@ def _run_sampling_checks(args: argparse.Namespace, settings: Any) -> dict[str, o
             command = [
                 sys.executable,
                 str(Path(__file__).resolve()),
+                "certify",
                 "--backend",
                 args.backend,
                 "--tracking-uri",
@@ -599,6 +647,8 @@ def _run_sampling_checks(args: argparse.Namespace, settings: Any) -> dict[str, o
 
 def run(args: argparse.Namespace) -> dict[str, object]:
     _require_live()
+    from dotenv import load_dotenv
+
     load_dotenv(_REPO_ROOT / ".env", override=False)
     settings = _settings_for_backend(args)
     experiment = settings.mlflow_experiment_name
@@ -734,11 +784,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def _certify_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.output.exists():
+        print("MLflow certification receipt already exists; refusing to replace it", file=sys.stderr)
+        return 2
+    _load_integrations()
     try:
         if args.sampling_probe is not None:
             _require_live()
+            from dotenv import load_dotenv
+
             load_dotenv(_REPO_ROOT / ".env", override=False)
             proof = _sampling_probe(_settings_for_backend(args), args.sampling_probe)
             _write_once(args.output, proof)
@@ -755,6 +811,193 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(json.dumps({"schema": _SCHEMA, "status": "failed", "error_category": type(exc).__name__}))
         return 1
+
+
+# Selected-policy MLflow tracing smoke lane.
+
+
+from pathlib import Path
+
+SMOKE_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+def smoke__load_repository_env() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv(SMOKE_REPO_ROOT / ".env", override=False)
+
+
+def smoke__resolve_option(value: str | None, environment_name: str, *, required: bool = True) -> str | None:
+    resolved = value or os.environ.get(environment_name, "").strip()
+    if required and not resolved:
+        raise RuntimeError(f"{environment_name} is required; set it in .env or pass the corresponding option")
+    return resolved or None
+
+
+def smoke__tracing_settings() -> Any:
+    """Load one selected Fleet policy with complete local or managed tracing."""
+    settings = load_runtime_settings()
+    if not settings.mlflow_tracing_enabled or not settings.mlflow_tracking_uri or not settings.mlflow_experiment_name:
+        raise RuntimeError("Fleet TOML configuration must enable MLflow tracing with an experiment")
+    if settings.mlflow_tracking_uri == "databricks":
+        managed_values = {
+            "mlflow.trace_catalog": settings.mlflow_trace_catalog,
+            "mlflow.trace_schema": settings.mlflow_trace_schema,
+            "mlflow.trace_table_prefix": settings.mlflow_trace_table_prefix,
+            "mlflow.tracing_sql_warehouse_id": settings.mlflow_tracing_sql_warehouse_id,
+        }
+        if any(not value for value in managed_values.values()):
+            raise RuntimeError("Fleet TOML configuration has incomplete Managed Databricks MLflow settings")
+    return settings
+
+
+def smoke__tables(profile: str | None, schema: str) -> set[str]:
+    catalog, schema_name = schema.split(".", 1)
+    command = ["databricks", "tables", "list", catalog, schema_name]
+    if profile:
+        command.extend(["--profile", profile])
+    command.extend(["-o", "json"])
+    result = subprocess.run(
+        command,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return {str(item["full_name"]) for item in json.loads(result.stdout)}
+
+
+def smoke__trace_summary(trace: Any, *, require_content_previews: bool = False) -> tuple[str, list[Any]]:
+    """Validate trace identity and health without requiring disabled content fields."""
+    info = trace.info
+    spans = list(trace.data.spans)
+    state = str(getattr(info, "state", ""))
+    if state != "OK":
+        raise RuntimeError(f"trace state is {state!r}, expected 'OK'")
+    if getattr(info, "execution_duration", None) is None:
+        raise RuntimeError("trace is missing execution duration")
+    if not spans:
+        raise RuntimeError("trace contains no spans")
+    root_spans = [span for span in spans if getattr(span, "parent_span_id", None) is None]
+    if not root_spans:
+        raise RuntimeError("trace contains no root span")
+    if require_content_previews:
+        if not getattr(info, "request_preview", None):
+            raise RuntimeError("trace is missing request preview")
+        if not getattr(info, "response_preview", None):
+            raise RuntimeError("trace is missing response preview")
+    error_spans = [
+        str(getattr(span, "name", "unknown"))
+        for span in spans
+        if smoke__span_status_code(span) in {"ERROR", "STATUS_CODE_ERROR"}
+    ]
+    if error_spans:
+        raise RuntimeError(f"trace contains error span(s): {', '.join(error_spans)}")
+    return str(getattr(info, "trace_id", "")), spans
+
+
+def smoke__span_status_code(span: Any) -> str:
+    """Normalize MLflow CLI and SDK span status representations."""
+    status = getattr(span, "status", None)
+    raw = getattr(status, "code", None)
+    if raw is None:
+        raw = getattr(status, "status_code", None)
+    return str(getattr(raw, "value", raw))
+
+
+def smoke_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Verify one selected-policy MLflow trace")
+    parser.add_argument("--profile")
+    args = parser.parse_args(argv)
+    _load_tracing_integrations()
+    smoke__load_repository_env()
+    settings = smoke__tracing_settings()
+    managed = settings.mlflow_tracking_uri == "databricks"
+    profile = smoke__resolve_option(args.profile, "DATABRICKS_CONFIG_PROFILE", required=False)
+
+    assert settings.mlflow_experiment_name is not None
+    if managed:
+        host = smoke__resolve_option(None, "DATABRICKS_HOST")
+        assert host is not None
+        assert settings.mlflow_tracing_sql_warehouse_id is not None
+        os.environ["DATABRICKS_HOST"] = host
+        if os.environ.get("DATABRICKS_TOKEN", "").strip():
+            profile = None
+        elif profile:
+            os.environ["DATABRICKS_CONFIG_PROFILE"] = profile
+
+    if not configure_tracing(settings) or not is_tracing_active():
+        raise RuntimeError("Fleet MLflow tracing setup did not activate")
+
+    tracing_active = True
+    try:
+        import mlflow
+
+        # configure_tracing is the single owner of the tracking URI,
+        # experiment destination, sanitizer, and DSPy autolog setup. Resolve
+        # the resulting experiment instead of duplicating that configuration
+        # in this standalone verifier.
+        experiment = mlflow.get_experiment_by_name(settings.mlflow_experiment_name)
+        if experiment is None:
+            raise RuntimeError("Fleet MLflow experiment was not available after setup")
+
+        @mlflow.trace(name="fleet_mlflow_smoke")
+        def smoke(input_text: str) -> dict[str, str]:
+            return {"echo": input_text}
+
+        smoke("fleet MLflow tracing smoke test")
+        trace_id = mlflow.get_last_active_trace_id()
+        if not trace_id:
+            raise RuntimeError("MLflow did not return a trace id")
+        trace = mlflow.get_trace(trace_id, flush=True)
+        if trace is None:
+            raise RuntimeError(f"MLflow trace was not available after flushing: {trace_id}")
+        verified_trace_id, spans = smoke__trace_summary(
+            trace,
+            require_content_previews=bool(getattr(settings, "mlflow_trace_content_enabled", False)),
+        )
+
+        trace_location = settings.mlflow_tracking_uri
+        if managed:
+            expected_tables = {
+                f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}_{suffix}"
+                for suffix in ("otel_spans", "otel_annotations", "otel_logs", "otel_metrics")
+            }
+            actual_tables = smoke__tables(profile, f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}")
+            missing_tables = expected_tables.difference(actual_tables)
+            if missing_tables:
+                raise RuntimeError(f"missing Unity Catalog trace table(s): {', '.join(sorted(missing_tables))}")
+            trace_location = (
+                f"{settings.mlflow_trace_catalog}.{settings.mlflow_trace_schema}.{settings.mlflow_trace_table_prefix}"
+            )
+
+        print(f"experiment_id={experiment.experiment_id}")
+        print(f"trace_id={verified_trace_id}")
+        print(f"span_count={len(spans)}")
+        print(f"execution_duration_ms={trace.info.execution_duration}")
+        print(f"tracking_uri={settings.mlflow_tracking_uri}")
+        print(f"trace_location={trace_location}")
+        print("status=PASS")
+        return 0
+    finally:
+        if tracing_active:
+            flush_tracing()
+            reset_tracing()
+
+
+def main(argv: list[str] | None = None) -> int:
+    command_parser = argparse.ArgumentParser(description="Run Fleet MLflow tracing smoke or certification")
+    command_parser.add_argument("command", choices=("smoke", "certify"))
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv or argv in (["-h"], ["--help"]):
+        command_parser.print_help()
+        return 0
+    command, *arguments = argv
+    if command not in {"smoke", "certify"}:
+        command_parser.error(f"invalid choice: {command!r} (choose from 'smoke', 'certify')")
+    if command == "smoke":
+        return smoke_main(arguments)
+    return _certify_main(arguments)
 
 
 if __name__ == "__main__":

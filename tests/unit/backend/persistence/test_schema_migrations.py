@@ -79,7 +79,7 @@ def test_dirty_preflight_preserves_rows_and_revision(tmp_path, monkeypatch, dirt
 def test_upgrade_enforces_lineage_and_status_and_round_trips(tmp_path, monkeypatch):
     config, engine = _database(tmp_path, monkeypatch)
     try:
-        command.upgrade(config, "head")
+        command.upgrade(config, "019fe0010001")
         with engine.connect() as connection:
             connection.execute(text("PRAGMA foreign_keys=ON"))
             connection.commit()
@@ -91,7 +91,7 @@ def test_upgrade_enforces_lineage_and_status_and_round_trips(tmp_path, monkeypat
             with connection.begin():
                 _binding(connection)
         command.downgrade(config, "019fdb010001")
-        command.upgrade(config, "head")
+        command.upgrade(config, "019fe0010001")
         with engine.connect() as connection:
             assert connection.execute(text("SELECT COUNT(*) FROM fleet_sandbox_bindings")).scalar_one() == 1
             assert connection.execute(text("PRAGMA foreign_key_check")).all() == []
@@ -126,7 +126,7 @@ async def test_database_compatibility_rejects_database_without_alembic_revision(
 @pytest.mark.asyncio
 async def test_database_compatibility_accepts_exact_alembic_head(tmp_path: Path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'head.sqlite3'}"
-    await _set_revision(database_url, "01a087800002")
+    await _set_revision(database_url, "01a087800003")
 
     await check_database_compatibility(database_url)
 
@@ -175,7 +175,7 @@ def test_existing_baseline_database_upgrades_to_settling_head(
     finally:
         engine.dispose()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
-    assert revision == "01a087800002"
+    assert revision == "01a087800003"
 
 
 def test_existing_baseline_database_upgrades_to_memory_intents_head(
@@ -218,7 +218,7 @@ def test_existing_baseline_database_upgrades_to_memory_intents_head(
         "claim_heartbeat_at",
         "completion_reason",
     } <= intent_columns
-    assert revision == "01a087800002"
+    assert revision == "01a087800003"
 
 
 # --- from test_turn_lineage_migration.py ------------------------------

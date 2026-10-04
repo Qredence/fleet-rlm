@@ -8,18 +8,38 @@ from uuid import UUID
 import pytest
 from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table, create_engine
 
-from scripts.migrate_sqlite_to_postgres import (
+from scripts.database import (
     MigrationError,
-    _canonical_value,
-    _digest_rows,
-    _environment_url,
-    _manifest,
-    _rows_for_target,
-    _target_has_fleet_schema,
-    _target_has_rows,
-    _validate_statuses,
-    _verify_sample_reconstruction,
-    create_verified_backup,
+)
+from scripts.database import (
+    import__canonical_value as _canonical_value,
+)
+from scripts.database import (
+    import__digest_rows as _digest_rows,
+)
+from scripts.database import (
+    import__environment_url as _environment_url,
+)
+from scripts.database import (
+    import__manifest as _manifest,
+)
+from scripts.database import (
+    import__rows_for_target as _rows_for_target,
+)
+from scripts.database import (
+    import__target_has_fleet_schema as _target_has_fleet_schema,
+)
+from scripts.database import (
+    import__target_has_rows as _target_has_rows,
+)
+from scripts.database import (
+    import__validate_statuses as _validate_statuses,
+)
+from scripts.database import (
+    import__verify_sample_reconstruction as _verify_sample_reconstruction,
+)
+from scripts.database import (
+    import_create_verified_backup as create_verified_backup,
 )
 
 

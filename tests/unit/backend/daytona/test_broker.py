@@ -688,3 +688,56 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
     assert broker._delivery_error is None
     assert "delivered after sandbox abandonment" in caplog.text
     assert "category=duplicate_call" in caplog.text
+
+
+def test_broker_sse_reverse_channel_streams_stdout_in_realtime(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    port = int(base_url.rsplit(":", 1)[1])
+    broker = DaytonaHttpToolBroker(object(), port=port)
+    broker._secret = headers["X-Broker-Secret"]
+    broker._url = base_url
+
+    received_chunks: list[str] = []
+
+    def on_stdout(chunk: str) -> None:
+        received_chunks.append(chunk)
+
+    code = "import time\nprint('line1', flush=True)\ntime.sleep(0.05)\nprint('line2', flush=True)\n"
+
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        result = broker.execute(code, {}, timeout_s=5, on_stdout=on_stdout)
+
+    assert result.get("streamed_stdout") is True
+    assert "line1\n" in "".join(received_chunks)
+    assert "line2\n" in "".join(received_chunks)
+    assert "line1\nline2\n" in result["stdout"]
+
+
+def test_broker_sse_reverse_channel_dispatches_tool_call_promptly(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    port = int(base_url.rsplit(":", 1)[1])
+    broker = DaytonaHttpToolBroker(object(), port=port)
+    broker._secret = headers["X-Broker-Secret"]
+
+    called = False
+
+    def compute(x: int) -> int:
+        nonlocal called
+        called = True
+        return x * 2
+
+    broker.bind_tools({"compute": compute})
+    broker._url = base_url
+    source = broker.setup_source("result = compute(x=21)\nprint('answer is', result)")
+
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        broker._client = client
+        result = broker.execute(source, {}, timeout_s=5)
+
+    assert called is True
+    assert "answer is 42" in result["stdout"]

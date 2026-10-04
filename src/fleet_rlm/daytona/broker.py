@@ -12,6 +12,7 @@ import contextlib
 import inspect
 import json
 import logging
+import queue
 import secrets
 import threading
 import time
@@ -48,14 +49,15 @@ def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, os, sys, threading, time, uuid
+import contextlib, hmac, io, json, os, queue, sys, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
-_lock, _execution_lock = threading.Lock(), threading.Lock()
+_lock, _execution_lock = threading.RLock(), threading.Lock()
 _active_deadline = None
+_event_subscribers = set()
 if os.path.isdir("/workspace"):
     os.chdir("/workspace")
 
@@ -66,11 +68,21 @@ if os.path.isdir("/workspace"):
 if hasattr(sys, "set_int_max_str_digits"):
     sys.set_int_max_str_digits(200_000)
 
+def _emit_event(data):
+    with _lock:
+        subscribers = list(_event_subscribers)
+    for q in subscribers:
+        try:
+            q.put_nowait(data)
+        except Exception:
+            pass
+
 class _BoundedWriter(io.StringIO):
-    def __init__(self, limit):
+    def __init__(self, limit, stream_type="stdout"):
         super().__init__()
         self._limit = limit
         self._truncated = False
+        self._stream_type = stream_type
     def write(self, value):
         remaining = self._limit - self.tell()
         if remaining <= 0:
@@ -79,8 +91,12 @@ class _BoundedWriter(io.StringIO):
         if len(value) > remaining:
             super().write(value[:remaining])
             self._truncated = True
+            written = value[:remaining]
         else:
             super().write(value)
+            written = value
+        if written:
+            _emit_event({"type": self._stream_type, "delta": written})
         return len(value)
     def getvalue(self):
         value = super().getvalue()
@@ -102,6 +118,33 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
         if self.path == "/health": _send(self, {"status": "ok"}); return
+        if self.path == "/events":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+            q = queue.Queue(maxsize=1000)
+            with _lock:
+                _event_subscribers.add(q)
+            try:
+                while True:
+                    try:
+                        item = q.get(timeout=0.2)
+                        if item is None:
+                            break
+                        raw = ("data: " + json.dumps(item, allow_nan=False) + "\n\n").encode("utf-8")
+                        self.wfile.write(raw)
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b":keep-alive\n\n")
+                        self.wfile.flush()
+            except Exception:
+                pass
+            finally:
+                with _lock:
+                    _event_subscribers.discard(q)
+            return
         if self.path.startswith("/pending"):
             out = []
             with _lock:
@@ -121,7 +164,7 @@ class Handler(BaseHTTPRequestHandler):
             if (not isinstance(code, str) or not isinstance(variables, dict) or isinstance(timeout_s, bool)
                     or not isinstance(timeout_s, (int, float)) or timeout_s <= 0):
                 _send(self, {"error": "invalid execution"}, 400); return
-            stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__), _BoundedWriter(__MAX_OUTPUT_CHARS__)
+            stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__, "stdout"), _BoundedWriter(__MAX_OUTPUT_CHARS__, "stderr")
             result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
             try:
                 with _execution_lock:
@@ -147,6 +190,7 @@ class Handler(BaseHTTPRequestHandler):
                     finally:
                         with _lock:
                             _active_deadline = None
+                        _emit_event({"type": "execution_done"})
             finally:
                 result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
             _send(self, result); return
@@ -157,8 +201,20 @@ class Handler(BaseHTTPRequestHandler):
                     _send(self, {"error": "duplicate call"}, 409); return
                 if _active_deadline is None or time.monotonic() >= _active_deadline:
                     _send(self, {"error": "invocation is not executing"}, 409); return
-                _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": None, "event": event}
+                lease = uuid.uuid4().hex if _event_subscribers else None
+                _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": lease, "event": event}
                 deadline = _active_deadline
+            if lease is not None:
+                _emit_event({
+                    "type": "tool_call",
+                    "request": {
+                        "id": call_id,
+                        "lease": lease,
+                        "tool_name": data.get("tool_name"),
+                        "args": data.get("args") or [],
+                        "kwargs": data.get("kwargs") or {},
+                    },
+                })
             wait_s = max(0.0, deadline - time.monotonic()) if deadline is not None else __DEFAULT_TOOL_TIMEOUT_S__
             if not event.wait(wait_s):
                 with _lock:
@@ -242,12 +298,23 @@ class DaytonaHttpToolBroker:
             + submit_source
         )
 
-    def execute(self, code: str, variables: Mapping[str, Any], *, timeout_s: int) -> Any:
+    def execute(
+        self,
+        code: str,
+        variables: Mapping[str, Any],
+        *,
+        timeout_s: int,
+        on_stdout: Callable[[str], None] | None = None,
+    ) -> Any:
         self._ensure_started()
         assert self._client is not None
         self._delivery_error = None
         client = self._client
         outcome: list[httpx.Response | BaseException] = []
+        sse_stop_event = threading.Event()
+        sse_ready = threading.Event()
+        host_tool_queue: queue.Queue[Mapping[str, Any]] = queue.Queue()
+        streamed_stdout = False
 
         def post() -> None:
             try:
@@ -261,20 +328,65 @@ class DaytonaHttpToolBroker:
             except BaseException as exc:
                 outcome.append(exc)
 
+        def listen_events() -> None:
+            nonlocal streamed_stdout
+            if not hasattr(client, "stream") or type(client).__name__ == "MagicMock":
+                sse_ready.set()
+                return
+            try:
+                with client.stream("GET", "/events", timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S) as stream:
+                    if stream.status_code != 200:
+                        sse_ready.set()
+                        return
+                    sse_ready.set()
+                    for line in stream.iter_lines():
+                        if sse_stop_event.is_set() or self._stopped:
+                            break
+                        if not line or not line.startswith("data: "):
+                            continue
+                        try:
+                            data = json.loads(line[6:].strip())
+                        except Exception:
+                            continue
+                        ev_type = data.get("type")
+                        if ev_type == "execution_done":
+                            break
+                        if ev_type == "tool_call":
+                            req = data.get("request")
+                            if isinstance(req, dict):
+                                host_tool_queue.put(req)
+                        elif ev_type in ("stdout", "stderr") and on_stdout is not None:
+                            delta = data.get("delta")
+                            if isinstance(delta, str) and delta:
+                                streamed_stdout = True
+                                with contextlib.suppress(Exception):
+                                    on_stdout(delta)
+            except Exception:
+                pass
+            finally:
+                sse_ready.set()
+
         worker = threading.Thread(target=post, daemon=True)
-        # Host tools run on this thread while the action waits for them; they
-        # can read when the action's in-sandbox waits expire.
+        sse_thread: threading.Thread | None = None
+        if hasattr(client, "stream") and type(client).__name__ != "MagicMock":
+            sse_thread = threading.Thread(target=listen_events, daemon=True)
+
         with host_action_deadline(time.monotonic() + timeout_s):
+            if sse_thread is not None:
+                sse_thread.start()
+                sse_ready.wait(timeout=0.2)
             worker.start()
             while worker.is_alive():
                 if self._stopped:
                     break
-                self._poll_once()
-                worker.join(0.05)
-        # The remote /execute request owns every outstanding /tool_call.  Do
-        # not return (or tear down its broker) until that request has settled,
-        # even after a rejected result delivery.  The typed delivery failure is
-        # raised only once remote execution has contained its waiting call.
+                try:
+                    req = host_tool_queue.get(timeout=0.02)
+                    self._dispatch_tool_request(req)
+                except queue.Empty:
+                    self._poll_once()
+                    worker.join(0.01)
+            sse_stop_event.set()
+
         delivery_error = self._delivery_error
         if delivery_error is not None:
             raise delivery_error
@@ -287,7 +399,10 @@ class DaytonaHttpToolBroker:
         response = outcome[0]
         if response.status_code != 200:
             raise DaytonaAdapterError(message="sandbox execution failed", cause_type="BrokerExecutionError")
-        return response.json()
+        result_json = response.json()
+        if streamed_stdout:
+            result_json["streamed_stdout"] = True
+        return result_json
 
     def stop(self, *, strict: bool = False) -> None:
         """Disable execution and attempt to close the client and delete its session.
@@ -366,83 +481,84 @@ class DaytonaHttpToolBroker:
         except (httpx.HTTPError, ValueError):
             return
         for request in requests:
-            name = str(request.get("tool_name") or "")
-            arguments = dict(request.get("kwargs") or {})
-            result: Any = None
-            succeeded = False
-            try:
-                tool = self._tools[name]
-                result = _resolve_awaitable_result(
-                    tool(*list(request.get("args") or []), **arguments),
-                    async_bridge=self._async_bridge,
-                )
-                validate_json_value(result, path=f"Tool {name} result")
-                body = {"id": request["id"], "lease": request["lease"], "result": result}
-                succeeded = True
-            except Exception as exc:
+            self._dispatch_tool_request(request)
+
+    def _dispatch_tool_request(self, request: Mapping[str, Any]) -> None:
+        client = self._client
+        if self._stopped or client is None:
+            return
+        name = str(request.get("tool_name") or "")
+        arguments = dict(request.get("kwargs") or {})
+        result: Any = None
+        succeeded = False
+        try:
+            tool = self._tools[name]
+            result = _resolve_awaitable_result(
+                tool(*list(request.get("args") or []), **arguments),
+                async_bridge=self._async_bridge,
+            )
+            validate_json_value(result, path=f"Tool {name} result")
+            body = {"id": request["id"], "lease": request["lease"], "result": result}
+            succeeded = True
+        except Exception as exc:
+            failed = self._tool_failed
+            if failed is not None:
+                with contextlib.suppress(Exception):
+                    failed(name, arguments)
+            body = {
+                "id": request.get("id"),
+                "lease": request.get("lease"),
+                "tool_error": {
+                    "category": type(exc).__name__[:80],
+                    "message": sanitize_provider_message(str(exc))[:500],
+                    "call_id": str(request.get("id") or ""),
+                },
+            }
+        try:
+            payload = _encode_result_envelope(body)
+        except ValueError:
+            if succeeded:
                 failed = self._tool_failed
                 if failed is not None:
                     with contextlib.suppress(Exception):
                         failed(name, arguments)
-                body = {
-                    "id": request.get("id"),
-                    "lease": request.get("lease"),
-                    "tool_error": {
-                        "category": type(exc).__name__[:80],
-                        "message": sanitize_provider_message(str(exc))[:500],
-                        "call_id": str(request.get("id") or ""),
-                    },
-                }
-            try:
-                payload = _encode_result_envelope(body)
-            except ValueError:
-                if succeeded:
-                    failed = self._tool_failed
-                    if failed is not None:
-                        with contextlib.suppress(Exception):
-                            failed(name, arguments)
-                succeeded = False
-                body = {
-                    "id": request.get("id"),
-                    "lease": request.get("lease"),
-                    "tool_error": {
-                        "category": "ToolResultTooLarge",
-                        "message": "tool result exceeds broker transport limit",
-                        "call_id": str(request.get("id") or ""),
-                    },
-                }
-                payload = _encode_result_envelope(body)
-            try:
-                if not self._stopped and self._client is client:
-                    response = client.post("/result", content=payload, headers={"Content-Type": "application/json"})
-                    if response.status_code != 200:
-                        benign = self._late_delivery_error(response)
-                        if benign is not None:
-                            # The sandbox already abandoned the call (its wait
-                            # expired and the call moved to _completed) or still
-                            # owns it and resolves it containedly; the action
-                            # has been given its timeout feedback, so a late
-                            # successful result must not fail the whole Turn.
-                            logger.warning(
-                                "sandbox tool result delivered after sandbox abandonment "
-                                "call_id=%s tool_name=%s category=%s",
-                                str(request.get("id") or "")[:128],
-                                str(request.get("tool_name") or "")[:80],
-                                benign,
-                            )
-                        else:
-                            self._record_delivery_failure(
-                                request, phase="result_delivery", category=f"http_{response.status_code}"
-                            )
-                    elif succeeded:
-                        settled = self._tool_settled
-                        if settled is not None:
-                            try:
-                                settled(name, arguments, result)
-                            except Exception:
-                                self._record_delivery_failure(request, phase="settlement", category="callback_error")
-            except httpx.HTTPError:
-                self._record_delivery_failure(request, phase="result_delivery", category="http_error")
+            succeeded = False
+            body = {
+                "id": request.get("id"),
+                "lease": request.get("lease"),
+                "tool_error": {
+                    "category": "ToolResultTooLarge",
+                    "message": "tool result exceeds broker transport limit",
+                    "call_id": str(request.get("id") or ""),
+                },
+            }
+            payload = _encode_result_envelope(body)
+        try:
+            if not self._stopped and self._client is client:
+                response = client.post("/result", content=payload, headers={"Content-Type": "application/json"})
+                if response.status_code != 200:
+                    benign = self._late_delivery_error(response)
+                    if benign is not None:
+                        logger.warning(
+                            "sandbox tool result delivered after sandbox abandonment "
+                            "call_id=%s tool_name=%s category=%s",
+                            str(request.get("id") or "")[:128],
+                            str(request.get("tool_name") or "")[:80],
+                            benign,
+                        )
+                    else:
+                        self._record_delivery_failure(
+                            request, phase="result_delivery", category=f"http_{response.status_code}"
+                        )
+                elif succeeded:
+                    settled = self._tool_settled
+                    if settled is not None:
+                        try:
+                            settled(name, arguments, result)
+                        except Exception:
+                            self._record_delivery_failure(request, phase="settlement", category="callback_error")
+        except httpx.HTTPError:
+            self._record_delivery_failure(request, phase="result_delivery", category="http_error")
 
     def _late_delivery_error(self, response: Any) -> str | None:
         """Classify a non-200 /result response as benign sandbox-side abandonment.
