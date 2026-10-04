@@ -633,3 +633,374 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
     assert any(isinstance(command, RevokeClaim) for command in store.commands)
     assert not any(isinstance(command, CompleteSettlement) for command in store.commands)
     assert "late Turn preparation cleanup failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_artifact_write_waits_then_removes_written_path() -> None:
+    from hashlib import sha256
+
+    from fleet_rlm.artifacts.models import ArtifactCandidate
+    from tests.support.turn_lifecycle import claimed_run, completed_outcome
+
+    turn = claimed_run()
+    data = b"artifact"
+    candidate = ArtifactCandidate(
+        uuid4(),
+        turn.access.user_id,
+        turn.access.workspace_id,
+        turn.session_id,
+        turn.run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/staging/a",
+        "/artifacts/a",
+    )
+    write_started, release_write = asyncio.Event(), asyncio.Event()
+
+    class Store:
+        async def commit(self, *args):
+            raise AssertionError(args)
+
+        async def transition_claim(self, *args):
+            raise AssertionError(args)
+
+    class Sink:
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+
+        async def read(self, location, *, max_bytes):
+            del max_bytes
+            return self.values[location]
+
+        async def write(self, location, value):
+            write_started.set()
+            await release_write.wait()
+            self.values[location] = value
+
+        async def remove(self, location):
+            self.values.pop(location, None)
+
+    sink = Sink()
+    task = asyncio.create_task(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+            turn,
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2}, candidates=(candidate,)
+            ),
+            artifact_sink=sink,
+        )
+    )
+    await write_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_write.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert candidate.durable_path not in sink.values
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_snapshot_write_waits_then_removes_snapshot() -> None:
+    from tests.support.turn_lifecycle import claimed_run, completed_outcome
+
+    turn = claimed_run()
+    write_started, release_write = asyncio.Event(), asyncio.Event()
+
+    class Store:
+        async def commit(self, *args):
+            raise AssertionError(args)
+
+        async def transition_claim(self, *args):
+            raise AssertionError(args)
+
+    class Snapshot:
+        path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
+        values: ClassVar[dict[str, bytes]] = {}
+
+        def result_path(self, session_id, run_id):
+            del session_id, run_id
+            return self.path
+
+        async def write(self, location, value):
+            write_started.set()
+            await release_write.wait()
+            self.values[location] = value
+
+        async def remove(self, location):
+            self.values.pop(location, None)
+
+    snapshot = Snapshot()
+    task = asyncio.create_task(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+            turn,
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
+            result_snapshot_sink=snapshot,
+        )
+    )
+    await write_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_write.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert snapshot.values == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_commit_failure_settles_repeatedly_cancelled_rollback() -> None:
+    from tests.support.turn_lifecycle import claimed_run, completed_outcome
+
+    turn = claimed_run()
+    commit_started, release_commit = asyncio.Event(), asyncio.Event()
+    remove_started, release_remove = asyncio.Event(), asyncio.Event()
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
+            commit_started.set()
+            await release_commit.wait()
+            raise RuntimeError("commit failed")
+
+        async def transition_claim(self, *args):
+            raise AssertionError(args)
+
+    class Snapshot:
+        path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
+        values: ClassVar[dict[str, bytes]] = {}
+
+        def result_path(self, session_id, run_id):
+            del session_id, run_id
+            return self.path
+
+        async def write(self, location, value):
+            self.values[location] = value
+
+        async def remove(self, location):
+            remove_started.set()
+            await release_remove.wait()
+            self.values.pop(location, None)
+
+    snapshot = Snapshot()
+    task = asyncio.create_task(
+        TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+            turn,
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
+            result_snapshot_sink=snapshot,
+        )
+    )
+    await commit_started.wait()
+    task.cancel()
+    release_commit.set()
+    await remove_started.wait()
+    task.cancel()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_remove.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert snapshot.values == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> None:
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
+    from tests.support.turn_lifecycle import claimed_run, completed_outcome
+
+    turn = claimed_run()
+    commit_started, release_commit = asyncio.Event(), asyncio.Event()
+
+    class Store:
+        failures = 0
+
+        async def commit(self, claimed, committed, artifacts):
+            del artifacts
+            commit_started.set()
+            await release_commit.wait()
+            return CommittedTurnReceipt(claimed.run_id, 1, committed, ())
+
+        async def transition_claim(self, *args):
+            self.failures += 1
+            raise AssertionError(args)
+
+    class Snapshot:
+        path = f"/sessions/{turn.session_id}/runs/{turn.run_id}/result.json"
+        values: ClassVar[dict[str, bytes]] = {}
+
+        def result_path(self, session_id, run_id):
+            del session_id, run_id
+            return self.path
+
+        async def write(self, location, value):
+            self.values[location] = value
+
+        async def remove(self, location):
+            self.values.pop(location, None)
+
+    store, snapshot = Store(), Snapshot()
+    task = asyncio.create_task(
+        TestingRunSettlement(store, max_artifact_bytes=1024).finish(
+            turn,
+            completed_outcome(
+                usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            ),
+            result_snapshot_sink=snapshot,
+        )
+    )
+    await commit_started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not task.done()
+    release_commit.set()
+
+    receipt = await task
+    assert isinstance(receipt, CommittedTurnReceipt)
+    assert snapshot.values.keys() == {snapshot.path}
+    assert store.failures == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.history import dspy_history_for_claim
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="cancelled attempt",
+    )
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
+
+    turn = await lifecycle.begin(RunClaim(access, session.id, TurnInput("draft the report"), "key-cancel", uuid4()))
+    settle = await lifecycle.settle(turn, RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
+    assert (settle.terminal_status, settle.durable) == ("cancelled", False)
+    assert await store.turn_records(session.id, access) == ()
+
+    final = await lifecycle.complete_settling(turn)
+    assert (final.terminal_status, final.durable) == ("cancelled", True)
+
+    records = await store.turn_records(session.id, access)
+    assert [type(record).__name__ for record in records] == ["UserTurnRecord", "AssistantTurnRecord"]
+    user, assistant = records
+    assert user.input.text == "draft the report"
+    assert user.sequence + 1 == assistant.sequence
+    status, usage, text = assistant.committed.parts
+    assert (status.type, status.phase, status.status, status.message) == ("status", "cancelled", "cancelled", None)
+    assert dict(usage.value) == dict(empty_rlm_usage())
+    assert text.text == "Turn cancelled"
+
+    retried = await lifecycle.begin(RunClaim(access, session.id, TurnInput("draft the report"), "key-cancel", uuid4()))
+    assert isinstance(retried, ClaimedRun)
+    assert retried.run_id != turn.run_id
+
+    assert [(message.role, message.content) for message in retried.history.messages] == [
+        ("user", "draft the report"),
+        ("assistant", "Turn cancelled"),
+    ]
+
+    assert list(dspy_history_for_claim(retried).messages) == []
+
+
+@pytest.mark.asyncio
+async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_usage() -> None:
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunFailure,
+    )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="preparation cancel",
+    )
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
+
+    turn = await lifecycle.begin(RunClaim(access, session.id, TurnInput("gather two facts"), "key-prep", uuid4()))
+    usage = {"iterations": 3, "observed_lm_usage": {"root": {"total_tokens": 12}}, "duration_ms": 7}
+    receipt = await lifecycle.finish(turn, RunFailure("cancelled", "cancelled", "Turn cancelled", usage))
+
+    assert (receipt.terminal_status, receipt.durable) == ("cancelled", True)
+    records = await store.turn_records(session.id, access)
+    assert len(records) == 2
+    assistant = records[-1]
+    assert dict(assistant.committed.parts[1].value) == usage
+    assert assistant.committed.text == "Turn cancelled"
+
+
+@pytest.mark.asyncio
+async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
+    from fleet_rlm.rlm.result import (
+        PredictionResult,
+        RLMOutcome,
+        empty_rlm_usage,
+    )
+    from fleet_rlm.sessions.committed_turn import CommittedTurnCodec
+    from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        CommittedTurnReceipt,
+        RunClaim,
+        RunFailure,
+    )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="interleaved",
+    )
+    lifecycle = TestingRunSettlement(store, max_artifact_bytes=1024)
+
+    first = await lifecycle.begin(RunClaim(access, session.id, TurnInput("one"), "key-1", uuid4()))
+    committed = await lifecycle.finish(
+        first,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            usage=empty_rlm_usage(),
+        ),
+    )
+    assert isinstance(committed, CommittedTurnReceipt)
+
+    second = await lifecycle.begin(RunClaim(access, session.id, TurnInput("two"), "key-2", uuid4()))
+    await lifecycle.settle(second, RunFailure("cancelled", "cancelled", "Turn cancelled", empty_rlm_usage()))
+    await lifecycle.complete_settling(second)
+
+    records = await store.turn_records(session.id, access)
+    assert [record.sequence for record in records] == [1, 2, 3, 4]
+    assert [type(record).__name__ for record in records] == [
+        "UserTurnRecord",
+        "AssistantTurnRecord",
+        "UserTurnRecord",
+        "AssistantTurnRecord",
+    ]
+    assert records[1].committed.text == "done"
+    assert records[3].committed.text == "Turn cancelled"
+    for record in records:
+        if isinstance(record, AssistantTurnRecord):
+            assert CommittedTurnCodec.decode(CommittedTurnCodec.encode(record.committed)) == record.committed

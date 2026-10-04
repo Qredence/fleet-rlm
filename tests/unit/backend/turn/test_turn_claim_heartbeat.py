@@ -916,3 +916,154 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     assert fenced == []
     assert closed == ["prepared"]
     assert "detached Turn cleanup failed" not in caplog.text
+
+
+def test_decide_claim_transition_applies_one_policy() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        BeginSettlement,
+        ClaimFailure,
+        ClaimState,
+        CompleteSettlement,
+        FailClaim,
+        RevokeClaim,
+        decide_claim_transition,
+    )
+
+    failure = ClaimFailure("failed", "execution_failed", "Turn failed")
+    cases = (
+        (FailClaim(failure), ClaimState("running"), "failed", True),
+        (BeginSettlement(failure), ClaimState("running"), "failed", False),
+        (RevokeClaim(failure), ClaimState("running"), "failed", False),
+        (CompleteSettlement(), ClaimState("settling", "execution_failed", failure), "failed", True),
+    )
+    for command, state, status, finalized in cases:
+        decision = decide_claim_transition(state, command).transition
+        assert decision is not None
+        assert decision.status == status
+        assert decision.finalized is finalized
+        assert decision.next_state is not None
+
+
+def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        ClaimFailure,
+        ClaimState,
+        RevokeClaim,
+        decide_claim_transition,
+    )
+
+    decision = decide_claim_transition(
+        ClaimState("running"),
+        RevokeClaim(ClaimFailure("timeout", "timeout", "Timed out")),
+    ).transition
+
+    assert decision is not None
+    assert decision.next_state == ClaimState(
+        "settling",
+        "stale_claim",
+        ClaimFailure("failed", "stale_claim", "Timed out"),
+    )
+
+
+def test_completed_claim_rejects_failure_transitions() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        BeginSettlement,
+        ClaimFailure,
+        ClaimState,
+        FailClaim,
+        InvalidClaimTransitionError,
+        RevokeClaim,
+        decide_claim_transition,
+    )
+
+    failure = ClaimFailure("failed", "execution_failed", "Turn failed")
+    for command in [FailClaim(failure), BeginSettlement(failure), RevokeClaim(failure)]:
+        with pytest.raises(InvalidClaimTransitionError):
+            decide_claim_transition(ClaimState("completed"), command)
+
+
+def test_terminal_transition_is_idempotent() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        ClaimFailure,
+        ClaimState,
+        FailClaim,
+        decide_claim_transition,
+    )
+
+    failure = ClaimFailure("failed", "execution_failed", "Turn failed")
+    decision = decide_claim_transition(ClaimState("failed", "execution_failed"), FailClaim(failure)).transition
+
+    assert decision is not None
+    assert decision.finalized is True
+    assert decision.next_state is None
+
+
+def test_heartbeat_policy_only_accepts_owned_work_states() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        ClaimState,
+        HeartbeatClaim,
+        decide_claim_transition,
+    )
+
+    assert decide_claim_transition(ClaimState("running"), HeartbeatClaim()).heartbeat_allowed
+    assert decide_claim_transition(ClaimState("settling"), HeartbeatClaim()).heartbeat_allowed
+    assert not decide_claim_transition(ClaimState("failed"), HeartbeatClaim()).heartbeat_allowed
+
+
+def test_decide_claim_transition_legal_matrix() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        BeginSettlement,
+        ClaimFailure,
+        ClaimState,
+        CompleteSettlement,
+        FailClaim,
+        RevokeClaim,
+        decide_claim_transition,
+    )
+
+    failure = ClaimFailure("failed", "execution_failed", "Turn failed")
+    settling = ClaimState("settling", "execution_failed", failure)
+    cases = (
+        (FailClaim(failure), ClaimState("running"), "failed", True),
+        (FailClaim(failure), settling, "failed", False),
+        (FailClaim(failure), ClaimState("failed", "execution_failed"), "failed", True),
+        (BeginSettlement(failure), ClaimState("running"), "failed", False),
+        (BeginSettlement(failure), settling, "failed", False),
+        (BeginSettlement(failure), ClaimState("timeout", "timeout"), "timeout", True),
+        (RevokeClaim(failure), ClaimState("running"), "failed", False),
+        (RevokeClaim(failure), settling, "failed", False),
+        (RevokeClaim(failure), ClaimState("failed", "stale_claim"), "failed", True),
+        (CompleteSettlement(), settling, "failed", True),
+        (CompleteSettlement(), ClaimState("failed", "stale_claim"), "failed", True),
+    )
+    for command, state, expected_status, expected_finalized in cases:
+        decision = decide_claim_transition(state, command).transition
+        assert decision is not None
+        assert decision.status == expected_status
+        assert decision.finalized is expected_finalized
+
+
+def test_decide_claim_transition_illegal_matrix() -> None:
+    from fleet_rlm.sessions.run_claim import (
+        BeginSettlement,
+        ClaimFailure,
+        ClaimState,
+        CompleteSettlement,
+        FailClaim,
+        InvalidClaimTransitionError,
+        RevokeClaim,
+        decide_claim_transition,
+    )
+
+    failure = ClaimFailure("failed", "execution_failed", "Turn failed")
+    cases = (
+        (FailClaim(failure), ClaimState("completed")),
+        (BeginSettlement(failure), ClaimState("completed")),
+        (RevokeClaim(failure), ClaimState("completed")),
+        (RevokeClaim(failure), ClaimState("cancelled", "cancelled")),
+        (CompleteSettlement(), ClaimState("running")),
+        (CompleteSettlement(), ClaimState("settling")),
+    )
+    for command, state in cases:
+        with pytest.raises(InvalidClaimTransitionError):
+            decide_claim_transition(state, command)
