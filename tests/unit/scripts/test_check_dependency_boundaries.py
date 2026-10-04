@@ -57,7 +57,7 @@ def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> No
 
 def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
     _write(tmp_path, "rlm/runtime.py", "from fleet_rlm.sessions.context import SessionContextManifest\n")
-    _write(tmp_path, "rlm/events.py", "from fleet_rlm.turn_preparation import RunPreparation\n")
+    _write(tmp_path, "rlm/events.py", "from fleet_rlm.turns.preparation import RunPreparation\n")
     _write(
         tmp_path,
         "persistence/repositories/turns.py",
@@ -66,12 +66,12 @@ def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
     _write(
         tmp_path,
         "persistence/repositories/outbox.py",
-        "from fleet_rlm.turn_settlement import RunSettlementPlan\n",
+        "from fleet_rlm.turns.settlement import RunSettlementPlan\n",
     )
     _write(
         tmp_path,
         "sessions/catalog.py",
-        "from fleet_rlm.turn_settlement import RunSettlementPlan\n",
+        "from fleet_rlm.turns.settlement import RunSettlementPlan\n",
     )
 
     violations = check_dependency_boundaries(tmp_path)

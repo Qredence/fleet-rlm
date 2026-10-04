@@ -26,7 +26,6 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.attachments import (
     AttachmentAccess,
     AttachmentLifecycleService,
@@ -47,10 +46,12 @@ from fleet_rlm.daytona.runtime import (
 )
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
-from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore, SandboxBinding
+from fleet_rlm.sessions.bindings import SandboxBinding
 from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 from tests.live.backend._evidence import candidate_identity, write_receipt
+from tests.support.in_memory_stores import InMemorySandboxBindingStore
+from tests.support.local_catalog import LocalArtifactCatalog
 
 
 class _Source:

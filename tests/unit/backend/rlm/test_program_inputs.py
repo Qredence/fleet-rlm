@@ -316,7 +316,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     session_id = uuid4()
     messages = tuple(

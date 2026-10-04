@@ -17,7 +17,7 @@ from fleet_rlm.api.routes.turns import router
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.sessions.run_state import RunLifecycleUnavailableError
-from fleet_rlm.turn_preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
+from fleet_rlm.turns.preparation import RunPreparationTimeoutError, RunPreparationUnavailableError
 
 
 class _FailingCoordinator:

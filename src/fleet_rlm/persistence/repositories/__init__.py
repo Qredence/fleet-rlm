@@ -12,7 +12,6 @@ from fleet_rlm.persistence.repositories.outbox import (
     SqlAlchemyMemoryPromotionOutbox,
 )
 from fleet_rlm.persistence.repositories.sessions import (
-    InMemorySessionCatalog,
     SandboxBinding,
     SessionRecord,
     SqlAlchemyArtifactCatalog,
@@ -21,15 +20,12 @@ from fleet_rlm.persistence.repositories.sessions import (
     SqlAlchemySessionCatalog,
 )
 from fleet_rlm.persistence.repositories.turns import (
-    InMemoryRunStateStore,
     ReconciliationSummary,
     SqlAlchemyRunStateStore,
 )
 
 __all__ = [
     "ClaimedMemoryPromotionIntent",
-    "InMemoryRunStateStore",
-    "InMemorySessionCatalog",
     "MemoryPromotionOutboxSummary",
     "ReconciliationSummary",
     "SandboxBinding",

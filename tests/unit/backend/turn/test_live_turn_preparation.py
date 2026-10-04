@@ -24,7 +24,7 @@ from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     _RunClaimToken,
 )
-from fleet_rlm.turn_preparation import RunPreparationUnavailableError, prepare_turn
+from fleet_rlm.turns.preparation import RunPreparationUnavailableError, prepare_turn
 from tests.support.session_manager import make_daytona_runtime
 from tests.support.turn_settlement import TestingRunSettlement
 from tests.support.workspace_storage import InMemoryDaytonaWorkspaceGateway
@@ -583,7 +583,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
 @pytest.mark.parametrize("mode", ["timeout", "cancel"])
 async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None:
     from fleet_rlm.skills.catalog import SkillCatalog
-    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
+    from fleet_rlm.turns.preparation import RunPreparationTimeoutError
 
     entered = threading.Event()
     release_lookup = threading.Event()

@@ -277,8 +277,6 @@ def deps__forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
     if scope == "sessions":
         return (
             ("sessions must not import chat", "fleet_rlm.chat"),
-            ("sessions must not import turn preparation", "fleet_rlm.turn_preparation"),
-            ("sessions must not import turn settlement", "fleet_rlm.turn_settlement"),
             ("sessions must not import turn coordination", "fleet_rlm.turns"),
         )
     if scope == "chat":
@@ -290,8 +288,6 @@ def deps__forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
         return (
             ("persistence must not import rlm", "fleet_rlm.rlm"),
             ("persistence must not import chat", "fleet_rlm.chat"),
-            ("persistence must not import turn settlement", "fleet_rlm.turn_settlement"),
-            ("persistence must not import turn preparation", "fleet_rlm.turn_preparation"),
             ("persistence must not import turn coordination", "fleet_rlm.turns"),
             ("persistence must not import api", "fleet_rlm.api"),
             ("persistence must not import FastAPI", "fastapi"),
@@ -301,8 +297,6 @@ def deps__forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("rlm must not import api", "fleet_rlm.api"),
             ("rlm must not import FastAPI", "fastapi"),
             ("rlm must not import chat", "fleet_rlm.chat"),
-            ("rlm must not import turn preparation", "fleet_rlm.turn_preparation"),
-            ("rlm must not import turn settlement", "fleet_rlm.turn_settlement"),
             ("rlm must not import turn coordination", "fleet_rlm.turns"),
         )
     if scope in {"artifacts", "attachments", "skills"}:

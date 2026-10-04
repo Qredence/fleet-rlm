@@ -605,7 +605,7 @@ async def test_policy_change_at_delivery_completes_without_provider() -> None:
 async def test_fast_path_success_completes_outbox_rows() -> None:
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,
@@ -652,7 +652,7 @@ async def test_fast_path_success_completes_outbox_rows() -> None:
 async def test_fast_path_failure_notes_rows_and_leaves_reconciler_work() -> None:
     from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import (
         MemoryCandidate,
         MemoryCandidatePromotionResult,

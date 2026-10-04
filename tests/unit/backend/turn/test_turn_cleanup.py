@@ -48,7 +48,6 @@ async def test_cleanup_supervisor_observes_cancelled_cleanup(caplog: pytest.LogC
 
 @pytest.mark.asyncio
 async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
@@ -58,6 +57,7 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
         RunInProgressError,
         RunStateError,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -91,7 +91,6 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
 
 @pytest.mark.asyncio
 async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
@@ -100,6 +99,7 @@ async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None
         RunClaim,
         RunFailure,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

@@ -10,12 +10,12 @@ reusing durable models as live SSE transport chunks.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, assert_never, cast
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
-from fleet_rlm.rlm.result import RLMUsage
+from fleet_rlm.rlm.result import RLMUsage, validate_rlm_usage
 from fleet_rlm.sessions.committed_turn import (
     ArtifactPart,
     AttachmentPart,
@@ -316,159 +316,136 @@ def _plain_json(value: Any) -> Any:
     return value
 
 
+_COMMITTED_TO_MODEL: dict[type[CommittedPart], Any] = {
+    StepPart: lambda p: StepAssistantPart(state=p.state, step=p.step, duration_ms=p.duration_ms),
+    ReasoningPart: lambda p: ReasoningAssistantPart(text=p.text, step=p.step),
+    CodePart: lambda p: CodeAssistantPart(code=p.code, step=p.step),
+    OutputPart: lambda p: OutputAssistantPart(output=p.output, step=p.step),
+    ToolCallPart: lambda p: ToolCallAssistantPart(
+        tool_call_id=p.tool_call_id,
+        tool_name=p.tool_name,
+        state=p.state,
+        input=_plain_json(p.input),
+        output=_plain_json(p.output),
+        error=p.error,
+    ),
+    SkillPart: lambda p: SkillAssistantPart(
+        skill_id=p.skill_id,
+        name=p.name,
+        phase=p.phase,
+        version=p.version,
+        trust=p.trust,
+        affordances=list(p.affordances),
+    ),
+    AttachmentPart: lambda p: AttachmentAssistantPart(
+        attachment_id=p.attachment_id,
+        phase=p.phase,
+        filename=p.filename,
+        byte_size=p.byte_size,
+    ),
+    WarningPart: lambda p: WarningAssistantPart(message=p.message, code=p.code),
+    StatusPart: lambda p: StatusAssistantPart(phase=p.phase, status=p.status, message=p.message),
+    ChildProgressPart: lambda p: ChildProgressAssistantPart(
+        child_id=p.child_id,
+        task_label=p.task_label,
+        state=p.state,
+        elapsed_ms=p.elapsed_ms,
+        outcome=p.outcome,
+        evidence=p.evidence,
+        gaps=p.gaps,
+        result_file_count=p.result_file_count,
+        code_excerpt=p.code_excerpt,
+        output_excerpt=p.output_excerpt,
+        cleanup_state=p.cleanup_state,
+        parent_run_id=p.parent_run_id,
+    ),
+    ArtifactPart: lambda p: ArtifactAssistantPart(
+        artifact_id=p.artifact_id,
+        kind=p.kind,
+        title=p.title,
+        media_type=p.media_type,
+        byte_size=p.byte_size,
+        checksum_sha256=p.checksum_sha256,
+    ),
+    UsagePart: lambda p: UsageAssistantPart(value=validate_rlm_usage(dict(p.value))),
+    StructuredResultPart: lambda p: StructuredResultAssistantPart(
+        schema_id=p.schema_id,
+        schema_version=p.schema_version,
+        value=_plain_json(p.value),
+    ),
+    TextPart: lambda p: TextAssistantPart(text=p.text),
+}
+
+
 def assistant_part_to_model(part: CommittedPart) -> AssistantPart:
     """Project a runtime committed part into its canonical Pydantic contract."""
-    if isinstance(part, StepPart):
-        return StepAssistantPart(state=part.state, step=part.step, duration_ms=part.duration_ms)
-    if isinstance(part, ReasoningPart):
-        return ReasoningAssistantPart(text=part.text, step=part.step)
-    if isinstance(part, CodePart):
-        return CodeAssistantPart(code=part.code, step=part.step)
-    if isinstance(part, OutputPart):
-        return OutputAssistantPart(output=part.output, step=part.step)
-    if isinstance(part, ToolCallPart):
-        return ToolCallAssistantPart(
-            tool_call_id=part.tool_call_id,
-            tool_name=part.tool_name,
-            state=part.state,
-            input=_plain_json(part.input),
-            output=_plain_json(part.output),
-            error=part.error,
-        )
-    if isinstance(part, SkillPart):
-        return SkillAssistantPart(
-            skill_id=part.skill_id,
-            name=part.name,
-            phase=part.phase,
-            version=part.version,
-            trust=part.trust,
-            affordances=list(part.affordances),
-        )
-    if isinstance(part, AttachmentPart):
-        return AttachmentAssistantPart(
-            attachment_id=part.attachment_id,
-            phase=part.phase,
-            filename=part.filename,
-            byte_size=part.byte_size,
-        )
-    if isinstance(part, WarningPart):
-        return WarningAssistantPart(message=part.message, code=part.code)
-    if isinstance(part, StatusPart):
-        return StatusAssistantPart(phase=part.phase, status=part.status, message=part.message)
-    if isinstance(part, ChildProgressPart):
-        return ChildProgressAssistantPart(
-            child_id=part.child_id,
-            task_label=part.task_label,
-            state=part.state,
-            elapsed_ms=part.elapsed_ms,
-            outcome=part.outcome,
-            evidence=part.evidence,
-            gaps=part.gaps,
-            result_file_count=part.result_file_count,
-            code_excerpt=part.code_excerpt,
-            output_excerpt=part.output_excerpt,
-            cleanup_state=part.cleanup_state,
-            parent_run_id=part.parent_run_id,
-        )
-    if isinstance(part, ArtifactPart):
-        return ArtifactAssistantPart(
-            artifact_id=part.artifact_id,
-            kind=part.kind,
-            title=part.title,
-            media_type=part.media_type,
-            byte_size=part.byte_size,
-            checksum_sha256=part.checksum_sha256,
-        )
-    if isinstance(part, UsagePart):
-        value = dict(part.value)
-        from fleet_rlm.rlm.result import validate_rlm_usage
+    return _COMMITTED_TO_MODEL[type(part)](part)
 
-        return UsageAssistantPart(value=validate_rlm_usage(value))
-    if isinstance(part, StructuredResultPart):
-        return StructuredResultAssistantPart(
-            schema_id=part.schema_id,
-            schema_version=part.schema_version,
-            value=_plain_json(part.value),
-        )
-    if isinstance(part, TextPart):
-        return TextAssistantPart(text=part.text)
-    assert_never(part)
+
+_MODEL_TO_COMMITTED: dict[type[AssistantPartModel], Any] = {
+    StepAssistantPart: lambda p: StepPart(state=p.state, step=p.step, duration_ms=p.duration_ms),
+    ReasoningAssistantPart: lambda p: ReasoningPart(text=p.text, step=p.step),
+    CodeAssistantPart: lambda p: CodePart(code=p.code, step=p.step),
+    OutputAssistantPart: lambda p: OutputPart(output=p.output, step=p.step),
+    ToolCallAssistantPart: lambda p: ToolCallPart(
+        tool_call_id=p.tool_call_id,
+        tool_name=p.tool_name,
+        state=p.state,
+        input=_plain_json(p.input),
+        output=_plain_json(p.output),
+        error=p.error,
+    ),
+    SkillAssistantPart: lambda p: SkillPart(
+        skill_id=p.skill_id,
+        name=p.name,
+        phase=p.phase,
+        version=p.version,
+        trust=p.trust,
+        affordances=tuple(p.affordances),
+    ),
+    AttachmentAssistantPart: lambda p: AttachmentPart(
+        attachment_id=p.attachment_id,
+        phase=p.phase,
+        filename=p.filename,
+        byte_size=p.byte_size,
+    ),
+    WarningAssistantPart: lambda p: WarningPart(message=p.message, code=p.code),
+    StatusAssistantPart: lambda p: StatusPart(phase=p.phase, status=p.status, message=p.message),
+    ChildProgressAssistantPart: lambda p: ChildProgressPart(
+        child_id=p.child_id,
+        task_label=p.task_label,
+        state=p.state,
+        elapsed_ms=p.elapsed_ms,
+        outcome=p.outcome,
+        evidence=p.evidence,
+        gaps=p.gaps,
+        result_file_count=p.result_file_count,
+        code_excerpt=p.code_excerpt,
+        output_excerpt=p.output_excerpt,
+        cleanup_state=p.cleanup_state,
+        parent_run_id=p.parent_run_id,
+    ),
+    ArtifactAssistantPart: lambda p: ArtifactPart(
+        artifact_id=p.artifact_id,
+        kind=p.kind,
+        title=p.title,
+        media_type=p.media_type,
+        byte_size=p.byte_size,
+        checksum_sha256=p.checksum_sha256,
+    ),
+    UsageAssistantPart: lambda p: UsagePart(value=cast(RLMUsage, dict(p.value))),
+    StructuredResultAssistantPart: lambda p: StructuredResultPart(
+        schema_id=p.schema_id,
+        schema_version=p.schema_version,
+        value=p.value,
+    ),
+    TextAssistantPart: lambda p: TextPart(text=p.text),
+}
 
 
 def assistant_part_from_model(part: AssistantPart) -> CommittedPart:
     """Convert a validated canonical part into the runtime committed aggregate."""
-    if isinstance(part, StepAssistantPart):
-        return StepPart(state=part.state, step=part.step, duration_ms=part.duration_ms)
-    if isinstance(part, ReasoningAssistantPart):
-        return ReasoningPart(text=part.text, step=part.step)
-    if isinstance(part, CodeAssistantPart):
-        return CodePart(code=part.code, step=part.step)
-    if isinstance(part, OutputAssistantPart):
-        return OutputPart(output=part.output, step=part.step)
-    if isinstance(part, ToolCallAssistantPart):
-        return ToolCallPart(
-            tool_call_id=part.tool_call_id,
-            tool_name=part.tool_name,
-            state=part.state,
-            input=_plain_json(part.input),
-            output=_plain_json(part.output),
-            error=part.error,
-        )
-    if isinstance(part, SkillAssistantPart):
-        return SkillPart(
-            skill_id=part.skill_id,
-            name=part.name,
-            phase=part.phase,
-            version=part.version,
-            trust=part.trust,
-            affordances=tuple(part.affordances),
-        )
-    if isinstance(part, AttachmentAssistantPart):
-        return AttachmentPart(
-            attachment_id=part.attachment_id,
-            phase=part.phase,
-            filename=part.filename,
-            byte_size=part.byte_size,
-        )
-    if isinstance(part, WarningAssistantPart):
-        return WarningPart(message=part.message, code=part.code)
-    if isinstance(part, StatusAssistantPart):
-        return StatusPart(phase=part.phase, status=part.status, message=part.message)
-    if isinstance(part, ChildProgressAssistantPart):
-        return ChildProgressPart(
-            child_id=part.child_id,
-            task_label=part.task_label,
-            state=part.state,
-            elapsed_ms=part.elapsed_ms,
-            outcome=part.outcome,
-            evidence=part.evidence,
-            gaps=part.gaps,
-            result_file_count=part.result_file_count,
-            code_excerpt=part.code_excerpt,
-            output_excerpt=part.output_excerpt,
-            cleanup_state=part.cleanup_state,
-            parent_run_id=part.parent_run_id,
-        )
-    if isinstance(part, ArtifactAssistantPart):
-        return ArtifactPart(
-            artifact_id=part.artifact_id,
-            kind=part.kind,
-            title=part.title,
-            media_type=part.media_type,
-            byte_size=part.byte_size,
-            checksum_sha256=part.checksum_sha256,
-        )
-    if isinstance(part, UsageAssistantPart):
-        return UsagePart(value=cast(RLMUsage, dict(part.value)))
-    if isinstance(part, StructuredResultAssistantPart):
-        return StructuredResultPart(
-            schema_id=part.schema_id,
-            schema_version=part.schema_version,
-            value=part.value,
-        )
-    if isinstance(part, TextAssistantPart):
-        return TextPart(text=part.text)
-    assert_never(part)
+    return _MODEL_TO_COMMITTED[type(part)](part)
 
 
 def assistant_part_payload(part: CommittedPart) -> dict[str, Any]:

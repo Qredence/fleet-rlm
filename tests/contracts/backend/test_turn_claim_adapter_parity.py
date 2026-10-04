@@ -28,12 +28,13 @@ async def _build_harness(adapter_kind: str) -> _Harness:
     Returns:
         _Harness: Harness containing the initialized store, claimed turn, state reader, and cleanup callback.
     """
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         RunClaim,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore
 
     access = TurnAccess(uuid4(), uuid4())
     session_id, run_id = uuid4(), uuid4()
@@ -177,6 +178,7 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
         RLMOutcome,
         empty_rlm_usage,
     )
+    from fleet_rlm.sessions.committed_turn import commit_success
     from fleet_rlm.sessions.run_claim import (
         ClaimFailure,
         CompleteSettlement,
@@ -187,7 +189,6 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
         RunAlreadyCompletedError,
         RunStateError,
     )
-    from fleet_rlm.sessions.turn_detail_policy import commit_success
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
     harness = await _build_harness(adapter_kind)

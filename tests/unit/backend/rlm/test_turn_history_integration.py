@@ -54,7 +54,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     history_messages = (
         HistoryMessage("user", "earlier user request"),
@@ -177,7 +177,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     claim = _make_claim(history_messages=())
 
@@ -262,7 +262,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.history_transport import committed_history_for_claim
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     claim = _make_claim(
         history_messages=(
@@ -379,7 +379,6 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     """
 
     from fleet_rlm.attachments import PreparedAttachments
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -387,7 +386,8 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
         ClaimedRun,
         RunClaim,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

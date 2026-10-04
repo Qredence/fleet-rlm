@@ -89,9 +89,10 @@ def test_generic_runtime_modules_do_not_import_daytona_implementations() -> None
         for package in ("artifacts", "skills", "workspace", "attachments", "turns")
         for path in (root / package).glob("*.py")
     ]
-    if (root / "turns.py").exists():
-        candidates.append(root / "turns.py")
-    candidates.extend((root / "turn_preparation.py", root / "turn_settlement.py"))
+    for shim in ("turns.py", "turn_preparation.py", "turn_settlement.py"):
+        shim_path = root / shim
+        if shim_path.exists():
+            candidates.append(shim_path)
 
     # Workspace storage's agent transport and host I/O bridge are the two
     # narrow provider edges; domain policy stays in Workspace.

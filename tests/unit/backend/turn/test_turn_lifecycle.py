@@ -685,7 +685,7 @@ async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_
         CommittedTurnReceipt,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
@@ -749,7 +749,7 @@ async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() ->
         FailedRunReceipt,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate
 
     run_id, session_id = uuid4(), uuid4()
@@ -819,7 +819,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
         CommittedTurnReceipt,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
     from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidatePromotionResult
 
     run_id, session_id = uuid4(), uuid4()
@@ -849,7 +849,7 @@ async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatc
 
         yield Handle()
 
-    monkeypatch.setattr("fleet_rlm.turn_settlement.turn_phase_span", fake_span)
+    monkeypatch.setattr("fleet_rlm.turns.settlement.turn_phase_span", fake_span)
 
     class Store:
         async def commit(self, claimed, committed, artifacts):
@@ -898,7 +898,7 @@ async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(
         RunFailure,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
 
     run_id, session_id = uuid4(), uuid4()
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import partial
@@ -49,15 +50,23 @@ from fleet_rlm.rlm.execution import (
     RunIdentity,
     SessionView,
 )
-from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry, RLMModelBundle, RLMOptions
+from fleet_rlm.rlm.program import (
+    AttachmentContextCapsule,
+    AttachmentContextEntry,
+    RLMModelBundle,
+    RLMOptions,
+)
 from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
 from fleet_rlm.sessions.context import build_session_context_manifest
 from fleet_rlm.sessions.history import dspy_history_for_claim
 from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
 from fleet_rlm.sessions.history_transport import committed_history_for_claim
 from fleet_rlm.sessions.run_state import ClaimedRun
-from fleet_rlm.sessions.task import SessionTaskService, task_checkpoint_summary
-from fleet_rlm.sessions.task_tools import SessionTaskToolHost
+from fleet_rlm.sessions.task import (
+    SessionTaskService,
+    SessionTaskToolHost,
+    task_checkpoint_summary,
+)
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.skills.models import SkillDefinition
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
@@ -81,6 +90,8 @@ from fleet_rlm.workspace.models import (
 from fleet_rlm.workspace.projects import ProjectToolHost
 from fleet_rlm.workspace.storage import StorageSession, VolumeBlobFs
 from fleet_rlm.workspace.workspace import WorkspaceToolHost
+
+logger = logging.getLogger(__name__)
 
 AsyncCleanup = Callable[[], Awaitable[Any]]
 

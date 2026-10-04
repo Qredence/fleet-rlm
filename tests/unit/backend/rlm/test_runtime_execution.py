@@ -521,7 +521,7 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
-    from fleet_rlm.turn_preparation import PreparedHostCapabilities
+    from fleet_rlm.turns.preparation import PreparedHostCapabilities
 
     user_id, workspace_id = uuid4(), uuid4()
     first = SkillDefinition(

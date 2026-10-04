@@ -415,8 +415,8 @@ async def test_shutdown_during_scheduled_prewarm_waits_for_owned_work() -> None:
 
 @pytest.mark.asyncio
 async def test_archive_during_scheduled_prewarm_requests_retirement() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.lifecycle import SessionLifecycle
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     mgr, platform, store, _volumes = _manager()
     session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()

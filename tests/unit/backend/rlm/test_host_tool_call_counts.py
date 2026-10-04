@@ -216,7 +216,7 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
     from fleet_rlm.attachments import AttachmentToolHost
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.execution import RLMExecutionSpec
-    from fleet_rlm.turn_preparation import PreparedHostCapabilities
+    from fleet_rlm.turns.preparation import PreparedHostCapabilities
     from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()

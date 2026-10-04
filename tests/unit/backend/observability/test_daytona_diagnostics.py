@@ -399,3 +399,36 @@ async def test_daytona_doctor_reports_cleanup_failure_without_exposing_provider_
     assert result.steps[-1].ok is False
     assert "private" not in result.steps[-1].message
     assert dependencies.calls[-1] == "close"
+
+
+# --- Missing Import Observations --------------------------------------
+def test_missing_import_observation_is_normalized_and_content_free() -> None:
+    from fleet_rlm.daytona.diagnostics import normalize_missing_import_observation
+
+    observation = normalize_missing_import_observation("  Fleet.Tools.Parser  ", "semantic-child", "import-error")
+    assert observation.as_dict() == {
+        "module": "fleet.tools.parser",
+        "profile": "semantic-child",
+        "outcome": "import-error",
+    }
+    assert set(observation.as_dict()) == {"module", "profile", "outcome"}
+
+
+@pytest.mark.parametrize(
+    "module",
+    [""],
+)
+def test_missing_import_observation_rejects_unbounded_or_non_module_names(module: str) -> None:
+    from fleet_rlm.daytona.diagnostics import normalize_missing_import_observation
+    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+
+    with pytest.raises(ValueError, match="normalized import name"):
+        normalize_missing_import_observation(module, DaytonaEnvironmentProfile.SESSION)
+
+
+def test_missing_import_defaults_to_bounded_missing_outcome() -> None:
+    from fleet_rlm.daytona.diagnostics import MissingImportOutcome, normalize_missing_import_observation
+    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+
+    result = normalize_missing_import_observation("fleet.tools", DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+    assert result.outcome is MissingImportOutcome.MISSING

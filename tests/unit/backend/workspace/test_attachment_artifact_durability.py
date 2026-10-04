@@ -9,7 +9,6 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.attachments import (
     AttachmentAccess,
     AttachmentLifecycleService,
@@ -22,6 +21,7 @@ from fleet_rlm.attachments import (
     LocalAttachmentPathPolicy,
 )
 from fleet_rlm.paths import UnsafePathError, VolumePaths, as_posix
+from tests.support.local_catalog import LocalArtifactCatalog
 from tests.support.workspace_storage import HostVolumeMirror
 
 

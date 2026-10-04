@@ -10,7 +10,7 @@ import pytest
 
 from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
-from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
+from tests.support.local_catalog import LocalArtifactCatalog
 
 
 def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:

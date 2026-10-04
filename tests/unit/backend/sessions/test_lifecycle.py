@@ -7,9 +7,9 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
 from fleet_rlm.sessions.errors import SessionRetirementPendingError
 from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
+from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
 
 class _RecordingRetirement:

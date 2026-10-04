@@ -211,8 +211,8 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
 
 @pytest.mark.asyncio
 async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> None:
-    from fleet_rlm import turn_settlement as lifecycle_module
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns import settlement as lifecycle_module
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
 
     monkeypatch.setattr(lifecycle_module, "_POST_COMMIT_MEMORY_PROMOTION_TIMEOUT_S", 0.01)
     started = threading.Event()
@@ -254,8 +254,8 @@ async def test_post_commit_memory_promotion_has_a_bounded_wait(monkeypatch) -> N
 
 @pytest.mark.asyncio
 async def test_prepared_run_retains_resources_until_timed_out_promotion_settles() -> None:
-    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
-    from fleet_rlm.turn_settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
 
     started = threading.Event()
     release_promotion = threading.Event()

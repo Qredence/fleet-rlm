@@ -6,6 +6,7 @@ import ast
 import asyncio
 import contextlib
 import json
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -191,9 +192,9 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
 @pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])
 def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
     import tests.support.testing_app as common
-    from fleet_rlm.artifacts.local_catalog import LocalArtifactReaderCatalog
     from fleet_rlm.attachments import LocalAttachmentCatalog
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from tests.support.local_catalog import LocalArtifactReaderCatalog
 
     builder = getattr(common, "build_local_storage_adapters", None)
     assert builder is not None
@@ -960,3 +961,61 @@ async def test_live_startup_preserves_original_error_and_attempts_all_cleanup(mo
     assert orphan_cleanup_task.cancelled()
     assert memory_outbox_task.cancelled()
     assert memory_outbox_cancelled.is_set()
+
+
+# --- Scratch Cleanup Before Releasing Invocation ----------------------
+@pytest.mark.asyncio
+async def test_invocation_gate_stays_held_until_cancelled_scratch_cleanup_finishes() -> None:
+    from fleet_rlm.app_lifecycle import _cleanup_scratch_before_releasing_invocation
+
+    cleanup_started = threading.Event()
+    finish_cleanup = threading.Event()
+    released = asyncio.Event()
+
+    def cleanup() -> None:
+        cleanup_started.set()
+        if not finish_cleanup.wait(timeout=5):
+            raise TimeoutError("scratch cleanup test was not released")
+
+    task = asyncio.create_task(_cleanup_scratch_before_releasing_invocation(cleanup, released.set))
+    assert await asyncio.to_thread(cleanup_started.wait, 1)
+
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    await asyncio.sleep(0)
+    assert not released.is_set()
+
+    finish_cleanup.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert released.is_set()
+
+
+@pytest.mark.asyncio
+async def test_invocation_gate_releases_after_scratch_cleanup_finishes() -> None:
+    from fleet_rlm.app_lifecycle import _cleanup_scratch_before_releasing_invocation
+
+    cleanup_finished = threading.Event()
+    released = asyncio.Event()
+
+    def cleanup() -> None:
+        cleanup_finished.set()
+
+    await _cleanup_scratch_before_releasing_invocation(cleanup, released.set)
+
+    assert cleanup_finished.is_set()
+    assert released.is_set()
+
+
+@pytest.mark.asyncio
+async def test_invocation_gate_releases_when_scratch_cleanup_fails() -> None:
+    from fleet_rlm.app_lifecycle import _cleanup_scratch_before_releasing_invocation
+
+    released = asyncio.Event()
+
+    def cleanup() -> None:
+        raise RuntimeError("scratch cleanup failed")
+
+    with pytest.raises(RuntimeError, match="scratch cleanup failed"):
+        await _cleanup_scratch_before_releasing_invocation(cleanup, released.set)

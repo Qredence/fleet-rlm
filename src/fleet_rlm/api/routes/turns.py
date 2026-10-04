@@ -25,12 +25,12 @@ from fleet_rlm.sessions.run_state import (
 )
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
-from fleet_rlm.turn_preparation import (
+from fleet_rlm.turns import OpenedTurnStream, OpenTurnCommand
+from fleet_rlm.turns.preparation import (
     RunPreparationCancelledError,
     RunPreparationTimeoutError,
     RunPreparationUnavailableError,
 )
-from fleet_rlm.turns import OpenedTurnStream, OpenTurnCommand
 
 router = APIRouter(prefix="/api/sessions", tags=["turns"])
 logger = logging.getLogger(__name__)

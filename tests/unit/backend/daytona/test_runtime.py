@@ -28,6 +28,7 @@ from fleet_rlm.daytona.runtime import (
     AbsenceTimeout,
     ChildRuntimeLease,
     DaytonaAdmission,
+    DaytonaAdmissionTimeoutError,
     ExpectedWorkspaceMount,
     InterpreterLease,
     LeaseRequest,
@@ -903,3 +904,59 @@ async def test_build_daytona_client_uses_explicit_api_url_without_deprecation(
         assert not any("server_url" in str(item.message) for item in caught)
     finally:
         await client.close()
+
+
+# --- Process-wide Daytona Interpreter Lease admission behavior --------
+def test_admission_rejects_more_than_eight_direct_leases() -> None:
+    with pytest.raises(ValueError, match="at most 8"):
+        DaytonaAdmission(max_active_leases=9)
+
+
+@pytest.mark.asyncio
+async def test_execution_reserves_one_of_eight_leases_for_host_io() -> None:
+    admission = DaytonaAdmission(max_active_leases=8)
+    deadline = asyncio.get_running_loop().time() + 10
+    permits = [await admission.acquire(deadline=deadline) for _ in range(7)]
+    io_permit = await admission.acquire(deadline=deadline, host_io=True)
+
+    ninth = asyncio.create_task(admission.acquire(deadline=deadline))
+    await asyncio.sleep(0)
+    assert not ninth.done()
+
+    permits[0].release()
+    ninth_permit = await asyncio.wait_for(ninth, timeout=1)
+    ninth_permit.release()
+    for permit in permits[1:]:
+        permit.release()
+    io_permit.release()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_waiter_restores_capacity() -> None:
+    admission = DaytonaAdmission(max_active_leases=1)
+    deadline = asyncio.get_running_loop().time() + 10
+    held = await admission.acquire(deadline=deadline)
+    waiter = asyncio.create_task(admission.acquire(deadline=deadline))
+    await asyncio.sleep(0)
+
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    held.release()
+
+    replacement = await admission.acquire(deadline=deadline)
+    replacement.release()
+
+
+@pytest.mark.asyncio
+async def test_deadline_exhaustion_does_not_consume_capacity() -> None:
+    admission = DaytonaAdmission(max_active_leases=1)
+    loop = asyncio.get_running_loop()
+    held = await admission.acquire(deadline=loop.time() + 10)
+
+    with pytest.raises(DaytonaAdmissionTimeoutError, match="Daytona admission unavailable"):
+        await admission.acquire(deadline=loop.time())
+
+    held.release()
+    available = await admission.acquire(deadline=loop.time() + 10)
+    available.release()

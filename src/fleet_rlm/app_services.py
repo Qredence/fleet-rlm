@@ -27,8 +27,8 @@ from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.task import SessionTaskService
-from fleet_rlm.turn_preparation import RunPreparation
 from fleet_rlm.turns import TurnRuntime
+from fleet_rlm.turns.preparation import RunPreparation
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 

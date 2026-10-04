@@ -20,7 +20,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import (
+    from fleet_rlm.turns.preparation import (
         RunEnvironment,
         RunPreparationUnavailableError,
     )
@@ -82,7 +82,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import (
+    from fleet_rlm.turns.preparation import (
         RunEnvironment,
         RunPreparationUnavailableError,
     )
@@ -140,7 +140,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import (
+    from fleet_rlm.turns.preparation import (
         RunEnvironment,
         RunPreparationUnavailableError,
     )

@@ -188,11 +188,11 @@ async def _run_success_turn(
     Returns:
         list[Any]: Events emitted during the turn.
     """
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     importlib.import_module("fleet_rlm.rlm.result")
 
@@ -286,7 +286,7 @@ def _real_prepared_run(run_id: Any, session_id: Any) -> Any:
     """
     Create a prepared run with the specified run and session identifiers.
     """
-    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
 
     return PreparedTurn(
         execution=cast("Any", SimpleNamespace(run_id=run_id, session_id=session_id)),

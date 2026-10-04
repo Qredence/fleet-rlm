@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -41,13 +40,12 @@ from fleet_rlm.sessions.errors import SessionNotFoundError
 from fleet_rlm.sessions.models import (
     AssistantTurnRecord,
     SessionRecord,
-    TurnAccess,
     TurnInputCodec,
     UserTurnRecord,
 )
 
 if TYPE_CHECKING:
-    from fleet_rlm.persistence.repositories.turns import InMemoryRunStateStore
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -245,108 +243,6 @@ class SqlAlchemySessionCatalog:
         if row is None:
             raise SessionNotFoundError("session not found")
         return row
-
-
-class InMemorySessionCatalog:
-    """In-memory Session Catalog adapter sharing authoritative Turn state registration."""
-
-    def __init__(self, turns: InMemoryRunStateStore) -> None:
-        self._turns = turns
-        self._records: dict[UUID, SessionRecord] = {}
-        self._lock = asyncio.Lock()
-
-    async def create(self, *, user_id: UUID, workspace_id: UUID, title: str) -> SessionRecord:
-        now = datetime.now(UTC)
-        record = SessionRecord(uuid4(), user_id, workspace_id, "active", title, 0, now, now)
-        async with self._lock:
-            self._records[record.id] = record
-        await self._turns.add_session(record.id, TurnAccess(user_id, workspace_id))
-        return record
-
-    async def list(
-        self,
-        *,
-        user_id: UUID,
-        workspace_id: UUID,
-        status: str | None,
-        search: str | None,
-        limit: int,
-        offset: int,
-    ) -> SessionPage:
-        async with self._lock:
-            values = [
-                record
-                for record in self._records.values()
-                if record.user_id == user_id
-                and record.workspace_id == workspace_id
-                and (status is None or record.status == status)
-                and (not search or search.lower() in record.title.lower())
-            ]
-        values.sort(key=lambda item: (item.updated_at or datetime.min.replace(tzinfo=UTC), item.id), reverse=True)
-        return SessionPage(tuple(values[offset : offset + limit]), len(values))
-
-    async def get(self, session_id: UUID, *, user_id: UUID, workspace_id: UUID) -> SessionRecord:
-        async with self._lock:
-            record = self._records.get(session_id)
-        if record is None or record.user_id != user_id or record.workspace_id != workspace_id:
-            raise SessionNotFoundError("session not found")
-        return record
-
-    async def update(
-        self,
-        session_id: UUID,
-        *,
-        user_id: UUID,
-        workspace_id: UUID,
-        title: str | None,
-        status: str | None,
-    ) -> SessionRecord:
-        record = await self.get(session_id, user_id=user_id, workspace_id=workspace_id)
-        updated = SessionRecord(
-            record.id,
-            record.user_id,
-            record.workspace_id,
-            status or record.status,
-            title if title is not None else record.title,
-            record.checkpoint_version,
-            record.created_at,
-            datetime.now(UTC),
-        )
-        async with self._lock:
-            self._records[session_id] = updated
-        await self._turns.set_session_status(
-            session_id,
-            TurnAccess(user_id, workspace_id),
-            cast(Literal["active", "archived"], updated.status),
-        )
-        return updated
-
-    async def archive(self, session_id: UUID, *, user_id: UUID, workspace_id: UUID) -> SessionRecord:
-        return await self.update(
-            session_id,
-            user_id=user_id,
-            workspace_id=workspace_id,
-            title=None,
-            status="archived",
-        )
-
-    async def turns(
-        self,
-        session_id: UUID,
-        *,
-        user_id: UUID,
-        workspace_id: UUID,
-        cursor: SequenceCursor,
-        limit: int,
-    ) -> SessionTurnPage:
-        await self.get(session_id, user_id=user_id, workspace_id=workspace_id)
-        records = await self._turns.turn_records(session_id, TurnAccess(user_id, workspace_id))
-        selected = tuple(
-            item for item in records if cursor.after_sequence is None or item.sequence > cursor.after_sequence
-        )
-        page = selected[:limit]
-        next_cursor = page[-1].sequence if len(selected) > limit and page else None
-        return SessionTurnPage(page, next_cursor)
 
 
 # ---------------------------------------------------------------------------
@@ -655,7 +551,6 @@ class SqlAlchemySandboxBindingStore:
 
 __all__ = [
     "CompletedRun",
-    "InMemorySessionCatalog",
     "SandboxBinding",
     "SqlAlchemyArtifactCatalog",
     "SqlAlchemyAttachmentCatalog",

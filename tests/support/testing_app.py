@@ -29,7 +29,7 @@ from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions,
 from fleet_rlm.rlm.recursion import RecursiveRLMOptions
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog
-from fleet_rlm.turn_preparation import (
+from fleet_rlm.turns.preparation import (
     PreparedHostCapabilities,
     PreparedTurn,
     RunEnvironment,
@@ -64,11 +64,6 @@ def build_local_storage_adapters(
     sql_artifact_blobs: Any | None,
 ) -> LocalStorageAdapters:
     """Build the local or SQL metadata adapters for a local runtime."""
-    from fleet_rlm.artifacts.local_catalog import (
-        LocalArtifactBlobGateway,
-        LocalArtifactCatalog,
-        LocalArtifactReaderCatalog,
-    )
     from fleet_rlm.artifacts.reader import ArtifactReader
     from fleet_rlm.attachments import (
         AttachmentLifecycleService,
@@ -77,6 +72,11 @@ def build_local_storage_adapters(
         LocalAttachmentPathPolicy,
     )
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from tests.support.local_catalog import (
+        LocalArtifactBlobGateway,
+        LocalArtifactCatalog,
+        LocalArtifactReaderCatalog,
+    )
 
     upload_root, artifact_root = host_roots(settings)
     if session_factory is None:
@@ -127,16 +127,18 @@ def build_local_inventory(
     assert_dspy_version()
     from fleet_rlm.config.policy import ConfigPolicyService
     from fleet_rlm.persistence.repositories import (
-        InMemoryRunStateStore,
-        InMemorySessionCatalog,
         SqlAlchemyRunStateStore,
         SqlAlchemySessionCatalog,
     )
     from fleet_rlm.rlm.execution import RLMRunner
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
-    from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
     from fleet_rlm.turns import TurnRuntime
+    from fleet_rlm.turns.settlement import RunSettlementPlan, bind_settlement
+    from tests.support.in_memory_stores import (
+        InMemoryRunStateStore,
+        InMemorySessionCatalog,
+    )
 
     session_factory = database.session_factory
     if session_factory is None:

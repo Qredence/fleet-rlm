@@ -34,7 +34,7 @@ from fleet_rlm.rlm.result import (
     empty_rlm_usage,
     project_outcome_prediction,
 )
-from fleet_rlm.sessions.committed_turn_events import CommittedTurnEventProjector
+from fleet_rlm.sessions.committed_turn import CommittedTurnEventProjector
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import (
     CancelResult,

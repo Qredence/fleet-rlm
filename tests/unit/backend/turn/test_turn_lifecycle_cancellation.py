@@ -244,7 +244,6 @@ async def test_cancelled_commit_that_succeeds_retains_snapshot_and_receipt() -> 
 
 @pytest.mark.asyncio
 async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -252,6 +251,7 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
         RunClaim,
         RunFailure,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -301,12 +301,12 @@ async def test_cancelled_settlement_persists_bounded_tombstone_in_turn_listing()
 
 @pytest.mark.asyncio
 async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_usage() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         RunClaim,
         RunFailure,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -331,7 +331,6 @@ async def test_preparation_failclaim_cancelled_persists_tombstone_with_observed_
 
 @pytest.mark.asyncio
 async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
         PredictionResult,
         RLMOutcome,
@@ -344,6 +343,7 @@ async def test_tombstone_sequences_interleave_with_committed_turns() -> None:
         RunClaim,
         RunFailure,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

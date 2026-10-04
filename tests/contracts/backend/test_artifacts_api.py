@@ -9,8 +9,8 @@ from uuid import uuid4
 from fastapi.testclient import TestClient
 
 from fleet_rlm.api.local_scope import LocalScope
-from fleet_rlm.artifacts.local_catalog import LocalArtifactCatalog
 from fleet_rlm.config.settings import Settings
+from tests.support.local_catalog import LocalArtifactCatalog
 from tests.support.testing_app import create_testing_app, host_roots
 
 

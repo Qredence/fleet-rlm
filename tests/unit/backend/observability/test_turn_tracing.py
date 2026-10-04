@@ -396,7 +396,6 @@ async def test_turn_disconnect_records_cancellation_before_owned_worker_drains(
 ) -> None:
     """A client disconnect records cancellation promptly while its owned RLM worker drains."""
     calls = _install_fake_mlflow(monkeypatch)
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RLMReasoning
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
@@ -410,6 +409,7 @@ async def test_turn_disconnect_records_cancellation_before_owned_worker_drains(
     from fleet_rlm.sessions.context import SessionContextManifest
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
     from tests.support.turn_settlement import TestingRunSettlement
     from tests.unit.backend.rlm.fakes import EmptyCapabilities
 
@@ -1220,7 +1220,7 @@ def test_start_turn_span_records_only_allowlisted_operational_attributes(
 
 def test_turn_phase_span_exports_safe_provider_failure_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.errors import ProviderRequestError
-    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
+    from fleet_rlm.turns.preparation import RunPreparationUnavailableError
 
     calls = _install_fake_mlflow(monkeypatch)
     cause = ProviderRequestError("api_key=private", cause_type="BadRequestException", status_code=400)

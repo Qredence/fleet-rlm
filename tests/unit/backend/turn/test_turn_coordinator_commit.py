@@ -28,7 +28,6 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
 
     importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         ArtifactCreated,
@@ -43,6 +42,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunClaim
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -181,11 +181,11 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
 
     importlib.import_module("fleet_rlm.rlm.result")
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -524,13 +524,13 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 # --- from test_turn_coordinator_concurrency.py ------------------------
 @pytest.mark.asyncio
 async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)

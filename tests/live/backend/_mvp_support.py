@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fleet_rlm.config.loader import load_configuration_environment_contract, load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.runtime import DaytonaRuntime
-from fleet_rlm.turn_preparation import TurnPreparationPlan
+from fleet_rlm.turns.preparation import TurnPreparationPlan
 from tests.live.backend._database import upgrade_to_head
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]

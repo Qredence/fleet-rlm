@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.turn_preparation import PreparedHostCapabilities
+from fleet_rlm.turns.preparation import PreparedHostCapabilities
 from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
@@ -25,7 +25,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     operations: list[str] = []
 
@@ -127,7 +127,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
 
 @pytest.mark.asyncio
 async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_failure() -> None:
-    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -155,7 +155,7 @@ async def test_prepared_cleanup_continues_after_cancelled_owner_and_reobserves_f
 
 @pytest.mark.asyncio
 async def test_precommit_cleanup_closes_only_native_context_then_full_drain_skips_it() -> None:
-    from fleet_rlm.turn_preparation import PreparedTurn, _PreparedTurnResources
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
 
     operations: list[str] = []
 
@@ -191,7 +191,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment, RunPreparationTimeoutError
+    from fleet_rlm.turns.preparation import RunEnvironment, RunPreparationTimeoutError
 
     released = False
 
@@ -256,7 +256,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
     staged_path = f"/sessions/{session_id}/runs/{run_id}/attachments/{attachment_id}.txt"
@@ -335,7 +335,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
         ClaimedRun,
         _RunClaimToken,
     )
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
 
     attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()
     operations: list[str] = []
@@ -544,7 +544,7 @@ async def test_preparation_cancel_projects_single_abort_frame() -> None:
     from types import SimpleNamespace
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.turn_preparation import RunPreparationCancelledError
+    from fleet_rlm.turns.preparation import RunPreparationCancelledError
 
     class Coordinator:
         def open_owned(self, _command):
@@ -568,11 +568,11 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.turns import TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()

@@ -19,7 +19,7 @@ from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor, RunCleanupUnavailableError
 from fleet_rlm.rlm.result import RLMOutcome, project_outcome_prediction
-from fleet_rlm.sessions.committed_turn import CommittedTurn
+from fleet_rlm.sessions.committed_turn import CommittedTurn, commit_success
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_claim import (
     BeginSettlement,
@@ -45,7 +45,6 @@ from fleet_rlm.sessions.run_state import (
     RunValidationError,
     _claim_failure,
 )
-from fleet_rlm.sessions.turn_detail_policy import commit_success
 from fleet_rlm.workspace.memory import (
     OUTCOME_DEADLINE_EXCEEDED,
     OUTCOME_INTERRUPTED,

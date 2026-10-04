@@ -21,12 +21,12 @@ from fleet_rlm.daytona.runtime import (
     verify_sandbox_workspace_mount,
     volume_mount_spec,
 )
-from fleet_rlm.sessions.bindings import InMemorySandboxBindingStore as InMemoryBindingStore
 from fleet_rlm.sessions.bindings import (
     SandboxBinding,
     require_scoped_volume_subpath,
     workspace_volume_subpath,
 )
+from tests.support.in_memory_stores import InMemorySandboxBindingStore as InMemoryBindingStore
 from tests.support.session_manager import make_daytona_runtime
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")

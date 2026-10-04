@@ -66,7 +66,6 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     from hashlib import sha256
 
     from fleet_rlm.artifacts.models import ArtifactCandidate
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         EventRecorder,
@@ -79,6 +78,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]
     access = TurnAccess(uuid4(), uuid4())
@@ -205,15 +205,15 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 
 @pytest.mark.asyncio
 async def test_open_preparation_failure_is_durable_before_stream_and_releases_claim() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         RunClaim,
         RunFailure,
     )
-    from fleet_rlm.turn_preparation import RunPreparationUnavailableError
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.turns.preparation import RunPreparationUnavailableError
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -253,10 +253,10 @@ async def test_open_preparation_failure_is_durable_before_stream_and_releases_cl
 async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.turns.preparation import RunPreparationTimeoutError
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     class Span:
         request_id = "tr-preparation-timeout"
@@ -345,10 +345,10 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
 @pytest.mark.asyncio
 async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_order() -> None:
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -425,11 +425,11 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 @pytest.mark.asyncio
 async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     updates: list[dict[str, object]] = []
 
@@ -553,12 +553,12 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     token = turn_tracing._fleet_trace_active.set(True)
     try:

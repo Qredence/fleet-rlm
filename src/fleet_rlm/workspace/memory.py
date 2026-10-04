@@ -1410,19 +1410,28 @@ class WorkspaceMemoryToolHost:
             raise _invalid_entry() from exc
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        def read_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                (
-                    "ok",
-                    "namespace",
-                    "truncated",
-                    "bytes_returned",
-                    "byte_budget",
-                    "total_bytes",
-                    "skipped_malformed_records",
-                ),
-            )
+        read_fields = (
+            "ok",
+            "namespace",
+            "truncated",
+            "bytes_returned",
+            "byte_budget",
+            "total_bytes",
+            "skipped_malformed_records",
+        )
+        rem_fields = ("ok", "namespace", "memory_id", "category", "entry_bytes", "total_bytes")
+        list_fields = ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records")
+        edit_fields = (
+            "ok",
+            "namespace",
+            "memory_id",
+            "category",
+            "source",
+            "record_version",
+            "updated_at",
+            "entry_bytes",
+        )
+        forget_fields = ("ok", "namespace", "memory_id", "removed")
 
         def remember_input(arguments: Mapping[str, Any]) -> JsonValue:
             learning = arguments.get("key_learning")
@@ -1431,9 +1440,6 @@ class WorkspaceMemoryToolHost:
                 "category": category,
                 "key_learning_bytes": len(learning.encode("utf-8")) if isinstance(learning, str) else 0,
             }
-
-        def remember_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "memory_id", "category", "entry_bytes", "total_bytes"))
 
         def list_input(arguments: Mapping[str, Any]) -> JsonValue:
             projected: dict[str, JsonValue] = {}
@@ -1444,12 +1450,6 @@ class WorkspaceMemoryToolHost:
             if arguments.get("category") is not None:
                 projected["category"] = _event_category(arguments.get("category"))
             return projected
-
-        def list_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records"),
-            )
 
         def search_input(arguments: Mapping[str, Any]) -> JsonValue:
             query = arguments.get("query")
@@ -1467,7 +1467,7 @@ class WorkspaceMemoryToolHost:
             entries = result.get("entries")
             top_ids: list[str] = []
             if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray)):
-                for item in list(entries)[:8]:
+                for item in entries[:8]:
                     if isinstance(item, Mapping):
                         raw_id = item.get("id")
                         if isinstance(raw_id, str):
@@ -1488,29 +1488,26 @@ class WorkspaceMemoryToolHost:
                 projected["category"] = _event_category(arguments.get("category"))
             return projected
 
-        def edit_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                ("ok", "namespace", "memory_id", "category", "source", "record_version", "updated_at", "entry_bytes"),
-            )
-
-        def forget_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"memory_id": _event_id(arguments.get("memory_id"))}
-
-        def forget_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "memory_id", "removed"))
-
         return MappingProxyType(
             {
-                "read_workspace_memory": ToolEventView(output_projection=read_output),
-                "remember": ToolEventView(input_projection=remember_input, output_projection=remember_output),
-                "update_workspace_memory": ToolEventView(
-                    input_projection=remember_input, output_projection=remember_output
+                "read_workspace_memory": ToolEventView(output_projection=lambda res: _output(res, read_fields)),
+                "remember": ToolEventView(
+                    input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
                 ),
-                "list_memories": ToolEventView(input_projection=list_input, output_projection=list_output),
+                "update_workspace_memory": ToolEventView(
+                    input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
+                ),
+                "list_memories": ToolEventView(
+                    input_projection=list_input, output_projection=lambda res: _output(res, list_fields)
+                ),
                 "search_memories": ToolEventView(input_projection=search_input, output_projection=search_output),
-                "edit_memory": ToolEventView(input_projection=edit_input, output_projection=edit_output),
-                "forget": ToolEventView(input_projection=forget_input, output_projection=forget_output),
+                "edit_memory": ToolEventView(
+                    input_projection=edit_input, output_projection=lambda res: _output(res, edit_fields)
+                ),
+                "forget": ToolEventView(
+                    input_projection=lambda args: {"memory_id": _event_id(args.get("memory_id"))},
+                    output_projection=lambda res: _output(res, forget_fields),
+                ),
             }
         )
 

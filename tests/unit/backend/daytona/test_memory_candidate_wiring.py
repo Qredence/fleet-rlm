@@ -113,7 +113,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
-    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer, RunEnvironment
+    from fleet_rlm.turns.preparation import DaytonaCapabilityPreparer, RunEnvironment
     from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from fleet_rlm.workspace.memory import build_workspace_memory_store
     from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage

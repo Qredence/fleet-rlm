@@ -27,13 +27,18 @@ The tests exercise, in the exact order below:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import contextlib
+import io
+from collections.abc import Callable, Sequence
 from typing import Any
 from uuid import uuid4
 
 import dspy
 import pytest
+from dspy.primitives.code_interpreter import FinalOutput
 
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.events import observe_tool
 from fleet_rlm.sessions.committed_turn import (
     CommittedTurn,
     StatusPart,
@@ -41,10 +46,15 @@ from fleet_rlm.sessions.committed_turn import (
     UsagePart,
 )
 from fleet_rlm.sessions.history import (
+    SESSION_HISTORY_RESULT_BYTE_BUDGET,
+    CommittedSessionHistory,
+    SessionHistoryToolHost,
+    committed_session_history_payload,
     to_canonical_history_records,
     to_dspy_history,
     validate_legacy_records,
 )
+from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
 from tests.support.turn_settlement import TestingRunSettlement
 
 _EMPTY_USAGE: dict[str, Any] = {
@@ -207,7 +217,6 @@ async def test_store_level_cross_session_history_isolation() -> None:
     claim path: both Sessions commit Turns into ONE store, then a fresh claim
     for Session A must carry exactly Session A's checkpoint (P52.1(g)).
     """
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -215,6 +224,7 @@ async def test_store_level_cross_session_history_isolation() -> None:
         ClaimedRun,
         RunClaim,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     store = InMemoryRunStateStore()
     catalog = InMemorySessionCatalog(store)
@@ -354,7 +364,6 @@ async def test_timed_out_turn_persists_terminal_status_but_never_enters_committe
     persists no user/assistant rows at all; only the terminal Run status is
     durable, which is observable by an idempotent retry beginning a FRESH Run.
     """
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -363,8 +372,9 @@ async def test_timed_out_turn_persists_terminal_status_but_never_enters_committe
         RunClaim,
         RunFailure,
     )
-    from fleet_rlm.turn_preparation import RunPreparationTimeoutError
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.turns.preparation import RunPreparationTimeoutError
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -436,7 +446,6 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
     audit while ``claimed_history_records``/``dspy_history_for_claim``
     keep exactly the committed conversation (P52.1(c)/(d) end-to-end half).
     """
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.history import claimed_history_records, dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -445,6 +454,7 @@ async def test_failed_and_cancelled_turns_never_enter_committed_history_end_to_e
         RunClaim,
         RunFailure,
     )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
     store = InMemoryRunStateStore()
@@ -559,3 +569,270 @@ def test_claimed_history_records_excludes_tombstone_bearing_checkpoints() -> Non
     assert "internal failure details" not in flattened
     assert "Turn timed out" not in flattened
     assert "Turn cancelled" not in flattened
+
+
+def _budget_fields(
+    *, has_more: bool, truncated: bool, bytes_returned: int, skipped_ordinal: int | None = None
+) -> dict[str, object]:
+    fields: dict[str, object] = {
+        "has_more": has_more,
+        "done": not has_more,
+        "truncated": truncated,
+        "bytes_returned": bytes_returned,
+        "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
+    }
+    if skipped_ordinal is not None:
+        fields["skipped_ordinal"] = skipped_ordinal
+    return fields
+
+
+def test_history_tool_pages_canonical_messages_with_stable_ordinals() -> None:
+    messages = tuple(
+        HistoryMessage(
+            "user" if index % 2 == 0 else "assistant",
+            f"canonical-{index + 1}\n" + "x" * (index + 1),
+        )
+        for index in range(5)
+    )
+    (tool,) = SessionHistoryToolHost(SessionHistory(messages)).as_tools()
+
+    assert tool.name == "read_session_history"
+    assert "only when" in tool.desc
+    assert "do not read history for self-contained requests" in tool.desc
+    assert tool.args == {
+        "offset": {"type": "integer", "minimum": 0},
+        "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+    }
+    assert "page dictionary" in tool.desc
+    assert 'result["messages"]' in tool.desc
+    assert "role" in tool.desc
+    assert "content" in tool.desc
+    first_page = tool(offset=0, limit=2)
+    assert first_page == {
+        "offset": 0,
+        "next_offset": 2,
+        "total": 5,
+        "messages": [
+            {"ordinal": 1, "role": "user", "content": messages[0].content},
+            {"ordinal": 2, "role": "assistant", "content": messages[1].content},
+        ],
+        **_budget_fields(
+            has_more=True, truncated=False, bytes_returned=sum(len(m.content.encode("utf-8")) for m in messages[:2])
+        ),
+    }
+    second = tool(offset=2, limit=2)
+    assert second["messages"] == [
+        {"ordinal": 3, "role": "user", "content": messages[2].content},
+        {"ordinal": 4, "role": "assistant", "content": messages[3].content},
+    ]
+    assert tool(offset=4, limit=20) == {
+        "offset": 4,
+        "next_offset": None,
+        "total": 5,
+        "messages": [{"ordinal": 5, "role": "user", "content": messages[4].content}],
+        **_budget_fields(has_more=False, truncated=False, bytes_returned=len(messages[4].content.encode("utf-8"))),
+    }
+    assert tool(offset=9, limit=3) == {
+        "offset": 9,
+        "next_offset": None,
+        "total": 5,
+        "messages": [],
+        **_budget_fields(has_more=False, truncated=False, bytes_returned=0),
+    }
+
+
+def test_history_tool_stops_mid_page_when_byte_budget_exhausted() -> None:
+    chunk = "x" * 150_000
+    messages = (
+        HistoryMessage("user", chunk),
+        HistoryMessage("assistant", chunk),
+        HistoryMessage("user", "tail"),
+    )
+    (tool,) = SessionHistoryToolHost(SessionHistory(messages)).as_tools()
+
+    result = tool(offset=0, limit=20)
+
+    assert result["truncated"] is True
+    assert result["messages"] == [
+        {"ordinal": 1, "role": "user", "content": chunk},
+    ]
+    assert result["next_offset"] == 1
+    assert result["bytes_returned"] == 150_000
+
+    continuation = tool(offset=result["next_offset"], limit=20)
+    assert continuation["messages"] == [
+        {"ordinal": 2, "role": "assistant", "content": chunk},
+        {"ordinal": 3, "role": "user", "content": "tail"},
+    ]
+    assert continuation["truncated"] is False
+    assert continuation["next_offset"] is None
+
+
+def test_history_event_view_exposes_page_metadata_without_message_bodies() -> None:
+    host = SessionHistoryToolHost(SessionHistory((HistoryMessage("user", "private history body"),)))
+    (tool,) = host.as_tools()
+    observed: list[object] = []
+
+    result = observe_tool(tool, observed.append, host.event_views()["read_session_history"])(offset=0, limit=1)
+
+    assert result["messages"][0]["content"] == "private history body"
+    assert observed[0].input == {"offset": 0, "limit": 1}
+    assert observed[1].output == {
+        "offset": 0,
+        "next_offset": None,
+        "total": 1,
+        "has_more": False,
+        "done": True,
+        "truncated": False,
+        "bytes_returned": len(b"private history body"),
+        "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
+        "message_count": 1,
+    }
+    assert "private history body" not in str(observed)
+
+
+class _SubmittedError(Exception):
+    def __init__(self, output: dict[str, object]) -> None:
+        self.output = output
+
+
+class _InProcessInterpreter:
+    def __init__(self) -> None:
+        self.tools: dict[str, Callable[..., Any]] = {}
+        self.namespace: dict[str, object] = {}
+        self.executed_code: list[str] = []
+
+    def start(self) -> None:
+        return None
+
+    def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
+        self.namespace.update(self.tools)
+        received = dict(variables or {})
+        if "_raw_history" in received and isinstance(received["_raw_history"], bytes):
+            try:
+                received["_raw_history"] = received["_raw_history"].decode("utf-8")
+            except UnicodeDecodeError:
+                import base64
+
+                received["_raw_history"] = base64.b64encode(received["_raw_history"]).decode("ascii")
+        self.namespace.update(received)
+        self.executed_code.append(code)
+
+        def submit(**output: object) -> None:
+            raise _SubmittedError(dict(output))
+
+        self.namespace["SUBMIT"] = submit
+        stdout = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(stdout):
+                exec(code, self.namespace, self.namespace)
+        except _SubmittedError as final:
+            return FinalOutput(final.output)
+        return stdout.getvalue()
+
+    def shutdown(self) -> None:
+        return None
+
+
+def test_transport_diagnostics_redact_complete_conversation_bodies() -> None:
+    history = CommittedSessionHistory([{"request": "SECRET_REQUEST_BODY", "answer": "SECRET_ANSWER_BODY"}])
+
+    rendered = repr(history)
+    assert rendered == "CommittedSessionHistory(messages=1)"
+    assert str(history) == rendered
+    assert "SECRET_REQUEST_BODY" not in rendered
+    assert "SECRET_ANSWER_BODY" not in rendered
+
+
+def test_transport_rejects_non_canonical_records_without_truncation() -> None:
+    for bad in (
+        [{"request": "r", "answer": "a", "extra": "x"}],
+        [{"request": 1, "answer": "a"}],
+        [{"prompt": "r", "answer": "a"}],
+        [{"request": "r"}],
+        ["not-a-record"],
+    ):
+        with pytest.raises(ValueError, match="committed Session History"):
+            CommittedSessionHistory(bad)
+
+
+def test_transport_round_trips_complete_unicode_multiline_records_in_sandbox() -> None:
+    records = [
+        {"request": "first Ω漢字🧪\nsecond line", "answer": "café — résumé ✓"},
+        *({"request": f"bulk {ordinal}", "answer": f"reply {ordinal}\npara {ordinal}"} for ordinal in range(200)),
+    ]
+    history = CommittedSessionHistory(records)
+    assert committed_session_history_payload(history) == records
+    assert "café" not in history.rlm_preview()
+    assert len(history.rlm_preview()) <= 500
+
+    interpreter = _InProcessInterpreter()
+    setup = history.sandbox_setup()
+    assignment = history.sandbox_assignment("history", "_raw_history")
+    assert "_raw_history" in assignment and "history.messages" not in assignment
+    interpreter.execute("\n".join((setup, assignment)), variables={"_raw_history": history.to_sandbox()})
+
+    restored = interpreter.namespace["history"]
+    assert type(restored).__name__ == "_FleetCommittedHistory"
+    assert list(restored.messages) == records
+    assert restored.messages[0]["answer"] == "café — résumé ✓"
+    assert "_fleet_load_committed_history" not in interpreter.namespace
+
+
+@pytest.mark.asyncio
+async def test_native_rlm_acall_sees_complete_history_through_the_transport() -> None:
+    records = [
+        {"request": "opening request", "answer": "opening answer"},
+        {"request": "latest request", "answer": "latest answer"},
+    ]
+    history = CommittedSessionHistory(records)
+
+    class SessionRLMContract(dspy.Signature):
+        request: str = dspy.InputField()
+        history: dspy.History = dspy.InputField()
+        answer: str = dspy.OutputField()
+
+    class _Actions:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def acall(self, **_kwargs: Any) -> dspy.Prediction:
+            self.calls += 1
+            return dspy.Prediction(
+                reasoning="Read the complete committed conversation from the transported value.",
+                code=(
+                    "assert type(history).__name__ == '_FleetCommittedHistory'\n"
+                    f"assert history.messages == {records!r}\n"
+                    "assert history.messages[-1]['answer'] == 'latest answer'\n"
+                    "SUBMIT(answer=history.messages[-1]['answer'])"
+                ),
+            )
+
+    actions = _Actions()
+    rlm = dspy.RLM(SessionRLMContract, max_iters=1)
+    rlm.generate_action = actions
+    interpreter = _InProcessInterpreter()
+
+    prediction = await rlm.acall(interpreter_factory=lambda: interpreter, request="current", history=history)
+
+    assert actions.calls == 1
+    assert prediction.answer == "latest answer"
+    assert any("_raw_history" in code for code in interpreter.executed_code)
+
+
+def test_history_materializes_before_nested_provider_404_failure() -> None:
+    history = CommittedSessionHistory([{"request": "prior", "answer": "settled"}])
+    interpreter = _InProcessInterpreter()
+    interpreter.execute(
+        "\n".join((history.sandbox_setup(), history.sandbox_assignment("history", "_raw_history"))),
+        variables={"_raw_history": history.to_sandbox()},
+    )
+    assert interpreter.namespace["history"].messages == [{"request": "prior", "answer": "settled"}]
+
+    class _ProviderNotFoundError(Exception):
+        status_code = 404
+
+    try:
+        raise RuntimeError("LMUnsupportedModelError: Error code: 404") from _ProviderNotFoundError()
+    except RuntimeError as raised:
+        assert normalize_turn_failure(raised).cause_type == "provider_not_found"

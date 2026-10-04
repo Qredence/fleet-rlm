@@ -2152,24 +2152,6 @@ class RecursiveRLMExecutor:
                     self._metrics.child_failed()
 
 
-def predict(
-    signature: type[dspy.Signature] | str,
-    *,
-    lm: dspy.LM | None = None,
-    **inputs: Any,
-) -> dspy.Prediction:
-    """Execute a typed, single-step DSPy prediction without full RLM recursion.
-
-    Useful inside REPL actions or subtasks when a bounded semantic step needs
-    structured, typed inputs and outputs (e.g. classification, extraction, summary).
-    """
-    predictor = dspy.Predict(signature)
-    if lm is not None:
-        with dspy.context(lm=lm):
-            return predictor(**inputs)
-    return predictor(**inputs)
-
-
 __all__ = [
     "RLM_NATIVE_CHILD_DEPTH",
     "ChildAsyncScheduler",
@@ -2191,6 +2173,5 @@ __all__ = [
     "RecursiveSubtaskSignature",
     "TokenUsageStatus",
     "normalize_lm_token_usage",
-    "predict",
     "run_reserved_batch",
 ]

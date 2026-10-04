@@ -129,7 +129,7 @@ class _DaytonaFilesystem:
 def _live_capability_environment(settings: Settings, session_id: UUID):
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.paths import volume_paths_from_settings
-    from fleet_rlm.turn_preparation import RunEnvironment
+    from fleet_rlm.turns.preparation import RunEnvironment
     from fleet_rlm.workspace.host_io import DaytonaRunStorage
     from fleet_rlm.workspace.memory import build_workspace_memory_store
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
@@ -331,7 +331,7 @@ async def test_private_progressive_tools_preload_exact_selection_and_keep_events
 async def test_progressive_resource_requires_load_and_daytona_preparation_is_provider_free() -> None:
     from fleet_rlm.config.settings import Settings
     from fleet_rlm.skills.tools import SkillToolHost
-    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer
+    from fleet_rlm.turns.preparation import DaytonaCapabilityPreparer
 
     catalog = _catalog()
     selected = catalog.require(stable_skill_id("long-context"))
@@ -487,7 +487,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
 @pytest.mark.asyncio
 async def test_daytona_report_builder_workspace_selection_keeps_workspace_host_owned() -> None:
     from fleet_rlm.config.settings import Settings
-    from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer
+    from fleet_rlm.turns.preparation import DaytonaCapabilityPreparer
 
     catalog = _catalog()
     report_builder = catalog.require(stable_skill_id("report-builder"))

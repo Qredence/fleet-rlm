@@ -41,7 +41,7 @@ REQUIRED_WHEEL_FILES = {
     "fleet_rlm/observability/mlflow.py",
     "fleet_rlm/observability/posthog.py",
     "fleet_rlm/app_lifecycle.py",
-    "fleet_rlm/turn_preparation.py",
+    "fleet_rlm/turns/preparation.py",
     "fleet_rlm/artifacts/tools.py",
     "fleet_rlm/attachments/service.py",
     "fleet_rlm/workspace/models.py",

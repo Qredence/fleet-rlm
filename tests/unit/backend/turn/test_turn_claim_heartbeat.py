@@ -46,7 +46,6 @@ def test_host_tool_rejects_calls_after_authority_revocation() -> None:
 
 @pytest.mark.asyncio
 async def test_heartbeat_supervision_covers_preparation() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -54,6 +53,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
         RunStateError,
     )
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -113,12 +113,12 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
 
 @pytest.mark.asyncio
 async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -212,11 +212,11 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
 @pytest.mark.asyncio
 async def test_repeated_transient_failures_revoke_without_provider_fence() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -303,7 +303,6 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 
 @pytest.mark.asyncio
 async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -312,6 +311,7 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
         RunClaim,
     )
     from fleet_rlm.turns import ClaimHeartbeat, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -366,13 +366,13 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
 
 @pytest.mark.asyncio
 async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import RunFailed
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunStateError
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -469,12 +469,12 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> None:
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunStateError
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -587,12 +587,12 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
     """RC-8 regression: a heartbeat racing post-commit must never fail the live stream."""
     import logging
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -700,7 +700,6 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
     """Claim-loss cleanup racing a committed Turn logs and no-ops; commit state is untouched."""
     import logging
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import (
         PredictionResult,
@@ -717,6 +716,7 @@ async def test_claim_loss_cleanup_after_commit_is_a_benign_no_op(caplog) -> None
         RunStateError,
     )
     from fleet_rlm.turns import ClaimHeartbeat, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     assert issubclass(RunAlreadyCompletedError, RunStateError)
 
@@ -781,7 +781,6 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
     """The guard funnel returns None for committed Runs; live claims still revoke durably."""
     import logging
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.result import (
         PredictionResult,
         RLMOutcome,
@@ -794,6 +793,7 @@ async def test_revoke_claim_guard_only_relaxes_committed_runs(caplog) -> None:
         RunClaim,
     )
     from fleet_rlm.turns import TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())
@@ -845,7 +845,6 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
     """Driver cleanup with claim_lost still closes resources but never settles a committed Run."""
     import logging
 
-    from fleet_rlm.persistence.repositories import InMemoryRunStateStore, InMemorySessionCatalog
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import (
         PredictionResult,
@@ -859,6 +858,7 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
         RunClaim,
     )
     from fleet_rlm.turns import TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     authoritative = InMemoryRunStateStore()
     access = TurnAccess(uuid4(), uuid4())

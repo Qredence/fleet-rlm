@@ -133,7 +133,7 @@ async def test_prepare_host_capabilities_installs_preloaded_skill_resources() ->
         _RunClaimToken,
     )
     from fleet_rlm.skills.models import SkillSelectionRef
-    from fleet_rlm.turn_preparation import prepare_host_capabilities
+    from fleet_rlm.turns.preparation import prepare_host_capabilities
     from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
     async def not_cancelled() -> bool:
