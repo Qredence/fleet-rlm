@@ -25,12 +25,7 @@ import {
   sessionsCommand,
   taskCommand,
 } from "./commands/sessions.js";
-import {
-  profilesCommand,
-  settingsCommand,
-  skillCommand,
-  skillsCommand,
-} from "./commands/skills-settings.js";
+import { settingsCommand, skillCommand, skillsCommand } from "./commands/skills-settings.js";
 import {
   cancelCommand,
   clearCommand,
@@ -70,7 +65,6 @@ for (const spec of [
   skillsCommand,
   skillCommand,
   settingsCommand,
-  profilesCommand,
   volumeCommand,
   statusCommand,
   attachCommand,

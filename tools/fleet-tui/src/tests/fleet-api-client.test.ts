@@ -254,154 +254,48 @@ describe("FleetApiClient", () => {
     expect(onStreamOpen).not.toHaveBeenCalled();
   });
 
-  it("reads and revision-updates local settings policy", async () => {
+  it("reads and atomically updates the single configuration", async () => {
+    const field = {
+      path: "llm.root.api_key_env",
+      group: "Root LLM",
+      label: "API key variable",
+      value: "DATABRICKS_TOKEN",
+      editor: "text",
+      choices: [],
+      environment_overridden: false,
+    };
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
         new Response(
-          JSON.stringify({
-            revision: "a".repeat(64),
-            scopes: [
-              { name: "defaults", fields: [] },
-              {
-                name: "daytona",
-                fields: [
-                  {
-                    path: "llm.root.model",
-                    group: "Root LLM",
-                    label: "Model id",
-                    value: "databricks-deepseek-v4-1-flash",
-                    editor: "text",
-                    choices: [],
-                    environment_overridden: false,
-                  },
-                  {
-                    path: "llm.root.api_key_env",
-                    group: "Root LLM",
-                    label: "Provider API key environment variable",
-                    value: "DATABRICKS_TOKEN",
-                    editor: "text",
-                    choices: [],
-                    environment_overridden: false,
-                  },
-                  {
-                    path: "llm.root.base_url_env",
-                    group: "Root LLM",
-                    label: "Provider base URL environment variable",
-                    value: "FLEET_LLM_BASE_URL",
-                    editor: "text",
-                    choices: [],
-                    environment_overridden: false,
-                  },
-                ],
-              },
-            ],
-          }),
+          JSON.stringify({ revision: "a".repeat(64), restart_required: true, fields: [field] }),
           { headers: { "content-type": "application/json" } },
         ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
-          headers: { "content-type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ revision: "b".repeat(64), restart_required: true, fields: [field] }),
+          { headers: { "content-type": "application/json" } },
+        ),
       );
     globalThis.fetch = fetchMock;
     const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
-
     const settings = await client.getSettings();
-    const daytonaScope = settings.scopes.find((scope) => scope.name === "daytona");
-    expect(daytonaScope).toBeDefined();
-    const fields = Object.fromEntries(
-      (daytonaScope?.fields ?? []).map((field) => [field.path, field.value]),
-    );
-    expect(fields["llm.root.model"]).toBe("databricks-deepseek-v4-1-flash");
-    expect(fields["llm.root.api_key_env"]).toBe("DATABRICKS_TOKEN");
-    expect(fields["llm.root.base_url_env"]).toBe("FLEET_LLM_BASE_URL");
-    await client.updateSettings({
-      revision: "a".repeat(64),
-      scope: "defaults",
-      path: "rlm.max_iters",
-      value: 21,
-    });
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "http://fleet.test/api/settings",
-      expect.any(Object),
-    );
+    expect(settings.fields[0]?.value).toBe("DATABRICKS_TOKEN");
+    const updates = [
+      { path: "rlm.recursion_enabled", value: false },
+      { path: "rlm.child_execution_timeout_s", value: 0 },
+    ];
+    const saved = await client.applySettings(settings.revision, updates);
+    expect(saved.revision).toBe("b".repeat(64));
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "http://fleet.test/api/settings",
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({
-          revision: "a".repeat(64),
-          scope: "defaults",
-          path: "rlm.max_iters",
-          value: 21,
-        }),
+        body: JSON.stringify({ revision: settings.revision, updates }),
       }),
     );
-  });
-
-  it("distinguishes an empty default profile from an omitted one in settings batches", async () => {
-    const fetchMock = vi.fn().mockImplementation(() =>
-      Promise.resolve(
-        new Response(JSON.stringify({ revision: "b".repeat(64), scopes: [] }), {
-          headers: { "content-type": "application/json" },
-        }),
-      ),
-    );
-    globalThis.fetch = fetchMock;
-    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
-
-    await client.applySettings("a".repeat(64), [], "");
-    await client.applySettings("b".repeat(64), []);
-
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
-      "http://fleet.test/api/settings",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ revision: "a".repeat(64), updates: [], default_profile: "" }),
-      }),
-    );
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "http://fleet.test/api/settings",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ revision: "b".repeat(64), updates: [] }),
-      }),
-    );
-  });
-
-  it("switches the active Fleet profile through the settings policy", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          revision: "b".repeat(64),
-          active_profile: "daytona",
-          default_profile: "daytona-bench",
-          available_profiles: ["daytona", "daytona-bench"],
-          scopes: [],
-        }),
-        { headers: { "content-type": "application/json" } },
-      ),
-    );
-    globalThis.fetch = fetchMock;
-    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
-
-    const result = await client.setProfile("daytona-bench", "a".repeat(64));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "http://fleet.test/api/settings",
-      expect.objectContaining({
-        method: "PATCH",
-        body: JSON.stringify({ profile: "daytona-bench", revision: "a".repeat(64) }),
-      }),
-    );
-    expect(result.default_profile).toBe("daytona-bench");
   });
 
   it("lists discoverable Skill cards", async () => {
