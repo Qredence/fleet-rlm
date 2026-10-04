@@ -2,7 +2,7 @@
 name: running-the-fleet-tui
 description: Drive a real Fleet Turn through the terminal TUI from an agent session, then verify it from the persisted MLflow traces.
 metadata:
-  compatibility: Fleet-RLM repository with its pinned DSPy and Daytona dependencies, a configured Daytona profile, tmux, and operator authorization for the live provider run.
+  compatibility: Fleet-RLM repository with its pinned DSPy and Daytona dependencies, a configured Daytona runtime, tmux, and operator authorization for the live provider run.
 ---
 
 # Running the Fleet TUI
@@ -11,16 +11,16 @@ Use the maintained terminal client when a check needs a real end-to-end Turn —
 live provider calls, a real Sandbox, settlement, and a durable trace — rather
 than a pytest lane. The
 [terminal TUI guide](../../../docs/how-to-guides/terminal-tui.md) owns launch,
-`scripts/db_init.py`, profiles, Session resume, the backend/client split, and the
+`scripts/db_init.py`, configuration, Session resume, the backend/client split, and the
 full slash-command list; read it for those and do not restate them here.
 
 ## Preconditions
 
 - Run `uv run python scripts/db_init.py` before the first launch. The supervisor
   verifies Alembic head and never migrates, so a stale database fails the launch.
-- Choose the profile before launching: `[config] default_profile` in
-  `config/fleet.toml` (shipped default `daytona-native`, which runs no Fleet
-  children), or `/profiles` followed by a restart.
+- Inspect the single `config/fleet.toml` policy before launching. The shipped
+  configuration enables bounded children; edit `/settings` or TOML and restart
+  to change `rlm.recursion_enabled`.
 - A Turn consumes provider and Daytona quota. Confirm the run is authorized
   before starting.
 
@@ -36,7 +36,7 @@ tmux new-session -d -s fleet -x 200 -y 50 -c "$PWD" "uv run fleet cli --port 800
 
 Poll for readiness instead of sleeping. The pane renders **nothing for tens of
 seconds** while the supervisor starts the database preflight, MLflow, and the
-backend — its own readiness bound for the Daytona profile is 150s, so poll at
+backend — its own readiness bound for the Daytona runtime is 150s, so poll at
 least that long before concluding the launch failed:
 
 ```bash
@@ -96,8 +96,9 @@ The final answer prints on its own line below the transcript.
 `capture-pane -p` returns only the visible screen; add `-S -2000` to include
 scrollback when a long Turn pushed the answer off the top.
 
-Treat `0 sub-LM` under `daytona-native` as expected rather than as a failure —
-child RLMs require the `daytona-recursive` profile.
+A Turn can finish with no semantic calls or children when they are unnecessary.
+Child availability is controlled by `rlm.recursion_enabled` in the configuration;
+usage counts alone do not prove a child ran.
 
 ## Inspect the traces
 

@@ -2,7 +2,7 @@
 """Run the native semantic FastAPI and attachment durability live contracts.
 
 This operator command checks one committed candidate with the configured
-``daytona-native`` policy. It does not certify recursive execution, provider
+native-only configuration (``rlm.recursion_enabled=false``). It does not certify recursive execution, provider
 containment, release readiness, or deployment.
 """
 
@@ -23,9 +23,8 @@ from typing import Any
 from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import (
-    ProfileEnvironmentContract,
-    active_profile,
-    load_profile_environment_contracts,
+    ConfigurationEnvironmentContract,
+    load_configuration_environment_contract,
     require_live_execution,
 )
 from fleet_rlm.config.settings import FleetConfigurationError
@@ -33,7 +32,6 @@ from fleet_rlm.config.settings import FleetConfigurationError
 RECEIPT_SCHEMA = "fleet.live-daytona-verification/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 LIVE_AUTH_VALUES = frozenset({"1", "true", "yes"})
-LIVE_PROFILE = "daytona-native"
 ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
 SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -117,13 +115,13 @@ def _candidate() -> tuple[str, str]:
     return sha, branch
 
 
-def _profile_contract() -> ProfileEnvironmentContract:
-    contract = next(
-        (item for item in load_profile_environment_contracts() if item.name == LIVE_PROFILE),
-        None,
-    )
-    if contract is None:
-        raise FleetConfigurationError(f"required live profile is missing: {LIVE_PROFILE}")
+def _configuration_contract() -> ConfigurationEnvironmentContract:
+    contract = load_configuration_environment_contract()
+    if contract.runtime_environment != "daytona" or contract.recursion_enabled:
+        raise FleetConfigurationError(
+            "native-only verification requires runtime.environment=daytona and rlm.recursion_enabled=false "
+            "in config/fleet.toml"
+        )
     return contract
 
 
@@ -407,14 +405,12 @@ def main(argv: list[str] | None = None) -> int:
 
     _load_repo_env()
     try:
-        require_live_execution(profile=LIVE_PROFILE)
-        if active_profile(require_live_execution()) != LIVE_PROFILE:
-            raise FleetConfigurationError(f"the configured default profile must be {LIVE_PROFILE}")
-        contract = _profile_contract()
+        require_live_execution()
+        contract = _configuration_contract()
         models = _candidate_models()
         missing = [name for name in contract.provider_environment_names if not os.environ.get(name)]
         if missing:
-            raise FleetConfigurationError("live profile credentials are incomplete")
+            raise FleetConfigurationError("configured provider credentials are incomplete")
         sha, branch = _candidate()
         repo_root = Path(_git("rev-parse", "--show-toplevel")).resolve()
         lockfile_sha256 = hashlib.sha256((repo_root / "uv.lock").read_bytes()).hexdigest()
@@ -514,7 +510,7 @@ def main(argv: list[str] | None = None) -> int:
     receipt = {
         "schema": RECEIPT_SCHEMA,
         "candidate": candidate,
-        "policy": {"profile": LIVE_PROFILE, "models": models},
+        "policy": {"runtime_environment": contract.runtime_environment, "recursion_enabled": False, "models": models},
         "timing": {"started_at": started_at, "finished_at": _utc_now()},
         "contracts": {
             "attachment_artifact_durability": {"passed": True, "evidence": durability_evidence},

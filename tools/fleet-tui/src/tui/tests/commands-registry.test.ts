@@ -13,7 +13,6 @@ const REGISTRATION_ORDER = [
   "skills",
   "skill",
   "settings",
-  "profiles",
   "volume",
   "status",
   "attach",

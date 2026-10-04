@@ -19,13 +19,13 @@ candidate and behavior its contract records.
 | `scripts/openapi_tools.py` | Generate or check the OpenAPI contract. |
 | `scripts/generate_stream_fixture.py` | Generate or check the deterministic TUI stream fixture. |
 | `scripts/generate_tui_chunk_validation.py` | Generate or check TUI chunk-validation tables. |
-| `scripts/generate_profile_matrix.py` | Generate or check the TOML-derived profile matrix. |
+| `scripts/generate_configuration_reference.py` | Generate or check the TOML-derived configuration environment reference. |
 | `scripts/validate_release.py` | Validate package metadata, artifacts, and release hygiene. |
 | `scripts/release_smoke.py` | Exercise the installed wheel through a local smoke check. |
 | `scripts/normalize_release_artifacts.py` | Normalize wheel and sdist metadata for reproducible release identities. |
 
 Use the matching Make target where one exists. Generated contracts and the
-profile matrix must be regenerated from their owning source, never edited by
+configuration environment reference must be regenerated from their owning source, never edited by
 hand. Codebase-tree and dependency-boundary checks remain separate because they
 guard different architectural rules.
 
@@ -46,7 +46,7 @@ guard different architectural rules.
 
 Credentialed commands require explicit operator intent and their documented
 policy, target, credential, spend, and receipt arguments. The live Daytona
-verifier requires `FLEET_LIVE=1`, the `daytona-native` profile, explicit bounded
+verifier requires `FLEET_LIVE=1`, the `rlm.recursion_enabled = false` setting, explicit bounded
 Root and Sub model IDs, provider credentials, a clean tracked candidate branch,
 and a new ignored or out-of-repository receipt path. `--help` does not load
 credentials or authorize a run.

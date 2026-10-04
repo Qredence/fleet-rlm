@@ -1,4 +1,4 @@
-/** Skills and settings slash commands: /skills, /skill, /settings, /profiles. */
+/** Skills and settings slash commands: /skills, /skill, /settings. */
 
 import { FleetApiError, type FleetSettingsPolicy } from "../../fleet-api-client.js";
 import {
@@ -118,65 +118,22 @@ export const settingsCommand: CommandSpec = {
         // Compatibility path: presenters without save-callback support (test
         // doubles) resolve the first update; save it once and close as before.
         if (update) {
-          await ctx.client.updateSettings(update);
+          await ctx.client.applySettings(update.revision, [
+            { path: update.path, value: update.value },
+          ]);
           notifySuccess(ctx, "Saved to config/fleet.toml. Restart Fleet to apply the new policy.");
         }
         return;
       }
-      const lines = settings.scopes.flatMap((scope) => [
-        `[${scope.name}]`,
-        ...scope.fields.map((field) => `  ${field.path} = ${formatSettingValue(field.value)}`),
-      ]);
+      const lines = settings.fields.map(
+        (field) => `  ${field.path} = ${formatSettingValue(field.value)}`,
+      );
       appendSystem(
         ctx.store,
         `Fleet settings (restart required after save)\n\n${lines.join("\n")}`,
       );
     } catch (error) {
       appendSystem(ctx.store, `Failed to access settings: ${errorMessage(error)}`);
-    }
-  },
-};
-
-export const profilesCommand: CommandSpec = {
-  name: "profiles",
-  description: "Switch the active Fleet profile (restart required)",
-  usage: "/profiles",
-  handler: async (_args, ctx) => {
-    try {
-      const settings = await ctx.client.getSettings();
-      const profiles =
-        settings.available_profiles ??
-        settings.scopes.map((scope) => scope.name).filter((name) => name !== "defaults");
-      const active = settings.active_profile ?? undefined;
-      const selectedForRestart = settings.default_profile ?? active;
-      if (ctx.presenter) {
-        const selected = await ctx.presenter.chooseProfile(profiles, active, selectedForRestart);
-        if (!selected || selected === selectedForRestart) return;
-        await ctx.client.setProfile(selected, settings.revision);
-        notifySuccess(ctx, `Profile set to '${selected}'. Restart Fleet to apply.`);
-        return;
-      }
-      const lines = profiles.map((name) => {
-        let suffix = "";
-        if (name === active && name === selectedForRestart) suffix = " (current)";
-        else if (name === active) suffix = " (running)";
-        else if (name === selectedForRestart) suffix = " (selected)";
-        return `  ${name}${suffix}`;
-      });
-      let state = "";
-      if (active && selectedForRestart && active !== selectedForRestart) {
-        state = ` (running: ${active}; selected: ${selectedForRestart})`;
-      } else if (active) {
-        state = ` (current: ${active})`;
-      } else if (selectedForRestart) {
-        state = ` (selected: ${selectedForRestart})`;
-      }
-      appendSystem(
-        ctx.store,
-        `Fleet profiles${state} (restart to apply)\n\n${lines.join("\n")}\n\nSwitch with /profiles in the interactive TUI, or /settings to edit policy values.`,
-      );
-    } catch (error) {
-      appendSystem(ctx.store, `Failed to access profiles: ${errorMessage(error)}`);
     }
   },
 };
@@ -192,23 +149,10 @@ async function saveSettingsUpdate(
   update: SettingsUpdate | SettingsBatchUpdate,
 ): Promise<FleetSettingsPolicy | null> {
   try {
-    const saved =
-      "updates" in update
-        ? await ctx.client.applySettings(
-            update.revision,
-            update.updates.map((item) =>
-              item.unset
-                ? { scope: item.scope, path: item.path, unset: true as const }
-                : {
-                    scope: item.scope,
-                    path: item.path,
-                    value: item.value,
-                    unset: false as const,
-                  },
-            ),
-            update.defaultProfile,
-          )
-        : await ctx.client.updateSettings(update);
+    const saved = await ctx.client.applySettings(
+      update.revision,
+      "updates" in update ? update.updates : [{ path: update.path, value: update.value }],
+    );
     const message =
       "updates" in update
         ? `Saved ${update.updates.length} settings changes to config/fleet.toml. Restart Fleet to apply.`

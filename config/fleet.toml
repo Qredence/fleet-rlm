@@ -1,12 +1,10 @@
 [config]
-schema_version = 1
-# The native-only profile is the default; select daytona-recursive to opt in to Fleet children.
-default_profile = "daytona-native"
+schema_version = 2
 
-[defaults.application]
+[application]
 name = "fleet-rlm"
 
-[defaults.runtime]
+[runtime]
 environment = "daytona"
 live_enabled = true
 turn_timeout_seconds = 1800
@@ -14,33 +12,28 @@ max_active_daytona_leases = 8
 heartbeat_seconds = 10
 stale_after_seconds = 60
 
-# Root and Sub use the Alibaba DashScope (MaaS) OpenAI-compatible endpoint.
-# The workspace Databricks gateway enforces a per-minute output-token quota that
-# kills multi-step Turns after roughly five root-LM calls; MaaS carries no such
-# quota. Keep the deliberately bounded 16,384-token role limit; Fleet's
-# character-level output caps independently bound retained output.
-[defaults.llm.root]
-model = "deepseek-v4.1-flash"
-api_key_env = "ALIBABA_API_KEY"
-base_url_env = "FLEET_MAAS_BASE_URL"
+# Root and Sub use the Databricks Unity AI Gateway Chat Completion endpoint.
+[llm.root]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 300
 num_retries = 3
 cache = false
 
-[defaults.llm.sub]
-model = "deepseek-v4.1-flash"
-api_key_env = "ALIBABA_API_KEY"
-base_url_env = "FLEET_MAAS_BASE_URL"
+[llm.sub]
+model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+api_key_env = "DATABRICKS_TOKEN"
+base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
 timeout_seconds = 90
 temperature = 0
 num_retries = 3
 cache = false
 
-# Native-only behavior is the base policy. Profiles opt in to Fleet child
-# execution explicitly; native llm_query remains available in either mode.
-[defaults.rlm]
+# Bounded Fleet child execution is enabled; native llm_query remains available.
+[rlm]
 max_iters = 12
 max_llm_calls = 32
 max_provider_attempts = 2048
@@ -58,7 +51,7 @@ execution_timeout_s = 300
 child_execution_timeout_s = 0
 wrap_up_seconds = 300
 finalization_attempts = 2
-recursion_enabled = false
+recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8
@@ -68,13 +61,13 @@ recursion_max_parallel_children = 4
 autonomous_memory_categories = []
 verbose = true
 
-[defaults.storage]
+[storage]
 data_root = ".fleet_rlm"
 max_upload_bytes = 10485760
 max_artifact_bytes = 10485760
 database_url_env = "FLEET_DATABASE_URL"
 
-[defaults.daytona]
+[daytona]
 api_key_env = "FLEET_DAYTONA_API_KEY"
 snapshot_env = "FLEET_DAYTONA_SNAPSHOT"
 child_snapshot_env = "FLEET_DAYTONA_CHILD_SNAPSHOT"
@@ -82,10 +75,10 @@ org_id_env = "FLEET_DAYTONA_ORG_ID"
 volume_name = "fleet-volume"
 volume_mount_path = "/home/daytona/fleet"
 
-[defaults.logging]
+[logging]
 level = "INFO"
 
-[defaults.mlflow]
+[mlflow]
 tracing_enabled = true
 tracking_uri = "http://127.0.0.1:5001"
 experiment_name = "fleet-rlm"
@@ -101,7 +94,7 @@ trace_export_retry_seconds = 10
 http_request_timeout_seconds = 10
 trace_shutdown_seconds = 5.0
 
-[defaults.posthog]
+[posthog]
 enabled = true
 project_token_env = "POSTHOG_PROJECT_TOKEN"
 host = "https://eu.i.posthog.com"
@@ -109,62 +102,7 @@ host = "https://eu.i.posthog.com"
 # One durable local Runtime Event capture file per Run, so a Turn's streamed
 # events survive a client disconnect. Capture is observation, never execution
 # authority; its size and event bounds are module constants, not policy.
-[defaults.capture]
+[capture]
 enabled = true
 retention_days = 14
 max_captures = 500
-
-# The default local/disposable profile inherits the base policy: native DSPy
-# RLM tools, local MLflow tracing, and the Root/Sub model pair above.
-[profiles.daytona-native]
-
-# Explicit opt-in for bounded Fleet child execution. This does not supersede
-# the Phase 4 failed retain gates or establish recursive value.
-[profiles.daytona-recursive]
-[profiles.daytona-recursive.rlm]
-recursion_enabled = true
-
-# Opt-in local Databricks gates. Promote the local default only after bounded
-# full-Turn evidence establishes format, correctness, settlement, and cleanup.
-[profiles.daytona-native-databricks.llm.root]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-native-databricks.llm.sub]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-recursive-databricks.llm.root]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-recursive-databricks.llm.sub]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-recursive-databricks.rlm]
-recursion_enabled = true
-
-# Explicit managed-production profile. Keep the native-only local/disposable
-# profile as the default until the Lakebase maintenance-window rehearsal and native
-# containment gates are complete; operators select this profile by changing
-# [config] default_profile in the deployment artifact.
-# Managed deployment keeps the Databricks Unity AI Gateway transport even though
-# the committed defaults now select Alibaba MaaS: this profile is the credentialed
-# Lakebase + managed-MLflow deployment contract.
-[profiles.daytona-managed.llm.root]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-managed.llm.sub]
-model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-api_key_env = "DATABRICKS_TOKEN"
-base_url_env = "FLEET_LLM_BASE_URL"
-
-[profiles.daytona-managed.storage]
-database_url_env = "FLEET_DATABASE_URL"

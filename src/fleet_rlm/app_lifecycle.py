@@ -507,7 +507,7 @@ async def build_daytona_composition(
             artifact_reader=artifact_reader,
             session_catalog=session_catalog,
             session_lifecycle=session_lifecycle,
-            config_policy=ConfigPolicyService.from_settings(resolved),
+            config_policy=ConfigPolicyService.for_runtime(),
             workspace_volume_gateway=gateway,
             workspace_file_service=workspace_file_service,
             daytona_runtime=runtime,

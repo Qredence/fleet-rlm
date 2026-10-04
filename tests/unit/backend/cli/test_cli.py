@@ -38,11 +38,11 @@ def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
     fleet_main(["doctor", "daytona"])
 
     output = capsys.readouterr().out
-    assert "[ok] policy: profile=daytona" in output
+    assert "[ok] policy: environment=daytona" in output
     assert output.endswith("[ok] settings: Settings valid.\n[ok] cleanup: Sandbox deleted.\n")
 
 
-def test_fleet_doctor_reads_profile_from_toml_default_profile(
+def test_fleet_doctor_reads_single_toml_policy(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: pytest.TempPathFactory,
@@ -63,8 +63,7 @@ def test_fleet_doctor_reads_profile_from_toml_default_profile(
 
     fleet_main(["doctor", "daytona"])
 
-    # committed config/fleet.toml has default_profile = "daytona-native"
-    assert "[ok] policy: profile=daytona-native" in capsys.readouterr().out
+    assert "[ok] policy: environment=daytona" in capsys.readouterr().out
 
 
 def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
@@ -96,7 +95,7 @@ def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
 
     assert error.value.code == 1
     output = capsys.readouterr().out
-    assert "[ok] policy: profile=daytona" in output
+    assert "[ok] policy: environment=daytona" in output
     assert output.endswith(
         "[failed] provider: Daytona authentication was rejected.\n"
         "action: verify FLEET_DAYTONA_API_KEY and Daytona account access.\n"
@@ -155,7 +154,7 @@ def test_fleet_doctor_reports_invalid_environment_without_traceback(
 
     fleet_main(["doctor", "daytona"])
     output = capsys.readouterr().out
-    assert output.startswith("[ok] policy: profile=daytona-native environment=daytona")
+    assert output.startswith("[ok] policy: environment=daytona")
     assert output.endswith("[ok] settings: Settings valid.\n")
 
 
@@ -254,41 +253,36 @@ def test_fleet_web_threads_the_non_loopback_opt_in_to_the_shared_launcher(
             "host": "0.0.0.0",
             "port": 8000,
             "reload": False,
-            "profile": None,
             "allow_non_loopback": True,
         }
     ]
 
 
-def test_profile_aware_server_loads_settings_and_builds_app_before_binding(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import fleet_rlm.app as app_module
-    import fleet_rlm.config.loader as loader
+@pytest.mark.parametrize("reload", [False, True])
+def test_server_uses_configured_import_string_with_reload(monkeypatch: pytest.MonkeyPatch, reload: bool) -> None:
     from fleet_rlm.cli import server
 
     calls: list[object] = []
-    settings = object()
-    application = object()
-    monkeypatch.setattr(
-        loader,
-        "load_runtime_settings",
-        lambda **kwargs: calls.append(("settings", kwargs)) or settings,
-    )
-    monkeypatch.setattr(app_module, "create_app", lambda **kwargs: calls.append(("app", kwargs)) or application)
     monkeypatch.setitem(
-        sys.modules,
-        "uvicorn",
-        SimpleNamespace(run=lambda target, **kwargs: calls.append(("uvicorn", target, kwargs))),
+        sys.modules, "uvicorn", SimpleNamespace(run=lambda target, **kwargs: calls.append((target, kwargs)))
     )
+    server.serve_api(host="127.0.0.1", port=8125, reload=reload)
+    assert calls == [("fleet_rlm.main:app", {"host": "127.0.0.1", "port": 8125, "reload": reload})]
 
-    server.serve_api(host="127.0.0.1", port=8125, reload=False, profile="daytona-recursive")
 
-    assert calls == [
-        ("settings", {"profile": "daytona-recursive"}),
-        ("app", {"settings": settings}),
-        ("uvicorn", application, {"host": "127.0.0.1", "port": 8125, "reload": False}),
-    ]
+@pytest.mark.parametrize("command", ["web", "cli"])
+def test_cli_rejects_removed_profile_argument(command: str) -> None:
+    with pytest.raises(SystemExit) as error:
+        fleet_main([command, "--profile", "daytona-recursive"])
+    assert error.value.code == 2
+
+
+def test_module_server_rejects_removed_profile_argument() -> None:
+    from fleet_rlm.cli import server
+
+    with pytest.raises(SystemExit) as error:
+        server.main(["--profile", "daytona-recursive"])
+    assert error.value.code == 2
 
 
 def test_supervision_failure_is_reported_without_traceback(

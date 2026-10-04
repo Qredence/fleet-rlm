@@ -15,7 +15,7 @@ import { selectTheme, theme } from "../theme.js";
 
 import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
 
-export type SettingsField = FleetSettingsPolicy["scopes"][number]["fields"][number];
+export type SettingsField = FleetSettingsPolicy["fields"][number];
 
 /**
  * Creates a selectable settings item with an editor appropriate for the field type.
@@ -120,14 +120,12 @@ export function parseFieldValue(field: SettingsField, raw: string): ParsedFieldV
  * Creates a settings update from raw field input and completes the editing operation.
  *
  * @param settings - Current settings policy used to assign the update revision
- * @param scope - Settings scope for the update
  * @param field - Field being updated
  * @param raw - Raw value entered for the field
  * @param finish - Callback receiving the update, or `null` when the value is invalid
  */
 export function applyFieldValue(
   settings: FleetSettingsPolicy,
-  scope: string,
   field: SettingsField,
   raw: string,
   finish: (update: SettingsUpdate | null) => void,
@@ -139,7 +137,6 @@ export function applyFieldValue(
   }
   finish({
     revision: settings.revision,
-    scope,
     path: field.path,
     value: parsed.value,
   });
@@ -288,8 +285,6 @@ function describeField(field: SettingsField): string {
   } else if (isFixedChoice(field)) {
     parts.push("fixed; only one value is supported");
   }
-  if (field.origin === "inherited") parts.push("inherited from defaults");
-  if (field.origin === "override") parts.push("profile override; can reset to inherited");
   return parts.join(" · ");
 }
 
