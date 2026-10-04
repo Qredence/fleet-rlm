@@ -1,7 +1,7 @@
 """Runtime policy loading and environment resolution for Fleet settings.
 
 Reads the required TOML policy, resolves environment-backed secrets through
-the selected profile, and produces the authoritative ``Settings`` instance.
+the configuration, and produces the authoritative ``Settings`` instance.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ import logging
 import os
 import tomllib
 from collections.abc import Mapping
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
@@ -57,10 +56,9 @@ def reject_retired_environment_variables() -> None:
 
 
 @dataclass(frozen=True, slots=True)
-class ProfileEnvironmentContract:
-    """Non-secret provider and profile facts derived from ``config/fleet.toml``."""
+class ConfigurationEnvironmentContract:
+    """Non-secret provider facts derived from ``config/fleet.toml``."""
 
-    name: str
     runtime_environment: str
     provider: str
     root_model: str
@@ -92,18 +90,6 @@ class ProfileEnvironmentContract:
             self.root_base_url_env,
             self.sub_base_url_env,
         )
-
-    @property
-    def managed_policy_environment_names(self) -> tuple[str, ...]:
-        """Return provider plus explicitly required managed-policy environment names."""
-        if self.name != "daytona-managed":
-            return self.provider_environment_names
-        # The managed production profile uses Lakebase for Fleet state while
-        # the selected observability topology remains local MLflow.  Managed
-        # Databricks MLflow fields are required only when that profile
-        # explicitly selects the logical ``databricks`` backend.
-        mlflow_names = self.mlflow_environment_names if self.mlflow_tracking_uri == "databricks" else ()
-        return _unique_environment_names(*self.provider_environment_names, self.database_url_env, *mlflow_names)
 
     @property
     def daytona_snapshot_environment_names(self) -> tuple[str, ...]:
@@ -207,14 +193,13 @@ def _require_mapping(value: object, location: str) -> Mapping[str, Any]:
     return cast(Mapping[str, Any], value)
 
 
-def _validate_policy_table(value: object, location: str, *, allow_partial_llm: bool = False) -> None:
+def _validate_policy_table(value: object, location: str) -> None:
     """
     Validate the structure and environment references in a runtime policy table.
 
     Parameters:
         value (object): Policy table to validate.
         location (str): Configuration path used in validation errors.
-        allow_partial_llm (bool): Whether LLM roles may omit an API key environment reference.
 
     Raises:
         FleetConfigurationError: If the table contains unknown keys, conflicting values,
@@ -247,8 +232,7 @@ def _validate_policy_table(value: object, location: str, *, allow_partial_llm: b
                 )
             if "base_url" in role_table and "base_url_env" in role_table:
                 raise FleetConfigurationError(f"{location}.llm.{role} cannot define both base_url and base_url_env")
-            if "api_key_env" in role_table or not allow_partial_llm:
-                _validate_environment_reference(role_table.get("api_key_env"), f"{location}.llm.{role}.api_key_env")
+            _validate_environment_reference(role_table.get("api_key_env"), f"{location}.llm.{role}.api_key_env")
             _validate_optional_environment_reference(
                 role_table.get("base_url_env"), f"{location}.llm.{role}.base_url_env"
             )
@@ -289,18 +273,8 @@ def _validate_optional_environment_reference(value: object, location: str) -> st
     return _validate_environment_reference(value, location)
 
 
-def _deep_merge(base: Mapping[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
-    result = deepcopy(dict(base))
-    for key, value in override.items():
-        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = deepcopy(value)
-    return result
-
-
 def _flatten_policy(policy: Mapping[str, Any]) -> FlattenedPolicy:
-    """Flatten one validated profile table into ``Settings`` constructor input.
+    """Flatten the validated policy into ``Settings`` constructor input.
 
     The authoritative field specs own the TOML-path-to-Settings-field mapping;
     absent optional keys stay absent so ``Settings`` defaults apply, and
@@ -308,7 +282,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> FlattenedPolicy:
     runtime load seam.
 
     Parameters:
-        policy (Mapping[str, Any]): Validated merged policy table for one profile.
+        policy (Mapping[str, Any]): Validated policy table.
 
     Returns:
         FlattenedPolicy: Settings values plus pending environment references.
@@ -331,7 +305,7 @@ def _flatten_policy(policy: Mapping[str, Any]) -> FlattenedPolicy:
         else:
             settings[spec.settings_field or spec.toml_path] = value
     if missing:
-        raise FleetConfigurationError(f"selected profile is missing required setting(s): {', '.join(sorted(missing))}")
+        raise FleetConfigurationError(f"configuration is missing required setting(s): {', '.join(sorted(missing))}")
     return FlattenedPolicy(settings=settings, environment_references=environment_references)
 
 
@@ -342,37 +316,29 @@ def _unique_environment_names(*values: str | None) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class PolicyDocument:
-    """Root ``config/fleet.toml`` document without secret/environment resolution."""
+    """Validated direct policy without secret/environment resolution."""
 
-    default_profile: str | None
-    defaults: Mapping[str, Any]
-    profiles: Mapping[str, Any]
+    policy: Mapping[str, Any]
 
 
 def _policy_document_from_mapping(document: Mapping[str, Any]) -> PolicyDocument:
-    """Validate and normalize one loaded Fleet policy root table."""
+    """Validate the schema-versioned, single Fleet configuration."""
     root = _require_mapping(document, "root")
-    allowed_root = {"config", "defaults", "profiles"}
-    unknown = set(root).difference(allowed_root)
-    if unknown:
-        raise FleetConfigurationError(f"unknown configuration key(s): {', '.join(sorted(unknown))}")
     config = _require_mapping(root.get("config", {}), "config")
-    if config.get("schema_version") != 1:
-        raise FleetConfigurationError("config.schema_version must be 1")
-    unknown_config = set(config).difference({"schema_version", "default_profile"})
+    if {"defaults", "profiles"}.intersection(root) or "default_profile" in config or config.get("schema_version") == 1:
+        raise FleetConfigurationError(
+            "profile-based Fleet configuration is no longer supported; migrate to config.schema_version = 2: "
+            "merge the chosen profile into defaults, move the resulting sections to the root, and remove "
+            "defaults, profiles, and config.default_profile. See docs/reference/configuration.md"
+        )
+    if not isinstance(config.get("schema_version"), int) or config.get("schema_version") != 2:
+        raise FleetConfigurationError("config.schema_version must be 2")
+    unknown_config = set(config).difference({"schema_version"})
     if unknown_config:
         raise FleetConfigurationError(f"unknown configuration key(s) at config: {', '.join(sorted(unknown_config))}")
-    default_profile = config.get("default_profile")
-    if default_profile is not None and not isinstance(default_profile, str):
-        raise FleetConfigurationError("config.default_profile must be a string")
-    defaults = _require_mapping(root.get("defaults", {}), "defaults")
-    profiles = _require_mapping(root.get("profiles", {}), "profiles")
-    if not profiles:
-        raise FleetConfigurationError("config.profiles must declare at least one profile")
-    _validate_policy_table(defaults, "defaults", allow_partial_llm=True)
-    if default_profile is not None and default_profile not in profiles:
-        raise FleetConfigurationError(f"configured profile does not exist: {default_profile}")
-    return PolicyDocument(default_profile, defaults, profiles)
+    policy = {key: value for key, value in root.items() if key != "config"}
+    _validate_policy_table(policy, "root")
+    return PolicyDocument(policy)
 
 
 def _read_policy_document(path: Path) -> PolicyDocument:
@@ -388,37 +354,18 @@ def _read_policy_document(path: Path) -> PolicyDocument:
     return _policy_document_from_mapping(document)
 
 
-def _profile_contract(
-    name: str,
-    defaults: Mapping[str, Any],
-    selected: object,
-) -> ProfileEnvironmentContract:
-    """
-    Builds the non-secret environment contract for a profile after applying its defaults and overrides.
-
-    Parameters:
-        name (str): Profile name used to identify configuration locations.
-        defaults (Mapping[str, Any]): Default policy values.
-        selected (object): Profile-specific policy values.
-
-    Returns:
-        ProfileEnvironmentContract: Validated contract containing the profile's runtime,
-            model, and environment-reference settings.
-    """
-    selected_table = _require_mapping(selected, f"profiles.{name}")
-    # Profile tables may override only the fields that differ from defaults;
-    # the merged policy below remains strict about the complete Root/Sub roles.
-    _validate_policy_table(selected_table, f"profiles.{name}", allow_partial_llm=True)
-    merged = _deep_merge(defaults, selected_table)
-    _validate_policy_table(merged, f"profiles.{name}")
+def load_configuration_environment_contract(path: Path | None = None) -> ConfigurationEnvironmentContract:
+    """Return the non-secret environment contract of the single validated policy."""
+    policy = _read_policy_document(path or _CONFIG_PATH).policy
+    settings = Settings.model_validate(dict(_flatten_policy(policy).settings))
 
     def table(section: str) -> Mapping[str, Any]:
-        return _require_mapping(merged.get(section, {}), f"profiles.{name}.{section}")
+        return _require_mapping(policy.get(section, {}), section)
 
     runtime = table("runtime")
     llm = table("llm")
-    root = _require_mapping(llm.get("root"), f"profiles.{name}.llm.root")
-    sub = _require_mapping(llm.get("sub"), f"profiles.{name}.llm.sub")
+    root = _require_mapping(llm.get("root"), "llm.root")
+    sub = _require_mapping(llm.get("sub"), "llm.sub")
     daytona = table("daytona")
     storage = table("storage")
     mlflow = table("mlflow")
@@ -428,32 +375,22 @@ def _profile_contract(
             raise FleetConfigurationError(f"{location} must be a non-blank string")
         return value
 
-    root_api_key_env = _validate_environment_reference(root.get("api_key_env"), f"profiles.{name}.llm.root.api_key_env")
-    sub_api_key_env = _validate_environment_reference(sub.get("api_key_env"), f"profiles.{name}.llm.sub.api_key_env")
-    root_base_url_env = _validate_optional_environment_reference(
-        root.get("base_url_env"), f"profiles.{name}.llm.root.base_url_env"
-    )
-    sub_base_url_env = _validate_optional_environment_reference(
-        sub.get("base_url_env"), f"profiles.{name}.llm.sub.base_url_env"
-    )
-    daytona_api_key_env = _validate_environment_reference(
-        daytona.get("api_key_env"), f"profiles.{name}.daytona.api_key_env"
-    )
-    daytona_snapshot_env = _validate_optional_environment_reference(
-        daytona.get("snapshot_env"), f"profiles.{name}.daytona.snapshot_env"
-    )
+    root_api_key_env = _validate_environment_reference(root.get("api_key_env"), "llm.root.api_key_env")
+    sub_api_key_env = _validate_environment_reference(sub.get("api_key_env"), "llm.sub.api_key_env")
+    root_base_url_env = _validate_optional_environment_reference(root.get("base_url_env"), "llm.root.base_url_env")
+    sub_base_url_env = _validate_optional_environment_reference(sub.get("base_url_env"), "llm.sub.base_url_env")
+    daytona_api_key_env = _validate_environment_reference(daytona.get("api_key_env"), "daytona.api_key_env")
+    daytona_snapshot_env = _validate_optional_environment_reference(daytona.get("snapshot_env"), "daytona.snapshot_env")
     daytona_child_snapshot_env = _validate_optional_environment_reference(
-        daytona.get("child_snapshot_env"), f"profiles.{name}.daytona.child_snapshot_env"
+        daytona.get("child_snapshot_env"), "daytona.child_snapshot_env"
     )
-    daytona_org_id_env = _validate_environment_reference(
-        daytona.get("org_id_env"), f"profiles.{name}.daytona.org_id_env"
-    )
+    daytona_org_id_env = _validate_environment_reference(daytona.get("org_id_env"), "daytona.org_id_env")
     database_url_env = _validate_optional_environment_reference(
-        storage.get("database_url_env"), f"profiles.{name}.storage.database_url_env"
+        storage.get("database_url_env"), "storage.database_url_env"
     )
     mlflow_environment_names = _unique_environment_names(
         *(
-            _validate_optional_environment_reference(mlflow.get(f"{field}_env"), f"profiles.{name}.mlflow.{field}_env")
+            _validate_optional_environment_reference(mlflow.get(f"{field}_env"), f"mlflow.{field}_env")
             for field in (
                 "experiment_name",
                 "trace_catalog",
@@ -464,12 +401,11 @@ def _profile_contract(
         )
     )
     provider = "OpenAI Chat Completion"
-    return ProfileEnvironmentContract(
-        name=name,
-        runtime_environment=required_text(runtime.get("environment"), f"profiles.{name}.runtime.environment"),
+    return ConfigurationEnvironmentContract(
+        runtime_environment=required_text(runtime.get("environment"), "runtime.environment"),
         provider=provider,
-        root_model=required_text(root.get("model"), f"profiles.{name}.llm.root.model"),
-        sub_model=required_text(sub.get("model"), f"profiles.{name}.llm.sub.model"),
+        root_model=required_text(root.get("model"), "llm.root.model"),
+        sub_model=required_text(sub.get("model"), "llm.sub.model"),
         root_api_key_env=root_api_key_env,
         sub_api_key_env=sub_api_key_env,
         root_base_url_env=root_base_url_env,
@@ -481,28 +417,11 @@ def _profile_contract(
         daytona_child_snapshot_env=daytona_child_snapshot_env,
         daytona_org_id_env=daytona_org_id_env,
         database_url_env=database_url_env,
-        mlflow_tracing_enabled=bool(mlflow.get("tracing_enabled", False)),
+        mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
         mlflow_tracking_uri=mlflow.get("tracking_uri"),
         mlflow_environment_names=mlflow_environment_names,
-        recursion_enabled=bool(table("rlm").get("recursion_enabled", False)),
+        recursion_enabled=settings.rlm_recursion_enabled,
     )
-
-
-def load_profile_environment_contracts(path: Path | None = None) -> tuple[ProfileEnvironmentContract, ...]:
-    """Return every profile's provider/environment contract from the TOML policy."""
-    document = _read_policy_document(path or _CONFIG_PATH)
-    return tuple(_profile_contract(name, document.defaults, selected) for name, selected in document.profiles.items())
-
-
-def active_profile_contract(path: Path | None = None) -> ProfileEnvironmentContract:
-    """Return the contract selected by TOML, never by ambient environment variables."""
-    document = _read_policy_document(path or _CONFIG_PATH)
-    default_profile = document.default_profile
-    if default_profile is None:
-        if len(document.profiles) != 1:
-            raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
-        default_profile = next(iter(document.profiles))
-    return _profile_contract(default_profile, document.defaults, document.profiles[default_profile])
 
 
 def _resolve_environment_value(
@@ -537,93 +456,11 @@ def _resolve_environment_value(
 _DOTENV_ONLY_FIELDS: frozenset[str] = frozenset({"daytona_snapshot", "daytona_child_snapshot", "daytona_org_id"})
 
 
-def _require_managed_profile_environment_values(
-    profile: str,
-    flattened: FlattenedPolicy,
-    dotenv: Mapping[str, str | None],
-) -> None:
-    """Fail early when the explicit managed Lakebase/MLflow policy is incomplete."""
-    if profile != "daytona-managed":
-        return
-    # Managed identity and provider values are checked by the provider
-    # composition seam.  This loader gate owns the production persistence
-    # contract, plus the optional environment-backed fields required by a
-    # managed Databricks MLflow topology.
-    references: list[tuple[str, str]] = [("database_url", "database_url_env")]
-    if flattened.settings.get("mlflow_tracking_uri") == "databricks":
-        references.extend(
-            (
-                ("mlflow_experiment_name", "mlflow_experiment_name_env"),
-                ("mlflow_trace_catalog", "mlflow_trace_catalog_env"),
-                ("mlflow_trace_schema", "mlflow_trace_schema_env"),
-                ("mlflow_trace_table_prefix", "mlflow_trace_table_prefix_env"),
-                ("mlflow_tracing_sql_warehouse_id", "mlflow_tracing_sql_warehouse_id_env"),
-            )
-        )
-    missing: set[str] = set()
-    for field_name, label in references:
-        environment_name = flattened.environment_references.get(field_name)
-        if not isinstance(environment_name, str) or not _resolve_environment_value(
-            environment_name,
-            dotenv,
-            dotenv_only=field_name in _DOTENV_ONLY_FIELDS,
-        ):
-            missing.add(environment_name if isinstance(environment_name, str) else label)
-    if missing:
-        raise FleetConfigurationError(
-            f"selected profile {profile!r} is missing required environment value(s): {', '.join(sorted(missing))}"
-        )
-    database_env = flattened.environment_references.get("database_url")
-    database_url = (
-        _resolve_environment_value(database_env, dotenv, dotenv_only=False) if isinstance(database_env, str) else None
-    )
-    try:
-        from fleet_rlm.persistence.database import ManagedDatabasePolicyError, validate_managed_postgres_url
-
-        validate_managed_postgres_url(database_url or "")
-    except ManagedDatabasePolicyError as exc:
-        raise FleetConfigurationError("selected managed profile has an invalid database policy") from exc
-
-
-def load_runtime_settings(*, profile: str | None = None) -> Settings:
-    """
-    Load and validate the runtime settings for the selected Fleet profile.
-
-    Parameters:
-        profile: Optional explicit profile name. When omitted, the committed
-            ``config.default_profile`` is used. Explicit selection is intended
-            for an operator launcher or an isolated campaign process; ambient
-            environment variables never select a profile.
-
-    Returns:
-        Settings: Resolved runtime settings, including environment-backed values.
-
-    Raises:
-        FleetConfigurationError: If the policy is missing, incomplete, invalid, or unsupported, or
-            required environment values are unavailable.
-    """
+def load_runtime_settings() -> Settings:
+    """Load the single TOML policy and resolve only its declared environment references."""
     dotenv = dotenv_values(".env")
     document = _read_policy_document(_CONFIG_PATH)
-    defaults = document.defaults
-    profiles = document.profiles
-    selected_profile = profile.strip() if isinstance(profile, str) else None
-    if profile is not None and not selected_profile:
-        raise FleetConfigurationError("selected profile must be a non-blank string")
-    if selected_profile is None:
-        selected_profile = document.default_profile
-    if selected_profile is None:
-        if len(profiles) == 1:
-            selected_profile = next(iter(profiles))
-        else:
-            raise FleetConfigurationError("config.default_profile is required when multiple profiles exist")
-    if selected_profile not in profiles:
-        raise FleetConfigurationError(f"selected profile does not exist: {selected_profile}")
-    selected = _require_mapping(profiles[selected_profile], f"profiles.{selected_profile}")
-    _validate_policy_table(selected, f"profiles.{selected_profile}", allow_partial_llm=True)
-    merged = _deep_merge(defaults, selected)
-    _validate_policy_table(merged, f"profiles.{selected_profile}")
-    flattened = _flatten_policy(merged)
-    _require_managed_profile_environment_values(selected_profile, flattened, dotenv)
+    flattened = _flatten_policy(document.policy)
 
     values: dict[str, Any] = dict(flattened.settings)
     for field_name, environment_name in flattened.environment_references.items():
@@ -638,26 +475,20 @@ def load_runtime_settings(*, profile: str | None = None) -> Settings:
             values[field_name] = resolved
     settings = Settings(**values)
     settings._dotenv_values = {key: value for key, value in dotenv.items() if value is not None}
-    settings._active_profile = selected_profile
     return settings
 
 
-def require_live_execution(*, profile: str | None = None) -> Settings:
+def require_live_execution() -> Settings:
     """Resolve the selected policy and require its live execution switch.
 
     This is deliberately separate from command invocation: callers still need
     to invoke a live script explicitly, while this single policy check provides
     the repository-wide fail-closed switch for credentialed commands.
     """
-    settings = load_runtime_settings(profile=profile)
+    settings = load_runtime_settings()
     if not settings.live_enabled:
         raise FleetConfigurationError("live execution is disabled by runtime.live_enabled=false")
     return settings
-
-
-def active_profile(settings: Settings) -> str | None:
-    """Return the TOML-selected active profile for the resolved settings."""
-    return settings._active_profile
 
 
 def configure_logging(settings: Settings) -> None:
@@ -667,12 +498,12 @@ def configure_logging(settings: Settings) -> None:
     logging.getLogger("dspy").setLevel(level)
 
 
-def redacted_policy_summary(settings: Settings, *, profile: str) -> str:
+def redacted_policy_summary(settings: Settings) -> str:
     """Return safe operator diagnostics without resolving any secret values."""
     root = settings.root_lm
     sub = settings.sub_lm
     return (
-        f"profile={profile} environment={settings.run_environment} "
+        f"environment={settings.run_environment} "
         f"root_model={root.model} sub_model={sub.model} "
         f"rlm_iters={settings.rlm_max_iters} "
         f"rlm_llm_calls={settings.rlm_max_llm_calls} "

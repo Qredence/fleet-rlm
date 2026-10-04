@@ -146,49 +146,6 @@ export class PiCommandPresenter implements CommandPresenter {
     );
   }
 
-  async chooseProfile(
-    profiles: string[],
-    active: string | undefined,
-    selected: string | undefined,
-  ): Promise<string | null> {
-    const contextParts: string[] = [];
-    if (active) contextParts.push(`Running: ${active}`);
-    if (selected) contextParts.push(`Selected for restart: ${selected}`);
-    return this.choose(
-      profiles.map((profile) => {
-        const isActive = profile === active;
-        const isSelected = profile === selected;
-        let state: "current" | "running" | "selected" | null = null;
-        if (isActive && isSelected) {
-          state = "current";
-        } else if (isActive) {
-          state = "running";
-        } else if (isSelected) {
-          state = "selected";
-        }
-        let description = "select for next restart";
-        if (state === "current") {
-          description = "running and selected for restart";
-        } else if (state === "running") {
-          description = "running now; select to keep on restart";
-        } else if (state === "selected") {
-          description = "applies on restart";
-        }
-        return {
-          value: profile,
-          label: state ? `${profile} (${state})` : profile,
-          description,
-        };
-      }),
-      {
-        title: "Select profile for next restart",
-        context: contextParts.join(" · ") || undefined,
-        hint: "Enter select",
-        selectedValue: selected,
-      },
-    );
-  }
-
   private choose(
     items: SelectItem[],
     options: {
@@ -212,7 +169,7 @@ export class PiCommandPresenter implements CommandPresenter {
     });
   }
 
-  /** Legacy contract: resolve the first chosen update and close (mocks/tests). */
+  /** Resolve one field edit when no save callback is supplied. */
   private chooseSettingOnce(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null> {
     return new Promise((resolve) => {
       const finish = (update: SettingsUpdate | null) => {
@@ -220,22 +177,20 @@ export class PiCommandPresenter implements CommandPresenter {
         this.restoreFocus();
         resolve(update);
       };
-      const scopeItems = (): SettingItem[] =>
-        settings.scopes.map((scope) => ({
-          id: scope.name,
-          label: scope.name,
-          description: `${scope.fields.length} setting${scope.fields.length === 1 ? "" : "s"}`,
+      const groupItems = (): SettingItem[] =>
+        settingGroups(settings).map((group) => ({
+          id: group.name,
+          label: group.name,
+          description: `${group.fields.length} setting${group.fields.length === 1 ? "" : "s"}`,
           currentValue: "",
           submenu: (_current, done) =>
             new SettingsList(
-              scope.fields.map((field) => fieldItem(field)),
+              group.fields.map((field) => fieldItem(field)),
               10,
               settingsListTheme,
               (id, value) => {
-                const field = settings.scopes
-                  .flatMap((item) => item.fields)
-                  .find((candidate) => candidate.path === id);
-                if (field) applyFieldValue(settings, scope.name, field, value, finish);
+                const field = settings.fields.find((candidate) => candidate.path === id);
+                if (field) applyFieldValue(settings, field, value, finish);
               },
               () => done(undefined),
               { enableSearch: true },
@@ -244,7 +199,7 @@ export class PiCommandPresenter implements CommandPresenter {
       const handle = this.showModal(
         new TitledComponent(
           new SettingsList(
-            scopeItems(),
+            groupItems(),
             10,
             settingsListTheme,
             () => undefined,
@@ -267,11 +222,10 @@ export class PiCommandPresenter implements CommandPresenter {
       let policy = settings;
       const draft = new Map<string, SettingsBatchUpdate["updates"][number]>();
       let activeFieldList: SettingsList | null = null;
-      let activeScopeName: string | null = null;
+      let activeGroupName: string | null = null;
       let applyInFlight = false;
       let root: SettingsList;
 
-      const draftKey = (scope: string, path: string): string => `${scope}\u0000${path}`;
       const updateRootStatus = (): void => {
         let status = "no changes";
         if (applyInFlight) status = "applying...";
@@ -284,46 +238,32 @@ export class PiCommandPresenter implements CommandPresenter {
         left: SettingsBatchUpdate["updates"][number],
         right: SettingsBatchUpdate["updates"][number],
       ): boolean =>
-        left.scope === right.scope &&
-        left.path === right.path &&
-        left.unset === right.unset &&
-        JSON.stringify(left.value) === JSON.stringify(right.value);
+        left.path === right.path && JSON.stringify(left.value) === JSON.stringify(right.value);
 
       const resyncDisplayedValues = (): void => {
-        // Field paths are unique per scope list; only the open scope's list
-        // can accept updates, so refresh from its fields alone.
-        const activeScope = policy.scopes.find((scope) => scope.name === activeScopeName);
-        if (!activeFieldList || !activeScope) return;
-        for (const field of activeScope.fields) {
-          const pending = draft.get(draftKey(activeScope.name, field.path));
-          activeFieldList.updateValue(
-            field.path,
-            displayValue(pending?.unset ? field.value : (pending?.value ?? field.value)),
-          );
+        if (!activeFieldList) return;
+        for (const field of policy.fields.filter((field) => field.group === activeGroupName)) {
+          const pending = draft.get(field.path);
+          activeFieldList.updateValue(field.path, displayValue(pending?.value ?? field.value));
         }
       };
 
-      const stage = (scopeName: string, field: SettingsField, raw: string): void => {
+      const stage = (field: SettingsField, raw: string): void => {
         const parsed = parseFieldValue(field, raw);
         if (!parsed.ok) {
           this.notify(`${field.path}: ${parsed.error}`);
           resyncDisplayedValues();
           return;
         }
-        draft.set(draftKey(scopeName, field.path), {
-          scope: scopeName,
-          path: field.path,
-          value: parsed.value,
-        });
+        draft.set(field.path, { path: field.path, value: parsed.value });
         updateRootStatus();
         resyncDisplayedValues();
       };
 
-      const onFieldChange = (scopeName: string, id: string, raw: string): void => {
-        const scope = policy.scopes.find((candidate) => candidate.name === scopeName);
-        const field = scope?.fields.find((candidate) => candidate.path === id);
+      const onFieldChange = (id: string, raw: string): void => {
+        const field = policy.fields.find((candidate) => candidate.path === id);
         if (!field || field.environment_overridden) return;
-        stage(scopeName, field, raw);
+        stage(field, raw);
       };
 
       const applyDraft = async (): Promise<void> => {
@@ -342,17 +282,13 @@ export class PiCommandPresenter implements CommandPresenter {
           const refreshed = await save({ revision: policy.revision, updates });
           if (!refreshed) return;
           const applied = updates.every((update) => {
-            const field = refreshed.scopes
-              .find((scope) => scope.name === update.scope)
-              ?.fields.find((candidate) => candidate.path === update.path);
-            return update.unset
-              ? field?.origin === "inherited"
-              : JSON.stringify(field?.value) === JSON.stringify(update.value);
+            const field = refreshed.fields.find((candidate) => candidate.path === update.path);
+            return JSON.stringify(field?.value) === JSON.stringify(update.value);
           });
           policy = refreshed;
           if (applied) {
             for (const update of updates) {
-              const key = draftKey(update.scope, update.path);
+              const key = update.path;
               const current = draft.get(key);
               if (current && sameDraftUpdate(current, update)) draft.delete(key);
             }
@@ -377,51 +313,30 @@ export class PiCommandPresenter implements CommandPresenter {
 
       root = new SettingsList(
         [
-          ...settings.scopes.map((scope) => ({
-            id: scope.name,
-            label: scope.name,
-            description: `${scope.fields.length} setting${scope.fields.length === 1 ? "" : "s"}`,
+          ...settingGroups(settings).map((group) => ({
+            id: group.name,
+            label: group.name,
+            description: `${group.fields.length} setting${group.fields.length === 1 ? "" : "s"}`,
             currentValue: "",
             submenu: (_current: string, done: (selectedValue?: string) => void) => {
-              // Look up the freshest snapshot so reopening a scope reflects
-              // values saved or refreshed through the server.
-              const latest =
-                policy.scopes.find((candidate) => candidate.name === scope.name) ?? scope;
+              const latest = policy.fields.filter((field) => field.group === group.name);
               const fieldList = new SettingsList(
-                latest.fields.flatMap((field) => [
+                latest.map((field) =>
                   fieldItem({
                     ...field,
-                    value: draft.get(draftKey(scope.name, field.path))?.value ?? field.value,
+                    value: draft.get(field.path)?.value ?? field.value,
                   }),
-                  ...(field.can_reset
-                    ? [
-                        {
-                          id: `__reset:${field.path}`,
-                          label: `Reset ${field.label}`,
-                          description: "Remove this profile override and inherit the default value",
-                          currentValue: "",
-                          values: ["reset"],
-                        },
-                      ]
-                    : []),
-                ]),
+                ),
                 10,
                 settingsListTheme,
                 (id, value) => {
-                  if (id.startsWith("__reset:")) {
-                    const path = id.slice("__reset:".length);
-                    draft.set(draftKey(scope.name, path), { scope: scope.name, path, unset: true });
-                    updateRootStatus();
-                    resyncDisplayedValues();
-                    return;
-                  }
-                  onFieldChange(scope.name, id, value);
+                  onFieldChange(id, value);
                 },
                 () => done(undefined),
                 { enableSearch: true },
               );
               activeFieldList = fieldList;
-              activeScopeName = scope.name;
+              activeGroupName = group.name;
               return fieldList;
             },
           })),
@@ -486,4 +401,17 @@ function relativeUpdatedAt(value: string | null | undefined): string {
   const elapsedHours = Math.floor(elapsedMinutes / 60);
   if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
   return `updated ${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+/** Group the single policy's fields by their existing editor categories. */
+function settingGroups(
+  policy: FleetSettingsPolicy,
+): Array<{ name: string; fields: SettingsField[] }> {
+  const groups = new Map<string, SettingsField[]>();
+  for (const field of policy.fields) {
+    const fields = groups.get(field.group) ?? [];
+    fields.push(field);
+    groups.set(field.group, fields);
+  }
+  return [...groups].map(([name, fields]) => ({ name, fields }));
 }

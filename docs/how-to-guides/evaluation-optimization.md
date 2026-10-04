@@ -1,7 +1,7 @@
 # Evaluation and Monitoring
 
 The Databricks-backed quality loop runs server-side against the managed
-`fleet_turn` traces written by a Databricks-tracing policy (a local profile
+`fleet_turn` traces written by a Databricks-tracing policy (a configuration
 with `mlflow.tracking_uri = "databricks"` and the UC `mlflow.*_env` references).
 It adds
 no Fleet Turn-path surface: tracing stays fail-soft and bounded by the
@@ -133,7 +133,7 @@ not certify live Daytona deletion semantics.
 
 Prerequisites: the `benchmark` extra (`uv sync --extra benchmark`) provides
 `databricks-agents` for UC-managed datasets. Production monitoring requires a
-Databricks-tracing policy (UC trace destination via the profile's
+Databricks-tracing policy (UC trace destination via the configuration's
 `mlflow.*_env` references) in an eligible region with the
 OpenTelemetry-on-Databricks preview enabled.
 
@@ -192,9 +192,10 @@ does not justify child promotion. Matched execution, judged quality, observed
 costs, and cleanup evidence remain open. See the
 [testing strategy](testing-strategy.md) for the current evidence boundaries.
 
-Phase 6 keeps `daytona-native` as the default and defers the full A/B/C campaign
-until a child-promotion decision. For the smaller native baseline, the existing
-`benchmark` command now accepts `--native-only` to check the active profile
+Phase 6 defers the full A/B/C campaign until a child-promotion decision.
+The shipped single configuration enables recursion; a native-only baseline
+requires explicitly disabling it and restarting Fleet. For the smaller native baseline, the existing
+`benchmark` command now accepts `--native-only` to check the configured recursion capability
 before admission and reject observed child work. Pair it with `--fixed-input`
 so every trial submits the same frozen prompt while HTTP idempotency keys remain
 unique. Run fresh-Session samples for

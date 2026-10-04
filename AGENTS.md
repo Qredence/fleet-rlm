@@ -32,8 +32,8 @@ behavior and tests define what the system does.
 - Use Python for deterministic inspection and reduction, `llm_query` for
   bounded semantic judgments, and Fleet child RLMs for independent work that
   needs iterative investigation. These tools serve different needs.
-- Full child recursion is bounded to one level. `daytona-native` is the
-  configured default; `daytona-recursive` opts into Fleet children. Preserve
+- Full child recursion is bounded to one level. The single configuration
+  enables Fleet children through `rlm.recursion_enabled`. Preserve
   the shared Turn finalization ledger, the bounded admission of Tool calls,
   recursive children, and execution output, and ordered partial outcomes.
   Provider-attempt admission and per-Turn LM deadlines are not preserved:
@@ -66,7 +66,7 @@ behavior and tests define what the system does.
 | --- | --- | --- |
 | `openapi.yaml`, generated TUI HTTP types | `make api-sync` | `make api-check` |
 | TUI stream fixtures and validators | `make stream-sync` | `make stream-check` |
-| `docs/reference/profile-matrix.md` | `make profile-matrix` | `make check-docs` |
+| `docs/reference/configuration-environment.md` | `make config-reference` | `make check-docs` |
 
 Never hand-edit generated outputs. Bundled Skill Markdown ships at runtime;
 check its catalog, manifests, resources, and contract tests when changing it.

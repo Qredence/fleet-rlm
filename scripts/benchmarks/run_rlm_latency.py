@@ -792,7 +792,8 @@ def analyze_phase6_outcomes(
         "policy_gate": policy_gate,
         "live_gate": (
             "No provider/Daytona call was made. Live evidence still needs FLEET_LIVE=1, existing campaign limits, "
-            "verified per-arm profiles with a shared envelope, isolated Session/cache conditions, quality judging, "
+            "verified per-arm configurations with a shared envelope, isolated Session/cache conditions, "
+            "quality judging, "
             "observed usage/staging, and cleanup ownership receipts."
         ),
     }
@@ -1299,10 +1300,10 @@ def _active_policy(
         client (httpx.Client): HTTP client configured for the Fleet API.
 
     Returns:
-        dict[str, Any]: Active profile name and selected model, token-limit, and reasoning settings.
+        dict[str, Any]: Configured model, token-limit, recursion, and reasoning settings.
 
     Raises:
-        BenchmarkError: If Fleet settings do not expose a valid active profile.
+        BenchmarkError: If Fleet settings do not expose valid configuration fields.
     """
     request_timeout = _campaign_timeout(timeout_seconds, deadline=deadline)
     request_kwargs = {"timeout": request_timeout} if request_timeout is not None else {}
@@ -1311,20 +1312,14 @@ def _active_policy(
     if deadline is not None:
         _remaining_campaign_seconds(deadline)
     payload = response.json()
-    profile = payload.get("active_profile")
-    scope = next(
-        (item for item in payload.get("scopes", []) if isinstance(item, Mapping) and item.get("name") == profile),
-        None,
-    )
-    if not isinstance(profile, str) or not isinstance(scope, Mapping):
-        raise BenchmarkError("Fleet settings do not expose the active profile")
+    if not isinstance(payload.get("fields"), list):
+        raise BenchmarkError("Fleet settings do not expose configuration fields")
     fields = {
         str(item["path"]): item.get("value")
-        for item in scope.get("fields", [])
+        for item in payload["fields"]
         if isinstance(item, Mapping) and isinstance(item.get("path"), str)
     }
     return {
-        "profile": profile,
         "root_model": fields.get("llm.root.model"),
         "root_max_tokens": fields.get("llm.root.max_tokens"),
         "root_reasoning_effort": fields.get("llm.root.reasoning_effort"),
@@ -2106,8 +2101,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
             deadline=campaign_deadline,
         )
         native_only = bool(getattr(args, "native_only", False))
-        if native_only and (policy.get("profile") != "daytona-native" or policy.get("recursion_enabled") is not False):
-            raise BenchmarkError("native-only baseline requires the daytona-native profile with recursion disabled")
+        if native_only and policy.get("recursion_enabled") is not False:
+            raise BenchmarkError("native-only baseline requires rlm.recursion_enabled=false")
         reuse_session = bool(getattr(args, "reuse_session", False))
         reused_session_id: str | None = None
         with tempfile.TemporaryDirectory(prefix="fleet-corpus-") as temp_dir:
@@ -2678,7 +2673,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--native-only",
         action="store_true",
-        help="Require the native profile before admission and reject observed full-child tool use",
+        help="Require recursion disabled in the configuration before admission and reject observed full-child tool use",
     )
     parser.add_argument("--timeout", type=float, default=2_000.0)
     parser.add_argument(

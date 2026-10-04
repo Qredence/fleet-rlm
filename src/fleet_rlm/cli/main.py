@@ -31,10 +31,6 @@ def _add_serve_command(
             "authentication and will expose the local API on the network"
         ),
     )
-    serve.add_argument(
-        "--profile",
-        help="explicit non-secret Fleet policy profile (defaults to config.default_profile)",
-    )
     if supervise_tui:
         serve.add_argument("tui_args", nargs=argparse.REMAINDER)
     serve.set_defaults(
@@ -94,9 +90,6 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
         _run_doctor(parser, args.doctor_provider)
         return
 
-    if args.profile is not None and args.reload:
-        parser.error("--reload cannot be combined with an explicit --profile")
-
     if args.supervise_tui:
         # The supervisor spawns its own uvicorn process, so the shared launcher
         # gate never runs on this path; apply the same policy before spawning.
@@ -120,26 +113,21 @@ def _run(parser: argparse.ArgumentParser, argv: Sequence[str] | None = None) -> 
                 "run_environment": args.run_environment,
                 "tui_args": tui_args,
             }
-            if args.profile is not None:
-                supervise_kwargs["profile"] = args.profile
             supervise(**supervise_kwargs)
         except SupervisorError as exc:
             parser.exit(1, f"fleet: error: {exc}\n")
         return
-    from fleet_rlm.cli.server import ProfileReloadError, serve_api
+    from fleet_rlm.cli.server import serve_api
 
     try:
         serve_api(
             host=args.host,
             port=args.port,
             reload=args.reload,
-            profile=args.profile,
             allow_non_loopback=bool(args.allow_non_loopback_bind),
         )
     except UnsafeBindError as exc:
         parser.exit(1, f"fleet: error: {exc}\n")
-    except ProfileReloadError as exc:
-        parser.error(str(exc))
 
 
 _DOCTOR_ACTIONS = {
@@ -162,7 +150,7 @@ _DOCTOR_ACTIONS = {
 def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
     if provider != "daytona":
         parser.error(f"unsupported doctor provider: {provider}")
-    from fleet_rlm.config.loader import active_profile, load_runtime_settings, redacted_policy_summary
+    from fleet_rlm.config.loader import load_runtime_settings, redacted_policy_summary
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor
 
     try:
@@ -171,8 +159,7 @@ def _run_doctor(parser: argparse.ArgumentParser, provider: str) -> None:
         _emit("[failed] settings: Required Fleet Daytona settings are missing or invalid.")
         _emit(f"action: {_DOCTOR_ACTIONS['settings']}")
         raise SystemExit(1) from None
-    profile = active_profile(settings)
-    _emit(f"[ok] policy: {redacted_policy_summary(settings, profile=profile or 'unknown')}")
+    _emit(f"[ok] policy: {redacted_policy_summary(settings)}")
     result = asyncio.run(run_daytona_doctor(settings))
     for step in result.steps:
         state = "ok" if step.ok else "failed"

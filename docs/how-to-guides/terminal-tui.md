@@ -6,21 +6,18 @@ Sandbox, or execution runtime.
 
 ## Start a supervised session
 
-For Daytona, select an interactive runtime policy profile (the shipped default
-is `daytona-native`; `daytona-recursive` is an opt-in for child-RLM execution),
-configure the provider/Daytona values from the [profile
-matrix](../reference/profile-matrix.md), and use an upgraded database. The
-supervisor verifies Alembic head and never migrates automatically:
+For Daytona, configure the provider values from the
+[environment reference](../reference/configuration-environment.md) and use an
+upgraded database. The supervisor verifies Alembic head and never migrates
+automatically:
 
 ```bash
 uv run python scripts/db_init.py
 uv run fleet cli --port 8000
 ```
 
-Set the intended interactive profile in `[config] default_profile` in
-`config/fleet.toml` first (the shipped default is `daytona-native`), or use
-`/profiles` to select `daytona-recursive` for bounded child-RLM execution, then
-restart Fleet.
+Edit `config/fleet.toml` or use `/settings`, then restart Fleet to apply saved
+changes. The shipped configuration enables bounded child-RLM execution.
 
 See [configuration](../reference/configuration.md) for all settings. Supervised
 backend output is stored under `.fleet_rlm/logs/`; `latest.log` identifies the
@@ -120,18 +117,17 @@ the interrupted reasoning, code, or Tool evidence.
 
 Use `/help` for the current slash-command list. Important commands include
 `/sessions`, `/rename`, `/resume`, `/reload`, `/status`, `/settings`,
-`/profiles`, `/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
+`/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
 `/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`, `/feedback`,
 and `/exit`. `/settings`
-is a local-only TOML policy editor whose overlay stays open for successive
-field edits (environment-pinned and single-valued fields are read-only, and
-each save reuses the freshly returned policy revision); `/profiles` opens a
-"Select profile for next restart" picker that marks the running profile;
+is a local-only editor for the single TOML configuration, grouped by field
+category. Changes remain drafts until Apply saves one atomic batch; Discard
+restores server values. Conflicts refresh the snapshot and retain the draft.
 `/volume [root]` shows the read-only Workspace Volume tree; `/theme [name]`
 lists and switches the builtin or custom color themes with a filter-as-you-type
 picker that marks the current theme. Saved policy
 settings take effect after restarting Fleet. Interactive one-shot successes
-(saved setting, selected profile, applied theme, updated Skill selections) are
+(saved settings, applied theme, updated Skill selections) are
 confirmed with a transient flash notice rather than a transcript message;
 failures still appear in the transcript.
 

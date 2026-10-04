@@ -979,7 +979,6 @@ class Settings(BaseModel):
     ] = Field(default=500, ge=1)
 
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
-    _active_profile: str | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _validate_run_liveness(self) -> Settings:

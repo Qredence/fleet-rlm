@@ -222,8 +222,8 @@ async def _run(args: argparse.Namespace) -> int:
         return 0
     from fleet_rlm.config.loader import load_runtime_settings
 
-    # Snapshot operations still use the selected policy profile for credentials
-    # and dotenv loading, but do not require the profile's runtime to be live.
+    # Snapshot operations still use the single configuration for credentials
+    # and dotenv loading, but do not require live runtime admission.
     settings = load_runtime_settings()
     if settings.daytona_api_key is None or not settings.daytona_api_key.get_secret_value().strip():
         raise SystemExit("FLEET_DAYTONA_API_KEY is required")

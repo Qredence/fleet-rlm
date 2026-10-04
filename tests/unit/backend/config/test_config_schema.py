@@ -9,7 +9,6 @@ reviewed policy-surface change.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import pytest
@@ -308,45 +307,28 @@ def test_unknown_direct_settings_field_is_rejected_without_leaking_values() -> N
     assert "super-secret-payload" not in message
 
 
-def test_committed_policy_loads_every_profile_identically(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """All supported committed TOML profiles resolve with identical values as documented."""
-    import tomllib
-
-    for name in (
-        "FLEET_DAYTONA_API_KEY",
-        "DATABRICKS_TOKEN",
-        "FLEET_LLM_BASE_URL",
-        "FLEET_DATABASE_URL",
-        "POSTHOG_PROJECT_TOKEN",
-    ):
-        value = (
-            "postgresql://fleet_app:password@lakebase.example/fleet?sslmode=require"
-            if name == "FLEET_DATABASE_URL"
-            else f"test-{name}"
-        )
-        monkeypatch.setenv(name, value)
-    for name in (
-        "FLEET_MLFLOW_EXPERIMENT_NAME",
-        "FLEET_MLFLOW_TRACE_CATALOG",
-        "FLEET_MLFLOW_TRACE_SCHEMA",
-        "FLEET_MLFLOW_TRACE_TABLE_PREFIX",
-        "FLEET_MLFLOW_TRACING_SQL_WAREHOUSE_ID",
-    ):
-        monkeypatch.setenv(name, f"test-{name}")
-
+def test_committed_policy_loads_single_configuration(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     source = Path("config/fleet.toml").read_text(encoding="utf-8")
-    profiles = tomllib.loads(source)["profiles"]
     policy = tmp_path / "fleet.toml"
-    for profile in profiles:
-        updated = re.sub(
-            r'^default_profile = "[^"]*"$',
-            f'default_profile = "{profile}"',
-            source,
-            count=1,
-            flags=re.MULTILINE,
-        )
-        policy.write_text(updated, encoding="utf-8")
-        monkeypatch.setattr(config_loader, "_CONFIG_PATH", policy)
-        settings = config_loader.load_runtime_settings()
-        assert settings.run_environment == "daytona"
-        assert settings.root_model and settings.sub_model
+    policy.write_text(source, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_loader, "_CONFIG_PATH", policy)
+    monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
+    monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
+    settings = config_loader.load_runtime_settings()
+    assert settings.run_environment == "daytona"
+    assert settings.root_model == settings.sub_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
+    assert settings.rlm_recursion_enabled is True
+    assert settings.database_url is None  # Startup owns the database requirement.
+
+
+@pytest.mark.parametrize("url", ["sqlite+aiosqlite:///fleet.db", "postgresql://test:pass@example/fleet"])
+def test_configuration_loader_has_no_managed_database_restriction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, url: str
+) -> None:
+    policy = tmp_path / "fleet.toml"
+    policy.write_text(Path("config/fleet.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config_loader, "_CONFIG_PATH", policy)
+    monkeypatch.setenv("FLEET_DATABASE_URL", url)
+    assert config_loader.load_runtime_settings().database_url == url

@@ -26,12 +26,9 @@ from tomlkit import TOMLDocument
 
 from fleet_rlm.config.loader import (
     _MISSING,
-    _deep_merge,
     _flatten_policy,
     _lookup_toml,
     _policy_document_from_mapping,
-    _require_mapping,
-    _validate_policy_table,
 )
 from fleet_rlm.config.settings import (
     EditorKind,
@@ -72,10 +69,8 @@ class PolicyField:
 class PolicyMutation:
     """One validated non-secret policy change in an atomic settings transaction."""
 
-    scope: str
     path: str
-    value: Any = None
-    unset: bool = False
+    value: Any
 
 
 # Derived from the authoritative Settings policy declarations (config/settings.py);
@@ -98,46 +93,41 @@ _FIELD_BY_PATH = {field.path: field for field in _FIELDS}
 @dataclass(frozen=True, slots=True)
 class PolicySnapshot:
     revision: str
-    active_profile: str | None
-    default_profile: str | None
-    available_profiles: tuple[str, ...]
-    scopes: tuple[dict[str, Any], ...]
+    fields: tuple[dict[str, Any], ...]
 
 
 class ConfigPolicyService:
     """Read and safely edit the fixed Fleet TOML policy path."""
 
-    def __init__(self, path: Path, *, active_profile: str | None) -> None:
+    def __init__(self, path: Path) -> None:
         self._path = path.resolve()
-        self._active_profile = active_profile or None
         self._lock = threading.Lock()
 
     @classmethod
-    def from_settings(cls, settings: Settings, *, path: Path | None = None) -> ConfigPolicyService:
-        """Construct the service for the canonical policy path and active profile."""
-        from fleet_rlm.config.loader import _CONFIG_PATH, active_profile
+    def for_runtime(cls, *, path: Path | None = None) -> ConfigPolicyService:
+        """Construct the service for the canonical policy path."""
+        from fleet_rlm.config.loader import _CONFIG_PATH
 
-        return cls(path or _CONFIG_PATH, active_profile=active_profile(settings))
+        return cls(path or _CONFIG_PATH)
 
     def read(self) -> PolicySnapshot:
         with self._lock:
             document, raw = self._read_document()
             return self._snapshot(document, raw)
 
-    def update(self, *, scope: str, path: str, value: Any, revision: str) -> PolicySnapshot:
-        return self.apply(updates=(PolicyMutation(scope=scope, path=path, value=value),), revision=revision)
+    def update(self, *, path: str, value: Any, revision: str) -> PolicySnapshot:
+        return self.apply(updates=(PolicyMutation(path=path, value=value),), revision=revision)
 
     def apply(
         self,
         *,
         updates: Sequence[PolicyMutation] = (),
-        default_profile: str | None = None,
         revision: str,
     ) -> PolicySnapshot:
         """Validate and atomically persist one batch of non-secret policy changes."""
-        if not updates and default_profile is None:
+        if not updates:
             raise FleetConfigurationError("settings update is empty")
-        targets = [(update.scope, update.path) for update in updates]
+        targets = [update.path for update in updates]
         if len(set(targets)) != len(targets):
             raise FleetConfigurationError("settings update contains duplicate fields")
         with self._lock:
@@ -148,26 +138,13 @@ class ConfigPolicyService:
                 field = _FIELD_BY_PATH.get(update.path)
                 if field is None:
                     raise FleetConfigurationError("unsupported settings field")
-                table = self._scope_table(document, update.scope)
-                if update.unset:
-                    if update.scope == "defaults":
-                        raise FleetConfigurationError("default settings cannot be reset")
-                    if self._lookup(table, update.path) is _MISSING:
-                        raise FleetConfigurationError("profile setting does not override a default value")
-                    self._unset(table, update.path)
-                    continue
-                parent, key = self._parent_table(table, update.path)
+                parent, key = self._parent_table(document, update.path)
                 parent[key] = self._normalize_value(field, update.value)
-            if default_profile is not None:
-                self._set_default_profile(document, default_profile)
             rendered = tomlkit.dumps(document)
             self._validate(rendered)
             self._atomic_write(rendered)
             updated, updated_raw = self._read_document()
             return self._snapshot(updated, updated_raw)
-
-    def set_default_profile(self, name: str, *, revision: str) -> PolicySnapshot:
-        return self.apply(default_profile=name, revision=revision)
 
     def _read_document(self) -> tuple[TOMLDocument, str]:
         if self._path.is_symlink() or not self._path.is_file():
@@ -179,42 +156,10 @@ class ConfigPolicyService:
             raise FleetConfigurationError("invalid Fleet configuration TOML") from exc
 
     def _snapshot(self, document: TOMLDocument, raw: str) -> PolicySnapshot:
-        scopes: list[dict[str, Any]] = []
-        defaults = document.get("defaults")
-        if isinstance(defaults, dict):
-            scopes.append(self._scope("defaults", defaults, origin="default"))
-        profiles = document.get("profiles")
-        available: list[str] = []
-        if isinstance(profiles, dict):
-            for name, profile in profiles.items():
-                if isinstance(name, str) and isinstance(profile, dict):
-                    available.append(name)
-                    scopes.append(self._scope(name, profile, inherited=defaults, origin="override"))
-        config = document.get("config")
-        default_profile = config.get("default_profile") if isinstance(config, dict) else None
-        return PolicySnapshot(
-            self._revision(raw),
-            self._active_profile,
-            default_profile if isinstance(default_profile, str) else None,
-            tuple(available),
-            tuple(scopes),
-        )
-
-    def _scope(
-        self,
-        name: str,
-        table: dict[str, Any],
-        *,
-        inherited: dict[str, Any] | None = None,
-        origin: str,
-    ) -> dict[str, Any]:
+        self._validate(raw)
         values: list[dict[str, Any]] = []
         for field in _FIELDS:
-            value = self._lookup(table, field.path)
-            field_origin = origin
-            if value is _MISSING and inherited is not None:
-                value = self._lookup(inherited, field.path)
-                field_origin = "inherited"
+            value = self._lookup(document, field.path)
             if value is _MISSING:
                 continue
             values.append(
@@ -226,21 +171,9 @@ class ConfigPolicyService:
                     "editor": field.editor,
                     "choices": list(field.choices),
                     "environment_overridden": False,
-                    "origin": field_origin,
-                    "can_reset": field_origin == "override",
                 }
             )
-        return {"name": name, "fields": values}
-
-    def _scope_table(self, document: TOMLDocument, scope: str) -> dict[str, Any]:
-        if scope == "defaults":
-            table = document.get("defaults")
-        else:
-            profiles = document.get("profiles")
-            table = profiles.get(scope) if isinstance(profiles, dict) else None
-        if not isinstance(table, dict):
-            raise FleetConfigurationError("settings scope does not exist")
-        return table
+        return PolicySnapshot(self._revision(raw), tuple(values))
 
     @staticmethod
     def _parent_table(table: dict[str, Any], path: str) -> tuple[dict[str, Any], str]:
@@ -253,31 +186,6 @@ class ConfigPolicyService:
                 child = current[part]
             current = child
         return current, parts[-1]
-
-    @staticmethod
-    def _unset(table: dict[str, Any], path: str) -> None:
-        parts = path.split(".")
-        current = table
-        for part in parts[:-1]:
-            child = current.get(part)
-            if not isinstance(child, dict):
-                return
-            current = child
-        current.pop(parts[-1], None)
-
-    @staticmethod
-    def _set_default_profile(document: TOMLDocument, name: str) -> None:
-        if not isinstance(name, str) or not name.strip():
-            raise FleetConfigurationError("profile name must be a non-empty string")
-        target = name.strip()
-        profiles = document.get("profiles")
-        if not isinstance(profiles, dict) or target not in profiles:
-            raise FleetConfigurationError(f"configured profile does not exist: {target}")
-        config = document.get("config")
-        if not isinstance(config, dict):
-            config = tomlkit.table()
-            document["config"] = config
-        config["default_profile"] = target
 
     @staticmethod
     def _lookup(table: dict[str, Any], path: str) -> Any:
@@ -328,22 +236,17 @@ class ConfigPolicyService:
         raise AssertionError(f"unsupported editor {field.editor}")
 
     def _validate(self, raw: str) -> None:
-        """Validate Fleet policy TOML and its profile configurations."""
+        """Validate the single Fleet policy TOML."""
         try:
             root = tomllib.loads(raw)
         except tomllib.TOMLDecodeError as exc:
             raise FleetConfigurationError("invalid Fleet configuration TOML") from exc
         document = _policy_document_from_mapping(root)
-        for profile, value in document.profiles.items():
-            selected = _require_mapping(value, f"profiles.{profile}")
-            _validate_policy_table(selected, f"profiles.{profile}", allow_partial_llm=True)
-            merged = _deep_merge(document.defaults, selected)
-            _validate_policy_table(merged, f"profiles.{profile}")
-            flattened = _flatten_policy(merged)
-            try:
-                Settings.model_validate(dict(flattened.settings))
-            except ValueError as exc:
-                raise FleetConfigurationError("invalid Fleet configuration policy") from exc
+        flattened = _flatten_policy(document.policy)
+        try:
+            Settings.model_validate(dict(flattened.settings))
+        except ValueError as exc:
+            raise FleetConfigurationError("invalid Fleet configuration policy") from exc
 
     def _atomic_write(self, content: str) -> None:
         parent = self._path.parent
