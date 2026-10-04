@@ -1,8 +1,8 @@
 # Backend Reference
 
 - [Architecture](../../ARCHITECTURE.md) — current component ownership and dependency direction.
-- [Configuration](configuration.md) — TOML policy, explicit environment references, and profile prerequisites.
-- [Runtime profile matrix](profile-matrix.md) — policy-derived providers, token limits, and environment names.
+- [Configuration](configuration.md) — TOML policy, explicit environment references, and startup prerequisites.
+- [Runtime configuration environment reference](configuration-environment.md) — policy-derived providers, token limits, and environment names.
 - [HTTP API](http-api.md) — supported routes and SSE behavior.
 - [CLI](cli.md) — supervised, backend-only, diagnostics, and Artifact commands.
 - [Database](database.md) — canonical tables and Alembic ownership.

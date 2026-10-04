@@ -122,7 +122,7 @@ def is_sqlite_url(url: str) -> bool:
 
 
 def validate_managed_postgres_url(url: str) -> None:
-    """Require the durable, TLS PostgreSQL shape used by Fleet's managed profile.
+    """Require the durable, TLS PostgreSQL shape required by the explicit Lakebase preflight.
 
     This intentionally validates only transport and role policy.  Endpoint
     ownership and schema state require a live preflight and must not be

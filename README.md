@@ -19,15 +19,15 @@ execution, and FastAPI for its backend.
   history survives a restart.
 - **Work with files.** Attach local files to a Turn, inspect workspace files,
   and download committed Artifacts.
-- **Choose how much delegation to use.** The default profile supports DSPy's
-  native semantic calls. An optional profile enables bounded, isolated child
-  RLMs for independent investigations.
+- **Choose how much delegation to use.** The configuration enables DSPy's
+  native semantic calls and bounded, isolated child RLMs for independent
+  investigations. Set `rlm.recursion_enabled = false` for native-only operation.
 
 ## Run a live local Session
 
 You need Python 3.11–3.13, [uv](https://docs.astral.sh/uv/), Node 22.19+,
 pnpm, a Daytona account, and a key for the model provider in the shipped
-profile. The repository includes a local SQLite configuration; a separate
+configuration. The repository includes a local SQLite configuration; a separate
 PostgreSQL setup is not needed to try Fleet.
 
 ### 1. Install
@@ -45,12 +45,12 @@ pnpm --dir tools/fleet-tui install --frozen-lockfile
 cp .env.example .env
 ```
 
-Open `.env` and fill in `ALIBABA_API_KEY`, `FLEET_DAYTONA_API_KEY`, and
-`FLEET_DAYTONA_ORG_ID`. The example already supplies the local SQLite URL and
-the DashScope base URL used by the default `daytona-native` profile. Keep
-secrets out of Git. For another model provider or deployment profile, use the
-[configuration guide](docs/reference/configuration.md) and
-[profile matrix](docs/reference/profile-matrix.md).
+Open `.env` and fill in `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL`,
+`FLEET_DAYTONA_API_KEY`, and `FLEET_DAYTONA_ORG_ID`. The example supplies an
+explicit local SQLite URL; replace the gateway placeholder with your Databricks
+workspace `/ai-gateway/mlflow/v1` base. Keep secrets out of Git. To configure
+another provider, use the [configuration guide](docs/reference/configuration.md)
+and [environment reference](docs/reference/configuration-environment.md).
 
 ### 3. Initialize and start
 
@@ -82,7 +82,7 @@ diagnostics and launch options.
 | `/files` | Browse the Workspace `files/` area. |
 | `/artifacts` | List Artifacts from the conversation. |
 | `/sessions` | Switch between saved Sessions. |
-| `/profiles` | Select a runtime profile for the next restart. |
+| `/settings` | Edit the single runtime configuration; restart to apply. |
 
 The [terminal guide](docs/how-to-guides/terminal-tui.md) covers file downloads,
 themes, Skills, cancellation, and other controls.
@@ -96,9 +96,9 @@ Terminal client → FastAPI/SSE backend → DSPy RLM → Daytona Sandbox
 
 The backend prepares each request, runs model-authored Python in Daytona, and
 streams progress to the terminal. It commits an answer and any Artifacts only
-after the Run settles. The default `daytona-native` profile keeps full child
-RLMs disabled; `daytona-recursive` is an explicit opt-in. Runtime policy lives
-in `config/fleet.toml`, and profile changes take effect after a restart.
+after the Run settles. Bounded child RLMs are enabled by the shipped
+configuration. Runtime policy lives in `config/fleet.toml`, and changes take
+effect after a restart.
 
 Fleet also exposes the backend without the terminal through `uv run fleet web`
 or `uv run fleet-rlm serve-api --port 8000`. The API binds to loopback by

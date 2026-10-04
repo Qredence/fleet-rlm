@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.daytona import runtime as recursive_child_runtime
 from fleet_rlm.rlm.events import ToolEventView
@@ -36,8 +36,9 @@ _RECEIPT_SCHEMA = "fleet.phase2-daytona-recursive/v1"
 _EVIDENCE_ENV = "FLEET_PHASE2_RECURSIVE_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
 _P27_CHILD_SNAPSHOT_ENV = "FLEET_P27_CHILD_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
+_CONFIGURED_MODELS = load_configuration_environment_contract()
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", _CONFIGURED_MODELS.root_model)
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", _CONFIGURED_MODELS.sub_model)
 _CONTRACT_ID = "fleet.phase2-daytona-recursive"
 
 
@@ -218,21 +219,15 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
     import fleet_rlm.config.loader as configuration
 
     copied_policy = tmp_path / "phase2-fleet.toml"
-    # Keep this canary tied to the shipped recursive profile while using a
-    # copied policy so its database and snapshot overrides stay isolated.
-    copied_policy.write_text(
-        (_REPO_ROOT / "config" / "fleet.toml")
-        .read_text(encoding="utf-8")
-        .replace('default_profile = "daytona-native"', 'default_profile = "daytona-recursive"', 1),
-        encoding="utf-8",
-    )
+    # Copy the configured policy unchanged; never enable recursion implicitly.
+    copied_policy.write_text((_REPO_ROOT / "config" / "fleet.toml").read_text(encoding="utf-8"), encoding="utf-8")
     monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
     try:
         policy = require_live_execution()
     except FleetConfigurationError:
         pytest.fail("Phase 2 recursive canary requires runtime.live_enabled=true")
-    if active_profile(policy) != "daytona-recursive" or policy.run_environment != "daytona":
-        pytest.fail("Phase 2 recursive canary requires the daytona-recursive profile")
+    if policy.run_environment != "daytona":
+        pytest.fail("Phase 2 recursive canary requires runtime.environment=daytona")
     if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,

@@ -208,3 +208,36 @@ def test_worktree_cleanup_removes_a_failed_contract_receipt(tmp_path: Path, monk
 
     assert removed == [["git", "worktree", "remove", "--force", str(worktree)]]
     assert not parent.exists()
+
+
+def test_native_verifier_refuses_configured_recursion_before_candidate_inspection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleet_rlm.config.settings import Settings
+
+    output = tmp_path / "receipt.json"
+    monkeypatch.setenv("FLEET_LIVE", "1")
+    monkeypatch.setattr(verifier, "_path_is_allowed", lambda _path: True)
+    monkeypatch.setattr(verifier, "_load_repo_env", lambda: None)
+    monkeypatch.setattr(verifier, "require_live_execution", lambda: Settings(rlm_recursion_enabled=True))
+    monkeypatch.setattr(
+        verifier, "_candidate", lambda: pytest.fail("recursion guard must run before candidate inspection")
+    )
+    assert verifier.main(["--output", str(output)]) == verifier.EXIT_PRECONDITION
+    assert json.loads(output.read_text(encoding="utf-8"))["failure"]["phase"] == "policy_or_candidate"
+
+
+def test_native_configuration_contract_requires_explicit_recursion_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from fleet_rlm.config.loader import load_configuration_environment_contract
+
+    content = Path("config/fleet.toml").read_text(encoding="utf-8")
+    policy = tmp_path / "fleet.toml"
+    policy.write_text(content.replace("recursion_enabled = true", "recursion_enabled = false"), encoding="utf-8")
+    monkeypatch.setattr(
+        verifier, "load_configuration_environment_contract", lambda: load_configuration_environment_contract(policy)
+    )
+    contract = verifier._configuration_contract()
+    assert contract.recursion_enabled is False
+    assert contract.runtime_environment == "daytona"
