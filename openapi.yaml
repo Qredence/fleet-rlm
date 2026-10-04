@@ -500,6 +500,14 @@ paths:
           type: string
           format: uuid
           title: Artifact Id
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: If-None-Match
       responses:
         '200':
           description: Successful Response
@@ -507,6 +515,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ArtifactResponse'
+          headers:
+            ETag:
+              description: SHA-256 of the artifact bytes, quoted (e.g. "hex")
+              schema:
+                type: string
+        '304':
+          description: Artifact matches If-None-Match
+          headers:
+            ETag:
+              description: SHA-256 of the artifact bytes, quoted (e.g. "hex")
+              schema:
+                type: string
         '404':
           description: Artifact not found
           content:
@@ -539,6 +559,14 @@ paths:
           type: string
           format: uuid
           title: Artifact Id
+      - name: If-None-Match
+        in: header
+        required: false
+        schema:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: If-None-Match
       responses:
         '200':
           description: Artifact bytes with integrity headers
@@ -554,6 +582,13 @@ paths:
               schema:
                 type: integer
             X-Content-Type-Options:
+              schema:
+                type: string
+        '304':
+          description: Artifact matches If-None-Match
+          headers:
+            ETag:
+              description: SHA-256 of the artifact bytes, quoted (e.g. "hex")
               schema:
                 type: string
         '404':
