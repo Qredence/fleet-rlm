@@ -12,6 +12,7 @@ import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
 from fleet_rlm.daytona.runtime import (
+    PREWARM_RUN_ID,
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
     DaytonaAdmission,
@@ -1511,4 +1512,406 @@ async def test_native_retirement_failure_keeps_admission_until_deletion_retry() 
     platform.delete = delete
     await mgr.release(native)
     assert await platform.get(native.sandbox_id) is None
+    assert not mgr.has_pending_ownership
+
+
+class _FailOnceBackend:
+    """Interpreter backend whose first close() fails and later ones settle."""
+
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+        if self.close_calls == 1:
+            raise RuntimeError("interpreter backend close failed")
+
+
+def _attach_failing_backend(platform) -> _FailOnceBackend:
+    """Attach one fail-once interpreter backend to every created sandbox."""
+    backend = _FailOnceBackend()
+    original_create = platform.create
+
+    async def create_with_failing_backend(**kwargs):
+        sandbox = await original_create(**kwargs)
+        sandbox.backend = backend
+        return sandbox
+
+    platform.create = create_with_failing_backend  # type: ignore[method-assign]
+    return backend
+
+
+@pytest.mark.asyncio
+async def test_prewarm_persists_binding_and_leaves_sandbox_running() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+
+    result = await mgr.prewarm_session(
+        session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+    )
+
+    assert result is True
+    binding = await store.get(session_id)
+    assert isinstance(binding, SandboxBinding)
+    assert binding.provider_state == "running"
+    assert not mgr.has_pending_ownership
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
+    lease = await mgr.acquire(
+        LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
+        deadline=asyncio.get_running_loop().time() + 10,
+    )
+    try:
+        assert lease.sandbox_id == binding.sandbox_id
+        assert len(platform.created) == 1, "first real Turn must not create a second Sandbox"
+    finally:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_overlapping_prewarm_yields_before_competing_sandbox_create() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    first_create_started = asyncio.Event()
+    allow_first_create = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        first_create_started.set()
+        await asyncio.wait_for(allow_first_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    first = asyncio.create_task(mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(first_create_started.wait(), timeout=5)
+
+    second = await asyncio.wait_for(
+        mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id),
+        timeout=5,
+    )
+    assert second is False
+    assert not platform.created, "overlapping pre-warm must yield before creating a competing Sandbox"
+
+    allow_first_create.set()
+    assert await asyncio.wait_for(first, timeout=10) is True
+    assert len(platform.created) == 1
+    assert isinstance(await store.get(session_id), SandboxBinding)
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_prewarm_failure_surfaces_to_caller() -> None:
+    mgr, _platform, _store, _volumes = _manager()
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("provider create failed")
+
+    mgr._platform.create = boom  # type: ignore[method-assign]
+
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    with pytest.raises(ProviderRequestError, match="provider create failed"):
+        await mgr.prewarm_session(
+            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+        )
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_prewarm_release_failure_is_not_reported_as_success() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    backend = _attach_failing_backend(platform)
+
+    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
+        await mgr.prewarm_session(
+            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    binding = await store.get(session_id)
+    assert isinstance(binding, SandboxBinding)
+    assert binding.provider_state == "running"
+    assert backend.close_calls == 1, "pre-warm release must have attempted interpreter shutdown once"
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
+    assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
+
+    assert await mgr.aclose(drain_seconds=5.0) is True
+    assert backend.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    backend = _attach_failing_backend(platform)
+
+    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
+        await mgr.prewarm_session(
+            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
+        )
+
+    assert backend.close_calls == 1
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
+    assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
+
+    settled = await mgr.aclose(drain_seconds=5.0)
+
+    assert settled is True
+    assert backend.close_calls == 1, "drain retires the owned sandbox without reopening the failed broker"
+    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_prewarm_yields_when_real_turn_acquires_concurrently() -> None:
+    mgr, _platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+
+    prewarm_entered = asyncio.Event()
+    release_prewarm = asyncio.Event()
+    original_acquire = mgr.acquire
+
+    async def gated_acquire(request, *, deadline=None, force_new=False):
+        if request.run_id == PREWARM_RUN_ID:
+            prewarm_entered.set()
+            await asyncio.wait_for(release_prewarm.wait(), timeout=10)
+        return await original_acquire(request, deadline=deadline, force_new=force_new)
+
+    mgr.acquire = gated_acquire  # type: ignore[method-assign]
+
+    prewarm_task = asyncio.create_task(mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(prewarm_entered.wait(), timeout=5)
+
+    real_lease = await original_acquire(
+        LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
+        deadline=asyncio.get_running_loop().time() + 10,
+    )
+    release_prewarm.set()
+
+    result = await asyncio.wait_for(prewarm_task, timeout=10)
+    assert result is False, "pre-warm must yield to the concurrent real Turn"
+    await mgr.release(real_lease)
+    for _ in range(20):
+        if not mgr.has_pending_ownership:
+            break
+        await asyncio.sleep(0.05)
+    assert not mgr.has_pending_ownership, "pre-warm yield must not leave ownership pending after Turn release"
+
+
+@pytest.mark.asyncio
+async def test_real_turn_waits_out_inflight_prewarm_claim() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+
+    prewarm_claimed = asyncio.Event()
+    release_prewarm = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        prewarm_claimed.set()
+        await asyncio.wait_for(release_prewarm.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    prewarm_task = asyncio.create_task(mgr.prewarm_session(session_id, user_id=user_id, workspace_id=workspace_id))
+    await asyncio.wait_for(prewarm_claimed.wait(), timeout=5)
+
+    turn_task = asyncio.create_task(
+        mgr.acquire(
+            LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id, run_id=uuid4()),
+            deadline=asyncio.get_running_loop().time() + 30,
+        )
+    )
+    await asyncio.sleep(0.1)
+    assert not turn_task.done(), "real Turn must wait for the pre-warm claim, not race past it"
+    release_prewarm.set()
+
+    lease = await asyncio.wait_for(turn_task, timeout=30)
+    warm = await asyncio.wait_for(prewarm_task, timeout=30)
+    assert lease.sandbox_id
+    assert warm is True
+    await mgr.release(lease)
+    for _ in range(20):
+        if not mgr.has_pending_ownership:
+            break
+        await asyncio.sleep(0.05)
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_real_turn_prewarm_claim_wait_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.daytona import runtime
+
+    mgr, _platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    registry = mgr.active_leases
+    registry.acquire(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
+    monkeypatch.setattr(runtime, "_PREWARM_CLAIM_WAIT_SECONDS", 0.05)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    try:
+        with pytest.raises(runtime.DaytonaLeaseAcquisitionTimeoutError):
+            await mgr.acquire(
+                LeaseRequest(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    run_id=uuid4(),
+                ),
+                deadline=started + 10.0,
+            )
+    finally:
+        registry.release(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
+
+    assert 0.04 <= loop.time() - started < 1.0
+
+
+@pytest.mark.asyncio
+async def test_expired_turn_deadline_does_not_wait_for_prewarm_claim() -> None:
+    from fleet_rlm.daytona import runtime
+
+    mgr, _platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    registry = mgr.active_leases
+    registry.acquire(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    try:
+        with pytest.raises(runtime.DaytonaLeaseAcquisitionTimeoutError):
+            await mgr.acquire(
+                LeaseRequest(
+                    session_id=session_id,
+                    user_id=user_id,
+                    workspace_id=workspace_id,
+                    run_id=uuid4(),
+                ),
+                deadline=started - 1.0,
+            )
+    finally:
+        registry.release(session_id, runtime.PREWARM_RUN_ID, workspace_id=workspace_id)
+
+    assert loop.time() - started < 0.1
+
+
+@pytest.mark.asyncio
+async def test_schedule_prewarm_failure_is_suppressed_and_drains_cleanly() -> None:
+    mgr, _platform, _store, _volumes = _manager()
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("provider create failed")
+
+    mgr._platform.create = boom  # type: ignore[method-assign]
+
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(task, timeout=5)
+    assert await mgr.aclose(drain_seconds=5.0) is True
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_schedule_prewarm_failure_then_real_turn_acquires_normally() -> None:
+    mgr, platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    original_create = platform.create
+
+    async def boom(*_args, **_kwargs):
+        raise RuntimeError("provider create failed")
+
+    mgr._platform.create = boom  # type: ignore[method-assign]
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(task, timeout=5)
+    mgr._platform.create = original_create  # type: ignore[method-assign]
+
+    lease = await mgr.acquire(
+        LeaseRequest(session_id=session_id, user_id=user_id, workspace_id=workspace_id),
+        deadline=asyncio.get_running_loop().time() + 10,
+    )
+    try:
+        assert lease.sandbox_id
+        assert len(platform.created) == 1
+        assert isinstance(await store.get(session_id), SandboxBinding)
+    finally:
+        await mgr.release(lease)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_during_scheduled_prewarm_waits_for_owned_work() -> None:
+    mgr, platform, _store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    create_started = asyncio.Event()
+    allow_create = asyncio.Event()
+    original_create = platform.create
+
+    async def gated_create(**kwargs):
+        create_started.set()
+        await asyncio.wait_for(allow_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    platform.create = gated_create  # type: ignore[method-assign]
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(create_started.wait(), timeout=5)
+    assert mgr.has_pending_ownership
+
+    drain = asyncio.create_task(mgr.aclose(drain_seconds=5.0))
+    await asyncio.sleep(0.05)
+    assert not drain.done(), "drain must wait for in-flight scheduled pre-warm work"
+    allow_create.set()
+
+    assert await asyncio.wait_for(drain, timeout=10) is True
+    await asyncio.wait_for(task, timeout=10)
+    assert not mgr.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_archive_during_scheduled_prewarm_requests_retirement() -> None:
+    from fleet_rlm.sessions.lifecycle import SessionLifecycle
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    mgr, _platform, store, _volumes = _manager()
+    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
+    create_started = asyncio.Event()
+    allow_create = asyncio.Event()
+    original_create = mgr._platform.create
+
+    async def gated_create(**kwargs):
+        create_started.set()
+        await asyncio.wait_for(allow_create.wait(), timeout=10)
+        return await original_create(**kwargs)
+
+    mgr._platform.create = gated_create  # type: ignore[method-assign]
+
+    class _RecordingRetirement:
+        def __init__(self) -> None:
+            self.calls: list[tuple[object, object]] = []
+
+        async def close_root_session(self, workspace_id, session_id, *, deadline=None) -> None:
+            del deadline
+            self.calls.append((workspace_id, session_id))
+
+    retirement = _RecordingRetirement()
+    catalog = InMemorySessionCatalog(InMemoryRunStateStore())
+    record = await catalog.create(user_id=user_id, workspace_id=workspace_id, title="archive-during-prewarm")
+    session_id = record.id
+    lifecycle = SessionLifecycle(catalog, retirement)
+
+    task = mgr.schedule_prewarm(session_id, user_id, workspace_id)
+    await asyncio.wait_for(create_started.wait(), timeout=5)
+
+    updated = await lifecycle.update(
+        session_id,
+        user_id=user_id,
+        workspace_id=workspace_id,
+        title=None,
+        status="archived",
+    )
+    assert updated.status == "archived"
+    assert retirement.calls == [(workspace_id, session_id)]
+
+    allow_create.set()
+    await asyncio.wait_for(task, timeout=10)
+    assert isinstance(await store.get(session_id), SandboxBinding)
+    assert await mgr.aclose(drain_seconds=5.0) is True
     assert not mgr.has_pending_ownership
