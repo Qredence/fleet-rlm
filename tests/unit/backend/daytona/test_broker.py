@@ -13,6 +13,7 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import httpx
@@ -40,6 +41,7 @@ def _start_embedded_server(prefix: str = "") -> Iterator[tuple[str, dict[str, st
         .replace("__MAX_REQUEST_BYTES__", str(broker_module._MAX_REQUEST_BYTES))
         .replace("__MAX_OUTPUT_CHARS__", str(broker_module._MAX_OUTPUT_CHARS))
         .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(broker_module._DEFAULT_TOOL_TIMEOUT_S))
+        .replace("__TOOL_CALL_TIMEOUT_MESSAGE__", repr(broker_module._TOOL_CALL_TIMEOUT_MESSAGE))
     )
     process = subprocess.Popen(
         [sys.executable, "-c", source],
@@ -132,8 +134,8 @@ def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
 ) -> None:
     """The live late-delivery race, unpatched: a host tool runs past the
     action deadline. The sandbox times its wait out and replies with the
-    tool error, the late result is dropped as benign, and execute() returns
-    that recoverable outcome instead of a transport timeout."""
+    typed tool error, the late result is dropped as benign, and execute()
+    returns that recoverable outcome instead of a transport timeout."""
     with _start_embedded_server() as (base_url, headers):
         port = int(base_url.rsplit(":", 1)[1])
 
@@ -159,7 +161,8 @@ def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
             result = broker.execute(source, {}, timeout_s=2)
             elapsed = time.monotonic() - started
 
-    assert result["error_category"] == "HTTPError"
+    assert result["error_category"] == "ToolCallTimeout"
+    assert result["tool_error"]["message"] == broker_module._TOOL_CALL_TIMEOUT_MESSAGE
     assert broker._delivery_error is None
     assert "category=duplicate_call" in caplog.text
     assert elapsed < 2 + broker_module._EXECUTE_RESPONSE_GRACE_S
@@ -684,7 +687,74 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
 
     assert not errors, f"execute raised: {errors!r}"
     assert outcomes, "execute never returned a response"
-    assert outcomes[0]["error_category"] == "HTTPError"
+    assert outcomes[0]["error_category"] == "ToolCallTimeout"
     assert broker._delivery_error is None
     assert "delivered after sandbox abandonment" in caplog.text
     assert "category=duplicate_call" in caplog.text
+
+
+def test_timed_out_write_reports_that_it_may_have_applied(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A write that completes after its waiter expired has applied, so the
+    action must get a typed "may have applied" error, not a bare HTTP 504."""
+    hold = tmp_path / "expire-now"
+    with _expired_wait_server(hold) as (base_url, headers):
+        port = int(base_url.rsplit(":", 1)[1])
+        writes: list[str] = []
+        tool_started = threading.Event()
+        tool_release = threading.Event()
+
+        def write_file(path: str) -> dict[str, str]:
+            tool_started.set()
+            tool_release.wait(timeout=10)
+            writes.append(path)
+            return {"path": path}
+
+        broker = DaytonaHttpToolBroker(object(), port=port)
+        broker._secret = headers["X-Broker-Secret"]
+        broker.bind_tools({"write_file": write_file})
+        broker._url = base_url
+        source = broker.setup_source(
+            "try:\n"
+            "    write_file('notes.md')\n"
+            "except Exception as exc:\n"
+            "    print(type(exc).__name__, exc.fleet_tool_error['category'])\n"
+            "    raise\n"
+        )
+        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+            broker._client = client
+            outcomes: list[dict[str, Any]] = []
+            thread = threading.Thread(
+                target=lambda: outcomes.append(broker.execute(source, {}, timeout_s=5)), daemon=True
+            )
+            thread.start()
+            assert tool_started.wait(timeout=5)
+            hold.touch()
+            time.sleep(0.1)
+            tool_release.set()
+            thread.join(timeout=10)
+
+    assert writes == ["notes.md"]
+    assert outcomes, "execute never returned a response"
+    result = outcomes[0]
+    assert result["stdout"] == "_FleetToolCallError ToolCallTimeout\n"
+    assert result["error_category"] == "ToolCallTimeout"
+    assert result["error"] == broker_module._TOOL_CALL_TIMEOUT_MESSAGE
+    assert "may have applied" in result["tool_error"]["message"]
+    assert result["tool_error"]["call_id"]
+    assert broker._delivery_error is None
+    assert "category=duplicate_call" in caplog.text
+
+
+def test_tool_stub_maps_its_own_socket_timeout_to_a_typed_error(
+    embedded_server: tuple[str, dict[str, str]],
+) -> None:
+    base_url, headers = embedded_server
+    source = _tool_source(int(base_url.rsplit(":", 1)[1]), headers["X-Broker-Secret"])
+    with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+        thread, responses = _run_execute(client, "_fleet_tool_timeout_s = 0.2\n" + source, timeout_s=1)
+        thread.join(timeout=5)
+
+    result = responses[0].json()
+    assert result["error_category"] == "ToolCallTimeout"
+    assert result["tool_error"]["message"] == broker_module._TOOL_CALL_TIMEOUT_MESSAGE
+    assert result["tool_error"]["call_id"]
