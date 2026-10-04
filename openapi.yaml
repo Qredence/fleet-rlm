@@ -1828,18 +1828,6 @@ components:
           type: boolean
           title: Environment Overridden
           default: false
-        origin:
-          type: string
-          enum:
-          - default
-          - inherited
-          - override
-          title: Origin
-          default: default
-        can_reset:
-          type: boolean
-          title: Can Reset
-          default: false
       type: object
       required:
       - path
@@ -1849,76 +1837,6 @@ components:
       - editor
       title: SettingsFieldResponse
     SettingsPolicyPatchRequest:
-      oneOf:
-      - not:
-          anyOf:
-          - required:
-            - profile
-          - required:
-            - updates
-          - required:
-            - default_profile
-        properties:
-          scope:
-            not:
-              type: 'null'
-          path:
-            not:
-              type: 'null'
-          value:
-            not:
-              type: 'null'
-        required:
-        - revision
-        - scope
-        - path
-        - value
-        title: UpdateSettingsPolicyField
-      - not:
-          anyOf:
-          - required:
-            - scope
-          - required:
-            - path
-          - required:
-            - value
-          - required:
-            - updates
-          - required:
-            - default_profile
-        properties:
-          profile:
-            not:
-              type: 'null'
-        required:
-        - revision
-        - profile
-        title: SelectSettingsPolicyProfile
-      - anyOf:
-        - properties:
-            updates:
-              minItems: 1
-          required:
-          - updates
-        - required:
-          - default_profile
-        not:
-          anyOf:
-          - required:
-            - scope
-          - required:
-            - path
-          - required:
-            - value
-          - required:
-            - profile
-        properties:
-          default_profile:
-            not:
-              type: 'null'
-        required:
-        - revision
-        title: BatchUpdateSettingsPolicy
       properties:
         revision:
           type: string
@@ -1926,112 +1844,40 @@ components:
           minLength: 64
           pattern: ^[0-9a-f]{64}$
           title: Revision
-        scope:
-          anyOf:
-          - type: string
-            maxLength: 128
-            minLength: 1
-            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
-          - type: 'null'
-          title: Scope
-        path:
-          anyOf:
-          - type: string
-            maxLength: 128
-            minLength: 1
-            pattern: ^[a-z][a-z0-9_.]*$
-          - type: 'null'
-          title: Path
-        value:
-          $ref: '#/components/schemas/JsonValue'
-        profile:
-          anyOf:
-          - type: string
-            maxLength: 128
-            minLength: 1
-            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
-          - type: 'null'
-          title: Profile
         updates:
           items:
             $ref: '#/components/schemas/SettingsPolicyUpdate'
           type: array
           maxItems: 128
+          minItems: 1
           title: Updates
-        default_profile:
-          anyOf:
-          - type: string
-            maxLength: 128
-            minLength: 1
-            pattern: ^[A-Za-z0-9][A-Za-z0-9._-]*$
-          - type: 'null'
-          title: Default Profile
       additionalProperties: false
       type: object
       required:
       - revision
+      - updates
       title: SettingsPolicyPatchRequest
     SettingsPolicyResponse:
       properties:
         revision:
           type: string
           title: Revision
-        active_profile:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Active Profile
-        default_profile:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Default Profile
-        available_profiles:
-          items:
-            type: string
-          type: array
-          title: Available Profiles
         restart_required:
           type: boolean
           title: Restart Required
           default: true
-        scopes:
+        fields:
           items:
-            $ref: '#/components/schemas/SettingsScopeResponse'
+            $ref: '#/components/schemas/SettingsFieldResponse'
           type: array
-          title: Scopes
+          title: Fields
       type: object
       required:
       - revision
-      - scopes
+      - fields
       title: SettingsPolicyResponse
     SettingsPolicyUpdate:
-      oneOf:
-      - properties:
-          value:
-            not:
-              type: 'null'
-          unset:
-            const: false
-        required:
-        - value
-        title: SetSettingsPolicyValue
-      - not:
-          required:
-          - value
-        properties:
-          unset:
-            const: true
-        required:
-        - unset
-        title: ResetSettingsPolicyValue
       properties:
-        scope:
-          type: string
-          maxLength: 128
-          minLength: 1
-          pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$
-          title: Scope
         path:
           type: string
           maxLength: 128
@@ -2040,32 +1886,15 @@ components:
           title: Path
         value:
           $ref: '#/components/schemas/JsonValue'
-        unset:
-          type: boolean
-          title: Unset
-          default: false
+          not:
+            type: 'null'
       additionalProperties: false
       type: object
       required:
-      - scope
       - path
+      - value
       title: SettingsPolicyUpdate
-      description: One set or reset operation in an atomic settings-policy batch.
-    SettingsScopeResponse:
-      properties:
-        name:
-          type: string
-          title: Name
-        fields:
-          items:
-            $ref: '#/components/schemas/SettingsFieldResponse'
-          type: array
-          title: Fields
-      type: object
-      required:
-      - name
-      - fields
-      title: SettingsScopeResponse
+      description: One non-secret field assignment in an atomic settings-policy batch.
     SkillCardResponse:
       properties:
         id:

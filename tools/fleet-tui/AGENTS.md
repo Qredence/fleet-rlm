@@ -35,7 +35,7 @@ execution or runtime policy.
 ## Settings and private data
 
 - Settings edit non-secret `config/fleet.toml` policy through the backend API.
-  Profile changes require a restart unless the backend contract changes.
+  Saved configuration changes require a restart.
   The client does not enable child tools or select execution policy locally.
 - Use typed Fleet API errors and bounded public error details. Never expose
   secret environment values, credentials, provider-private paths, or raw

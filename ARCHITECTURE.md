@@ -83,8 +83,8 @@ Use ordinary Sandbox Python for deterministic inspection and reduction. Native
 `llm_query` and `llm_query_batched` provide bounded semantic calls inside the
 current invocation. Fleet `rlm_query` and `rlm_query_batched` are separate,
 opt-in child investigations that run their own iterative DSPy invocation.
-The configured default `daytona-native` profile disables full-child recursion;
-`daytona-recursive` enables it. Full children stop at depth one, share the
+The single configuration enables full-child recursion through
+`rlm.recursion_enabled`; operators may disable it and restart. Full children stop at depth one, share the
 parent Turn budget, and have bounded admission and ordered outcomes.
 
 `daytona/runtime.py` owns provider Sandboxes, retained Session roots, disposable
@@ -131,7 +131,7 @@ closed by the application lifespan. Retention excludes active captures;
 capture failures do not affect execution or establish durable commitment.
 
 Non-secret runtime policy comes from `config/fleet.toml` through typed settings
-in `config/`. The selected profile names the environment variables from which
+in `config/`. The configuration names the environment variables from which
 secrets are read. Policy changes require a restart. Runtime state such as
 callbacks, bindings, deadlines, and budgets stays scoped to a Turn or
 invocation; process resources are composed and closed by the lifespan.
@@ -158,7 +158,7 @@ generated artifacts:
 | --- | --- |
 | `openapi.yaml`, `tools/fleet-tui/src/generated/openapi.ts` | `make api-sync` / `make api-check` |
 | TUI stream fixtures and validators | `make stream-sync` / `make stream-check` |
-| `docs/reference/profile-matrix.md` | `make profile-matrix` / `make check-docs` |
+| `docs/reference/configuration-environment.md` | `make config-reference` / `make check-docs` |
 
 Use [AGENTS.md](AGENTS.md#work-and-validate-safely) for validation selection
 and the [testing strategy](docs/how-to-guides/testing-strategy.md) for test

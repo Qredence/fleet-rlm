@@ -133,19 +133,10 @@ export class FleetApiClient {
   async applySettings(
     revision: string,
     updates: FleetSettingsUpdate[],
-    defaultProfile?: string,
   ): Promise<FleetSettingsPolicy> {
     return this.updateSettings({
       revision,
       updates,
-      ...(defaultProfile !== undefined ? { default_profile: defaultProfile } : {}),
-    });
-  }
-
-  async setProfile(name: string, revision: string): Promise<FleetSettingsPolicy> {
-    return this.requestJson<FleetSettingsPolicy>("/api/settings", {
-      method: "PATCH",
-      body: JSON.stringify({ profile: name, revision }),
     });
   }
 

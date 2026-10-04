@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from fleet_rlm.app import create_app
-from fleet_rlm.config.loader import active_profile, require_live_execution
+from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
@@ -33,8 +33,9 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _RECEIPT_SCHEMA = "fleet.phase1-daytona-stream/v1"
 _EVIDENCE_ENV = "FLEET_PHASE1_STREAM_EVIDENCE_PATH"
 _P27_SESSION_SNAPSHOT_ENV = "FLEET_P27_SESSION_SNAPSHOT"
-_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", "deepseek-v4.1-flash")
-_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", "deepseek-v4.1-flash")
+_CONFIGURED_MODELS = load_configuration_environment_contract()
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", _CONFIGURED_MODELS.root_model)
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", _CONFIGURED_MODELS.sub_model)
 _APPROVED_MODELS = frozenset(
     name
     for base in {
@@ -203,14 +204,10 @@ def _load_live_settings(tmp_path: Path) -> Settings:
     except FleetConfigurationError:
         pytest.fail("Phase 1 stream canary requires runtime.live_enabled=true")
     candidate_snapshot = os.environ.get(_P27_SESSION_SNAPSHOT_ENV)
-    permitted_profiles = {"daytona"}
-    if candidate_snapshot:
-        # P2.7 only overrides the selected Session image. The recursive profile
-        # remains a Daytona Session profile and is allowed solely for that
-        # aggregate candidate-certification path.
-        permitted_profiles.add("daytona-recursive")
-    if active_profile(policy) not in permitted_profiles or policy.run_environment != "daytona":
-        pytest.fail("Phase 1 stream canary requires an allowed Daytona profile")
+    if policy.run_environment != "daytona":
+        pytest.fail("Phase 1 stream canary requires runtime.environment=daytona")
+    if policy.rlm_recursion_enabled and not candidate_snapshot:
+        pytest.fail("Phase 1 native-only stream canary requires rlm.recursion_enabled=false")
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
         pytest.fail("Phase 1 stream canary requires the committed Root and Sub policy")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):

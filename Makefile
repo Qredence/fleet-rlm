@@ -38,7 +38,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	cloud-preflight \
 	daytona-snapshot-create daytona-snapshot-check daytona-snapshot-plan daytona-snapshot-verify-runtime \
 	daytona-child-snapshot-create daytona-child-snapshot-check daytona-child-snapshot-plan daytona-child-snapshot-verify-runtime \
-	profile-matrix \
+	config-reference \
 	benchmark-daytona-lifecycle
 
 help:
@@ -99,7 +99,7 @@ help:
 	@echo "  make daytona-child-snapshot-check  - Check the lean SemanticChild Snapshot contract"
 	@echo "  make daytona-child-snapshot-plan   - Print the non-secret SemanticChild plan"
 	@echo "  make daytona-child-snapshot-verify-runtime - Verify the native SemanticChild runtime"
-	@echo "  make profile-matrix          - Regenerate the TOML-derived provider/profile matrix"
+	@echo "  make config-reference          - Regenerate the TOML-derived configuration environment reference"
 	@echo "  make clean            - Remove project caches/build artifacts; preserve local data and logs"
 	@echo "  make precommit-install - Install pre-commit and pre-push git hooks"
 	@echo "  make precommit-run    - Run pre-commit on all files"
@@ -184,8 +184,8 @@ daytona-child-snapshot-plan:
 daytona-child-snapshot-verify-runtime:
 	uv run python scripts/daytona_snapshot.py verify-runtime --profile semantic-child --name $(DAYTONA_CHILD_SNAPSHOT_NAME)
 
-profile-matrix:
-	uv run python scripts/generate_profile_matrix.py generate
+config-reference:
+	uv run python scripts/generate_configuration_reference.py generate
 
 tui-check: api-check stream-check
 	# Run pnpm from inside the workspace so corepack resolves the pinned
@@ -208,7 +208,7 @@ check-instructions:
 	uv run python scripts/check_repo_hygiene.py
 
 check-docs: check-instructions
-	uv run python scripts/generate_profile_matrix.py check
+	uv run python scripts/generate_configuration_reference.py check
 
 check-security:
 	uvx pip-audit $(PIP_AUDIT_ARGS)

@@ -769,91 +769,34 @@ export interface components {
              * @default false
              */
             environment_overridden: boolean;
-            /**
-             * Origin
-             * @default default
-             * @enum {string}
-             */
-            origin: "default" | "inherited" | "override";
-            /**
-             * Can Reset
-             * @default false
-             */
-            can_reset: boolean;
         };
         /** SettingsPolicyPatchRequest */
         SettingsPolicyPatchRequest: {
             /** Revision */
             revision: string;
-            /** Scope */
-            scope?: string | null;
-            /** Path */
-            path?: string | null;
-            value?: components["schemas"]["JsonValue"];
-            /** Profile */
-            profile?: string | null;
             /** Updates */
-            updates?: components["schemas"]["SettingsPolicyUpdate"][];
-            /** Default Profile */
-            default_profile?: string | null;
-        } & ({
-            scope: unknown;
-            path: unknown;
-            value: unknown;
-        } | {
-            profile: unknown;
-        } | ({
-            default_profile?: unknown;
-        } | {
-            updates: unknown;
-        } | unknown));
+            updates: components["schemas"]["SettingsPolicyUpdate"][];
+        };
         /** SettingsPolicyResponse */
         SettingsPolicyResponse: {
             /** Revision */
             revision: string;
-            /** Active Profile */
-            active_profile?: string | null;
-            /** Default Profile */
-            default_profile?: string | null;
-            /** Available Profiles */
-            available_profiles?: string[];
             /**
              * Restart Required
              * @default true
              */
             restart_required: boolean;
-            /** Scopes */
-            scopes: components["schemas"]["SettingsScopeResponse"][];
+            /** Fields */
+            fields: components["schemas"]["SettingsFieldResponse"][];
         };
         /**
          * SettingsPolicyUpdate
-         * @description One set or reset operation in an atomic settings-policy batch.
+         * @description One non-secret field assignment in an atomic settings-policy batch.
          */
         SettingsPolicyUpdate: {
-            /** Scope */
-            scope: string;
             /** Path */
             path: string;
-            value?: components["schemas"]["JsonValue"];
-            /**
-             * Unset
-             * @default false
-             */
-            unset: boolean;
-        } & ({
-            value: unknown;
-            /** @constant */
-            unset?: false;
-        } | {
-            /** @constant */
-            unset: true;
-        });
-        /** SettingsScopeResponse */
-        SettingsScopeResponse: {
-            /** Name */
-            name: string;
-            /** Fields */
-            fields: components["schemas"]["SettingsFieldResponse"][];
+            value: components["schemas"]["JsonValue"];
         };
         /**
          * SkillCardResponse
