@@ -136,6 +136,29 @@ def test_prediction_result_redacts_private_paths_only_in_listed_fields() -> None
     assert mount.outputs["evidence"] == ("Read /home/daytona/fleet/notes.md",)
 
 
+def test_prediction_result_rewrites_own_scratch_paths_to_relative_paths() -> None:
+    result = prediction_result(
+        _child_prediction(
+            evidence=[
+                f"Staged copy {_CHILD_SCRATCH}/exports/sweep-ledger.csv matches the manifest.",
+                f"Sibling {_CHILD_SCRATCH}0/exports/other.csv and {_CHILD_SCRATCH}/../5/x.csv differ.",
+                "Host file /tmp/other/notes.md was not read.",
+            ]
+        ),
+        _ChildFindings,
+        path_redacted_fields=_REDACTED,
+        path_relative_to=_CHILD_SCRATCH,
+    )
+
+    assert result.outputs["evidence"] == (
+        "Staged copy exports/sweep-ledger.csv matches the manifest.",
+        "Sibling [path] and [path] differ.",
+        "Host file [path] was not read.",
+    )
+    # The scratch root alone has no relative form and stays redacted.
+    assert result.outputs["gaps"] == ("Scratch was located by search at [path].",)
+
+
 @pytest.mark.parametrize(
     "overrides",
     [
