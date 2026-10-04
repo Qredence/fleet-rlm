@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 from pathlib import PurePosixPath
 from typing import Annotated, Any, NoReturn
@@ -40,13 +42,17 @@ from fleet_rlm.attachments import (
     AttachmentStorageError,
     AttachmentUpload,
 )
+from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.observability.posthog import capture
+from fleet_rlm.sessions.bindings import workspace_volume_subpath
 from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.workspace import (
     MAX_PUBLIC_LIST_LIMIT,
     MAX_PUBLIC_READ_CHARS,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Workspace Files Router (/api/files)
@@ -262,6 +268,7 @@ async def patch_workspace_file(
 # ---------------------------------------------------------------------------
 
 volume_router = APIRouter(prefix="/api/volume", tags=["volume"])
+_VOLUME_TREE_TIMEOUT_SECONDS = 60.0
 
 
 @volume_router.get(
@@ -271,6 +278,7 @@ volume_router = APIRouter(prefix="/api/volume", tags=["volume"])
     responses={
         400: {"description": "Volume tree request is invalid"},
         503: {"description": "Workspace Volume is unavailable"},
+        504: {"description": "Workspace Volume listing timed out"},
     },
 )
 async def list_volume_tree(
@@ -286,21 +294,38 @@ async def list_volume_tree(
         requested = PurePosixPath(root)
         if "\x00" in root or "\\" in root or ".." in requested.parts:
             raise ValueError("root escapes volume mount")
-        logical_path = requested if requested.is_absolute() else mount.joinpath(*requested.parts)
+        relative_parts = requested.parts
+        # The Volume mounts only this Workspace's subpath, so that subpath
+        # names the mount root.
+        scope_parts = PurePosixPath(workspace_volume_subpath(identity.workspace_id)).parts
+        if relative_parts[: len(scope_parts)] == scope_parts:
+            relative_parts = relative_parts[len(scope_parts) :]
+        logical_path = requested if requested.is_absolute() else mount.joinpath(*relative_parts)
         try:
             logical_path.relative_to(mount)
         except ValueError as exc:
             raise ValueError("root escapes volume mount") from exc
         logical_root = str(logical_path)
-        fetched_files = await gateway.list_files(
-            identity.workspace_id,
-            logical_root,
-            max_depth=max_depth,
-            max_files=max_files + 1,
-        )
+        async with asyncio.timeout(_VOLUME_TREE_TIMEOUT_SECONDS):
+            fetched_files = await gateway.list_files(
+                identity.workspace_id,
+                logical_root,
+                max_depth=max_depth,
+                max_files=max_files + 1,
+            )
     except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
         raise http_error(400, "volume_tree_invalid", "Volume tree request is invalid") from exc
+    except TimeoutError as exc:
+        logger.warning("volume_tree_timeout timeout_seconds=%.1f", _VOLUME_TREE_TIMEOUT_SECONDS)
+        raise http_error(504, "volume_timeout", "Workspace Volume listing timed out") from exc
     except Exception as exc:
+        diagnostic = normalize_turn_failure(exc)
+        logger.warning(
+            "volume_tree_unavailable cause_type=%s provider_status_category=%s message=%s",
+            diagnostic.cause_type,
+            diagnostic.provider_status_category,
+            diagnostic.message,
+        )
         raise http_error(503, "volume_unavailable", "Workspace Volume is unavailable") from exc
     truncated = len(fetched_files) > max_files
     relative_paths: set[str] = set()

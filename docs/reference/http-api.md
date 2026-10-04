@@ -48,6 +48,14 @@ unauthorized, or version-mismatched) resolve during in-stream Turn opening and
 answer with the same generic `Invalid Skill selection` message as a stream
 `error` chunk; both contracts avoid revealing hidden catalog entries.
 
+`GET /api/volume/tree` resolves `root` against the Workspace Volume mount. The
+mount contains only the `workspaces/<workspace_id>` subpath, so a `root` that
+starts with the caller's own `workspaces/<workspace_id>` resolves to the mount
+root. A `root` that is missing or outside the mount returns 400
+`volume_tree_invalid`. A listing that takes longer than 60 seconds returns 504
+`volume_timeout`. Other Volume failures return 503 `volume_unavailable` and log
+a sanitized cause.
+
 ## Turn streaming contract
 
 `POST /api/sessions/{session_id}/turns` begins the AI SDK UI message stream
