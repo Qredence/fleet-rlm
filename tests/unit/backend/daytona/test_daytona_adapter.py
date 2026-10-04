@@ -408,6 +408,30 @@ def test_new_invocation_deadline_clamps_each_action_timeout() -> None:
         retained.new_invocation(deadline_monotonic=float("nan"))
 
 
+def test_host_wait_deadline_follows_turn_wrap_up_reserve_and_invocation_deadline() -> None:
+    import time
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
+    from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
+
+    retained = DaytonaCodeInterpreter(
+        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
+    )
+    assert retained._backend._host_wait_deadline() is None
+
+    turn_deadline = time.monotonic() + 1_800
+    budget = TurnBudget(deadline=turn_deadline, limits=BudgetLimits(finalization_seconds=300))
+    retained.bind_turn_budget(budget)
+    assert retained._backend._host_wait_deadline() == turn_deadline - 300
+
+    child_deadline = time.monotonic() + 600
+    child = retained.new_invocation(turn_budget=budget, deadline_monotonic=child_deadline)
+    assert child._backend._host_wait_deadline() == child_deadline
+
+    retained.bind_turn_budget(TurnBudget(deadline=None))
+    assert retained._backend._host_wait_deadline() is None
+
+
 def test_new_invocation_admission_refuses_the_next_action() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 

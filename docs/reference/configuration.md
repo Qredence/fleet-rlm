@@ -144,11 +144,16 @@ sandbox execution), independent of the parent `execution_timeout_s`. The
 committed default `0` derives `max(1, int(execution_timeout_s × 0.9))`, clamped
 to the parent; an explicit value must not exceed `execution_timeout_s`. A child
 runs several actions, so this bound alone does not keep a batch inside its
-caller. Every recursive call is also bounded by the deadline of the sandbox
-action that made it, minus a 10-second delivery margin: each child action is
-clamped to end by then, the next child action is refused once it passes, and
-the call returns ordered partial outcomes (`timed_out` for running and
-`not_started` for queued children, with `error_category: action_deadline`).
+caller. `execution_timeout_s` counts sandbox compute only: the action clock
+pauses while a host tool call is in flight, so a long `rlm_query_batched` wait
+does not spend it. Runaway generated Python still stops at the timeout. Each
+host tool wait ends by the Turn deadline less `wrap_up_seconds` (never earlier
+than `execution_timeout_s` after the action starts). Every recursive call is
+bounded by that host-wait deadline of the action that made it, minus a
+10-second delivery margin: each child action is clamped to end by then, the
+next child action is refused once it passes, and the call returns ordered
+partial outcomes (`timed_out` for running and `not_started` for queued
+children, with `error_category: action_deadline`).
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
