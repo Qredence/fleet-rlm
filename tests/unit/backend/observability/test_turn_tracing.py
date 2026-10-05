@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from uuid import uuid4
 
 import dspy
@@ -34,6 +34,9 @@ from fleet_rlm.rlm.events import (
     ToolEventView,
     observe_tool,
 )
+from tests.support.role_lm import placeholder_bundle
+from tests.support.turn_preparation import TestingRunPreparer
+from tests.support.turn_settlement import TestingRunSettlement
 
 
 @pytest.fixture(autouse=True)
@@ -1680,3 +1683,464 @@ def test_callback_spans_do_not_parent_later_iterations_to_closed_predict_spans(
             assert parent.start_time_ns <= span.start_time_ns <= span.end_time_ns <= parent.end_time_ns
             if span.name in {"RLM.root_action", "RLM.root_lm"}:
                 assert parent.name == "RLM.execute"
+
+
+# ---------------------------------------------------------------------------
+# Turn preparation phase span emission (M6)
+# ---------------------------------------------------------------------------
+
+
+def _make_prep_turn() -> Any:
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import ClaimedRun, _RunClaimToken
+
+    async def not_cancelled() -> bool:
+        return False
+
+    return ClaimedRun(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("next"),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+
+def _make_preparer(*, environments: Any = None) -> Any:
+    from fleet_rlm.attachments import PreparedAttachments
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.turns.preparation import RunEnvironment
+
+    class Sink:
+        async def remove_private(self, location: str) -> None:
+            del location
+            return None
+
+    class Attachments:
+        async def prepare_run(self, access: Any, ids: Any, run: Any, sink: Any) -> PreparedAttachments:
+            del access, ids, run, sink
+            return PreparedAttachments((), ())
+
+    class Capabilities:
+        spec = RLMExecutionSpec()
+
+        def drain_public_details(self) -> tuple[Any, ...]:
+            return ()
+
+        def drain_artifact_candidates(self) -> tuple[Any, ...]:
+            return ()
+
+        def drain_memory_candidates(self) -> tuple[Any, ...]:
+            return ()
+
+        async def aclose(self) -> None:
+            return None
+
+    class CapabilityFactory:
+        async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Capabilities:
+            del turn, environment, attachments
+            assert deadline > 0
+            return Capabilities()
+
+    class Environments:
+        async def acquire(self, turn: Any, *, deadline: float) -> RunEnvironment:
+            del turn
+            assert deadline > 0
+
+            async def release() -> None:
+                return None
+
+            sink = Sink()
+            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+
+    return TestingRunPreparer(
+        models=placeholder_bundle(),
+        options=RLMOptions(),
+        attachments=Attachments(),
+        acquire_environment=(environments if environments is not None else Environments()).acquire,
+        capabilities=CapabilityFactory(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_prepare_emits_decomposed_phase_spans(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_fake_mlflow(monkeypatch)
+
+    prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=float("inf"))
+
+    assert calls.start_span_names == [
+        "Turn.acquire_environment",
+        "Turn.stage_attachments",
+        "Turn.prepare_capabilities",
+    ]
+    assert calls.span_outputs[0]["has_interpreter"] is True
+    assert calls.span_outputs[0]["has_snapshot_sink"] is False
+    assert calls.span_outputs[0]["phase_status"] == "completed"
+    assert calls.span_inputs[1] == {"attachment_count": 0}
+    assert calls.span_outputs[1]["staged_count"] == 0
+    assert calls.span_outputs[1]["staged_bytes"] == 0
+    assert calls.span_inputs[2] == {"skill_selection_count": 0}
+    assert calls.span_outputs[2]["notice_count"] == 0
+    assert calls.span_outputs[2]["phase_status"] == "completed"
+    await prepared.aclose()
+
+
+@pytest.mark.asyncio
+async def test_acquire_environment_failure_marks_phase_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.turns.preparation import RunPreparationUnavailableError
+
+    calls = _install_fake_mlflow(monkeypatch)
+
+    class ExplodingEnvironments:
+        async def acquire(self, turn: Any, *, deadline: float) -> Any:
+            del turn, deadline
+            raise RuntimeError("env boom")
+
+    with pytest.raises(RunPreparationUnavailableError):
+        await _make_preparer(environments=ExplodingEnvironments()).prepare(_make_prep_turn(), deadline=float("inf"))
+
+    assert calls.start_span_names == ["Turn.acquire_environment"]
+    assert calls.span_outputs[0]["phase_status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_prepare_without_active_trace_is_noop() -> None:
+    """No active trace gate: preparation succeeds without MLflow."""
+    token = turn_tracing._fleet_trace_active.set(False)
+    try:
+        prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=float("inf"))
+        assert prepared.execution.session.request == "next"
+        await prepared.aclose()
+    finally:
+        turn_tracing._fleet_trace_active.reset(token)
+
+
+# ---------------------------------------------------------------------------
+# Cross-trace phase metadata and one-way preparation link
+# ---------------------------------------------------------------------------
+
+
+class _PhaseLinkFakeSpan:
+    def __init__(self, request_id: str) -> None:
+        self.request_id = request_id
+        self.span_id = f"{len(request_id):016x}"
+        self.inputs: list[dict[str, object]] = []
+        self.outputs: list[dict[str, object]] = []
+        self.statuses: list[str] = []
+        self.links: list[Any] = []
+        self.attributes: dict[str, object] = {}
+
+    def set_inputs(self, payload: dict[str, object]) -> None:
+        self.inputs.append(payload)
+
+    def set_outputs(self, payload: dict[str, object]) -> None:
+        self.outputs.append(payload)
+
+    def set_attributes(self, payload: dict[str, object]) -> None:
+        self.attributes = payload
+
+    def set_status(self, status: str) -> None:
+        self.statuses.append(status)
+
+    def add_link(self, link: Any) -> None:
+        if getattr(self, "fail_links", False):
+            raise RuntimeError("link unsupported")
+        self.links.append(link)
+
+    def end(self) -> None:
+        pass
+
+
+def _install_phase_link_fake_mlflow(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+    calls = SimpleNamespace(spans=[], update_kwargs=[], stack=[], fail_links=False)
+
+    def create_span(name: str) -> _PhaseLinkFakeSpan:
+        span = _PhaseLinkFakeSpan(f"tr-span-{len(calls.spans) + 1}")
+        span.fail_links = calls.fail_links
+        calls.spans.append((name, span))
+        return span
+
+    @contextmanager
+    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        del span_type
+        span = create_span(name)
+        calls.stack.append(span)
+        try:
+            yield span
+        finally:
+            calls.stack.pop()
+
+    def start_span_no_context(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Any:
+        del span_type
+        return create_span(name)
+
+    @contextmanager
+    def safe_set_span_in_context(span: Any) -> Iterator[Any]:
+        calls.stack.append(span)
+        try:
+            yield span
+        finally:
+            calls.stack.pop()
+
+    def update_current_trace(**kwargs: Any) -> None:
+        calls.update_kwargs.append(kwargs)
+
+    def get_current_active_span() -> Any:
+        return calls.stack[-1] if calls.stack else None
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = start_span
+    mlflow.start_span_no_context = start_span_no_context
+    mlflow.update_current_trace = update_current_trace
+    mlflow.get_current_active_span = get_current_active_span
+
+    entities = ModuleType("mlflow.entities")
+    entities.SpanType = SimpleNamespace(CHAIN="CHAIN")
+
+    class Link:
+        def __init__(self, *, trace_id: str, span_id: str, attributes: Mapping[str, object]) -> None:
+            self.trace_id = trace_id
+            self.span_id = span_id
+            self.attributes = dict(attributes)
+
+    entities.Link = Link
+
+    fluent = ModuleType("mlflow.tracing.fluent")
+    fluent.safe_set_span_in_context = safe_set_span_in_context
+    tracing_module = ModuleType("mlflow.tracing")
+    tracing_module.fluent = fluent
+
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing", tracing_module)
+    monkeypatch.setitem(sys.modules, "mlflow.tracing.fluent", fluent)
+    return calls
+
+
+def _real_prepared_run(run_id: Any, session_id: Any) -> Any:
+    from fleet_rlm.turns.preparation import PreparedTurn, _PreparedTurnResources
+
+    return PreparedTurn(
+        execution=cast("Any", SimpleNamespace(run_id=run_id, session_id=session_id)),
+        artifact_sink=cast("Any", object()),
+        _resources=_PreparedTurnResources(()),
+    )
+
+
+def _legacy_prepared_double(run_id: Any, session_id: Any) -> Any:
+    class Prepared:
+        execution = SimpleNamespace(run_id=run_id, session_id=session_id)
+        artifact_sink = SimpleNamespace()
+        result_snapshot_sink = None
+        post_commit_memory_promotion = None
+
+        async def aclose(self) -> None:
+            return None
+
+    return Prepared()
+
+
+async def _run_success_turn(
+    *,
+    prepared_factory: Any,
+    tracing_enabled: bool,
+    expose_trace_id: bool,
+) -> list[Any]:
+    from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="phase link coordinator",
+    )
+    run_id = uuid4()
+
+    class Preparation:
+        async def prepare(self, _turn: Any, *, deadline: float) -> Any:
+            del deadline
+            return prepared_factory(run_id, session.id)
+
+    class Stream:
+        def __init__(self, execution: Any) -> None:
+            recorder = EventRecorder(execution.run_id, execution.session_id)
+            self._events = iter(
+                (
+                    recorder.record(RunStarted(delivery="live")),
+                    recorder.record(Status("execution", "running")),
+                )
+            )
+            self.outcome = RLMOutcome(
+                "completed",
+                PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            )
+
+        def __aiter__(self) -> Any:
+            return self
+
+        async def __anext__(self) -> Any:
+            try:
+                return next(self._events)
+            except StopIteration:
+                raise StopAsyncIteration from None
+
+        async def aclose(self) -> None:
+            return None
+
+    class Runner:
+        def stream(self, execution: Any) -> Stream:
+            return Stream(execution)
+
+    coordinator = TurnRuntime(
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024),
+        preparation=Preparation(),
+        runner=Runner(),
+        mlflow_tracing_enabled=tracing_enabled,
+        mlflow_expose_trace_id=expose_trace_id,
+    )
+    events = [
+        event
+        async for event in await coordinator.open(
+            OpenTurnCommand(access, session.id, TurnInput("hello"), "idem", run_id)
+        )
+    ]
+    return events
+
+
+def _trace_root_updates(calls: SimpleNamespace) -> list[dict[str, Any]]:
+    return [kwargs for kwargs in calls.update_kwargs if "tags" in kwargs]
+
+
+@pytest.mark.asyncio
+async def test_execution_trace_links_preparation_trace_id_one_way(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.events import RunCompleted, RunStarted
+
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    monkeypatch.setattr(turn_tracing, "_TRACKING_URI_APPLIED", "http://127.0.0.1:5001")
+    events = await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+
+    tagged = _trace_root_updates(calls)
+    assert len(tagged) == 2
+    preparation_update, execution_update = tagged
+    roots = [span for name, span in calls.spans if name == "fleet_turn"]
+    assert len(roots) == 2
+    preparation_id, execution_id = roots[0].request_id, roots[1].request_id
+    assert execution_id != preparation_id
+    assert roots[0].links == []
+    assert len(roots[1].links) == 1
+    assert roots[1].links[0].trace_id == preparation_id
+    assert roots[1].links[0].span_id == roots[0].span_id
+    assert roots[1].links[0].attributes == {"fleet.relationship": "preparation"}
+
+    assert preparation_update["tags"]["fleet.trace_phase"] == "preparation"
+    assert execution_update["tags"]["fleet.trace_phase"] == "execution"
+    assert "fleet.preparation_trace_id" not in preparation_update["tags"]
+    assert execution_update["tags"]["fleet.preparation_trace_id"] == preparation_id
+    assert execution_update["metadata"]["fleet.preparation_trace_id"] == preparation_id
+
+    start = next(event.detail for event in events if isinstance(event.detail, RunStarted))
+    completed = next(event.detail for event in events if isinstance(event.detail, RunCompleted))
+    assert start.trace_id == execution_id
+    assert completed.trace_id == execution_id
+    assert all(getattr(event.detail, "trace_id", None) != preparation_id for event in events)
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
+@pytest.mark.asyncio
+async def test_preparation_link_fail_soft_for_legacy_prepared_double(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    events = await _run_success_turn(
+        prepared_factory=_legacy_prepared_double,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+    assert events
+
+    tagged = _trace_root_updates(calls)
+    assert len(tagged) == 2
+    execution_update = tagged[1]
+    assert execution_update["tags"]["fleet.trace_phase"] == "execution"
+    assert "fleet.preparation_trace_id" not in execution_update["tags"]
+    assert calls.update_kwargs[-1] == {"state": "OK"}
+
+
+@pytest.mark.asyncio
+async def test_hidden_expose_trace_id_keeps_link_out_of_sse(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fleet_rlm.rlm.events import RunCompleted, RunStarted
+
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    events = await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=False,
+    )
+
+    tagged = _trace_root_updates(calls)
+    assert len(tagged) == 2
+    execution_update = tagged[1]
+    assert execution_update["tags"]["fleet.trace_phase"] == "execution"
+    assert "fleet.preparation_trace_id" in execution_update["tags"]
+    start = next(event.detail for event in events if isinstance(event.detail, RunStarted))
+    completed = next(event.detail for event in events if isinstance(event.detail, RunCompleted))
+    assert start.trace_id is None
+    assert completed.trace_id is None
+
+
+@pytest.mark.asyncio
+async def test_preparation_link_is_disabled_for_unity_catalog_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    monkeypatch.setattr(turn_tracing, "_TRACKING_URI_APPLIED", "databricks")
+    await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+    roots = [span for name, span in calls.spans if name == "fleet_turn"]
+    assert len(roots) == 2
+    assert roots[1].links == []
+    execution_update = _trace_root_updates(calls)[1]
+    assert execution_update["tags"]["fleet.preparation_trace_id"] == roots[0].request_id
+
+
+@pytest.mark.asyncio
+async def test_preparation_link_failure_does_not_fail_execution(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    calls.fail_links = True
+    monkeypatch.setattr(turn_tracing, "_TRACKING_URI_APPLIED", "http://127.0.0.1:5001")
+    events = await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=True,
+        expose_trace_id=True,
+    )
+    assert events
+    roots = [span for name, span in calls.spans if name == "fleet_turn"]
+    assert len(roots) == 2
+    assert all(not span.links for span in roots)
+
+
+@pytest.mark.asyncio
+async def test_tracing_disabled_records_no_phase_or_link_and_no_sse_trace_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _install_phase_link_fake_mlflow(monkeypatch)
+    events = await _run_success_turn(
+        prepared_factory=_real_prepared_run,
+        tracing_enabled=False,
+        expose_trace_id=True,
+    )
+
+    assert calls.spans == []
+    assert calls.update_kwargs == []
+    assert all(getattr(event.detail, "trace_id", None) is None for event in events)
