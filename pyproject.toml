@@ -47,7 +47,7 @@ dependencies = [
     # Web API surface. Pinned exactly to the latest PyPI release at pin time
     # for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
-    "fastapi[standard]==0.141.1",
+    "fastapi[standard]==0.142.2",
     "uvicorn>=0.54.0,<1",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
     # connection reuse through the preview proxy. Transitive via the Daytona
