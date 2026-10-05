@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from hashlib import sha256
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.sessions.committed_turn import CommittedTurn
@@ -101,84 +101,42 @@ class TurnInput:
 class TurnInputCodec:
     @staticmethod
     def encode(value: TurnInput) -> dict[str, object]:
-        return {
-            "schema_version": 2,
-            "text": value.text,
-            "attachment_ids": [str(item) for item in value.attachment_ids],
-            "skill_selections": [
-                {
-                    "id": str(selection.id),
-                    "expected_version": selection.expected_version,
-                }
-                for selection in value.skill_selections
-            ],
-        }
+        return json.loads(value.canonical_json)
 
     @staticmethod
     def decode(value: object) -> TurnInput:
         if not isinstance(value, dict):
             raise TurnInputValidationError("stored Turn input is invalid")
-        stored = cast(dict[object, object], value)
-        schema_version = stored.get("schema_version")
-        if schema_version == 1:
-            return TurnInputCodec._decode_v1(stored)
-        if schema_version == 2:
-            return TurnInputCodec._decode_v2(stored)
-        raise TurnInputValidationError("stored Turn input is invalid")
-
-    @staticmethod
-    def _decode_v1(value: dict[object, object]) -> TurnInput:
-        if set(value) != {"schema_version", "text", "attachment_ids"}:
-            raise TurnInputValidationError("stored Turn input is invalid")
+        ver = value.get("schema_version")
         text = value.get("text")
-        attachment_ids = value.get("attachment_ids")
+        att = value.get("attachment_ids")
         if (
-            not isinstance(text, str)
-            or not isinstance(attachment_ids, list)
-            or any(not isinstance(item, str) for item in attachment_ids)
+            ver not in (1, 2)
+            or not isinstance(text, str)
+            or not isinstance(att, list)
+            or any(not isinstance(i, str) for i in att)
         ):
             raise TurnInputValidationError("stored Turn input is invalid")
         try:
-            return TurnInput(
-                text,
-                tuple(UUID(item) for item in cast(list[str], attachment_ids)),
-            )
-        except (TypeError, ValueError) as exc:
-            raise TurnInputValidationError("stored Turn input is invalid") from exc
-
-    @staticmethod
-    def _decode_v2(value: dict[object, object]) -> TurnInput:
-        if set(value) != {"schema_version", "text", "attachment_ids", "skill_selections"}:
-            raise TurnInputValidationError("stored Turn input is invalid")
-        text = value.get("text")
-        attachment_ids = value.get("attachment_ids")
-        skill_selections = value.get("skill_selections")
-        if (
-            not isinstance(text, str)
-            or not isinstance(attachment_ids, list)
-            or any(not isinstance(item, str) for item in attachment_ids)
-            or not isinstance(skill_selections, list)
-            or any(
-                not isinstance(item, dict)
-                or set(item) != {"id", "expected_version"}
-                or not isinstance(item.get("id"), str)
-                or not isinstance(item.get("expected_version"), str)
-                for item in skill_selections
-            )
-        ):
-            raise TurnInputValidationError("stored Turn input is invalid")
-        try:
-            return TurnInput(
-                text,
-                tuple(UUID(item) for item in cast(list[str], attachment_ids)),
-                tuple(
-                    SkillSelectionRef(
-                        UUID(cast(str, item["id"])),
-                        cast(str, item["expected_version"]),
-                    )
-                    for item in cast(list[dict[str, object]], skill_selections)
-                ),
-            )
+            att_ids = tuple(UUID(i) for i in att)
+            if ver == 1:
+                if set(value) != {"schema_version", "text", "attachment_ids"}:
+                    raise TurnInputValidationError("stored Turn input is invalid")
+                return TurnInput(text, att_ids)
+            if set(value) != {"schema_version", "text", "attachment_ids", "skill_selections"}:
+                raise TurnInputValidationError("stored Turn input is invalid")
+            skills = value.get("skill_selections")
+            if not isinstance(skills, list):
+                raise TurnInputValidationError("stored Turn input is invalid")
+            selections: list[SkillSelectionRef] = []
+            for s in skills:
+                if not isinstance(s, dict) or set(s) != {"id", "expected_version"}:
+                    raise TurnInputValidationError("stored Turn input is invalid")
+                s_id, s_ver = s.get("id"), s.get("expected_version")
+                if not isinstance(s_id, str) or not isinstance(s_ver, str):
+                    raise TurnInputValidationError("stored Turn input is invalid")
+                selections.append(SkillSelectionRef(UUID(s_id), s_ver))
+            return TurnInput(text, att_ids, tuple(selections))
         except (TypeError, ValueError) as exc:
             raise TurnInputValidationError("stored Turn input is invalid") from exc
 
