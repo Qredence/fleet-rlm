@@ -4,7 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
-## [0.7.11] - Unreleased
+## [0.7.11] - 2026-10-05
+
+Fleet RLM 0.7.11 aligns the execution and web stacks with current upstream
+releases, while keeping telemetry ownership in Fleet and handling Daytona's
+new sandbox queue-timeout and spot-eviction errors explicitly.
 
 ### Changed
 
