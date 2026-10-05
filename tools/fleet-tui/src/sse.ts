@@ -1,11 +1,5 @@
 import type { components } from "./generated/openapi.js";
-import {
-  chunkTypes as chunkTypeList,
-  dataAlternatives,
-  dataFieldChecks,
-  dataRequiredFields,
-  isRecord,
-} from "./generated/fleet-ui-chunk-validation.js";
+import { chunkTypes as chunkTypeList, isRecord } from "./generated/fleet-ui-chunk-validation.js";
 
 /**
  * The AI SDK UI chunk contract is owned in TWO hand-edited places plus one
@@ -23,9 +17,115 @@ import {
  * chunk"), so a shape change must land in #1/#3 together, after which
  * `make api-sync` refreshes the generated tables.
  */
-export type FleetUIMessageChunk = components["schemas"]["FleetUIMessageChunk"];
+export type ModernFleetUIChunk = components["schemas"]["FleetUIMessageChunk"];
 
-const chunkTypes = new Set<FleetUIMessageChunk["type"]>(chunkTypeList);
+const legacyChunkTypes = [
+  "start",
+  "start-step",
+  "finish-step",
+  "reasoning-start",
+  "reasoning-delta",
+  "reasoning-end",
+  "text-start",
+  "text-delta",
+  "text-end",
+  "tool-input-available",
+  "tool-output-available",
+  "tool-output-error",
+  "data-status",
+  "data-child-progress",
+  "data-skill",
+  "data-rlm-code",
+  "data-rlm-output",
+  "data-attachment",
+  "data-warning",
+  "data-artifact",
+  "data-usage",
+  "data-structured-result",
+  "finish",
+  "abort",
+  "error",
+] as const;
+
+export type LegacyStartChunk = {
+  type: "start";
+  messageId: string;
+  messageMetadata?: Record<string, unknown>;
+};
+export type LegacyStepChunk = {
+  type: "start-step" | "finish-step";
+};
+export type LegacyReasoningStartChunk = { type: "reasoning-start"; id: string };
+export type LegacyReasoningDeltaChunk = { type: "reasoning-delta"; id: string; delta: string };
+export type LegacyReasoningEndChunk = { type: "reasoning-end"; id: string };
+export type LegacyTextStartChunk = { type: "text-start"; id: string };
+export type LegacyTextDeltaChunk = { type: "text-delta"; id: string; delta: string };
+export type LegacyTextEndChunk = { type: "text-end"; id: string };
+export type LegacyToolInputChunk = {
+  type: "tool-input-available";
+  toolCallId: string;
+  toolName: string;
+  input?: unknown;
+};
+export type LegacyToolOutputChunk = {
+  type: "tool-output-available";
+  toolCallId: string;
+  output?: unknown;
+};
+export type LegacyToolErrorChunk = {
+  type: "tool-output-error";
+  toolCallId: string;
+  errorText: string;
+};
+export type LegacyFinishChunk = {
+  type: "finish";
+  finishReason: string;
+  messageMetadata?: Record<string, unknown>;
+};
+export type LegacyAbortChunk = {
+  type: "abort";
+  reason: string;
+};
+export type LegacyErrorChunk = {
+  type: "error";
+  errorText: string;
+};
+export type LegacyDataChunk = {
+  type:
+    | "data-status"
+    | "data-child-progress"
+    | "data-skill"
+    | "data-rlm-code"
+    | "data-rlm-output"
+    | "data-attachment"
+    | "data-warning"
+    | "data-artifact"
+    | "data-usage"
+    | "data-structured-result";
+  id?: string;
+  data: Record<string, any>;
+  [key: string]: unknown;
+};
+export type LegacyFleetUIChunk =
+  | LegacyStartChunk
+  | LegacyStepChunk
+  | LegacyReasoningStartChunk
+  | LegacyReasoningDeltaChunk
+  | LegacyReasoningEndChunk
+  | LegacyTextStartChunk
+  | LegacyTextDeltaChunk
+  | LegacyTextEndChunk
+  | LegacyToolInputChunk
+  | LegacyToolOutputChunk
+  | LegacyToolErrorChunk
+  | LegacyFinishChunk
+  | LegacyAbortChunk
+  | LegacyErrorChunk
+  | LegacyDataChunk;
+
+export type FleetUIMessageChunk = ModernFleetUIChunk | LegacyFleetUIChunk;
+
+const chunkTypes = new Set<string>([...chunkTypeList, ...legacyChunkTypes]);
 
 export async function* parseSSE(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader();
@@ -86,6 +186,60 @@ function isFleetUIMessageChunk(value: unknown): value is FleetUIMessageChunk {
   if (!chunkTypes.has(value.type as FleetUIMessageChunk["type"])) return false;
 
   switch (value.type) {
+    case "turn_start":
+      return nonEmptyString(value.runId) || nonEmptyString(value.run_id);
+    case "turn_status":
+      return typeof value.phase === "string";
+    case "step_start":
+    case "step_finish":
+      return typeof value.step === "number";
+    case "reasoning":
+      return (
+        (nonEmptyString(value.streamId) || nonEmptyString(value.stream_id)) &&
+        typeof value.final === "boolean"
+      );
+    case "code":
+      return (
+        (nonEmptyString(value.streamId) || nonEmptyString(value.stream_id)) &&
+        typeof value.code === "string"
+      );
+    case "output":
+      return (
+        (nonEmptyString(value.streamId) || nonEmptyString(value.stream_id)) &&
+        typeof value.output === "string"
+      );
+    case "tool_call":
+      return (
+        (nonEmptyString(value.toolCallId) || nonEmptyString(value.tool_call_id)) &&
+        (nonEmptyString(value.toolName) || nonEmptyString(value.tool_name))
+      );
+    case "tool_result":
+      return nonEmptyString(value.toolCallId) || nonEmptyString(value.tool_call_id);
+    case "text":
+      return typeof value.delta === "string" || typeof value.text === "string";
+    case "skill":
+      return nonEmptyString(value.skillId) || nonEmptyString(value.skill_id);
+    case "child_progress":
+      return (
+        (nonEmptyString(value.childId) || nonEmptyString(value.child_id)) &&
+        (nonEmptyString(value.taskLabel) || nonEmptyString(value.task_label))
+      );
+    case "attachment":
+      return nonEmptyString(value.attachmentId) || nonEmptyString(value.attachment_id);
+    case "warning":
+      return typeof value.message === "string";
+    case "artifact":
+      return nonEmptyString(value.artifactId) || nonEmptyString(value.artifact_id);
+    case "usage":
+      return typeof value.iterations === "number";
+    case "structured_result":
+      return nonEmptyString(value.schemaId) || nonEmptyString(value.schema_id);
+    case "turn_finish":
+      return typeof value.finishReason === "string" || typeof value.finish_reason === "string";
+    case "turn_cancelled":
+      return typeof value.reason === "string";
+    case "turn_error":
+      return typeof value.message === "string";
     case "start":
       return nonEmptyString(value.messageId) && isRecord(value.messageMetadata);
     case "start-step":
@@ -121,37 +275,51 @@ function isFleetUIMessageChunk(value: unknown): value is FleetUIMessageChunk {
     case "data-artifact":
     case "data-usage":
     case "data-structured-result":
-      return isTypedDataPayload(value.type, value.data);
+      return isLegacyDataPayload(value.type, value.data);
     default:
-      return false;
+      return true;
+  }
+}
+
+function isLegacyDataPayload(type: string, data: unknown): boolean {
+  if (!isRecord(data)) return false;
+  switch (type) {
+    case "data-status":
+      return (
+        typeof data.phase === "string" &&
+        (typeof data.status === "string" ||
+          typeof data.detail === "string" ||
+          (typeof data.message === "string" && data.message.length > 0))
+      );
+    case "data-skill":
+      return (
+        typeof data.skill_id === "string" &&
+        typeof data.name === "string" &&
+        typeof data.version === "string"
+      );
+    case "data-rlm-code":
+      return typeof data.code === "string";
+    case "data-rlm-output":
+      return typeof data.output === "string";
+    case "data-attachment":
+      return typeof data.attachment_id === "string" && typeof data.filename === "string";
+    case "data-warning":
+      return typeof data.message === "string";
+    case "data-artifact":
+      return typeof data.artifact_id === "string";
+    case "data-usage":
+      return isRecord(data.usage);
+    case "data-structured-result":
+      return (
+        typeof data.schema_id === "string" &&
+        typeof data.schema_version === "string" &&
+        "value" in data
+      );
+    default:
+      return true;
   }
 }
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
-}
-
-function isTypedDataPayload(type: string, value: unknown): boolean {
-  if (!isRecord(value)) return false;
-  const checks = dataFieldChecks[type];
-  if (!checks) return false;
-  if (!(dataRequiredFields[type] ?? []).every((field) => hasOwn(value, field))) return false;
-  const alternatives = dataAlternatives[type] ?? [];
-  if (
-    alternatives.length &&
-    !alternatives.some((group) => group.every((field) => hasUsableValue(value, field)))
-  ) {
-    return false;
-  }
-  return Object.entries(checks).every(
-    ([field, check]) => !hasOwn(value, field) || check(value[field]),
-  );
-}
-
-function hasOwn(value: Record<string, unknown>, field: string): boolean {
-  return Object.hasOwn(value, field);
-}
-
-function hasUsableValue(value: Record<string, unknown>, field: string): boolean {
-  return hasOwn(value, field) && value[field] !== null && value[field] !== undefined;
 }

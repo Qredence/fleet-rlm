@@ -145,17 +145,17 @@ def _taxonomy() -> dict[str, Any]:
         "terminal_shape": {
             "success": {
                 "runtime_event": "run.completed",
-                "chunks": ["finish", "[DONE]"],
+                "chunks": ["turn_finish", "[DONE]"],
                 "finish_reason": "stop",
             },
             "failure": {
                 "runtime_events": ["run.failed", "run.timed_out"],
-                "chunks": ["error", "finish", "[DONE]"],
+                "chunks": ["turn_error", "turn_finish", "[DONE]"],
                 "finish_reason": "error",
             },
             "cancellation": {
                 "runtime_event": "run.cancelled",
-                "chunks": ["abort", "[DONE]"],
+                "chunks": ["turn_cancelled", "[DONE]"],
                 "finish": False,
             },
         },

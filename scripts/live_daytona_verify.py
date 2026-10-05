@@ -26,9 +26,9 @@ LIVE_AUTH_VALUES = frozenset({"1", "true", "yes"})
 ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
 SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_NATIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
+_NATIVE_TEST = "tests/live/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
 _DURABILITY_TEST = (
-    "tests/live/backend/test_attachment_artifact_durability.py::"
+    "tests/live/test_attachment_artifact_durability.py::"
     "test_staged_attachment_is_readable_and_artifact_survives_replacement"
 )
 DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
@@ -551,9 +551,7 @@ from pathlib import Path
 
 CANARY_REPO_ROOT = Path(__file__).resolve().parents[1]
 
-CANARY_TEST = (
-    "tests/live/backend/test_daytona_recursive_batch.py::test_daytona_recursive_batch_two_children_through_fastapi"
-)
+CANARY_TEST = "tests/live/test_daytona_recursive_batch.py::test_daytona_recursive_batch_two_children_through_fastapi"
 
 
 def canary__require_clean_candidate() -> str:

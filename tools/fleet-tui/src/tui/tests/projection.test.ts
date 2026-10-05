@@ -805,7 +805,7 @@ describe("terminal projection", () => {
             role: "assistant",
             parts: chunks.slice(1).map((chunk) => ({
               type: "data-skill" as const,
-              id: "id" in chunk ? chunk.id : undefined,
+              id: ("id" in chunk ? chunk.id : undefined) as string | undefined,
               data: "data" in chunk ? chunk.data : undefined,
             })),
           },

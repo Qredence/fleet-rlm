@@ -475,10 +475,10 @@ def _scenario(status: str, **details: object) -> dict[str, object]:
 
 
 # Fixed behavior-owned tests, not a second fault-injection implementation.
-_OUTAGE_TESTS = "tests/unit/backend/observability/test_mlflow_export_outage.py"
-_RUNTIME_TESTS = "tests/unit/backend/observability/test_mlflow_runtime.py"
-_LIFESPAN_TESTS = "tests/contracts/backend/test_mlflow_lifespan.py"
-_FEEDBACK_TESTS = "tests/contracts/backend/test_mlflow_feedback_api.py"
+_OUTAGE_TESTS = "tests/observability/test_mlflow_export_outage.py"
+_RUNTIME_TESTS = "tests/observability/test_mlflow_runtime.py"
+_LIFESPAN_TESTS = "tests/observability/test_mlflow_lifespan.py"
+_FEEDBACK_TESTS = "tests/observability/test_mlflow_feedback_api.py"
 _FAULT_TESTS = {
     "expired_credentials": [f"{_OUTAGE_TESTS}::test_expired_credentials_record_error_evidence_and_drop_trace"],
     "saturated_export_queue": [f"{_OUTAGE_TESTS}::test_saturated_queue_drops_traces_without_blocking_the_caller"],
@@ -495,7 +495,7 @@ _FAULT_TESTS = {
         f"{_LIFESPAN_TESTS}::test_public_turn_succeeds_when_tracing_setup_is_unavailable",
     ],
     "feedback_authorization": [
-        "tests/unit/backend/observability/test_mlflow_feedback.py::test_submit_rejects_non_execution_traces_as_not_found[preparation]",
+        "tests/observability/test_mlflow_feedback.py::test_submit_rejects_non_execution_traces_as_not_found[preparation]",
         f"{_FEEDBACK_TESTS}::test_feedback_route_returns_safe_assessment_projection_and_forwards_scope",
         f"{_FEEDBACK_TESTS}::test_feedback_route_maps_trace_mismatch_and_backend_failure_to_closed_errors",
         f"{_FEEDBACK_TESTS}::test_feedback_route_maps_closed_mlflow_lifecycle_to_unavailable",

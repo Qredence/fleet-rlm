@@ -174,11 +174,11 @@ Link; Unity Catalog traces retain tag-based correlation through
 ## Validation
 
 ```bash
-uv run pytest tests/unit/scripts/test_judges.py \
-  tests/unit/scripts/test_certify_mlflow.py \
-  tests/unit/scripts/test_run_rlm_latency.py \
-  tests/unit/scripts/test_run_routing_eval.py \
-  tests/unit/scripts/test_run_oolong_predict.py -q
+uv run pytest tests/scripts/test_judges.py \
+  tests/scripts/test_certify_mlflow.py \
+  tests/scripts/test_run_rlm_latency.py \
+  tests/scripts/test_run_routing_eval.py \
+  tests/scripts/test_run_oolong_predict.py -q
 ```
 
 ### Isolate related optimization examples

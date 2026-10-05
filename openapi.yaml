@@ -34,11 +34,11 @@ paths:
               $ref: '#/components/schemas/CreateTurnRequest'
       responses:
         '200':
-          description: 'AI SDK UI v1 UIMessage SSE stream. It opens immediately with
-            a transient data-status prelude (phase=preparation) that repeats every
-            runtime heartbeat until the Turn is claimed and prepared. Claim or preparation
-            failures no longer change the HTTP status: they project closed error +
-            finish chunks inside the stream, and cancellation projects one abort chunk.'
+          description: Fleet Turn SSE stream. It opens immediately with a transient
+            turn_status prelude (phase=preparation) that repeats every runtime heartbeat
+            until the Turn is claimed and prepared. Claim or preparation failures
+            project closed turn_error + turn_finish events inside the stream, and
+            cancellation projects one turn_cancelled event.
           content:
             text/event-stream:
               itemSchema:
@@ -2325,804 +2325,562 @@ components:
       - additionalProperties: false
         properties:
           type:
-            const: start
+            const: turn_start
             title: Type
             type: string
-          messageId:
-            format: uuid
-            title: Messageid
+          runId:
+            title: Runid
             type: string
-          messageMetadata:
-            additionalProperties: true
-            title: Messagemetadata
-            type: object
+          sessionId:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Sessionid
+          delivery:
+            enum:
+            - live
+            - replay
+            title: Delivery
+            type: string
+          traceId:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Traceid
         required:
         - type
-        - messageId
-        - messageMetadata
-        title: StartChunk
+        - runId
+        title: TurnStartEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: start-step
+            const: turn_status
             title: Type
             type: string
-        title: StartStepChunk
-        type: object
+          phase:
+            title: Phase
+            type: string
+          status:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Status
+          message:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Message
         required:
         - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: finish-step
-            title: Type
-            type: string
-        title: FinishStepChunk
-        type: object
-        required:
-        - type
-      - additionalProperties: false
-        properties:
-          type:
-            const: reasoning-start
-            title: Type
-            type: string
-          id:
-            minLength: 1
-            title: Id
-            type: string
-        required:
-        - type
-        - id
-        title: ReasoningStartChunk
+        - phase
+        title: TurnStatusEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: reasoning-delta
+            const: step_start
             title: Type
             type: string
-          id:
-            minLength: 1
-            title: Id
+          step:
+            title: Step
+            type: integer
+        required:
+        - type
+        - step
+        title: StepStartEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: step_finish
+            title: Type
+            type: string
+          step:
+            title: Step
+            type: integer
+          durationMs:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Durationms
+        required:
+        - type
+        - step
+        title: StepFinishEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: reasoning
+            title: Type
+            type: string
+          streamId:
+            title: Streamid
+            type: string
+          step:
+            title: Step
+            type: integer
+          text:
+            title: Text
             type: string
           delta:
             title: Delta
             type: string
+          final:
+            title: Final
+            type: boolean
         required:
         - type
-        - id
-        - delta
-        title: ReasoningDeltaChunk
+        - streamId
+        title: ReasoningEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: reasoning-end
+            const: code
             title: Type
             type: string
-          id:
-            minLength: 1
-            title: Id
+          streamId:
+            title: Streamid
             type: string
+          step:
+            title: Step
+            type: integer
+          code:
+            title: Code
+            type: string
+          isDelta:
+            title: Isdelta
+            type: boolean
+          final:
+            title: Final
+            type: boolean
         required:
         - type
-        - id
-        title: ReasoningEndChunk
+        - streamId
+        - code
+        title: CodeEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: data-status
+            const: output
             title: Type
             type: string
-          id:
+          streamId:
+            title: Streamid
             type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              phase:
-                title: Phase
-                type: string
-              status:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Status
-              detail:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Detail
-              message:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Message
-            required:
-            - phase
-            title: StatusData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
+          step:
+            title: Step
+            type: integer
+          output:
+            title: Output
+            type: string
+          isDelta:
+            title: Isdelta
+            type: boolean
+          final:
+            title: Final
+            type: boolean
         required:
         - type
-        - data
-        title: DataStatusChunk
+        - streamId
+        - output
+        title: OutputEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: data-child-progress
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              child_id:
-                maxLength: 128
-                minLength: 1
-                title: Child Id
-                type: string
-              task_label:
-                maxLength: 240
-                minLength: 1
-                title: Task Label
-                type: string
-              state:
-                enum:
-                - not_started
-                - running
-                - completed
-                - failed
-                - cancelled
-                - timed_out
-                title: State
-                type: string
-              elapsed_ms:
-                minimum: 0
-                title: Elapsed Ms
-                type: integer
-              outcome:
-                anyOf:
-                - maxLength: 500
-                  type: string
-                - type: 'null'
-                title: Outcome
-              evidence:
-                items:
-                  type: string
-                maxItems: 8
-                title: Evidence
-                type: array
-              gaps:
-                items:
-                  type: string
-                maxItems: 8
-                title: Gaps
-                type: array
-              result_file_count:
-                maximum: 16
-                minimum: 0
-                title: Result File Count
-                type: integer
-              code_excerpt:
-                anyOf:
-                - maxLength: 800
-                  type: string
-                - type: 'null'
-                title: Code Excerpt
-              output_excerpt:
-                anyOf:
-                - maxLength: 800
-                  type: string
-                - type: 'null'
-                title: Output Excerpt
-              cleanup_state:
-                enum:
-                - pending
-                - complete
-                - failed
-                - not_required
-                title: Cleanup State
-                type: string
-              parent_run_id:
-                anyOf:
-                - maxLength: 128
-                  minLength: 1
-                  type: string
-                - type: 'null'
-                title: Parent Run Id
-            required:
-            - child_id
-            - task_label
-            - state
-            - elapsed_ms
-            - cleanup_state
-            title: ChildProgressData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataChildProgressChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-skill
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              skill_id:
-                title: Skill Id
-                type: string
-              name:
-                title: Name
-                type: string
-              version:
-                title: Version
-                type: string
-              phase:
-                anyOf:
-                - enum:
-                  - activated
-                  - loaded
-                  type: string
-                - type: 'null'
-                title: Phase
-              trust:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Trust
-              affordances:
-                anyOf:
-                - items:
-                    type: string
-                  type: array
-                - type: 'null'
-                title: Affordances
-            required:
-            - skill_id
-            - name
-            - version
-            title: SkillData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataSkillChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-rlm-code
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              code:
-                title: Code
-                type: string
-              step:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Step
-              stream_id:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Stream Id
-              is_delta:
-                anyOf:
-                - type: boolean
-                - type: 'null'
-                title: Is Delta
-              is_final:
-                anyOf:
-                - type: boolean
-                - type: 'null'
-                title: Is Final
-            required:
-            - code
-            title: RLMCodeData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataRLMCodeChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-rlm-output
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              output:
-                title: Output
-                type: string
-              step:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Step
-              stream_id:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Stream Id
-              is_delta:
-                anyOf:
-                - type: boolean
-                - type: 'null'
-                title: Is Delta
-              is_final:
-                anyOf:
-                - type: boolean
-                - type: 'null'
-                title: Is Final
-            required:
-            - output
-            title: RLMOutputData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataRLMOutputChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: tool-input-available
+            const: tool_call
             title: Type
             type: string
           toolCallId:
-            minLength: 1
             title: Toolcallid
             type: string
           toolName:
-            minLength: 1
             title: Toolname
             type: string
           input:
             title: Input
-          dynamic:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Dynamic
-          providerExecuted:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Providerexecuted
         required:
         - type
         - toolCallId
         - toolName
-        - input
-        title: ToolInputAvailableChunk
+        title: ToolCallEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: tool-output-available
+            const: tool_result
             title: Type
             type: string
           toolCallId:
-            minLength: 1
             title: Toolcallid
             type: string
+          toolName:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Toolname
           output:
             title: Output
-          dynamic:
+          error:
             anyOf:
-            - type: boolean
+            - type: string
             - type: 'null'
-            title: Dynamic
-          providerExecuted:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Providerexecuted
+            title: Error
         required:
         - type
         - toolCallId
-        - output
-        title: ToolOutputAvailableChunk
+        title: ToolResultEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: tool-output-error
+            const: text
             title: Type
             type: string
-          toolCallId:
-            minLength: 1
-            title: Toolcallid
-            type: string
-          errorText:
-            minLength: 1
-            title: Errortext
-            type: string
-          dynamic:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Dynamic
-          providerExecuted:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Providerexecuted
-        required:
-        - type
-        - toolCallId
-        - errorText
-        title: ToolOutputErrorChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-attachment
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              attachment_id:
-                format: uuid
-                title: Attachment Id
-                type: string
-              filename:
-                title: Filename
-                type: string
-              phase:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Phase
-              byte_size:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Byte Size
-              attachmentId:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Attachmentid
-              byteSize:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Bytesize
-            required:
-            - attachment_id
-            - filename
-            title: AttachmentData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataAttachmentChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-warning
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              message:
-                title: Message
-                type: string
-              code:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Code
-            required:
-            - message
-            title: WarningData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataWarningChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-artifact
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              artifact_id:
-                format: uuid
-                title: Artifact Id
-                type: string
-              artifact_kind:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Artifact Kind
-              kind:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Kind
-              title:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Title
-              name:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Name
-              media_type:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Media Type
-              byte_size:
-                anyOf:
-                - type: integer
-                - type: 'null'
-                title: Byte Size
-              checksum_sha256:
-                anyOf:
-                - type: string
-                - type: 'null'
-                title: Checksum Sha256
-            required:
-            - artifact_id
-            title: ArtifactData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataArtifactChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-usage
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              usage:
-                additionalProperties: true
-                title: Usage
-                type: object
-            required:
-            - usage
-            title: UsageData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataUsageChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: data-structured-result
-            title: Type
-            type: string
-          id:
-            type: string
-            title: Id
-          data:
-            additionalProperties: false
-            properties:
-              schema_id:
-                title: Schema Id
-                type: string
-              schema_version:
-                title: Schema Version
-                type: string
-              value:
-                title: Value
-            required:
-            - schema_id
-            - schema_version
-            - value
-            title: StructuredResultData
-            type: object
-          transient:
-            anyOf:
-            - type: boolean
-            - type: 'null'
-            title: Transient
-        required:
-        - type
-        - data
-        title: DataStructuredResultChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: text-start
-            title: Type
-            type: string
-          id:
-            minLength: 1
-            title: Id
-            type: string
-        required:
-        - type
-        - id
-        title: TextStartChunk
-        type: object
-      - additionalProperties: false
-        properties:
-          type:
-            const: text-delta
-            title: Type
-            type: string
-          id:
-            minLength: 1
-            title: Id
+          streamId:
+            title: Streamid
             type: string
           delta:
             title: Delta
             type: string
+          text:
+            title: Text
+            type: string
+          final:
+            title: Final
+            type: boolean
+          role:
+            title: Role
+            type: string
+        title: TextEvent
+        type: object
         required:
         - type
-        - id
-        - delta
-        title: TextDeltaChunk
-        type: object
       - additionalProperties: false
         properties:
           type:
-            const: text-end
+            const: skill
             title: Type
             type: string
-          id:
-            minLength: 1
-            title: Id
+          skillId:
+            title: Skillid
             type: string
+          name:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Name
+          phase:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Phase
+          version:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Version
+          trust:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Trust
+          affordances:
+            anyOf:
+            - items:
+                type: string
+              type: array
+            - type: 'null'
+            title: Affordances
         required:
         - type
-        - id
-        title: TextEndChunk
+        - skillId
+        title: SkillEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          childId:
+            title: Childid
+            type: string
+          taskLabel:
+            title: Tasklabel
+            type: string
+          state:
+            enum:
+            - not_started
+            - running
+            - completed
+            - failed
+            - cancelled
+            - timed_out
+            title: State
+            type: string
+          elapsedMs:
+            minimum: 0
+            title: Elapsedms
+            type: integer
+          type:
+            const: child_progress
+            title: Type
+            type: string
+          outcome:
+            anyOf:
+            - maxLength: 500
+              type: string
+            - type: 'null'
+            title: Outcome
+          cleanupState:
+            enum:
+            - pending
+            - complete
+            - failed
+            - not_required
+            title: Cleanupstate
+            type: string
+          parentRunId:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Parentrunid
+          evidence:
+            items:
+              type: string
+            maxItems: 8
+            title: Evidence
+            type: array
+          gaps:
+            items:
+              type: string
+            maxItems: 8
+            title: Gaps
+            type: array
+          resultFileCount:
+            maximum: 16
+            minimum: 0
+            title: Resultfilecount
+            type: integer
+          codeExcerpt:
+            anyOf:
+            - maxLength: 800
+              type: string
+            - type: 'null'
+            title: Codeexcerpt
+          outputExcerpt:
+            anyOf:
+            - maxLength: 800
+              type: string
+            - type: 'null'
+            title: Outputexcerpt
+        required:
+        - type
+        - childId
+        - taskLabel
+        - state
+        - elapsedMs
+        title: ChildProgressEvent
         type: object
       - additionalProperties: false
         properties:
           type:
-            const: finish
+            const: attachment
+            title: Type
+            type: string
+          attachmentId:
+            title: Attachmentid
+            type: string
+          phase:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Phase
+          filename:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Filename
+          byteSize:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Bytesize
+        required:
+        - type
+        - attachmentId
+        title: AttachmentEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: warning
+            title: Type
+            type: string
+          message:
+            title: Message
+            type: string
+          code:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Code
+        required:
+        - type
+        - message
+        title: WarningEventChunk
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: artifact
+            title: Type
+            type: string
+          artifactId:
+            title: Artifactid
+            type: string
+          artifactKind:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Artifactkind
+          title:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Title
+          mediaType:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Mediatype
+          byteSize:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Bytesize
+          checksumSha256:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Checksumsha256
+        required:
+        - type
+        - artifactId
+        title: ArtifactEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: usage
+            title: Type
+            type: string
+          iterations:
+            title: Iterations
+            type: integer
+          durationMs:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Durationms
+          usage:
+            additionalProperties: true
+            title: Usage
+            type: object
+        title: UsageEvent
+        type: object
+        required:
+        - type
+      - additionalProperties: false
+        properties:
+          type:
+            const: structured_result
+            title: Type
+            type: string
+          schemaId:
+            title: Schemaid
+            type: string
+          schemaVersion:
+            title: Schemaversion
+            type: string
+          value:
+            title: Value
+        required:
+        - type
+        - schemaId
+        - schemaVersion
+        title: StructuredResultEvent
+        type: object
+      - additionalProperties: false
+        properties:
+          type:
+            const: turn_finish
             title: Type
             type: string
           finishReason:
-            enum:
-            - stop
-            - error
             title: Finishreason
             type: string
-          messageMetadata:
+          status:
+            title: Status
+            type: string
+          checkpointVersion:
             anyOf:
-            - additionalProperties: true
-              type: object
+            - type: integer
             - type: 'null'
-            title: Messagemetadata
+            title: Checkpointversion
+          durationMs:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Durationms
+          traceId:
+            anyOf:
+            - type: string
+            - type: 'null'
+            title: Traceid
+        title: TurnFinishEvent
+        type: object
         required:
         - type
-        - finishReason
-        title: FinishChunk
-        type: object
       - additionalProperties: false
         properties:
           type:
-            const: abort
+            const: turn_cancelled
             title: Type
             type: string
           reason:
             title: Reason
             type: string
+          durationMs:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Durationms
+        title: TurnCancelledEvent
+        type: object
         required:
         - type
-        - reason
-        title: AbortChunk
-        type: object
       - additionalProperties: false
         properties:
           type:
-            const: error
+            const: turn_error
             title: Type
             type: string
-          errorText:
-            minLength: 1
-            title: Errortext
+          message:
+            title: Message
             type: string
+          code:
+            title: Code
+            type: string
+          durationMs:
+            anyOf:
+            - type: integer
+            - type: 'null'
+            title: Durationms
         required:
         - type
-        - errorText
-        title: ErrorChunk
+        - message
+        title: TurnErrorEvent
         type: object
       title: FleetUIMessageChunk

@@ -49,6 +49,16 @@ export async function* streamFleetTurn({
   lifecycle.assertComplete();
 }
 
+function getFinishReason(chunk: object): unknown {
+  if ("finishReason" in chunk) {
+    return (chunk as { finishReason?: unknown }).finishReason;
+  }
+  if ("finish_reason" in chunk) {
+    return (chunk as { finish_reason?: unknown }).finish_reason;
+  }
+  return undefined;
+}
+
 // Exported for the fixture test that validates the backend projector's golden
 // stream through the same ordering grammar the live TUI enforces.
 export class StreamLifecycle {
@@ -83,28 +93,45 @@ export class StreamLifecycle {
       // The stream opens with transient preparation heartbeats; after the
       // Turn claim resolves it either starts or ends with a startless
       // error/abort terminal.
-      if (chunk.type === "data-status") return;
-      if (this.sawError && chunk.type === "start") {
+      if (chunk.type === "turn_status" || chunk.type === "data-status") return;
+      if (this.sawError && (chunk.type === "turn_start" || chunk.type === "start")) {
         throw new Error("Fleet API emitted a start chunk after an error chunk");
       }
-      if (chunk.type !== "start" && chunk.type !== "error" && chunk.type !== "abort") {
+      if (
+        chunk.type !== "turn_start" &&
+        chunk.type !== "start" &&
+        chunk.type !== "turn_error" &&
+        chunk.type !== "error" &&
+        chunk.type !== "turn_cancelled" &&
+        chunk.type !== "abort"
+      ) {
         // Without a start only an error-closed finish terminal may follow.
-        if (!(chunk.type === "finish" && chunk.finishReason === "error" && this.sawError)) {
+        const finishReason = getFinishReason(chunk);
+        if (
+          !(
+            (chunk.type === "turn_finish" || chunk.type === "finish") &&
+            finishReason === "error" &&
+            this.sawError
+          )
+        ) {
           throw new Error("Fleet API stream did not start with a start chunk");
         }
       }
     }
-    if (this.started && chunk.type === "start") {
+    if (this.started && (chunk.type === "turn_start" || chunk.type === "start")) {
       throw new Error("Fleet API emitted duplicate start chunks");
     }
 
     switch (chunk.type) {
+      case "turn_start":
       case "start":
         this.started = true;
         return;
+      case "step_start":
       case "start-step":
         this.stepDepth += 1;
         return;
+      case "step_finish":
       case "finish-step":
         if (this.stepDepth === 0) {
           throw new Error("Fleet API emitted finish-step without a matching start-step");
@@ -136,18 +163,23 @@ export class StreamLifecycle {
       case "tool-output-error":
         this.end(chunk.toolCallId, this.toolsOpen, this.toolsEnded, "tool call");
         return;
+      case "turn_error":
       case "error":
         if (this.sawError) throw new Error("Fleet API emitted duplicate error chunks");
         this.sawError = true;
         if (!this.started) this.openFailed = true;
         return;
-      case "finish":
-        if (chunk.finishReason === "error" && !this.sawError) {
+      case "turn_finish":
+      case "finish": {
+        const finishReason = getFinishReason(chunk);
+        if (finishReason === "error" && !this.sawError) {
           throw new Error("Fleet API emitted finish:error without an error chunk");
         }
         this.terminal = true;
-        this.cleanFinish = chunk.finishReason === "stop";
+        this.cleanFinish = finishReason === "stop";
         return;
+      }
+      case "turn_cancelled":
       case "abort":
         if (!this.started) this.openFailed = true;
         this.terminal = true;

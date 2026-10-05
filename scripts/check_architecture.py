@@ -123,10 +123,9 @@ def tree_check_codebase_tree(root: Path = TREE_ROOT) -> tuple[list[str], list[st
 
 TREE_LAYOUT_EXEMPT_LANES = (
     "tests/live/",
-    "tests/contracts/",
     "tests/freeze/",
     "tests/e2e/",
-    "tests/unit/backend/packaging/",
+    "tests/packaging/",
 )
 
 TREE_MIN_CASES_PER_NEW_FILE = 3
@@ -144,7 +143,7 @@ def tree__test_case_count(path: Path) -> int:
 def tree_check_test_layout(root: Path = TREE_ROOT) -> list[str]:
     """Return layout violations for the test suite.
 
-    Enforces two rules: the backend unit root stays organized into
+    Enforces two rules: the tests root stays organized into
     behavior-owner sub-packages, and no test file outside the exempt lanes
     holds fewer than ``_MIN_CASES_PER_NEW_FILE`` cases.
     """
@@ -154,9 +153,8 @@ def tree_check_test_layout(root: Path = TREE_ROOT) -> list[str]:
         return []
 
     violations: list[str] = []
-    backend_root = tests_root / "unit" / "backend"
-    for path in sorted(backend_root.glob("test_*.py")):
-        violations.append(f"{path.relative_to(root)}: flat file in the backend unit root; move it into a sub-package")
+    for path in sorted(tests_root.glob("test_*.py")):
+        violations.append(f"{path.relative_to(root)}: flat file in the tests root; move it into a sub-package")
 
     for path in sorted(tests_root.rglob("test_*.py")):
         relative = path.relative_to(root).as_posix()

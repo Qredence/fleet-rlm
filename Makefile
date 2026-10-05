@@ -6,8 +6,8 @@ PIP_AUDIT_ARGS ?=
 # virtual environments and are covered by the dedicated package gate.
 PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
 PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
-PYTEST_FAST_PATHS = tests/unit/backend tests/unit/scripts tests/unit/optimization tests/contracts/backend tests/freeze tests/unit/test_litellm_invariant.py tests/e2e
-PYTEST_UNIT_PATHS = tests/unit/backend tests/unit/scripts tests/unit/optimization tests/freeze tests/unit/test_litellm_invariant.py
+PYTEST_FAST_PATHS = tests/api tests/cli tests/config tests/daytona tests/e2e tests/freeze tests/observability tests/optimization tests/persistence tests/rlm tests/scripts tests/sessions tests/skills tests/workspace
+PYTEST_UNIT_PATHS = $(PYTEST_FAST_PATHS)
 PYTEST := uv run --no-sync pytest
 PYTEST_ISOLATED := env \
 	FLEET_DAYTONA_API_KEY= \
@@ -139,10 +139,10 @@ test-unit:
 	$(PYTEST_ISOLATED) $(PYTEST_UNIT_ARGS)
 
 test-contract:
-	$(PYTEST_ISOLATED) -q tests/contracts/backend tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
+	$(PYTEST_ISOLATED) -q tests/api tests/e2e -m "$(PYTEST_FAST_MARKERS)" -n 0
 
 test-packaging:
-	$(PYTEST_ISOLATED) -q tests/unit/backend/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
+	$(PYTEST_ISOLATED) -q tests/packaging -m "$(PYTEST_PACKAGING_MARKERS)" -n 0
 
 test-db:
 	$(PYTEST) -q -m "db" -n 0

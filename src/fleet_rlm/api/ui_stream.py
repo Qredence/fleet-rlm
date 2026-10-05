@@ -1,9 +1,8 @@
-"""Typed AI SDK UI transport chunks for live Fleet SSE.
+"""Typed stream event and chunk transport models for Fleet SSE.
 
-These discriminated models are the bounded live transport contract. They are
-intentionally separate from the durable `AssistantPart` vocabulary: durable
-parts describe one committed assistant Result, while these chunks describe the
-ordered live/replay SSE frames consumed by the TUI.
+These discriminated models are the bounded live transport contract. Both modern
+event shapes and legacy transport chunk shapes are admitted to allow smooth
+client compatibility across API revisions.
 """
 
 from __future__ import annotations
@@ -25,14 +24,12 @@ class FleetUIChunkModel(BaseModel):
 
 
 class FleetUIDataModel(BaseModel):
-    """Closed data payload model for declared public/compatibility fields.
-
-    Extensibility is explicit: dynamic tool input/output, message metadata,
-    structured-result ``value``, and usage records declare their own JSON-value
-    boundaries. Unknown nested fields are not silently admitted.
-    """
+    """Closed data payload model for legacy data fields."""
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+# --- Legacy Data Models ---
 
 
 class StatusData(FleetUIDataModel):
@@ -129,6 +126,177 @@ class StructuredResultData(FleetUIDataModel):
     schema_id: str
     schema_version: str
     value: Any
+
+
+# --- Modern Event Models ---
+
+
+class TurnStartEvent(FleetUIChunkModel):
+    type: Literal["turn_start"] = "turn_start"
+    run_id: str = Field(alias="runId")
+    session_id: str | None = Field(default=None, alias="sessionId")
+    delivery: Literal["live", "replay"] = "live"
+    trace_id: str | None = Field(default=None, alias="traceId")
+
+
+class TurnStatusEvent(FleetUIChunkModel):
+    type: Literal["turn_status"] = "turn_status"
+    phase: str
+    status: str | None = None
+    message: str | None = None
+
+
+class StepStartEvent(FleetUIChunkModel):
+    type: Literal["step_start"] = "step_start"
+    step: int
+
+
+class StepFinishEvent(FleetUIChunkModel):
+    type: Literal["step_finish"] = "step_finish"
+    step: int
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+
+
+class ReasoningEvent(FleetUIChunkModel):
+    type: Literal["reasoning"] = "reasoning"
+    stream_id: str = Field(alias="streamId")
+    step: int = 0
+    text: str = ""
+    delta: str = ""
+    final: bool = False
+
+
+class CodeEvent(FleetUIChunkModel):
+    type: Literal["code"] = "code"
+    stream_id: str = Field(alias="streamId")
+    step: int = 0
+    code: str
+    is_delta: bool = Field(default=False, alias="isDelta")
+    final: bool = True
+
+
+class OutputEvent(FleetUIChunkModel):
+    type: Literal["output"] = "output"
+    stream_id: str = Field(alias="streamId")
+    step: int = 0
+    output: str
+    is_delta: bool = Field(default=False, alias="isDelta")
+    final: bool = True
+
+
+class ToolCallEvent(FleetUIChunkModel):
+    type: Literal["tool_call"] = "tool_call"
+    tool_call_id: str = Field(alias="toolCallId")
+    tool_name: str = Field(alias="toolName")
+    input: Any = None
+
+
+class ToolResultEvent(FleetUIChunkModel):
+    type: Literal["tool_result"] = "tool_result"
+    tool_call_id: str = Field(alias="toolCallId")
+    tool_name: str | None = Field(default=None, alias="toolName")
+    output: Any = None
+    error: str | None = None
+
+
+class TextEvent(FleetUIChunkModel):
+    type: Literal["text"] = "text"
+    stream_id: str = Field(default="text", alias="streamId")
+    delta: str = ""
+    text: str = ""
+    final: bool = False
+    role: str = "assistant"
+
+
+class SkillEvent(FleetUIChunkModel):
+    type: Literal["skill"] = "skill"
+    skill_id: str = Field(alias="skillId")
+    name: str | None = None
+    phase: str | None = None
+    version: str | None = None
+    trust: str | None = None
+    affordances: list[str] | None = None
+
+
+class ChildProgressEvent(FleetUIChunkModel):
+    child_id: str = Field(alias="childId")
+    task_label: str = Field(alias="taskLabel")
+    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
+    elapsed_ms: int = Field(ge=0, alias="elapsedMs")
+    type: Literal["child_progress"] = "child_progress"
+    outcome: str | None = Field(default=None, max_length=500)
+    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = Field(
+        default="not_required", alias="cleanupState"
+    )
+    parent_run_id: str | None = Field(default=None, alias="parentRunId")
+    evidence: list[str] = Field(default_factory=list, max_length=8)
+    gaps: list[str] = Field(default_factory=list, max_length=8)
+    result_file_count: int = Field(default=0, ge=0, le=16, alias="resultFileCount")
+    code_excerpt: str | None = Field(default=None, max_length=800, alias="codeExcerpt")
+    output_excerpt: str | None = Field(default=None, max_length=800, alias="outputExcerpt")
+
+
+class AttachmentEvent(FleetUIChunkModel):
+    type: Literal["attachment"] = "attachment"
+    attachment_id: str = Field(alias="attachmentId")
+    phase: str | None = None
+    filename: str | None = None
+    byte_size: int | None = Field(default=None, alias="byteSize")
+
+
+class WarningEventChunk(FleetUIChunkModel):
+    type: Literal["warning"] = "warning"
+    message: str
+    code: str | None = None
+
+
+class ArtifactEvent(FleetUIChunkModel):
+    type: Literal["artifact"] = "artifact"
+    artifact_id: str = Field(alias="artifactId")
+    artifact_kind: str | None = Field(default=None, alias="artifactKind")
+    title: str | None = None
+    media_type: str | None = Field(default=None, alias="mediaType")
+    byte_size: int | None = Field(default=None, alias="byteSize")
+    checksum_sha256: str | None = Field(default=None, alias="checksumSha256")
+
+
+class UsageEvent(FleetUIChunkModel):
+    type: Literal["usage"] = "usage"
+    iterations: int = 0
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+    usage: dict[str, Any] = Field(default_factory=dict)
+
+
+class StructuredResultEvent(FleetUIChunkModel):
+    type: Literal["structured_result"] = "structured_result"
+    schema_id: str = Field(alias="schemaId")
+    schema_version: str = Field(alias="schemaVersion")
+    value: Any = None
+
+
+class TurnFinishEvent(FleetUIChunkModel):
+    type: Literal["turn_finish"] = "turn_finish"
+    finish_reason: str = Field(default="stop", alias="finishReason")
+    status: str = "completed"
+    checkpoint_version: int | None = Field(default=None, alias="checkpointVersion")
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+    trace_id: str | None = Field(default=None, alias="traceId")
+
+
+class TurnCancelledEvent(FleetUIChunkModel):
+    type: Literal["turn_cancelled"] = "turn_cancelled"
+    reason: str = "Turn cancelled"
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+
+
+class TurnErrorEvent(FleetUIChunkModel):
+    type: Literal["turn_error"] = "turn_error"
+    message: str
+    code: str = "execution_failed"
+    duration_ms: int | None = Field(default=None, alias="durationMs")
+
+
+# --- Legacy Chunk Models ---
 
 
 class StartChunk(FleetUIChunkModel):
@@ -288,34 +456,33 @@ class DataStructuredResultChunk(FleetUIChunkModel):
     transient: bool | None = None
 
 
-FleetUIMessageChunk = Annotated[
-    StartChunk
-    | StartStepChunk
-    | FinishStepChunk
-    | ReasoningStartChunk
-    | ReasoningDeltaChunk
-    | ReasoningEndChunk
-    | DataStatusChunk
-    | DataChildProgressChunk
-    | DataSkillChunk
-    | DataRLMCodeChunk
-    | DataRLMOutputChunk
-    | ToolInputAvailableChunk
-    | ToolOutputAvailableChunk
-    | ToolOutputErrorChunk
-    | DataAttachmentChunk
-    | DataWarningChunk
-    | DataArtifactChunk
-    | DataUsageChunk
-    | DataStructuredResultChunk
-    | TextStartChunk
-    | TextDeltaChunk
-    | TextEndChunk
-    | FinishChunk
-    | AbortChunk
-    | ErrorChunk,
+# --- Combined Unions ---
+
+FleetStreamEvent = Annotated[
+    TurnStartEvent
+    | TurnStatusEvent
+    | StepStartEvent
+    | StepFinishEvent
+    | ReasoningEvent
+    | CodeEvent
+    | OutputEvent
+    | ToolCallEvent
+    | ToolResultEvent
+    | TextEvent
+    | SkillEvent
+    | ChildProgressEvent
+    | AttachmentEvent
+    | WarningEventChunk
+    | ArtifactEvent
+    | UsageEvent
+    | StructuredResultEvent
+    | TurnFinishEvent
+    | TurnCancelledEvent
+    | TurnErrorEvent,
     Field(discriminator="type"),
 ]
+
+FleetUIMessageChunk = FleetStreamEvent
 
 FleetUIMessageChunkAdapter: TypeAdapter[FleetUIMessageChunk] = TypeAdapter(FleetUIMessageChunk)
 
@@ -337,14 +504,19 @@ def fleet_ui_chunk_payload(value: object) -> dict[str, Any]:
 
 def fleet_ui_message_chunk_json_schema() -> dict[str, Any]:
     """Return the typed discriminated schema used by OpenAPI generation."""
-    return FleetUIMessageChunkAdapter.json_schema(mode="serialization")
+    schema = FleetUIMessageChunkAdapter.json_schema(mode="serialization")
+    return schema
 
 
 __all__ = [
     "AbortChunk",
     "ArtifactData",
+    "ArtifactEvent",
     "AttachmentData",
+    "AttachmentEvent",
     "ChildProgressData",
+    "ChildProgressEvent",
+    "CodeEvent",
     "DataArtifactChunk",
     "DataAttachmentChunk",
     "DataChildProgressChunk",
@@ -358,27 +530,45 @@ __all__ = [
     "ErrorChunk",
     "FinishChunk",
     "FinishStepChunk",
+    "FleetStreamEvent",
     "FleetUIChunkModel",
+    "FleetUIDataModel",
     "FleetUIMessageChunk",
     "FleetUIMessageChunkAdapter",
+    "OutputEvent",
     "RLMCodeData",
     "RLMOutputData",
     "ReasoningDeltaChunk",
     "ReasoningEndChunk",
+    "ReasoningEvent",
     "ReasoningStartChunk",
     "SkillData",
+    "SkillEvent",
     "StartChunk",
     "StartStepChunk",
     "StatusData",
+    "StepFinishEvent",
+    "StepStartEvent",
     "StructuredResultData",
+    "StructuredResultEvent",
     "TextDeltaChunk",
     "TextEndChunk",
+    "TextEvent",
     "TextStartChunk",
+    "ToolCallEvent",
     "ToolInputAvailableChunk",
     "ToolOutputAvailableChunk",
     "ToolOutputErrorChunk",
+    "ToolResultEvent",
+    "TurnCancelledEvent",
+    "TurnErrorEvent",
+    "TurnFinishEvent",
+    "TurnStartEvent",
+    "TurnStatusEvent",
     "UsageData",
+    "UsageEvent",
     "WarningData",
+    "WarningEventChunk",
     "fleet_ui_chunk_payload",
     "fleet_ui_message_chunk_json_schema",
 ]

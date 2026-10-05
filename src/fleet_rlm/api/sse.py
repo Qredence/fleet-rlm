@@ -1,18 +1,10 @@
-"""Exhaustive AI SDK UI v1 projection for typed Fleet Runtime Events."""
-
-# The live AI SDK UI transport contract is owned by typed models in
-# src/fleet_rlm/api/ui_stream.py and consumed by these explicit adapters:
-#   1. this module (RuntimeEvent -> typed chunks -> JSON)
-#   2. src/fleet_rlm/api/ui_message.py       (durable assistant Result reload)
-#   3. src/fleet_rlm/api/openapi.py          (derived OpenAPI chunk schemas)
-#   4. tools/fleet-tui/src/generated/fleet-ui-chunk-validation.ts
-#      (generated TUI validator tables via `make api-sync`)
+"""Exhaustive stream projection for typed Fleet Runtime Events into SSE frames."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
-from uuid import UUID
+
+from fastapi.sse import ServerSentEvent
 
 from fleet_rlm.api.json_util import to_plain_json
 from fleet_rlm.api.ui_stream import fleet_ui_chunk_payload
@@ -44,306 +36,297 @@ from fleet_rlm.rlm.events import (
     WarningEvent,
 )
 
-FLEET_UI_CHUNK_TYPES = (
-    "start",
-    "start-step",
-    "finish-step",
-    "reasoning-start",
-    "reasoning-delta",
-    "reasoning-end",
-    "data-status",
-    "data-child-progress",
-    "data-skill",
-    "data-rlm-code",
-    "data-rlm-output",
-    "tool-input-available",
-    "tool-output-available",
-    "tool-output-error",
-    "data-attachment",
-    "data-warning",
-    "data-artifact",
-    "data-usage",
-    "data-structured-result",
-    "text-start",
-    "text-delta",
-    "text-end",
-    "finish",
-    "abort",
-    "error",
+FLEET_STREAM_EVENT_TYPES = (
+    "turn_start",
+    "turn_status",
+    "step_start",
+    "step_finish",
+    "reasoning",
+    "code",
+    "output",
+    "tool_call",
+    "tool_result",
+    "text",
+    "skill",
+    "child_progress",
+    "attachment",
+    "warning",
+    "artifact",
+    "usage",
+    "structured_result",
+    "turn_finish",
+    "turn_cancelled",
+    "turn_error",
 )
-_CANONICAL_REASONING_SUFFIX = ":canonical"
+FLEET_UI_CHUNK_TYPES = FLEET_STREAM_EVENT_TYPES
 
 
-def _detail_data(detail: object) -> dict[str, Any]:
-    fields = getattr(detail, "__dataclass_fields__", {})
-    return {
-        name: dict(value) if isinstance(value, Mapping) else value
-        for name in fields
-        if name != "kind"
-        for value in (getattr(detail, name),)
-    }
+def project_runtime_event(event: RuntimeEvent) -> list[dict[str, Any]]:
+    """Project one domain RuntimeEvent into typed stream event payload dicts."""
+    detail = event.detail
+    if isinstance(detail, RunStarted):
+        return [
+            {
+                "type": "turn_start",
+                "runId": str(event.run_id),
+                "sessionId": str(event.session_id),
+                "delivery": detail.delivery,
+                **({"traceId": detail.trace_id} if detail.trace_id else {}),
+            }
+        ]
+    if isinstance(detail, Status):
+        return [
+            {
+                "type": "turn_status",
+                "phase": detail.phase,
+                "status": detail.status,
+                "message": detail.message,
+            }
+        ]
+    if isinstance(detail, StepStarted):
+        return [{"type": "step_start", "step": detail.step}]
+    if isinstance(detail, StepFinished):
+        return [
+            {
+                "type": "step_finish",
+                "step": detail.step,
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            }
+        ]
+    if isinstance(detail, RLMReasoning):
+        if not detail.text.strip():
+            return []
+        return [
+            {
+                "type": "reasoning",
+                "streamId": detail.stream_id or str(detail.step or 1),
+                "step": detail.step or 0,
+                "text": detail.text,
+                "delta": detail.text if detail.is_delta else "",
+                "final": detail.is_final,
+            }
+        ]
+    if isinstance(detail, RLMCode):
+        return [
+            {
+                "type": "code",
+                "streamId": detail.stream_id or str(detail.step or 1),
+                "step": detail.step or 0,
+                "code": detail.code,
+                "isDelta": detail.is_delta,
+                "final": detail.is_final,
+            }
+        ]
+    if isinstance(detail, RLMOutput):
+        return [
+            {
+                "type": "output",
+                "streamId": detail.stream_id or str(detail.step or 1),
+                "step": detail.step or 0,
+                "output": detail.output,
+                "isDelta": detail.is_delta,
+                "final": detail.is_final,
+            }
+        ]
+    if isinstance(detail, ToolStarted):
+        return [
+            {
+                "type": "tool_call",
+                "toolCallId": detail.tool_call_id,
+                "toolName": detail.tool_name,
+                "input": to_plain_json(detail.input),
+            }
+        ]
+    if isinstance(detail, ToolCompleted):
+        return [
+            {
+                "type": "tool_result",
+                "toolCallId": detail.tool_call_id,
+                "toolName": detail.tool_name,
+                "output": to_plain_json(detail.output),
+            }
+        ]
+    if isinstance(detail, ToolFailed):
+        return [
+            {
+                "type": "tool_result",
+                "toolCallId": detail.tool_call_id,
+                "toolName": detail.tool_name,
+                "error": detail.error,
+            }
+        ]
+    if isinstance(detail, TextDelta):
+        return [
+            {
+                "type": "text",
+                "streamId": "text",
+                "delta": detail.text,
+                "final": False,
+                "role": "assistant",
+            }
+        ]
+    if isinstance(detail, TextCompleted):
+        return [
+            {
+                "type": "text",
+                "streamId": "text",
+                "delta": "",
+                "text": detail.text,
+                "final": True,
+                "role": "assistant",
+            }
+        ]
+    if isinstance(detail, (SkillActivated, SkillLoaded)):
+        phase = "activated" if isinstance(detail, SkillActivated) else "loaded"
+        payload: dict[str, Any] = {
+            "type": "skill",
+            "skillId": detail.skill_id,
+            "name": detail.name,
+            "phase": phase,
+            "version": detail.version,
+        }
+        if isinstance(detail, SkillActivated):
+            payload["trust"] = detail.trust
+            payload["affordances"] = list(detail.affordances)
+        return [payload]
+    if isinstance(detail, ChildProgress):
+        return [
+            {
+                "type": "child_progress",
+                "childId": detail.child_id,
+                "taskLabel": detail.task_label,
+                "state": detail.state,
+                "elapsedMs": detail.elapsed_ms,
+                "outcome": detail.outcome,
+                "cleanupState": detail.cleanup_state,
+                "parentRunId": detail.parent_run_id,
+                "evidence": list(detail.evidence),
+                "gaps": list(detail.gaps),
+                "resultFileCount": detail.result_file_count,
+                "codeExcerpt": detail.code_excerpt,
+                "outputExcerpt": detail.output_excerpt,
+            }
+        ]
+    if isinstance(detail, AttachmentRead):
+        return [
+            {
+                "type": "attachment",
+                "attachmentId": str(detail.attachment_id),
+                "phase": "read",
+                "filename": detail.filename,
+                "byteSize": detail.byte_size,
+            }
+        ]
+    if isinstance(detail, ArtifactCreated):
+        return [
+            {
+                "type": "artifact",
+                "artifactId": str(detail.artifact_id),
+                "artifactKind": detail.artifact_kind,
+                "title": detail.title,
+                "mediaType": detail.media_type,
+                "byteSize": detail.byte_size,
+                "checksumSha256": detail.checksum_sha256,
+            }
+        ]
+    if isinstance(detail, Usage):
+        return [
+            {
+                "type": "usage",
+                "iterations": detail.value.get("iterations", 0),
+                **(
+                    {"durationMs": detail.value.get("duration_ms")}
+                    if detail.value.get("duration_ms") is not None
+                    else {}
+                ),
+                "usage": to_plain_json(detail.value),
+            }
+        ]
+    if isinstance(detail, StructuredResult):
+        return [
+            {
+                "type": "structured_result",
+                "schemaId": detail.schema_id,
+                "schemaVersion": detail.schema_version,
+                "value": to_plain_json(detail.value),
+            }
+        ]
+    if isinstance(detail, WarningEvent):
+        return [
+            {
+                "type": "warning",
+                "message": detail.message,
+                **({"code": detail.code} if detail.code else {}),
+            }
+        ]
+    if isinstance(detail, RunCompleted):
+        return [
+            {
+                "type": "turn_finish",
+                "finishReason": "stop",
+                "status": "completed",
+                "checkpointVersion": detail.checkpoint_version,
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+                **({"traceId": detail.trace_id} if detail.trace_id else {}),
+            }
+        ]
+    if isinstance(detail, RunCancelled):
+        return [
+            {
+                "type": "turn_cancelled",
+                "reason": detail.message,
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            }
+        ]
+    if isinstance(detail, RunFailed):
+        return [
+            {
+                "type": "turn_error",
+                "message": detail.message,
+                "code": detail.code,
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            },
+            {
+                "type": "turn_finish",
+                "finishReason": "error",
+                "status": "error",
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            },
+        ]
+    if isinstance(detail, RunTimedOut):
+        return [
+            {
+                "type": "turn_error",
+                "message": detail.message,
+                "code": "timeout",
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            },
+            {
+                "type": "turn_finish",
+                "finishReason": "timeout",
+                "status": "error",
+                **({"durationMs": detail.duration_ms} if detail.duration_ms is not None else {}),
+            },
+        ]
+    raise AssertionError(f"unhandled Runtime Event detail: {type(detail).__name__}")
 
 
 class AISDKUIProjector:
-    """Stateful typed Runtime Event to AI SDK UI message chunk projector."""
-
-    def __init__(self) -> None:
-        self._text_ids: dict[UUID, str] = {}
-        self._text_started: set[UUID] = set()
-        self._text_ended: set[UUID] = set()
-        self._stream_ids: dict[tuple[str, int | None], str] = {}
-        self._reasoning_started: set[str] = set()
-        self._reasoning_ended: set[str] = set()
+    """Projector mapping RuntimeEvent to typed stream chunk payloads and SSE frames."""
 
     def project(self, event: RuntimeEvent) -> list[dict[str, Any]]:
-        """Project one RuntimeEvent and validate every frame before SSE serialization."""
-        return [fleet_ui_chunk_payload(chunk) for chunk in self._project(event)]
+        """Project one RuntimeEvent into validated chunk payload dictionaries."""
+        return [fleet_ui_chunk_payload(chunk) for chunk in project_runtime_event(event)]
 
-    def _project(self, event: RuntimeEvent) -> list[dict[str, Any]]:
-        detail = event.detail
-        data = _detail_data(detail)
-        if isinstance(detail, RunStarted):
-            return self._project_run_started(event, detail)
-        if isinstance(detail, ChildProgress):
-            return [self._data("child-progress", data, part_id=detail.child_id)]
-        if isinstance(detail, (Status, SkillActivated, SkillLoaded, StepStarted, StepFinished)):
-            return self._project_progress_event(detail, data)
-        if isinstance(detail, (RLMReasoning, RLMCode, RLMOutput)):
-            return self._project_rlm_event(event, detail, data)
-        if isinstance(detail, (ToolStarted, ToolCompleted, ToolFailed)):
-            return self._project_tool_event(detail)
-        if isinstance(detail, (AttachmentRead, ArtifactCreated, Usage, StructuredResult, WarningEvent)):
-            return self._project_data_event(event, detail, data)
-        if isinstance(detail, (TextDelta, TextCompleted)):
-            return self._project_text_event(event, detail)
-        if isinstance(detail, (RunFailed, RunCancelled, RunTimedOut)):
-            return self._project_run_failure(detail)
-        if isinstance(detail, RunCompleted):
-            return self._project_run_completed(event, detail)
-        raise AssertionError(f"unhandled Runtime Event detail: {type(detail).__name__}")
+    def project_sse(self, event: RuntimeEvent) -> list[ServerSentEvent]:
+        """Project one RuntimeEvent into native FastAPI ServerSentEvent instances."""
+        chunks = self.project(event)
+        return [ServerSentEvent(event=chunk["type"], data=chunk) for chunk in chunks]
 
-    @staticmethod
-    def _project_run_started(event: RuntimeEvent, detail: RunStarted) -> list[dict[str, Any]]:
-        metadata = {
-            "schemaVersion": event.schema_version,
-            "runId": str(event.run_id),
-            "sessionId": str(event.session_id),
-            "createdAt": event.timestamp.isoformat(),
-            "delivery": detail.delivery,
-        }
-        if detail.trace_id:
-            metadata["traceId"] = detail.trace_id
-        return [
-            {
-                "type": "start",
-                "messageId": str(event.run_id),
-                "messageMetadata": metadata,
-            }
-        ]
 
-    def _project_run_completed(self, event: RuntimeEvent, detail: RunCompleted) -> list[dict[str, Any]]:
-        chunks: list[dict[str, Any]] = []
-        if event.run_id in self._text_started and event.run_id not in self._text_ended:
-            chunks.append({"type": "text-end", "id": self._text_ids[event.run_id]})
-            self._text_ended.add(event.run_id)
-        chunks.append(
-            {
-                "type": "finish",
-                "finishReason": "stop",
-                "messageMetadata": {
-                    "schemaVersion": event.schema_version,
-                    "runId": str(event.run_id),
-                    "sessionId": str(event.session_id),
-                    "checkpointVersion": detail.checkpoint_version,
-                    "durationMs": detail.duration_ms,
-                    "idempotentReplay": detail.delivery == "replay",
-                    **({"traceId": detail.trace_id} if detail.trace_id else {}),
-                },
-            }
-        )
-        return chunks
-
-    @staticmethod
-    def _project_run_failure(detail: RunFailed | RunCancelled | RunTimedOut) -> list[dict[str, Any]]:
-        if isinstance(detail, RunCancelled):
-            return [{"type": "abort", "reason": detail.message}]
-        return [
-            {"type": "error", "errorText": detail.message},
-            {"type": "finish", "finishReason": "error"},
-        ]
-
-    def _project_progress_event(
-        self,
-        detail: Status | SkillActivated | SkillLoaded | StepStarted | StepFinished,
-        data: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        if isinstance(detail, Status):
-            return [self._data("status", data, transient=True)]
-        if isinstance(detail, (SkillActivated, SkillLoaded)):
-            phase = "activated" if isinstance(detail, SkillActivated) else "loaded"
-            data["phase"] = phase
-            return [self._data("skill", data, part_id=detail.skill_id)]
-        if isinstance(detail, StepStarted):
-            return [{"type": "start-step"}]
-        return [{"type": "finish-step"}]
-
-    def _project_rlm_event(
-        self,
-        event: RuntimeEvent,
-        detail: RLMReasoning | RLMCode | RLMOutput,
-        data: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        if isinstance(detail, RLMReasoning):
-            return self._project_reasoning(event, detail)
-        if isinstance(detail, RLMCode):
-            return [self._data("rlm-code", data, part_id=self._detail_part_id(event, detail, "code"))]
-        return [self._data("rlm-output", data, part_id=self._detail_part_id(event, detail, "output"))]
-
-    def _project_reasoning(self, event: RuntimeEvent, detail: RLMReasoning) -> list[dict[str, Any]]:
-        part_id = self._detail_part_id(event, detail, "reasoning")
-        chunks: list[dict[str, Any]] = []
-        if detail.is_delta:
-            if not detail.text and not detail.is_final:
-                return []
-            if not detail.text and part_id not in self._reasoning_started:
-                return []
-            if part_id not in self._reasoning_started:
-                self._reasoning_started.add(part_id)
-                chunks.append({"type": "reasoning-start", "id": part_id})
-            if detail.text:
-                chunks.append({"type": "reasoning-delta", "id": part_id, "delta": detail.text})
-            if detail.is_final and part_id not in self._reasoning_ended:
-                self._reasoning_ended.add(part_id)
-                chunks.append({"type": "reasoning-end", "id": part_id})
-            return chunks
-        # A live DSPy callback can already have opened this stream before the
-        # canonical trajectory correction arrives. Close the live stream first,
-        # then use a distinct stream ID for the correction so strict clients do
-        # not see a reopened AI SDK part.
-        if part_id in self._reasoning_ended:
-            return self._canonical_reasoning_correction(part_id, detail.text)
-        if part_id in self._reasoning_started:
-            self._reasoning_ended.add(part_id)
-            correction = self._canonical_reasoning_correction(part_id, detail.text)
-            return [{"type": "reasoning-end", "id": part_id}, *correction]
-        if not detail.text.strip():
-            return []
-        chunks.extend(
-            (
-                {"type": "reasoning-start", "id": part_id},
-                {"type": "reasoning-delta", "id": part_id, "delta": detail.text},
-                {"type": "reasoning-end", "id": part_id},
-            )
-        )
-        self._reasoning_started.add(part_id)
-        self._reasoning_ended.add(part_id)
-        return chunks
-
-    def _canonical_reasoning_correction(self, part_id: str, text: str) -> list[dict[str, Any]]:
-        if not text.strip():
-            return []
-        correction_id = f"{part_id}{_CANONICAL_REASONING_SUFFIX}"
-        if correction_id in self._reasoning_ended:
-            return []
-        self._reasoning_started.add(correction_id)
-        self._reasoning_ended.add(correction_id)
-        return [
-            {"type": "reasoning-start", "id": correction_id},
-            {"type": "reasoning-delta", "id": correction_id, "delta": text},
-            {"type": "reasoning-end", "id": correction_id},
-        ]
-
-    @staticmethod
-    def _project_tool_event(detail: ToolStarted | ToolCompleted | ToolFailed) -> list[dict[str, Any]]:
-        if isinstance(detail, ToolStarted):
-            return [
-                {
-                    "type": "tool-input-available",
-                    "toolCallId": detail.tool_call_id,
-                    "toolName": detail.tool_name,
-                    "input": detail.input,
-                    "providerExecuted": True,
-                    "dynamic": True,
-                }
-            ]
-        if isinstance(detail, ToolCompleted):
-            return [
-                {
-                    "type": "tool-output-available",
-                    "toolCallId": detail.tool_call_id,
-                    "output": detail.output,
-                    "providerExecuted": True,
-                    "dynamic": True,
-                }
-            ]
-        return [
-            {
-                "type": "tool-output-error",
-                "toolCallId": detail.tool_call_id,
-                "errorText": detail.error,
-                "providerExecuted": True,
-                "dynamic": True,
-            }
-        ]
-
-    def _project_data_event(
-        self,
-        event: RuntimeEvent,
-        detail: AttachmentRead | ArtifactCreated | Usage | StructuredResult | WarningEvent,
-        data: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        if isinstance(detail, AttachmentRead):
-            # Keep the transport-neutral snake_case fields for existing clients while
-            # matching the reload projection's public UIMessage shape.
-            data.update(
-                attachmentId=str(detail.attachment_id),
-                phase="read",
-                byteSize=detail.byte_size,
-            )
-            return [self._data("attachment", data, part_id=str(detail.attachment_id))]
-        if isinstance(detail, ArtifactCreated):
-            return [self._data("artifact", data, part_id=str(detail.artifact_id))]
-        if isinstance(detail, Usage):
-            return [self._data("usage", {"usage": to_plain_json(detail.value)}, part_id=f"usage-{event.run_id}")]
-        if isinstance(detail, StructuredResult):
-            return [self._data("structured-result", data, part_id=f"result-{event.run_id}")]
-        return [self._data("warning", data)]
-
-    def _project_text_event(self, event: RuntimeEvent, detail: TextDelta | TextCompleted) -> list[dict[str, Any]]:
-        text_id = self._text_ids.setdefault(event.run_id, f"text-{event.run_id}")
-        chunks: list[dict[str, Any]] = []
-        if event.run_id not in self._text_started:
-            self._text_started.add(event.run_id)
-            chunks.append({"type": "text-start", "id": text_id})
-        if isinstance(detail, TextDelta):
-            chunks.append({"type": "text-delta", "id": text_id, "delta": detail.text})
-            return chunks
-        chunks.append({"type": "text-end", "id": text_id})
-        self._text_ended.add(event.run_id)
-        return chunks
-
-    @staticmethod
-    def _data(
-        name: str, data: dict[str, Any], *, part_id: str | None = None, transient: bool = False
-    ) -> dict[str, Any]:
-        chunk: dict[str, Any] = {"type": f"data-{name}", "data": data}
-        if part_id is not None:
-            chunk["id"] = part_id
-        if transient:
-            chunk["transient"] = True
-        return chunk
-
-    @staticmethod
-    def _step_id(event: RuntimeEvent, step: int | None, name: str) -> str:
-        return f"{name}-{event.run_id}-{step or event.sequence}"
-
-    def _detail_part_id(self, event: RuntimeEvent, detail: RLMReasoning | RLMCode | RLMOutput, name: str) -> str:
-        key = (name, detail.step)
-        if detail.stream_id:
-            self._stream_ids[key] = detail.stream_id
-            return detail.stream_id
-        stream_id = self._stream_ids.get(key)
-        if stream_id is None:
-            stream_id = self._step_id(event, detail.step, name)
-            self._stream_ids[key] = stream_id
-        return stream_id
+__all__ = [
+    "FLEET_STREAM_EVENT_TYPES",
+    "FLEET_UI_CHUNK_TYPES",
+    "AISDKUIProjector",
+    "project_runtime_event",
+]

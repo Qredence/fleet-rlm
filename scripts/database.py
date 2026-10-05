@@ -579,9 +579,9 @@ from xml.etree import ElementTree
 
 POSTGRES_ROOT = Path(__file__).resolve().parents[1]
 
-POSTGRES_TEST_PATH = "tests/live/backend/test_postgres_contention.py"
+POSTGRES_TEST_PATH = "tests/live/test_postgres_contention.py"
 
-POSTGRES_QUERY_TEST_PATH = "tests/live/backend/test_postgres_query_plans.py"
+POSTGRES_QUERY_TEST_PATH = "tests/live/test_postgres_query_plans.py"
 
 POSTGRES_QUERY_OPERATIONS = ("sessions", "history", "replay", "recovery", "outbox")
 

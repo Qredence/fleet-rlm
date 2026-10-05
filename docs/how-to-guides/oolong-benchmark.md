@@ -123,8 +123,8 @@ do not retain prompt bodies or provider payloads.
 ## Validation
 
 ```bash
-uv run pytest tests/unit/scripts/test_run_oolong_predict.py -q
-uv run ruff check scripts/benchmarks/oolong scripts/benchmarks/run_oolong_predict.py tests/unit/scripts/test_run_oolong_predict.py
+uv run pytest tests/scripts/test_run_oolong_predict.py -q
+uv run ruff check scripts/benchmarks/oolong scripts/benchmarks/run_oolong_predict.py tests/scripts/test_run_oolong_predict.py
 ```
 
 These checks prove adapter wiring only. They do not establish paper-comparable

@@ -38,16 +38,15 @@ logger = logging.getLogger(__name__)
 # Transient client-facing pre-run heartbeat emitted until the runtime-owned open
 # resolves; it never enters the durable event log and may repeat.
 _PREPARATION_PRELUDE_CHUNK: Final[dict[str, Any]] = {
-    "type": "data-status",
-    "data": {"phase": "preparation", "status": "running", "message": None},
-    "transient": True,
+    "type": "turn_status",
+    "phase": "preparation",
+    "status": "running",
+    "message": None,
 }
 
 
 def _preparation_prelude() -> ServerSentEvent:
-    chunk: dict[str, Any] = dict(_PREPARATION_PRELUDE_CHUNK)
-    chunk["data"] = dict(_PREPARATION_PRELUDE_CHUNK["data"])
-    return ServerSentEvent(data=chunk)
+    return ServerSentEvent(event="turn_status", data=_PREPARATION_PRELUDE_CHUNK)
 
 
 def _correlation_id(request: Request) -> str:
@@ -89,10 +88,10 @@ def _open_failure_message(exc: BaseException) -> str | None:
 
 
 def _open_failure_frames(message: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Project an open failure exactly like the RunFailed terminal chunk pair."""
+    """Project an open failure as typed terminal events."""
     return (
-        {"type": "error", "errorText": message},
-        {"type": "finish", "finishReason": "error"},
+        {"type": "turn_error", "message": message, "code": "open_failed"},
+        {"type": "turn_finish", "finishReason": "error", "status": "error"},
     )
 
 
@@ -126,11 +125,11 @@ def _stream_headers(response: Response) -> None:
     responses={
         200: {
             "description": (
-                "AI SDK UI v1 UIMessage SSE stream. It opens immediately with a transient"
-                " data-status prelude (phase=preparation) that repeats every runtime heartbeat"
-                " until the Turn is claimed and prepared. Claim or preparation failures no"
-                " longer change the HTTP status: they project closed error + finish chunks"
-                " inside the stream, and cancellation projects one abort chunk."
+                "Fleet Turn SSE stream. It opens immediately with a transient"
+                " turn_status prelude (phase=preparation) that repeats every runtime heartbeat"
+                " until the Turn is claimed and prepared. Claim or preparation failures"
+                " project closed turn_error + turn_finish events"
+                " inside the stream, and cancellation projects one turn_cancelled event."
             ),
             "content": {"text/event-stream": {"schema": {"type": "string"}}},
             "headers": {
@@ -170,7 +169,7 @@ async def create_turn(
     except RunPreparationCancelledError:
         if owner is not None:
             await owner.aclose()
-        yield ServerSentEvent(data={"type": "abort", "reason": "Turn cancelled"})
+        yield ServerSentEvent(event="turn_cancelled", data={"type": "turn_cancelled", "reason": "Turn cancelled"})
         yield ServerSentEvent(raw_data="[DONE]")
         return
     except (asyncio.CancelledError, GeneratorExit):
@@ -197,7 +196,7 @@ async def create_turn(
             },
         )
         for chunk in _open_failure_frames(message):
-            yield ServerSentEvent(data=chunk)
+            yield ServerSentEvent(event=chunk["type"], data=chunk)
         yield ServerSentEvent(raw_data="[DONE]")
         return
 
@@ -218,8 +217,8 @@ async def create_turn(
             },
         )
         async for event in owner:
-            for chunk in projector.project(event):
-                yield ServerSentEvent(data=chunk)
+            for sse_event in projector.project_sse(event):
+                yield sse_event
         yield ServerSentEvent(raw_data="[DONE]")
     except (asyncio.CancelledError, GeneratorExit):
         # Client disconnect is not a turn failure; never capture it.

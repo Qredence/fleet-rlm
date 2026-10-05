@@ -19,16 +19,12 @@ lane, or live marker. Coverage is a coarse floor, not a reason to test every
 internal branch. Retain independent concurrency, durability, privacy, and provider
 assertions even when nearby tests use similar setup.
 
-`make check-codebase-tree` enforces this admission rule: no `test_*.py` may sit
-flat in `tests/unit/backend/` (organize by behavior owner), and no file outside
-`tests/live/`, `tests/contracts/`, `tests/freeze/`, `tests/e2e/`, and
-`tests/unit/backend/packaging/` may hold fewer than three cases. Those lanes own
-many small files by design — one contract per live canary or API boundary.
-
-`tests/unit/backend/` is grouped by the source module a file primarily
-exercises: `api/`, `chat/`, `cli/`, `composition/`, `config/`, `daytona/`,
-`observability/`, `packaging/`, `persistence/`, `rlm/`, `runtime/`, `sessions/`,
-`skills/`, `turn/`, and `workspace/`.
+`make check-codebase-tree` enforces test structure: tests directly mirror the
+source modules under `tests/` (`api/`, `cli/`, `config/`, `daytona/`,
+`observability/`, `optimization/`, `packaging/`, `persistence/`, `rlm/`,
+`scripts/`, `sessions/`, `skills/`, `workspace/`, `e2e/`, `live/`), and no file
+outside `tests/live/`, `tests/e2e/`, and `tests/packaging/` may hold fewer than
+three cases.
 
 Shared setup belongs in small `tests/support` modules, existing domain fakes,
 or a narrowly scoped fixture. Do not import collected test functions or fixtures
@@ -38,17 +34,15 @@ claims remain distinct.
 
 | Suite | Path | Purpose |
 | --- | --- | --- |
-| Backend unit | `tests/unit/backend/` | domain, adapters, configuration, routes, runtime modules |
-| Script unit | `tests/unit/scripts/` | supported helper behavior |
-| Optimization unit | `tests/unit/optimization/` | GEPA orchestration, curated datasets, routing evaluation, sanitized proof receipts |
-| LiteLLM invariant | `tests/unit/test_litellm_invariant.py` | forbids direct application LiteLLM use |
-| Backend contracts | `tests/contracts/backend/` | API, persistence, composition, and boundary contracts |
-| Packaging/release | `tests/unit/backend/packaging/` | artifact metadata, clean installs, CLI guards, and VCS-free builds |
+| Backend domain / modules | `tests/<module>/` | 1:1 mirroring `src/fleet_rlm/` (`sessions/`, `api/`, `rlm/`, `daytona/`, `persistence/`, `workspace/`, `observability/`, `skills/`, `config/`, `cli/`) |
+| Script unit | `tests/scripts/` | supported helper behavior |
+| Optimization unit | `tests/optimization/` | GEPA orchestration, curated datasets, routing evaluation, sanitized proof receipts |
+| Packaging/release | `tests/packaging/` | artifact metadata, clean installs, CLI guards, and VCS-free builds |
 | End to end | `tests/e2e/` | canonical local process and request flows |
 | TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
 | Database | tests marked `db` | explicit configured database behavior |
-| Native semantic FastAPI contract | `tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi` | single and ordered batch semantic calls, typed submission, zero recursive children, and owned-resource cleanup |
-| Attachment/Artifact durability | `tests/live/backend/test_attachment_artifact_durability.py` | Volume persistence and committed content |
+| Native semantic FastAPI contract | `tests/live/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi` | single and ordered batch semantic calls, typed submission, zero recursive children, and owned-resource cleanup |
+| Attachment/Artifact durability | `tests/live/test_attachment_artifact_durability.py` | Volume persistence and committed content |
 
 ## Primary non-live gate
 
@@ -95,7 +89,7 @@ and `stream-check`), `lint-typecheck`, the four-way `test-unit` job (unit,
 contract, freeze, and E2E atoms through `pytest-unit`, with per-shard
 coverage), `coverage-gate`, lightweight `python-compat-311` /
 `python-compat-312` / `python-compat-313` jobs (lock/install, import check,
-and `tests/unit/backend` + `tests/contracts/backend` only, through the
+and `tests/` backend module tests only, through the
 `pytest-compat` testsuite with the same first-flake `max-auto-rerun`
 containment as `pytest-unit`), and the `tui` job (pnpm format, lint,
 typecheck, and Vitest against the maintained client). Python 3.13 remains the
@@ -132,7 +126,9 @@ make test-packaging
 Useful focused commands are:
 
 ```bash
-uv run pytest tests/unit/backend tests/unit/scripts tests/contracts/backend tests/e2e -q \
+uv run pytest tests/api tests/cli tests/config tests/daytona tests/observability \
+  tests/optimization tests/persistence tests/rlm tests/scripts tests/sessions \
+  tests/skills tests/workspace tests/e2e -q \
   -m "not live_llm and not live_daytona and not benchmark and not db and not packaging"
 uv run ruff check src tests scripts migrations
 uv run ty check src
@@ -143,10 +139,10 @@ git diff --check
 
 For separation-of-concerns changes, keep boundary checks close to the
 production seam: composition inventory tests live in
-`tests/unit/backend/composition/test_live_composition.py`, Turn execution tests
-in `tests/unit/backend/chat/test_turn_coordinator_execution.py`, binding repository tests
-in `tests/unit/backend/runtime/test_sandbox_lifecycle.py`, and pure broker
-source and transport tests in `tests/unit/backend/daytona/test_broker.py`. Include
+`tests/sessions/test_live_composition.py`, Turn execution tests
+in `tests/sessions/test_turn_coordinator_execution.py`, binding repository tests
+in `tests/daytona/test_sandbox_lifecycle.py`, and pure broker
+source and transport tests in `tests/daytona/test_broker.py`. Include
 the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,
 broker-binding, and interpreter-observation suites when changing lifecycle or
 provider ownership.
@@ -199,7 +195,7 @@ accounting in individual pytest modules.
 | Snapshot image package and import contract | `scripts/daytona_snapshot.py verify-runtime`; disposable Sandbox result | The selected immutable image must expose its baked Python and dependency contract in Daytona. This does not exercise Fleet's API or RLM path. |
 | Native semantic FastAPI and attachment/artifact durability | `scripts/live_daytona_verify.py`; one bounded JSON receipt | Native semantic calls and mounted bytes across Sandbox replacement require the configured provider. The native lane enables MLflow tracing, so it also requires a reachable tracking server at the configured `mlflow.tracking_uri` (the shipped configuration uses `http://127.0.0.1:5001`) and fails, rather than skips, when that server is down: a lane certifying one `RLM.execute` span must not pass with none. The receipt includes cleanup evidence and does not certify recursion or containment. |
 | Recursive two-child batch canary | `scripts/live_daytona_verify.py recursive-batch`; new receipt outside the repository | Child ordering, observed concurrency, trace hierarchy, retained Root reuse, and cleanup cross the Daytona and MLflow boundaries. One canary is not containment or promotion evidence. |
-| Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/backend/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
+| Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
 | PostgreSQL contention and migration rehearsal | `scripts/database.py certify-postgres --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
 | Configured MLflow export | `scripts/benchmarks/certify_mlflow.py certify --backend configured`; JSON receipt | Backend authentication, export and retrieval cannot be proved by fail-soft unit mocks. |
@@ -219,8 +215,8 @@ environment setup. The operator wrappers require both `FLEET_LIVE=1` and
 FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
   --output .scratch/daytona-lifecycle-benchmark.json
 FLEET_LIVE=1 uv run pytest -q -n 0 --timeout=900 \
-  tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi
-FLEET_LIVE=1 uv run pytest tests/live/backend/test_attachment_artifact_durability.py -q -n 0
+  tests/live/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi
+FLEET_LIVE=1 uv run pytest tests/live/test_attachment_artifact_durability.py -q -n 0
 ```
 
 The lifecycle benchmark always runs three warmups and twenty measured cycles

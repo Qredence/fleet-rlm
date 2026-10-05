@@ -369,7 +369,7 @@ immutable Daytona snapshot name, then run:
 FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
 FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
 uv run pytest -q -n 0 --timeout=900 \
-  tests/live/backend/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
+  tests/live/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
 ```
 
 The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
