@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -218,3 +219,328 @@ def test_artifact_promotion_rejects_traversal_in_candidate_locations(path: str, 
 
     with pytest.raises(ArtifactValidationError, match="location is invalid"):
         policy.validate((candidate,), access=access, session_id=session_id, run_id=run_id)
+
+
+# --- Local Artifact Catalog Contracts ---
+def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:
+    import hashlib
+
+    from fleet_rlm.api.local_scope import LocalScope
+    from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
+    from tests.support.local_catalog import LocalArtifactCatalog
+
+    store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
+    scope = LocalScope()
+    user, ws = scope.user_id, scope.workspace_id
+    session_id, run_id = uuid4(), uuid4()
+
+    text_ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        content="hello world",
+        title="greeting",
+    )
+    assert text_ref.kind == "text"
+    assert text_ref.media_type == "text/plain"
+    assert text_ref.byte_size == len(b"hello world")
+    assert text_ref.checksum_sha256 == hashlib.sha256(b"hello world").hexdigest()
+
+    md_ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="markdown",
+        content="# Title\n\nbody",
+    )
+    assert md_ref.media_type == "text/markdown"
+
+    json_ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="json",
+        content='{"ok": true}',
+    )
+    assert json_ref.media_type == "application/json"
+
+    with pytest.raises(ArtifactValidationError):
+        store.create(
+            user_id=user,
+            workspace_id=ws,
+            session_id=session_id,
+            run_id=run_id,
+            kind="json",
+            content="not-json",
+        )
+
+    got = store.get(text_ref.id, user_id=user, workspace_id=ws)
+    assert got.id == text_ref.id
+    with pytest.raises(ArtifactNotFoundError):
+        store.get(text_ref.id, user_id=user, workspace_id=uuid4())
+    with pytest.raises(ArtifactNotFoundError):
+        store.get(uuid4(), user_id=user, workspace_id=ws)
+
+
+def test_logical_sandbox_path_run_scoped(tmp_path: Path) -> None:
+    from tests.support.local_catalog import LocalArtifactCatalog
+
+    store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
+    user, ws = uuid4(), uuid4()
+    session_id, run_id = uuid4(), uuid4()
+    ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="markdown",
+        content="# note",
+    )
+    path = store.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
+    assert path.startswith("/home/daytona/fleet/sessions/")
+    assert str(session_id) in path
+    assert str(run_id) in path
+    assert "/artifacts/" in path
+    assert str(ref.id) in path
+    assert path.endswith(".md")
+    assert not path.startswith(str(tmp_path))
+
+
+def test_content_survives_store_reload(tmp_path: Path) -> None:
+    from tests.support.local_catalog import LocalArtifactCatalog
+
+    root = tmp_path / "artifacts"
+    user, ws = uuid4(), uuid4()
+    session_id, run_id = uuid4(), uuid4()
+    first = LocalArtifactCatalog(root, max_bytes=1024)
+    ref = first.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        content="durable payload",
+    )
+    path_before = first.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
+
+    second = LocalArtifactCatalog(root, max_bytes=1024)
+    body = second.read_bytes(ref.id, user_id=user, workspace_id=ws)
+    assert body == b"durable payload"
+    path_after = second.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
+    assert path_after == path_before
+    assert "/home/daytona/fleet/sessions/" in path_after
+
+
+# --- Attachment and Artifact Durability Contracts ---
+class _AttachmentSource:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.data)
+        chunk = self.data[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+
+class _AttachmentSink:
+    def __init__(self, mirror) -> None:
+        self.mirror = mirror
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        self.mirror.write_bytes(logical_path, data)
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.mirror.remove(logical_path)
+
+
+class _HybridPaths:
+    def __init__(self, volume_paths) -> None:
+        self.volume_paths = volume_paths
+
+    def attachment_blob(self, attachment_id):
+        return f"{attachment_id}.bin"
+
+    def run_attachment(self, run, attachment_id, filename):
+        return str(self.volume_paths.run_attachment_file(run.session_id, run.run_id, attachment_id, filename))
+
+
+def test_volume_paths_durable_attachment_and_artifact_layout() -> None:
+    from fleet_rlm.paths import VolumePaths, as_posix
+
+    paths = VolumePaths.from_mount()
+    aid = uuid4()
+    art = uuid4()
+    sid, rid = uuid4(), uuid4()
+    assert as_posix(paths.attachment_blob_path(aid)).endswith(f"/attachments/{aid}/blob")
+    assert as_posix(paths.artifact_blob_path(art)).endswith(f"/artifacts/{art}/blob")
+    staged = paths.run_attachment_file(sid, rid, aid, "note.txt")
+    assert as_posix(staged).startswith("/home/daytona/fleet/sessions/")
+    assert str(aid) in as_posix(staged)
+
+
+def test_daytona_run_attachment_paths_keep_blobs_durable_and_stage_in_scratch() -> None:
+    from fleet_rlm.attachments import (
+        AttachmentRun,
+        AttachmentValidationError,
+        DaytonaRunAttachmentPathPolicy,
+    )
+    from fleet_rlm.paths import VolumePaths, as_posix
+
+    paths = VolumePaths.from_mount()
+    policy = DaytonaRunAttachmentPathPolicy(paths)
+    session_id, run_id, attachment_id = uuid4(), uuid4(), uuid4()
+
+    assert policy.attachment_blob(attachment_id) == as_posix(paths.attachment_blob_path(attachment_id))
+    staged = policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "report final.txt")
+    assert staged == f"/tmp/fleet/{run_id}/attachments/{attachment_id}/report final.txt"
+
+    with pytest.raises(AttachmentValidationError):
+        policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "../outside.txt")
+    with pytest.raises(AttachmentValidationError):
+        policy.run_attachment(AttachmentRun(session_id, run_id), attachment_id, "nested\\outside.txt")
+
+
+def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path) -> None:
+    import asyncio
+
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentUpload,
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+        LocalAttachmentPathPolicy,
+    )
+
+    module = AttachmentLifecycleService(
+        catalog=LocalAttachmentCatalog(tmp_path / "catalog"),
+        blobs=LocalAttachmentBlobGateway(tmp_path / "catalog"),
+        paths=LocalAttachmentPathPolicy(tmp_path / "catalog"),
+        max_bytes=1024,
+    )
+    user, ws = uuid4(), uuid4()
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("a.txt", "text/plain", _AttachmentSource(b"durable-bytes")),
+        )
+    )
+    assert asyncio.run(module.metadata(access, (ref.id,)))[0] == ref
+
+
+def test_stager_requires_volume_write_and_materializes_run_path(tmp_path: Path) -> None:
+    import asyncio
+
+    from fleet_rlm.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRun,
+        AttachmentUpload,
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+    )
+    from tests.support.workspace_storage import HostVolumeMirror
+
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    module = AttachmentLifecycleService(
+        catalog=LocalAttachmentCatalog(tmp_path / "catalog"),
+        blobs=LocalAttachmentBlobGateway(tmp_path / "catalog"),
+        paths=_HybridPaths(mirror.volume_paths),
+        max_bytes=1024,
+    )
+    user, ws = uuid4(), uuid4()
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("in.txt", "text/plain", _AttachmentSource(b"stage-me")),
+        )
+    )
+    session_id, run_id = uuid4(), uuid4()
+    prepared = asyncio.run(
+        module.prepare_run(
+            access,
+            (ref.id,),
+            AttachmentRun(session_id, run_id),
+            _AttachmentSink(mirror),
+        )
+    )
+    staged = prepared.staged[0]
+    assert "/runs/" in staged.sandbox_path
+    assert mirror.read_bytes(staged.sandbox_path) == b"stage-me"
+
+
+def test_artifact_store_writes_durable_and_run_scoped_volume_bytes(tmp_path: Path) -> None:
+    import hashlib
+
+    from tests.support.local_catalog import LocalArtifactCatalog
+    from tests.support.workspace_storage import HostVolumeMirror
+
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    store = LocalArtifactCatalog(
+        tmp_path / "catalog",
+        max_bytes=1024,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
+    user, ws = uuid4(), uuid4()
+    session_id, run_id = uuid4(), uuid4()
+    content = "hello artifact"
+    ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=session_id,
+        run_id=run_id,
+        kind="text",
+        content=content,
+        title="t",
+    )
+    expected = content.encode("utf-8")
+    checksum = hashlib.sha256(expected).hexdigest()
+    assert ref.checksum_sha256 == checksum
+    durable = store.durable_volume_blob_path(ref.id, user_id=user, workspace_id=ws)
+    run_path = store.sandbox_path_for(ref.id, user_id=user, workspace_id=ws)
+    assert mirror.read_bytes(durable) == expected
+    assert mirror.read_bytes(run_path) == expected
+    assert store.read_bytes(ref.id, user_id=user, workspace_id=ws) == expected
+
+
+def test_artifact_survives_catalog_delete_when_volume_blob_present(tmp_path: Path) -> None:
+    from tests.support.local_catalog import LocalArtifactCatalog
+    from tests.support.workspace_storage import HostVolumeMirror
+
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    store = LocalArtifactCatalog(
+        tmp_path / "catalog",
+        max_bytes=1024,
+        volume_fs=mirror,
+        volume_paths=mirror.volume_paths,
+    )
+    user, ws = uuid4(), uuid4()
+    ref = store.create(
+        user_id=user,
+        workspace_id=ws,
+        session_id=uuid4(),
+        run_id=uuid4(),
+        kind="text",
+        content="persist-me",
+    )
+    store._blob_path(ref.id).unlink()
+    assert store.read_bytes(ref.id, user_id=user, workspace_id=ws) == b"persist-me"
+
+
+def test_host_volume_mirror_rejects_escape(tmp_path: Path) -> None:
+    from fleet_rlm.paths import UnsafePathError
+    from tests.support.workspace_storage import HostVolumeMirror
+
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    with pytest.raises(UnsafePathError):
+        mirror.write_bytes("/etc/passwd", b"nope")

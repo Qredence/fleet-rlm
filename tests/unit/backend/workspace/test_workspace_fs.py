@@ -446,3 +446,355 @@ async def test_async_workspace_fs_delete_and_patch_passthrough(tmp_path: Path) -
     assert not (root / "notes" / "report.txt").exists()
     with pytest.raises(FileNotFoundError):
         await workspace.delete_path("notes/report.txt")
+
+
+# --- Daytona Sandbox Workspace Storage Symlink Safety ---
+_SYMLINK_TEST_ROOT = "/workspace/sessions/session-a/workspace"
+
+
+class _SymlinkFs:
+    def __init__(self) -> None:
+        self.directories = {
+            "/",
+            "/workspace",
+            "/workspace/sessions",
+            "/workspace/sessions/session-a",
+            _SYMLINK_TEST_ROOT,
+        }
+        self.files: dict[str, bytes] = {}
+        self.symlinks: dict[str, str] = {}
+        self.listing: list[object] = []
+
+    def get_file_info(self, path: str):
+        if path in self.symlinks:
+            return SimpleNamespace(path=path, is_dir=False, is_symlink=True, size=0)
+        if path in self.directories:
+            return SimpleNamespace(path=path, is_dir=True, size=0)
+        if path in self.files:
+            return SimpleNamespace(path=path, is_dir=False, size=len(self.files[path]))
+        raise FileNotFoundError(path)
+
+    def download_file(self, path: str) -> bytes:
+        resolved = self.symlinks.get(path, path)
+        if resolved not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[resolved]
+
+    def upload_file(self, data: bytes, path: str) -> None:
+        self.files[path] = data
+
+    def delete_file(self, path: str) -> None:
+        self.files.pop(path, None)
+
+    def list_files(self, _path: str, *, depth: int):
+        del depth
+        return self.listing
+
+
+def _storage_for_symlink_test(fs: _SymlinkFs):
+    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
+
+    return DaytonaSandboxWorkspaceStorage(SimpleNamespace(fs=fs), root=_SYMLINK_TEST_ROOT, volume_root="/workspace")
+
+
+def test_daytona_storage_rejects_symlink_file_for_read_and_stat() -> None:
+    from fleet_rlm.paths import UnsafePathError
+
+    fs = _SymlinkFs()
+    fs.files["/outside/secret.txt"] = b"secret"
+    fs.symlinks[f"{_SYMLINK_TEST_ROOT}/secret.txt"] = "/outside/secret.txt"
+    storage = _storage_for_symlink_test(fs)
+
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_text("secret.txt")
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.stat_path("secret.txt")
+
+
+def test_daytona_storage_bounded_binary_read_is_exact_and_rejects_symlink() -> None:
+    from fleet_rlm.paths import UnsafePathError
+
+    fs = _SymlinkFs()
+    path = f"{_SYMLINK_TEST_ROOT}/data.bin"
+    fs.files[path] = b"12345678"
+    storage = _storage_for_symlink_test(fs)
+
+    assert storage.read_file_bytes("data.bin", max_bytes=8) == b"12345678"
+    with pytest.raises(ValueError, match="file read bound exceeded"):
+        storage.read_file_bytes("data.bin", max_bytes=7)
+
+    fs.symlinks[f"{_SYMLINK_TEST_ROOT}/link.bin"] = path
+    fs.symlinks[f"{_SYMLINK_TEST_ROOT}/link-dir"] = "/outside"
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_file_bytes("link.bin", max_bytes=16)
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_file_bytes("link-dir/data.bin", max_bytes=16)
+
+
+def test_daytona_storage_recognizes_provider_octal_string_symlink_mode() -> None:
+    from fleet_rlm.paths import UnsafePathError
+
+    path = f"{_SYMLINK_TEST_ROOT}/secret.txt"
+
+    class _ProviderMetadataFS(_SymlinkFs):
+        def get_file_info(self, candidate: str):
+            if candidate == path:
+                return {"path": candidate, "is_dir": False, "mode": "120777"}
+            return super().get_file_info(candidate)
+
+    fs = _ProviderMetadataFS()
+    fs.files[path] = b"secret"
+    storage = _storage_for_symlink_test(fs)
+
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_text("secret.txt")
+
+
+def test_daytona_storage_rejects_symlink_component_before_outside_read_or_write() -> None:
+    from fleet_rlm.paths import UnsafePathError
+
+    fs = _SymlinkFs()
+    fs.files["/outside/secret.txt"] = b"secret"
+    fs.symlinks[f"{_SYMLINK_TEST_ROOT}/linked"] = "/outside"
+    storage = _storage_for_symlink_test(fs)
+
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.read_text("linked/secret.txt")
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.write_text("linked/new.txt", "no")
+    assert "/outside/new.txt" not in fs.files
+
+
+def test_daytona_storage_rejects_symlink_and_outside_root_listing_records() -> None:
+    from fleet_rlm.paths import UnsafePathError
+
+    fs = _SymlinkFs()
+    fs.listing = [SimpleNamespace(path=f"{_SYMLINK_TEST_ROOT}/link", is_dir=False, is_symlink=True, size=0)]
+    storage = _storage_for_symlink_test(fs)
+    with pytest.raises(UnsafePathError, match="symlink"):
+        storage.list_entries()
+
+    fs.listing = [SimpleNamespace(path="/outside/escape.txt", is_dir=False, size=1)]
+    with pytest.raises(UnsafePathError, match="escapes trusted root"):
+        storage.list_entries()
+
+
+class _SdkNotFoundError(Exception):
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to get file info: stat {path}: no such file or directory")
+        self.status_code = 404
+
+
+def test_daytona_storage_writes_into_new_directories_with_sdk_not_found_errors() -> None:
+    class SdkFs(_SymlinkFs):
+        def get_file_info(self, path: str):
+            try:
+                return super().get_file_info(path)
+            except FileNotFoundError:
+                raise _SdkNotFoundError(path) from None
+
+        def download_file(self, path: str) -> bytes:
+            if path not in self.files:
+                raise _SdkNotFoundError(path)
+            return self.files[path]
+
+    fs = SdkFs()
+    storage = _storage_for_symlink_test(fs)
+    storage.write_text("reports/2026/summary.md", "written")
+
+    assert fs.files[f"{_SYMLINK_TEST_ROOT}/reports/2026/summary.md"] == b"written"
+
+
+# --- Daytona Workspace Volume Gateway Contracts ---
+@pytest.mark.asyncio
+async def test_volume_read_maps_typed_missing_file_without_swallowing_provider_failure() -> None:
+    from daytona.common.errors import DaytonaFileNotFoundError, DaytonaNotFoundError
+
+    from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
+
+    class MissingFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise DaytonaFileNotFoundError("missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingFs()))
+    with pytest.raises(FileNotFoundError):
+        await volume.read_bytes("/volume/task.json")
+
+    class BrokenFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise RuntimeError("provider unavailable")
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=BrokenFs()))
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await volume.read_bytes("/volume/task.json")
+
+    class MissingProviderRouteFs:
+        async def download_file(self, _path: str) -> bytes:
+            raise DaytonaNotFoundError("provider route missing", status_code=404)
+
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=MissingProviderRouteFs()))
+    with pytest.raises(DaytonaNotFoundError, match="provider route missing"):
+        await volume.read_bytes("/volume/task.json")
+
+
+class _GatewayFakeFs:
+    def __init__(self, *, fail_upload: bool = False) -> None:
+        self.data: dict[str, bytes] = {}
+        self.fail_upload = fail_upload
+
+    async def create_folder(self, path: str, mode: str | None = None) -> None:
+        del path, mode
+
+    async def upload_file(self, data: bytes, path: str) -> None:
+        if self.fail_upload:
+            raise RuntimeError("provider unavailable")
+        self.data[path] = bytes(data)
+
+    async def download_file(self, path: str) -> bytes:
+        return self.data[path]
+
+    async def delete_file(self, path: str) -> None:
+        self.data.pop(path, None)
+
+    async def list_files(self, path: str, *, depth: int) -> list[object]:
+        del depth
+        return [
+            SimpleNamespace(path=value, is_dir=False, mod_time=1.0)
+            for value in sorted(self.data)
+            if value.startswith(path + "/")
+        ]
+
+
+class _MountedGateway:
+    def __init__(self, *, fail_upload: bool = False) -> None:
+        from uuid import UUID
+
+        self.sandbox = SimpleNamespace(fs=_GatewayFakeFs(fail_upload=fail_upload))
+        self.opens: list[tuple[UUID, str]] = []
+        self.closes = 0
+
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def open_sandbox(self, workspace_id, *, purpose: str):
+        self.opens.append((workspace_id, purpose))
+        try:
+            yield self.sandbox
+        finally:
+            self.closes += 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_uses_one_shared_mounted_scope_for_grouped_byte_operations() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    mounted = _MountedGateway()
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+    workspace_id = uuid4()
+    path = "/home/daytona/fleet/attachments/a.bin"
+
+    async with gateway.open_workspace(workspace_id) as volume:
+        await volume.write_bytes(path, b"payload")
+        assert await volume.read_bytes(path) == b"payload"
+        assert await volume.list_files(
+            "/home/daytona/fleet/attachments",
+            max_depth=2,
+            max_files=10,
+        )
+        await volume.remove_bytes(path)
+
+    assert mounted.opens == [(workspace_id, "workspace-volume-io")]
+    assert mounted.closes == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_can_list_the_mount_root() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    mounted = _MountedGateway()
+    mounted.sandbox.fs.data["/home/daytona/fleet/files/notes.md"] = b"notes"
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+
+    files = await gateway.list_files(
+        uuid4(),
+        "/home/daytona/fleet",
+        max_depth=8,
+        max_files=10,
+    )
+
+    assert [file.path for file in files] == ["/home/daytona/fleet/files/notes.md"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_releases_mounted_scope_when_operation_fails() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    mounted = _MountedGateway(fail_upload=True)
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await gateway.write_bytes(
+            uuid4(),
+            "/home/daytona/fleet/attachments/a.bin",
+            b"payload",
+        )
+
+    assert mounted.closes == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_rejects_paths_outside_workspace_mount_before_file_io() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.paths import UnsafePathError
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceVolumeGateway
+
+    mounted = _MountedGateway()
+    gateway = DaytonaWorkspaceVolumeGateway(
+        mounted,  # ty: ignore[invalid-argument-type]
+        mount_path="/home/daytona/fleet",
+    )
+
+    with pytest.raises(UnsafePathError):
+        await gateway.write_bytes(
+            uuid4(),
+            "/home/daytona/other/foreign.bin",
+            b"payload",
+        )
+
+    assert mounted.sandbox.fs.data == {}
+
+
+@pytest.mark.asyncio
+async def test_stat_preserves_an_explicit_false_checksum_request() -> None:
+    from fleet_rlm.workspace.models import WorkspaceEntry
+    from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceFileSession
+
+    calls: list[bool | None] = []
+
+    class Workspace:
+        async def stat(self, path: str, *, include_checksum: bool | None = None) -> WorkspaceEntry:
+            calls.append(include_checksum)
+            return WorkspaceEntry(path, "file", 3, None, None)
+
+    session = DaytonaWorkspaceFileSession(Workspace(), max_file_bytes=1024)
+    entry = await session.stat("note.txt", include_checksum=False)
+
+    assert calls == [False]
+    assert entry is not None
+    assert entry.checksum_sha256 is None

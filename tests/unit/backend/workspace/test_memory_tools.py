@@ -2,22 +2,48 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import FrozenInstanceError, dataclass, field
 from datetime import UTC, datetime
+from typing import Any, cast
+from uuid import uuid4
 
 import dspy
 import pytest
 
 from fleet_rlm.rlm.events import observe_tool
+from fleet_rlm.workspace.errors import WorkspaceConflictError
+from fleet_rlm.workspace.memory import (
+    WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT,
+    WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES,
+    WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES,
+    MemoryCandidateCollector,
+    MemoryCandidateToolError,
+    MemoryCandidateToolHost,
+    WorkspaceMemory,
+    promote_memory_candidates,
+)
 from fleet_rlm.workspace.models import (
+    WORKSPACE_MEMORY_HEADER,
+    WORKSPACE_MEMORY_MAX_WARNINGS,
     WorkspaceMemoryAppendResult,
+    WorkspaceMemoryConflictError,
     WorkspaceMemoryEntry,
     WorkspaceMemoryEntryNotFoundError,
+    WorkspaceMemoryIdError,
     WorkspaceMemoryListResult,
     WorkspaceMemoryReadResult,
+    WorkspaceMemoryStoreFullError,
     WorkspaceMemoryStoreUnavailableError,
+    count_workspace_memory_warnings,
+    format_workspace_memory_record,
+    format_workspace_memory_v3_record,
+    normalize_workspace_memory_id,
+    parse_workspace_memory_lines,
+    parse_workspace_memory_record,
+    validate_workspace_memory_record,
     workspace_memory_record_id,
 )
+from fleet_rlm.workspace.storage import WorkspaceStorage
 
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 # Deterministic golden v2 record for STAMP + "User Preference"; id =
@@ -490,3 +516,578 @@ def test_lifecycle_event_views_expose_only_memory_metadata() -> None:
     assert observed[4].input == {"memory_id": "aaaa0001"}
     assert observed[5].output == {"ok": True, "namespace": "workspace_memory", "memory_id": "aaaa0001", "removed": True}
     assert "secret learning" not in str(observed)
+
+
+# --- Memory Model Invariants ---
+
+V1_RECORD = "- [2026-07-27T11:14:05Z] **General**: keep release notes short\n"
+V2_RECORD = "- [2026-07-27T11:14:05Z] **General** <!-- id:d2c1b7a1 -->: keep release notes short\n"
+
+
+def test_tolerant_parse_skips_malformed_lines_with_bounded_warnings() -> None:
+    content = (
+        f"{WORKSPACE_MEMORY_HEADER}\n"
+        + V1_RECORD
+        + V2_RECORD
+        + "human scribble\n"
+        + "\n"
+        + "  \n"
+        + "- [2026-07-27T11:14:06Z] **General**: good again\n"
+        + "- [torn record\n"
+    )
+
+    lines = parse_workspace_memory_lines(content)
+
+    assert all(type(line).__name__ == "WorkspaceMemoryParsedLine" for line in lines)
+    entries = [line.entry for line in lines if line.entry is not None]
+    assert [entry.learning for entry in entries if entry is not None] == [
+        "keep release notes short",
+        "keep release notes short",
+        "good again",
+    ]
+    assert entries[0] is not None and entries[0].memory_id == workspace_memory_record_id(
+        "2026-07-27T11:14:05Z", "General", "keep release notes short"
+    )
+    assert entries[1] is not None and entries[1].memory_id == "d2c1b7a1"
+    assert sum(line.header for line in lines) == 1
+    assert sum(line.blank for line in lines) == 2
+    assert count_workspace_memory_warnings(lines) == 2  # scribble + torn, blanks don't warn
+    assert all(line.raw for line in lines)  # lossless line preservation
+
+
+def test_warning_count_is_bounded() -> None:
+    lines = parse_workspace_memory_lines("bad\n" * (WORKSPACE_MEMORY_MAX_WARNINGS + 50))
+    assert count_workspace_memory_warnings(lines) == WORKSPACE_MEMORY_MAX_WARNINGS
+
+
+def test_id_normalization_shape() -> None:
+    assert normalize_workspace_memory_id("0123abcd") == "0123abcd"
+    for bad in ("", "0123abc", "0123abcde", "0123ABCD", "not-an-id", None, 5):
+        with pytest.raises(WorkspaceMemoryIdError):
+            normalize_workspace_memory_id(bad)  # type: ignore[arg-type]
+
+
+def test_v3_records_parse_provenance_and_legacy_records_project_unknown_fallback() -> None:
+    old_id = workspace_memory_record_id("2026-07-27T11:14:05Z", "General", "older policy")
+    updated = format_workspace_memory_v3_record(
+        "keep release notes short",
+        "Policy",
+        memory_id="dddd0004",
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-27T10:30:00Z",
+        source="operator_import",
+        supersedes_id=old_id,
+    )
+    target = f"- [2026-07-27T11:14:05Z] **General** <!-- id:{old_id} -->: older policy\n"
+    lines = parse_workspace_memory_lines(V1_RECORD + V2_RECORD + target + updated)
+
+    legacy_v1, legacy_v2, target_entry, provenance = (line.entry for line in lines if line.entry is not None)
+    assert target_entry is not None and target_entry.active is False
+    assert target_entry.superseded_by_id == "dddd0004"
+    assert legacy_v1.source == "legacy_unknown" == legacy_v2.source
+    assert legacy_v1.updated_at == legacy_v1.timestamp
+    assert legacy_v2.updated_at == legacy_v2.timestamp
+    assert legacy_v1.supersedes_id is None == legacy_v2.supersedes_id
+    assert provenance.source == "operator_import"
+    assert provenance.timestamp == "2026-07-19T09:00:00Z"
+    assert provenance.updated_at == "2026-07-27T10:30:00Z"
+    assert provenance.supersedes_id == old_id
+    assert provenance.memory_id == "dddd0004"
+    validate_workspace_memory_record(updated)
+    assert not any(line.malformed for line in lines)
+
+
+def _v3(memory_id: str, learning: str, *, supersedes_id: str | None = None) -> str:
+    return format_workspace_memory_v3_record(
+        learning,
+        "Policy",
+        memory_id=memory_id,
+        created_at="2026-07-19T09:00:00Z",
+        updated_at="2026-07-19T09:00:00Z",
+        source="operator_import",
+        supersedes_id=supersedes_id,
+    )
+
+
+def test_supersession_graph_marks_active_state_and_rejects_invalid_geometry() -> None:
+    first_record = _v3("aaaa0001", "old policy")
+    second_record = _v3("bbbb0002", "new policy", supersedes_id="aaaa0001")
+    third_record = _v3("cccc0003", "newest policy", supersedes_id="bbbb0002")
+
+    lines = parse_workspace_memory_lines(first_record + second_record + third_record)
+    entries = [line.entry for line in lines if line.entry is not None]
+
+    assert [entry.active for entry in entries] == [False, False, True]
+    assert entries[0].superseded_by_id == "bbbb0002"
+    assert entries[1].superseded_by_id == "cccc0003"
+    assert entries[2].superseded_by_id is None
+    assert not any(line.malformed for line in lines)
+
+    for invalid_content in (
+        second_record,  # missing target
+        _v3("aaaa0001", "a", supersedes_id="bbbb0002") + _v3("bbbb0002", "b", supersedes_id="aaaa0001"),
+        first_record + second_record + _v3("dddd0004", "duplicate target", supersedes_id="aaaa0001"),
+        first_record + _v3("aaaa0001", "duplicate record id"),
+    ):
+        assert any(line.malformed for line in parse_workspace_memory_lines(invalid_content))
+
+
+# --- Durable State and Append Invariants ---
+
+
+def _memory(tmp_path, *, max_file_bytes: int = 262_144) -> WorkspaceMemory:
+    return WorkspaceMemory(WorkspaceStorage(root=tmp_path), max_file_bytes=max_file_bytes)
+
+
+def test_root_memory_is_verified_then_retired(tmp_path) -> None:
+    legacy = "- [2026-09-20T10:00:00Z] **General**: migrate this entry\n"
+    (tmp_path / "MEMORIES.md").write_text(legacy, encoding="utf-8")
+
+    store = _memory(tmp_path)
+    result = store.read_tail(byte_budget=4096)
+
+    assert result.content == "# Fleet Memory v2\n" + legacy
+    assert (tmp_path / "memory" / "MEMORIES.md").read_text(encoding="utf-8") == result.content
+    assert not (tmp_path / "MEMORIES.md").exists()
+
+
+def test_append_is_idempotent_and_rejects_identity_conflicts(tmp_path) -> None:
+    store = _memory(tmp_path)
+    record, _ = format_workspace_memory_record(
+        "stable append", "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+
+    first = store.append_record(record)
+    second = store.append_record(record)
+    assert first == second
+    assert len(store.list_entries(limit=10).entries) == 1
+
+    conflict = format_workspace_memory_v3_record(
+        "different payload",
+        "General",
+        memory_id=parse_workspace_memory_record(record).memory_id,
+        created_at="2026-09-20T10:00:00Z",
+        updated_at="2026-09-20T10:00:00Z",
+        source="user_explicit",
+    )
+    with pytest.raises(WorkspaceMemoryConflictError, match="conflicts") as error:
+        store.append_record(conflict)
+    assert error.value.detail == "memory_id_collision"
+
+
+def test_append_enforces_capacity_and_active_supersession(tmp_path) -> None:
+    first, _ = format_workspace_memory_record("old", "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC))
+    first_id = parse_workspace_memory_record(first).memory_id
+    replacement = format_workspace_memory_v3_record(
+        "new",
+        "General",
+        memory_id="bbbb0002",
+        created_at="2026-09-20T10:01:00Z",
+        updated_at="2026-09-20T10:01:00Z",
+        source="operator_import",
+        supersedes_id=first_id,
+    )
+    store = _memory(tmp_path)
+    store.append_record(first)
+    store.append_record(replacement)
+
+    with pytest.raises(WorkspaceMemoryConflictError) as error:
+        store.append_record(
+            format_workspace_memory_v3_record(
+                "stale",
+                "General",
+                memory_id="cccc0003",
+                created_at="2026-09-20T10:02:00Z",
+                updated_at="2026-09-20T10:02:00Z",
+                source="operator_import",
+                supersedes_id=first_id,
+            )
+        )
+    assert error.value.detail == "supersedes_not_active"
+
+    header_size = len(b"# Fleet Memory v2\n")
+    capacity_store = _memory(
+        tmp_path / "capacity",
+        max_file_bytes=header_size + len(first.encode()) - 1,
+    )
+    with pytest.raises(WorkspaceMemoryStoreFullError):
+        capacity_store.append_record(first)
+
+
+def test_tail_budget_reports_full_size_without_returning_over_budget(tmp_path) -> None:
+    store = _memory(tmp_path)
+    record, _ = format_workspace_memory_record(
+        "é" * 20,
+        "General",
+        timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC),
+    )
+    store.append_record(record)
+
+    result = store.read_tail(byte_budget=17)
+
+    assert result.truncated is True
+    assert result.total_bytes > result.byte_budget
+    assert result.bytes_returned <= result.byte_budget
+
+
+def test_edit_appends_provenance_record_and_supersedes_original(tmp_path) -> None:
+    store = _memory(tmp_path)
+    original, _ = format_workspace_memory_record(
+        "Keep the report detailed", "Project", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    original_id = parse_workspace_memory_record(original).memory_id
+    store.append_record(original)
+
+    replacement = store.edit_entry(original_id, "Keep the report concise")
+    parsed_replacement = parse_workspace_memory_record(replacement)
+    entries = store.list_entries(limit=10).entries
+
+    assert len(entries) == 2
+    assert entries[0].memory_id == original_id
+    assert entries[0].active is False
+    assert entries[1].memory_id == parsed_replacement.memory_id
+    assert entries[1].active is True
+    assert entries[1].supersedes_id == original_id
+    assert entries[1].source == "user_explicit"
+
+
+def test_injection_prefers_lexical_matches_then_recent_active_records_within_budget(tmp_path) -> None:
+    store = _memory(tmp_path)
+    old, _ = format_workspace_memory_record(
+        "operator report evidence is authoritative", "Project", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    old_id = parse_workspace_memory_record(old).memory_id
+    latest, _ = format_workspace_memory_record(
+        "Remember to use the newer formatting", "Preference", timestamp=datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    )
+    superseding = format_workspace_memory_v3_record(
+        "operator report evidence stays compact",
+        "Project",
+        memory_id="bbbb0002",
+        created_at="2026-09-22T10:00:00Z",
+        updated_at="2026-09-22T10:00:00Z",
+        source="operator_import",
+        supersedes_id=old_id,
+    )
+    store.append_record(old)
+    store.append_record(latest)
+    store.append_record(superseding)
+
+    digest = store.read_injection_digest(request="operator report evidence")
+
+    assert "operator report evidence stays compact" in digest
+    assert "operator report evidence is authoritative" not in digest
+    assert digest.index("operator report evidence stays compact") < digest.index("Remember to use")
+    assert "source:operator_import" in digest
+    assert len(digest.encode("utf-8")) <= 4_096
+
+
+def test_injection_does_not_truncate_a_record_to_fit_budget(tmp_path) -> None:
+    store = _memory(tmp_path)
+    record, _ = format_workspace_memory_record(
+        "x" * 2_000, "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    second, _ = format_workspace_memory_record(
+        "y" * 2_000, "General", timestamp=datetime(2026, 9, 21, 10, 0, tzinfo=UTC)
+    )
+    store.append_record(record)
+    store.append_record(second)
+
+    digest = store.read_injection_digest(request="x")
+    assert digest == record
+
+
+def test_delete_uses_checksum_precondition(tmp_path) -> None:
+    volume = WorkspaceStorage(root=tmp_path)
+
+    class RacyStorage:
+        def __getattr__(self, name):
+            return getattr(volume, name)
+
+        def write_text(self, path, content, *, overwrite=True, expected_sha256=None):
+            if expected_sha256 is not None:
+                volume.write_text(path, "# Fleet Memory v2\nexternal change\n", overwrite=True)
+            return volume.write_text(path, content, overwrite=overwrite, expected_sha256=expected_sha256)
+
+    store = WorkspaceMemory(RacyStorage())
+    record, _ = format_workspace_memory_record(
+        "delete me", "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
+    )
+    memory_id = parse_workspace_memory_record(record).memory_id
+    store.append_record(record)
+
+    with pytest.raises(WorkspaceConflictError, match="checksum mismatch"):
+        store.delete_entry(memory_id)
+
+    assert (tmp_path / "memory" / "MEMORIES.md").read_text(encoding="utf-8").endswith("external change\n")
+
+
+# --- Memory Candidate Proposals and Promotion ---
+
+
+def _collector(**kwargs: Any) -> MemoryCandidateCollector:
+    values: dict[str, object] = dict(
+        run_id=uuid4(),
+        allowed_categories=("Preference", "Project", "Workflow"),
+        candidate_id_factory=lambda ordinal: f"cand{ordinal:08d}",
+    )
+    values.update(kwargs)
+    return MemoryCandidateCollector(**cast("dict[str, Any]", values))
+
+
+def _tool(collector: MemoryCandidateCollector) -> dspy.Tool:
+    tools = MemoryCandidateToolHost(collector).as_tools()
+    assert len(tools) == 1 and type(tools[0]) is dspy.Tool
+    assert tools[0].name == "propose_memory"
+    return tools[0]
+
+
+class _StoreDouble:
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    def append_record(self, record: str):
+        self.calls.append(record)
+        raise AssertionError("proposals must not touch Workspace Memory")
+
+
+def test_memory_candidate_collector_is_immutable_bounded_and_deterministic() -> None:
+    run_id = uuid4()
+    collector = MemoryCandidateCollector(
+        run_id=run_id,
+        allowed_categories=(" Preference ", "Project"),
+        candidate_id_factory=lambda ordinal: f"cand{ordinal:08d}",
+    )
+
+    first = _tool(collector)(
+        key_learning="  Prefer" + chr(10) + " polar joins for frame work. ",
+        category="Preference",
+        supersedes_id="aaaa0001",
+    )
+    assert first == {
+        "ok": True,
+        "namespace": "workspace_memory",
+        "candidate_id": "cand00000001",
+        "category": "Preference",
+        "byte_size": len(b"Prefer polar joins for frame work."),
+        "candidate_count": 1,
+        "candidate_bytes": len(b"Prefer polar joins for frame work."),
+        "supersedes": True,
+    }
+
+    candidate = collector.drain()[0]
+    assert candidate.source == "agent_candidate"
+    assert candidate.supersedes_id == "aaaa0001"
+    assert candidate.learning == "Prefer polar joins for frame work."
+    with pytest.raises(FrozenInstanceError):
+        candidate.learning = "changed"  # ty: ignore[invalid-assignment]
+    assert collector.drain() == ()
+
+
+def test_duplicate_candidate_is_idempotent_until_drain() -> None:
+    collector = _collector()
+    tool = _tool(collector)
+
+    first = tool(key_learning=" remember the stable workflow ", category="Workflow")
+    duplicate = tool(key_learning="remember the stable workflow", category="Workflow")
+
+    assert duplicate["candidate_id"] == first["candidate_id"]
+    assert duplicate["candidate_count"] == 1
+    assert len(collector.drain()) == 1
+
+
+@pytest.mark.parametrize(
+    ("key_learning", "category", "supersedes_id", "message"),
+    [
+        ("stable", "Project", "nothex", "supersedes id is invalid"),
+        ("stable", "Secret Category!", None, "category is invalid"),
+        ("", "Project", None, "candidate is invalid"),
+        ("x" * (WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES + 1), "Project", None, "allowed byte budget"),
+    ],
+)
+def test_candidate_payload_is_strict(
+    key_learning: str,
+    category: str,
+    supersedes_id: str | None,
+    message: str,
+) -> None:
+    with pytest.raises(MemoryCandidateToolError, match=message) as captured:
+        _tool(_collector())(
+            key_learning=key_learning,
+            category=category,
+            supersedes_id=supersedes_id,
+        )
+
+    assert captured.value.code in {"invalid_category", "invalid_entry", "invalid_id", "candidate_bytes"}
+
+
+def test_candidate_category_allowlist_and_count_and_total_budgets() -> None:
+    collector = MemoryCandidateCollector(
+        run_id=uuid4(),
+        allowed_categories=("Project",),
+        candidate_id_factory=lambda ordinal: f"cand{ordinal:08d}",
+    )
+    tool = _tool(collector)
+
+    with pytest.raises(MemoryCandidateToolError, match="not allowed") as captured:
+        tool(key_learning="stable preference", category="Preference")
+    assert captured.value.code == "policy_denied"
+
+    for index in range(WORKSPACE_MEMORY_CANDIDATE_MAX_COUNT):
+        tool(key_learning=f"learning {index}", category="Project")
+    with pytest.raises(MemoryCandidateToolError, match="limit") as captured:
+        tool(key_learning="one more", category="Project")
+    assert captured.value.code == "candidate_limit"
+
+    bounded = MemoryCandidateCollector(run_id=uuid4(), allowed_categories=("Project",))
+    tool = _tool(bounded)
+    for index in range(WORKSPACE_MEMORY_CANDIDATE_MAX_TOTAL_BYTES // WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES):
+        tool(key_learning=str(index) + "x" * (WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES - 1), category="Project")
+    with pytest.raises(MemoryCandidateToolError, match="total byte"):
+        tool(key_learning="z" + "x" * (WORKSPACE_MEMORY_CANDIDATE_MAX_LEARNING_BYTES - 1), category="Project")
+
+
+class _PromotionStore:
+    def __init__(self, *entries) -> None:
+        self.entries = list(entries)
+        self.appended: list[str] = []
+        self.fail_next = False
+        self.list_calls = 0
+
+    def read_tail(self, *, byte_budget: int):
+        from fleet_rlm.workspace.models import WorkspaceMemoryReadResult
+
+        return WorkspaceMemoryReadResult(
+            content="", truncated=False, bytes_returned=0, byte_budget=byte_budget, total_bytes=0, warnings=0
+        )
+
+    def delete_entry(self, memory_id: str) -> bool:
+        del memory_id
+        raise AssertionError("promotion tests do not delete")
+
+    def edit_entry(self, memory_id: str, key_learning: str, *, category: str | None = None) -> str:
+        del memory_id, key_learning, category
+        raise AssertionError("promotion tests do not edit")
+
+    def list_entries(self, *, after: str | None = None, limit: int, category: str | None = None):
+        from fleet_rlm.workspace.models import WorkspaceMemoryListResult
+
+        del after
+        self.list_calls += 1
+        entries = self.entries[:limit]
+        if category is not None:
+            entries = [entry for entry in entries if entry.category == category]
+        return WorkspaceMemoryListResult(entries=tuple(entries), truncated=False, next_cursor=None, warnings=0)
+
+    def append_record(self, record: str):
+        from fleet_rlm.workspace.models import WorkspaceMemoryAppendResult, parse_workspace_memory_record
+
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("mounted store failed")
+        self.appended.append(record)
+        self.entries.append(parse_workspace_memory_record(record))
+        return WorkspaceMemoryAppendResult(entry_bytes=len(record.encode()), total_bytes=1)
+
+
+def test_candidate_promotion_revalidates_current_active_supersession_target() -> None:
+    from fleet_rlm.workspace.memory import MemoryCandidate
+    from fleet_rlm.workspace.models import WorkspaceMemoryEntry
+
+    target = WorkspaceMemoryEntry(
+        memory_id="aaaa0001",
+        timestamp="2026-08-10T01:00:00Z",
+        updated_at="2026-08-10T01:00:00Z",
+        category="Project",
+        learning="old report policy",
+        source="legacy_unknown",
+        record_version=1,
+        active=False,
+    )
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="new report policy",
+        byte_size=len(b"new report policy"),
+        supersedes_id="aaaa0001",
+    )
+
+    result = promote_memory_candidates(
+        store=(store := _PromotionStore(target)),
+        candidates=(candidate,),
+        allowed_categories=("Project",),
+    )
+
+    assert result.dropped_count == 1
+    assert result.reasons == ("supersedes_not_active",)
+    assert store.appended == []
+
+
+def test_candidate_promotion_drop_and_failure_are_fail_soft_and_bounded() -> None:
+    from fleet_rlm.workspace.memory import MemoryCandidate
+
+    denied = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Workflow",
+        learning="workflow learning",
+        byte_size=len(b"workflow learning"),
+    )
+    failing = MemoryCandidate(
+        candidate_id="cand00000002",
+        category="Project",
+        learning="project learning",
+        byte_size=len(b"project learning"),
+    )
+    accepted = MemoryCandidate(
+        candidate_id="cand00000003",
+        category="Project",
+        learning="another project learning",
+        byte_size=len(b"another project learning"),
+    )
+    store = _PromotionStore()
+    store.fail_next = True
+
+    result = promote_memory_candidates(
+        store=store,
+        candidates=(denied, failing, accepted),
+        allowed_categories=("Project",),
+    )
+
+    assert result.promoted_count == 1
+    assert result.dropped_count == 1
+    assert result.failure_count == 1
+    assert result.reasons == ("policy_denied", "promotion_failed")
+    assert len(store.appended) == 1
+
+
+def test_intent_builder_and_post_commit_promotion_mint_identical_records() -> None:
+    from datetime import UTC, datetime
+
+    from fleet_rlm.workspace.memory import MemoryCandidate, build_memory_promotion_intents
+
+    def clock() -> datetime:
+        return datetime(2026, 8, 17, 12, 0, 0, tzinfo=UTC)
+
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="shared minting stays byte-identical",
+        byte_size=len(b"shared minting stays byte-identical"),
+    )
+    intents = build_memory_promotion_intents(
+        run_id=uuid4(),
+        candidates=(candidate,),
+        allowed_categories=("Project",),
+        clock=clock,
+    )
+    store = _PromotionStore()
+    result = promote_memory_candidates(
+        store=store,
+        candidates=(candidate,),
+        allowed_categories=("Project",),
+        clock=clock,
+    )
+
+    assert result.promoted_count == 1
+    assert store.appended == [intents[0].record_text]
+    assert intents[0].memory_id in store.appended[0]
