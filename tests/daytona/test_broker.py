@@ -741,3 +741,48 @@ def test_broker_sse_reverse_channel_dispatches_tool_call_promptly(
 
     assert called is True
     assert "answer is 42" in result["stdout"]
+
+
+@pytest.mark.parametrize("subscriber", ["full", "disconnected", "duplicate"])
+def test_dropped_or_repeated_sse_notifications_execute_tool_once(subscriber: str) -> None:
+    with _start_embedded_server() as (base_url, headers):
+        broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+        broker._secret = headers["X-Broker-Secret"]
+        calls: list[int] = []
+
+        def compute(x: int) -> int:
+            calls.append(x)
+            return x * 2
+
+        broker.bind_tools({"compute": compute})
+        broker._url = base_url
+        # Inject an SSE subscriber that fails, drops, or repeats delivery. The
+        # actual embedded broker's HTTP polling path must recover the request.
+        behavior = {
+            "full": "raise queue.Full()",
+            "disconnected": "raise BrokenPipeError()",
+            "duplicate": "original(data); original(data)",
+        }[subscriber]
+        injection = (
+            "import __main__, queue\n"
+            "class Subscriber:\n"
+            "    def put_nowait(self, data):\n"
+            f"        {behavior}\n"
+            "original = __main__._emit_event\n"
+            + (
+                "def duplicate(data):\n    original(data); original(data)\n__main__._emit_event = duplicate\n"
+                if subscriber == "duplicate"
+                else (
+                    "with __main__._lock:\n"
+                    "    __main__._event_subscribers.clear()\n"
+                    "    __main__._event_subscribers.add(Subscriber())\n"
+                )
+            )
+        )
+        source = broker.setup_source(injection + "result = compute(x=21)\nprint(result)")
+        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
+            broker._client = client
+            result = broker.execute(source, {}, timeout_s=1)
+        assert result["error"] is None
+        assert "42" in result["stdout"]
+        assert calls == [21]

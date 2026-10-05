@@ -12,7 +12,6 @@ import contextlib
 import inspect
 import json
 import logging
-import queue
 import secrets
 import threading
 import time
@@ -201,20 +200,11 @@ class Handler(BaseHTTPRequestHandler):
                     _send(self, {"error": "duplicate call"}, 409); return
                 if _active_deadline is None or time.monotonic() >= _active_deadline:
                     _send(self, {"error": "invocation is not executing"}, 409); return
-                lease = uuid.uuid4().hex if _event_subscribers else None
-                _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": lease, "event": event}
+                _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": None, "event": event}
                 deadline = _active_deadline
-            if lease is not None:
-                _emit_event({
-                    "type": "tool_call",
-                    "request": {
-                        "id": call_id,
-                        "lease": lease,
-                        "tool_name": data.get("tool_name"),
-                        "args": data.get("args") or [],
-                        "kwargs": data.get("kwargs") or {},
-                    },
-                })
+            # SSE is only a wake-up hint. /pending is the sole lease issuer,
+            # so a dropped event cannot hide unclaimed work from polling.
+            _emit_event({"type": "tools_pending"})
             wait_s = max(0.0, deadline - time.monotonic()) if deadline is not None else __DEFAULT_TOOL_TIMEOUT_S__
             if not event.wait(wait_s):
                 with _lock:
@@ -313,7 +303,7 @@ class DaytonaHttpToolBroker:
         outcome: list[httpx.Response | BaseException] = []
         sse_stop_event = threading.Event()
         sse_ready = threading.Event()
-        host_tool_queue: queue.Queue[Mapping[str, Any]] = queue.Queue()
+        tools_pending = threading.Event()
         streamed_stdout = False
 
         def post() -> None:
@@ -351,10 +341,8 @@ class DaytonaHttpToolBroker:
                         ev_type = data.get("type")
                         if ev_type == "execution_done":
                             break
-                        if ev_type == "tool_call":
-                            req = data.get("request")
-                            if isinstance(req, dict):
-                                host_tool_queue.put(req)
+                        if ev_type == "tools_pending":
+                            tools_pending.set()
                         elif ev_type in ("stdout", "stderr") and on_stdout is not None:
                             delta = data.get("delta")
                             if isinstance(delta, str) and delta:
@@ -379,12 +367,10 @@ class DaytonaHttpToolBroker:
             while worker.is_alive():
                 if self._stopped:
                     break
-                try:
-                    req = host_tool_queue.get(timeout=0.02)
-                    self._dispatch_tool_request(req)
-                except queue.Empty:
-                    self._poll_once()
-                    worker.join(0.01)
+                tools_pending.wait(timeout=0.02)
+                tools_pending.clear()
+                self._poll_once()
+                worker.join(0.01)
             sse_stop_event.set()
 
         delivery_error = self._delivery_error

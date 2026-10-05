@@ -24,18 +24,23 @@ from fleet_rlm.persistence.database import (
 # attachment/artifact persistence, and the durable promotion outbox.  The
 # operator role must be able to perform the complete write lifecycle; checking
 # only SELECT on ``fleet_sessions`` would let a read-only role pass readiness.
-_REQUIRED_DML_PRIVILEGES: tuple[tuple[str, str], ...] = tuple(
-    (table, action)
-    for table in (
-        "fleet_sessions",
-        "fleet_runs",
-        "fleet_turns",
-        "fleet_sandbox_bindings",
-        "fleet_attachments",
-        "fleet_artifacts",
-        "fleet_memory_promotion_intents",
-    )
-    for action in ("INSERT", "UPDATE", "DELETE")
+_REQUIRED_DML_PRIVILEGES: tuple[tuple[str, str], ...] = (
+    *(
+        (table, action)
+        for table in (
+            "fleet_sessions",
+            "fleet_runs",
+            "fleet_turns",
+            "fleet_sandbox_bindings",
+            "fleet_attachments",
+            "fleet_artifacts",
+            "fleet_memory_promotion_intents",
+        )
+        for action in ("INSERT", "UPDATE", "DELETE")
+    ),
+    # Session and Attachment catalogs still seed these local identity rows.
+    ("fleet_users", "INSERT"),
+    ("fleet_workspaces", "INSERT"),
 )
 
 # Every table touched by the normal durable request paths is read as well as

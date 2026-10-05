@@ -482,6 +482,22 @@ def test_daytona_admission_defaults_to_eight_leases() -> None:
     assert Settings().max_active_daytona_leases == 8
 
 
+@pytest.mark.parametrize("field", ["workspace_io_idle_seconds", "workspace_io_acquisition_timeout_seconds"])
+@pytest.mark.parametrize("value", [0, -1])
+def test_workspace_io_policy_requires_positive_timeouts(field: str, value: int) -> None:
+    with pytest.raises(ValueError):
+        Settings(**{field: value})
+
+
+def test_workspace_io_policy_defaults_and_overrides() -> None:
+    defaults = Settings()
+    assert defaults.workspace_io_idle_seconds == 300
+    assert defaults.workspace_io_acquisition_timeout_seconds == 30
+    changed = Settings(workspace_io_idle_seconds=60, workspace_io_acquisition_timeout_seconds=10)
+    assert changed.workspace_io_idle_seconds == 60
+    assert changed.workspace_io_acquisition_timeout_seconds == 10
+
+
 def test_settings_does_not_read_fleet_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("FLEET_MAX_ACTIVE_DAYTONA_LEASES", "3")
     assert Settings().max_active_daytona_leases == 8

@@ -45,6 +45,8 @@ def test_logical_or_missing_mlflow_backend_is_unknown(uri: str | None) -> None:
         ("fleet_sessions", "INSERT"),
         ("fleet_runs", "INSERT"),
         ("fleet_artifacts", "INSERT"),
+        ("fleet_users", "INSERT"),
+        ("fleet_workspaces", "INSERT"),
     ],
 )
 async def test_managed_preflight_rejects_role_without_runtime_dml(
@@ -71,7 +73,7 @@ async def test_managed_preflight_rejects_role_without_runtime_dml(
             ]
             if missing_privilege[1] == "SELECT":
                 values[3 + _REQUIRED_SELECT_TABLES.index(missing_privilege[0])] = False
-            else:
+            elif missing_privilege in _REQUIRED_DML_PRIVILEGES:
                 values[3 + len(_REQUIRED_SELECT_TABLES) + _REQUIRED_DML_PRIVILEGES.index(missing_privilege)] = False
             return Result(tuple(values))
 
@@ -118,6 +120,10 @@ def test_preflight_receipt_defaults_missing_dml_privileges_to_false() -> None:
     fleet_dml = observed.as_dict()["privileges"]["fleet_dml"]
     assert fleet_dml["fleet_sessions:insert"] is False
     assert fleet_dml["fleet_runs:insert"] is False
+    assert fleet_dml["fleet_users:insert"] is False
+    assert fleet_dml["fleet_workspaces:insert"] is False
+    assert "fleet_users:update" not in fleet_dml
+    assert "fleet_workspaces:delete" not in fleet_dml
 
     fleet_select = observed.as_dict()["privileges"]["fleet_select"]
     assert fleet_select["fleet_sessions"] is True

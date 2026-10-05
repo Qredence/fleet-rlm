@@ -95,6 +95,19 @@ model-authored code does not run in the Fleet process. A healthy root Sandbox
 may be reused across clean sequential Turns, but each invocation gets fresh
 bindings, tools, budget, and DSPy history.
 
+The single-user application serializes Workspace I/O operation groups through
+the runtime. One host I/O Sandbox may remain warm between operations, retaining
+its shared admission permit until confirmed deletion. Queueing and preparation
+have a finite acquisition deadline; idle expiry and obsolete replacement use
+the same cleanup owner. Shutdown drains preparation and active file operations
+before deleting their Sandbox. Unconfirmed cleanup blocks replacement and
+remains runtime-owned for retry.
+
+Broker SSE notifications wake host polling; only `/pending` issues tool leases.
+A dropped notification leaves unclaimed work available to polling. Claimed
+tools are not automatically re-executed, and `/result` fences late or duplicate
+delivery against the issued lease.
+
 The adapter calls one typed backend protocol: `run(code, variables,
 on_stdout=...)` returns `BackendExecutionResult`. `_SandboxProcessBackend`
 owns its live `DaytonaHttpToolBroker`, including the port configuration,

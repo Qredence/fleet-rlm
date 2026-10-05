@@ -41,6 +41,306 @@ from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 from tests.support.session_manager import _FakePlatform, _FakeSandbox, make_daytona_runtime
 
 
+@pytest.fixture
+def workspace_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[runtime_module.DaytonaRuntime, SimpleNamespace]:
+    live: dict[str, SimpleNamespace] = {}
+    created: list[SimpleNamespace] = []
+    deleted: list[str] = []
+    platform = SimpleNamespace(live=live, created=created, deleted=deleted, confirm_delete=True)
+
+    async def create(*_args: object, **_kwargs: object) -> SimpleNamespace:
+        sandbox = SimpleNamespace(id=f"io-{len(created)}", state="running", refresh_data=AsyncMock())
+        created.append(sandbox)
+        live[sandbox.id] = sandbox
+        return sandbox
+
+    async def delete(sandbox_id: str) -> None:
+        deleted.append(sandbox_id)
+        if platform.confirm_delete:
+            live.pop(sandbox_id, None)
+
+    async def get(sandbox_id: str) -> object | None:
+        return live.get(sandbox_id)
+
+    async def confirm(*, sandbox_id: str, **_kwargs: object) -> AbsenceConfirmation | AbsenceTimeout:
+        if sandbox_id not in live:
+            return AbsenceConfirmation(sandbox_id, ("absent",), 0.0)
+        return AbsenceTimeout(sandbox_id, "running", ("running",), 0.0)
+
+    platform.delete = delete
+    platform.get = get
+    platform.start = AsyncMock()
+    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", AsyncMock(return_value="volume"))
+    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(runtime_module, "sandbox_state", lambda sandbox: sandbox.state)
+    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", AsyncMock())
+    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
+    runtime = make_daytona_runtime(platform=platform, admission=DaytonaAdmission(max_active_leases=2))
+    return runtime, platform
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reused", [False, True])
+async def test_warm_workspace_shutdown_drains_contexts(workspace_runtime, reused: bool) -> None:
+    runtime, platform = workspace_runtime
+    workspace_id = uuid4()
+    if reused:
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="prime", reuse_warm=True):
+            pass
+    async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
+        assert not await runtime.aclose(drain_seconds=0.01)
+        assert not platform.deleted
+    assert await runtime.aclose(drain_seconds=1)
+    assert platform.deleted == ["io-0"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["refresh", "state", "restart"])
+async def test_warm_workspace_replacement_closes_obsolete_lease(workspace_runtime, failure: str) -> None:
+    runtime, platform = workspace_runtime
+    workspace_id = uuid4()
+    for _ in range(3):
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True) as sandbox:
+            pass
+        if failure == "refresh":
+            sandbox.refresh_data.side_effect = RuntimeError("probe unavailable")
+        elif failure == "state":
+            sandbox.state = "unknown"
+        else:
+            sandbox.state = "stopped"
+            platform.start.side_effect = RuntimeError("restart failed")
+    assert len(platform.created) == 3
+    assert platform.deleted == ["io-0", "io-1"]
+    assert runtime._admission._semaphore._value == 1
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_warm_workspace_cache_preserves_turn_capacity(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    for _ in range(4):
+        async with asyncio.timeout(1):
+            async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+                pass
+        permit = await runtime._admission.acquire(deadline=asyncio.get_running_loop().time() + 0.1)
+        permit.release()
+    assert len(runtime._warm_workspace_io_sandboxes) == 1
+    assert len(platform.live) == 1
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_warm_workspace_idle_expiry_and_reuse_timer(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_idle_seconds = 0.03
+    workspace_id = uuid4()
+    async with runtime.open_workspace_sandbox(workspace_id, purpose="prime", reuse_warm=True):
+        pass
+    async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
+        await asyncio.sleep(0.05)
+        assert not platform.deleted
+    async with asyncio.timeout(1):
+        while not platform.deleted:
+            await asyncio.sleep(0.01)
+    assert not runtime._warm_workspace_io_sandboxes
+    assert runtime._admission._semaphore._value == 2
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_warm_workspace_failed_cleanup_blocks_replacement(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    async with runtime.open_workspace_sandbox(uuid4(), purpose="prime", reuse_warm=True):
+        pass
+    platform.confirm_delete = False
+    with pytest.raises(TimeoutError):
+        async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+            pytest.fail("replacement was admitted")
+    assert len(platform.created) == 1
+    assert runtime._admission._semaphore._value == 1
+    assert runtime.has_pending_ownership
+    platform.confirm_delete = True
+    assert await runtime.wait_pending_cleanup(timeout=2)
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_queue_timeout_never_closes_active_sandbox(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    workspace_id = uuid4()
+    async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
+        with pytest.raises(TimeoutError):
+            async with runtime.open_workspace_sandbox(workspace_id, purpose="checkpoint", reuse_warm=True):
+                pytest.fail("overlapping operation was admitted")
+        assert not platform.deleted
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_operation_groups_serialize_and_share_warm_sandbox(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    workspace_id = uuid4()
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+    seen: list[str] = []
+
+    async def read() -> None:
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True) as sandbox:
+            seen.append(sandbox.id)
+            entered.set()
+            await finish.wait()
+
+    async def checkpoint() -> None:
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="checkpoint", reuse_warm=True) as sandbox:
+            seen.append(sandbox.id)
+
+    first = asyncio.create_task(read())
+    await entered.wait()
+    second = asyncio.create_task(checkpoint())
+    await asyncio.sleep(0)
+    assert seen == ["io-0"]
+    assert runtime._workspace_io_contexts == 2
+    finish.set()
+    await asyncio.gather(first, second)
+    assert seen == ["io-0", "io-0"]
+    assert len(platform.created) == 1
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_acquisition_bound_does_not_limit_active_work(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+        await asyncio.sleep(0.05)
+        assert not platform.deleted
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_capacity_one_does_not_retain_idle_permit(workspace_runtime) -> None:
+    runtime, platform = workspace_runtime
+    runtime._admission = DaytonaAdmission(max_active_leases=1)
+    async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+        assert runtime._admission._semaphore._value == 0
+    assert not runtime._warm_workspace_io_sandboxes
+    assert platform.deleted == ["io-0"]
+    assert runtime._admission._semaphore._value == 1
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired", [False, True])
+async def test_workspace_acquisition_honors_calling_action_deadline(workspace_runtime, expired: bool) -> None:
+    from fleet_rlm.rlm.budget import host_action_deadline
+
+    runtime, platform = workspace_runtime
+    loop = asyncio.get_running_loop()
+    permits = [await runtime._admission.acquire(deadline=loop.time() + 1, host_io=True) for _ in range(2)]
+    started = loop.time()
+    with (
+        host_action_deadline(started + (-1 if expired else 0.03)),
+        pytest.raises((TimeoutError, DaytonaAdmissionTimeoutError)),
+    ):
+        async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+            pytest.fail("expired acquisition was admitted")
+    assert loop.time() - started < 0.5
+    assert not platform.created
+    assert runtime._workspace_io_contexts == 0
+    for permit in permits:
+        permit.release()
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reused", [False, True])
+async def test_workspace_preparation_timeout_retains_cleanup(workspace_runtime, monkeypatch, reused: bool) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    workspace_id = uuid4()
+
+    async def blocked(*_args: object) -> None:
+        await asyncio.Event().wait()
+
+    if reused:
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="prime", reuse_warm=True) as sandbox:
+            pass
+        sandbox.refresh_data.side_effect = blocked
+    else:
+        monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", blocked)
+    with pytest.raises(TimeoutError):
+        async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
+            pytest.fail("unfinished preparation was admitted")
+    assert not runtime._warm_workspace_io_sandboxes
+    assert await runtime.wait_pending_cleanup(timeout=2)
+    assert not platform.live
+    assert runtime._admission._semaphore._value == 2
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_late_create_blocks_replacement(workspace_runtime, monkeypatch) -> None:
+    runtime, platform = workspace_runtime
+    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    original_create = runtime_module._create_daytona_sandbox
+    finish = asyncio.Event()
+    creates = 0
+
+    async def blocked_create(*args: object, **kwargs: object) -> object:
+        nonlocal creates
+        creates += 1
+        await finish.wait()
+        return await original_create(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", blocked_create)
+    for _ in range(2):
+        with pytest.raises(TimeoutError):
+            async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+                pytest.fail("late creation was admitted")
+    assert creates == 1
+    assert runtime.has_pending_ownership
+    assert runtime._admission._semaphore._value == 1
+    finish.set()
+    assert await runtime.wait_pending_cleanup(timeout=2)
+    assert platform.deleted == ["io-0"]
+    async with runtime.open_workspace_sandbox(uuid4(), purpose="retry", reuse_warm=True):
+        pass
+    assert creates == 2
+    assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_workspace_shutdown_drains_preparation(workspace_runtime, monkeypatch) -> None:
+    runtime, platform = workspace_runtime
+    entered = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def layout(*_args: object) -> None:
+        entered.set()
+        await finish.wait()
+
+    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
+
+    async def prepare() -> None:
+        async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
+            pytest.fail("preparation published after shutdown")
+
+    task = asyncio.create_task(prepare())
+    await entered.wait()
+    assert not await runtime.aclose(drain_seconds=0.01)
+    assert not platform.deleted
+    finish.set()
+    with pytest.raises(RuntimeError, match="closed during Workspace I/O preparation"):
+        await task
+    assert await runtime.aclose(drain_seconds=1)
+    assert platform.deleted == ["io-0"]
+
+
 @pytest.mark.asyncio
 async def test_reused_root_probe_failure_never_replaces_the_sandbox() -> None:
     """A probe fault on a live reused Sandbox must not be answered by deleting it.

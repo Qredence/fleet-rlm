@@ -238,6 +238,22 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
     ("capture.enabled", "Capture", "Turn capture enabled", "boolean", (), "capture_enabled"),
     ("capture.retention_days", "Capture", "Capture retention (days)", "number", (), "capture_retention_days"),
     ("capture.max_captures", "Capture", "Retained capture files", "number", (), "capture_max_captures"),
+    (
+        "runtime.workspace_io_idle_seconds",
+        "Runtime",
+        "Workspace Sandbox idle seconds",
+        "number",
+        (),
+        "workspace_io_idle_seconds",
+    ),
+    (
+        "runtime.workspace_io_acquisition_timeout_seconds",
+        "Runtime",
+        "Workspace acquisition timeout seconds",
+        "number",
+        (),
+        "workspace_io_acquisition_timeout_seconds",
+    ),
 )
 
 

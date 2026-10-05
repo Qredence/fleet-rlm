@@ -454,6 +454,35 @@ def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() ->
     assert committed.structured_result == {"answer": "42", "total": 42}
 
 
+def test_commit_serializes_frozen_tool_and_prediction_values_without_mutation() -> None:
+    import json
+    from types import MappingProxyType
+
+    from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.committed_turn import CommittedTurnCodec, commit_success
+
+    started = ToolStarted(tool_call_id="call", tool_name="lookup", input={"items": [{"q": None}, 2]})
+    completed = ToolCompleted(tool_call_id="call", tool_name="lookup", output={"items": [{"ok": True}]})
+    outcome = RLMOutcome(
+        terminal_status="completed",
+        prediction=PredictionResult("42", {"answer": "42", "details": {"items": [None, 42]}}, "analysis", "1"),
+        usage={"iterations": 1, "observed_lm_usage": {"root": {"prompt_tokens": 3}}, "duration_ms": 3},
+        execution_details=(started, completed),
+    )
+    committed = commit_success(outcome, ())
+    encoded = json.loads(json.dumps(CommittedTurnCodec.encode(committed), allow_nan=False))
+    reloaded = CommittedTurnCodec.decode(encoded)
+    assert encoded["parts"][0]["input"] == {"items": [{"q": None}, 2]}
+    assert encoded["parts"][0]["output"] == {"items": [{"ok": True}]}
+    assert reloaded.structured_result == {"answer": "42", "details": {"items": [None, 42]}}
+    assert isinstance(started.input, MappingProxyType)
+    assert isinstance(completed.output, MappingProxyType)
+    assert isinstance(committed.structured_result, MappingProxyType)
+    assert isinstance(started.input["items"], tuple)
+    assert reloaded.text == "42"
+
+
 def test_commit_success_coalesces_incremental_output_before_durable_commit() -> None:
     from fleet_rlm.rlm.events import RLMOutput
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome

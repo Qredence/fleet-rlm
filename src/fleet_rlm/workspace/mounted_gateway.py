@@ -237,7 +237,6 @@ class DaytonaWorkspaceGateway:
     ) -> None:
         self._runtime = runtime
         self._map_error = map_error
-        self._workspace_locks: dict[UUID, asyncio.Lock] = {}
 
     @asynccontextmanager
     async def open_sandbox(
@@ -247,32 +246,30 @@ class DaytonaWorkspaceGateway:
         purpose: str,
     ) -> AsyncIterator[Any]:
         """Yield one verified mounted Sandbox for a bounded I/O operation group."""
-        lock = self._workspace_locks.setdefault(workspace_id, asyncio.Lock())
-        async with lock:
+        try:
+            open_fn = self._runtime.open_workspace_sandbox
+            kwargs: dict[str, Any] = {"purpose": purpose}
             try:
-                open_fn = self._runtime.open_workspace_sandbox
-                kwargs: dict[str, Any] = {"purpose": purpose}
-                try:
-                    sig = inspect.signature(open_fn)
-                    if "reuse_warm" in sig.parameters or any(
-                        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-                    ):
-                        kwargs["reuse_warm"] = True
-                except (TypeError, ValueError):
-                    pass
-                async with open_fn(workspace_id, **kwargs) as sandbox:
-                    yield sandbox
-            except (
-                ValueError,
-                WorkspaceConflictError,
-                FileNotFoundError,
-                FileExistsError,
-                IsADirectoryError,
-                NotADirectoryError,
-            ):
-                raise
-            except Exception as exc:
-                raise self._map_error(exc) from exc
+                sig = inspect.signature(open_fn)
+                if "reuse_warm" in sig.parameters or any(
+                    p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+                ):
+                    kwargs["reuse_warm"] = True
+            except (TypeError, ValueError):
+                pass
+            async with open_fn(workspace_id, **kwargs) as sandbox:
+                yield sandbox
+        except (
+            ValueError,
+            WorkspaceConflictError,
+            FileNotFoundError,
+            FileExistsError,
+            IsADirectoryError,
+            NotADirectoryError,
+        ):
+            raise
+        except Exception as exc:
+            raise self._map_error(exc) from exc
 
 
 class DaytonaWorkspaceVolumeGateway:

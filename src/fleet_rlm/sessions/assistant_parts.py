@@ -17,6 +17,7 @@ from pydantic import (
     Field,
     TypeAdapter,
     ValidationError,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -47,6 +48,15 @@ class AssistantPartModel(BaseModel):
 def _require_nonblank(value: str, field_name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field_name} is required")
+    return value
+
+
+def _json_containers(value: Any) -> Any:
+    """Thaw immutable event containers at the durable serialization boundary."""
+    if isinstance(value, Mapping):
+        return {key: _json_containers(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_containers(item) for item in value]
     return value
 
 
@@ -83,6 +93,10 @@ class ToolCallPart(AssistantPartModel):
     input: Any
     output: Any = None
     error: str | None = None
+
+    @field_serializer("input", "output", when_used="json")
+    def _serialize_json(self, value: Any) -> Any:
+        return _json_containers(value)
 
     @field_validator("tool_call_id", "tool_name")
     @classmethod
@@ -209,6 +223,10 @@ class UsagePart(AssistantPartModel):
     type: Literal["usage"] = "usage"
     value: Mapping[str, Any]
 
+    @field_serializer("value", when_used="json")
+    def _serialize_json(self, value: Any) -> Any:
+        return _json_containers(value)
+
     @field_validator("value")
     @classmethod
     def _validate_usage(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -223,6 +241,10 @@ class StructuredResultPart(AssistantPartModel):
     schema_id: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
     value: Any
+
+    @field_serializer("value", when_used="json")
+    def _serialize_json(self, value: Any) -> Any:
+        return _json_containers(value)
 
     @field_validator("schema_id", "schema_version")
     @classmethod
