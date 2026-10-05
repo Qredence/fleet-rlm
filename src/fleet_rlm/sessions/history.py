@@ -356,29 +356,10 @@ _PREVIEW_BUDGET_CHARS = 500
 class _ImmutableHistoryRecord(dict[str, str]):
     """Dict-shaped canonical record that cannot be mutated after snapshotting."""
 
-    def __setitem__(self, _key: str, _value: str) -> NoReturn:
+    def _immutable(self, *args: Any, **kwargs: Any) -> NoReturn:
         raise TypeError("committed Session History is immutable")
 
-    def __delitem__(self, _key: str) -> NoReturn:
-        raise TypeError("committed Session History is immutable")
-
-    def __ior__(self, _value: dict[str, str]) -> Self:  # ty: ignore[invalid-method-override]
-        raise TypeError("committed Session History is immutable")
-
-    def clear(self) -> NoReturn:
-        raise TypeError("committed Session History is immutable")
-
-    def pop(self, _key: str, _default: Any = None) -> NoReturn:  # ty: ignore[invalid-method-override]
-        raise TypeError("committed Session History is immutable")
-
-    def popitem(self) -> NoReturn:
-        raise TypeError("committed Session History is immutable")
-
-    def setdefault(self, _key: str, _default: str | None = None) -> NoReturn:
-        raise TypeError("committed Session History is immutable")
-
-    def update(self, *_args: Any, **_kwargs: Any) -> NoReturn:
-        raise TypeError("committed Session History is immutable")
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable  # type: ignore[assignment]
 
 
 def _validate_messages(messages: tuple[dict[str, str], ...]) -> None:
