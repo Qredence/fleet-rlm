@@ -1581,3 +1581,103 @@ def test_outcome_usage_with_delegation_commits_to_usage_part() -> None:
         {"role": "root", "recursive_depth": 0, "count": 1},
     )
     assert part.value["recursive_call_count"] == 1
+
+
+def _memory_candidate_context(*, drain_calls: list[int], returned_candidates=(), cancelled: bool = False):
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+
+    class Capabilities(EmptyCapabilities):
+        def drain_memory_candidates(self):
+            drain_calls.append(1)
+            return returned_candidates
+
+    async def cancellation_probe() -> bool:
+        return cancelled
+
+    return RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="promote later",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=cast("Any", SimpleNamespace(root_lm=object(), sub_lm=object())),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=cancellation_probe,
+        ),
+        capabilities=cast("Any", Capabilities()),
+    )
+
+
+@pytest.mark.asyncio
+async def test_runner_attaches_drained_memory_candidates_only_to_completed_outcome() -> None:
+    from fleet_rlm.rlm.execution import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
+
+    candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    return dspy.Prediction(answer="done", trajectory=[])
+
+            return Program()
+
+    drains: list[int] = []
+    context = _memory_candidate_context(drain_calls=drains, returned_candidates=(candidate,))
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.terminal_status == "completed"
+    assert stream.outcome.memory_candidates == (candidate,)
+    assert drains == [1]
+
+
+@pytest.mark.asyncio
+async def test_runner_discards_memory_candidates_on_execution_failure() -> None:
+    from fleet_rlm.rlm.execution import RLMRunner
+
+    class Factory:
+        def create(self, **_kwargs):
+            raise RuntimeError("provider unavailable")
+
+    drains: list[int] = []
+    context = _memory_candidate_context(drain_calls=drains)
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.terminal_status == "failed"
+    assert stream.outcome.memory_candidates == ()
+    assert drains == [1]
+
+
+@pytest.mark.asyncio
+async def test_runner_discards_memory_candidates_when_execution_is_cancelled() -> None:
+    from fleet_rlm.rlm.execution import RLMRunner
+    from fleet_rlm.workspace.memory import MemoryCandidate
+
+    candidate = MemoryCandidate(candidate_id="cand00000001", category="Project", learning="durable", byte_size=7)
+    drains: list[int] = []
+    context = _memory_candidate_context(drain_calls=drains, returned_candidates=(candidate,), cancelled=True)
+    stream = RLMRunner(program_builder=SimpleNamespace(create=lambda **_kwargs: object()).create).stream(context)
+
+    _ = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.terminal_status == "cancelled"
+    assert stream.outcome.memory_candidates == ()
+    assert drains == [1]
