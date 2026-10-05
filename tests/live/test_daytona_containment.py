@@ -35,7 +35,7 @@ pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(300)]
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _EVIDENCE_ENV = "FLEET_PHASE1_CONTAINMENT_EVIDENCE_PATH"
 _REQUIRED_DSPY = "3.4.0"
-_REQUIRED_DAYTONA = "0.218.0"
+_REQUIRED_DAYTONA = "0.220.0"
 
 
 def _load_live_settings() -> Any:

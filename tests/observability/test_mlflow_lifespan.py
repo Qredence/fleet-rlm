@@ -82,3 +82,20 @@ def test_two_fresh_app_lifespans_can_reconfig_after_a_failed_attempt(monkeypatch
         assert second.state.mlflow_runtime.state is MLflowRuntimeState.ACTIVE
 
     assert configure_calls == ["configure", "configure"]
+
+
+def test_native_fastapi_telemetry_does_not_adopt_ambient_exporters(monkeypatch) -> None:
+    from fastapi.telemetry import _runtime
+
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+
+    def unexpected_exporter(*_args, **_kwargs):
+        raise AssertionError("FastAPI must not configure exporters")
+
+    monkeypatch.setattr(_runtime, "_export_endpoint", unexpected_exporter)
+    app = create_testing_app(settings=Settings(mlflow_tracing_enabled=False))
+    assert not app._native_telemetry.enabled()
+    with TestClient(app) as client:
+        _post_canned_turn(client)
+        assert app.state.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
+    assert app.state.mlflow_runtime.state is MLflowRuntimeState.CLOSED

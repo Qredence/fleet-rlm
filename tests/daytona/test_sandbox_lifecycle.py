@@ -12,6 +12,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from daytona.common.errors import DaytonaQueueTimeoutError, DaytonaSpotEvictedError
 
 from fleet_rlm.daytona.errors import (
     DEFAULT_SANITIZED_FAILURE_MAX_CHARS,
@@ -885,3 +886,39 @@ async def test_confirmation_timeout_retains_permit_for_recovery() -> None:
         await _cleanup_coroutine(platform, permit, confirm_timeout_s=0.05)
     assert permit._released is False
     permit.release()
+
+
+@pytest.mark.parametrize(
+    ("error_type", "category"),
+    [(DaytonaQueueTimeoutError, "timeout"), (DaytonaSpotEvictedError, "unknown")],
+)
+def test_destroyed_sandbox_errors_preserve_sanitized_provider_failure(error_type, category) -> None:
+    raw = error_type("sandbox destroyed api_key=private")
+    mapped = map_provider_error(raw)
+    assert isinstance(mapped, ProviderRequestError)
+    assert mapped.cause_type == error_type.__name__
+    assert "private" not in str(mapped)
+    for error in (raw, mapped):
+        assert classify_provider_error(error) == category
+        assert not is_sandbox_not_found(error)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error_type", [DaytonaQueueTimeoutError, DaytonaSpotEvictedError])
+@pytest.mark.parametrize("operation", ["create", "start"])
+async def test_native_destroyed_error_does_not_retry_provider_operation(error_type, operation) -> None:
+    client = SimpleNamespace(
+        create=AsyncMock(side_effect=error_type("sandbox destroyed")),
+        get=AsyncMock(return_value=SimpleNamespace(id="sandbox")),
+        start=AsyncMock(side_effect=error_type("sandbox destroyed")),
+    )
+    platform = LiveDaytonaPlatform(client, _SPEC)
+    with pytest.raises(ProviderRequestError) as raised:
+        if operation == "create":
+            await platform.create(with_volume=False)
+        else:
+            await platform.start("sandbox")
+    assert raised.value.cause_type == error_type.__name__
+    getattr(client, operation).assert_awaited_once()
+    if operation == "create":
+        assert client.create.await_args.args[0].queue_timeout is None

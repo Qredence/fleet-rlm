@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.7.11] - Unreleased
+
+### Changed
+
+- Upgrade Daytona to 0.220.0, FastAPI standard to 0.142.2, PostHog to
+  7.63.0, and Ruff to 0.16.10. Preserve Fleet-owned observation by explicitly
+  disabling FastAPI native telemetry and automatic exporter configuration.
+
+
 ### Removed
 
 - **Change:** Removed `DeadlineLMProxy` and the deprecated

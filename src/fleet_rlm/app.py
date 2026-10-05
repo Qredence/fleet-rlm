@@ -94,6 +94,15 @@ def create_app(
         title=resolved.app_name,
         version=__version__,
         lifespan=lifespan,
+        # Observation remains owned by Fleet; ambient OTLP settings must not
+        # enable FastAPI exporters or additional request signals.
+        telemetry={
+            "tracing": False,
+            "metrics": False,
+            "logs": False,
+            "operation_spans": False,
+            "auto_configure": False,
+        },
     )
     app.state.settings = resolved
     app.state.composition_ready = False

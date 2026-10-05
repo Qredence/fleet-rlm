@@ -1,6 +1,6 @@
 [project]
 name = "fleet-rlm"
-version = "0.7.10"
+version = "0.7.11"
 description = "RLM-native FastAPI backend with DSPy and Daytona"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
@@ -33,7 +33,7 @@ dependencies = [
     "packaging>=26.3,<27",
     # Exact SDK pin: its resource and cleanup surface is verified by the
     # Daytona contract and live lifecycle lanes.
-    "daytona==0.218.0",
+    "daytona==0.220.0",
     # Persistence and migrations.
     "aiosqlite>=0.22.1",
     "alembic>=1.20.0,<2",
@@ -47,7 +47,7 @@ dependencies = [
     # Web API surface. Pinned exactly to the latest PyPI release at pin time
     # for reproducible installs; bump deliberately when a newer release is
     # validated against the runtime + test suite.
-    "fastapi[standard]==0.141.1",
+    "fastapi[standard]==0.142.2",
     "uvicorn>=0.54.0,<1",
     # Pooled HTTP client for the Daytona tool broker poll/fulfill loop:
     # connection reuse through the preview proxy. Transitive via the Daytona
@@ -59,7 +59,7 @@ dependencies = [
     "mlflow==3.16.1",
     "opentelemetry-sdk==1.45.0",
     "tomlkit>=0.15.1,<1",
-    "posthog>=7.60.1,<8",
+    "posthog>=7.63.0,<8",
 ]
 
 [project.urls]
@@ -106,7 +106,7 @@ dev = [
     # Starlette 1.6+ test clients use httpx2; keeping it installed avoids
     # deprecated fallback behavior when the app's HTTPX transport stays on httpx.
     "httpx2>=2.13.1",
-    "ruff>=0.16.9",
+    "ruff>=0.16.10",
     "ty>=0.0.84",
 ]
 

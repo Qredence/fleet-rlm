@@ -1,6 +1,6 @@
 """Public Daytona runtime facade and client-construction contracts.
 
-This suite covers runtime lifecycle contracts and Daytona 0.218.0 client
+This suite covers runtime lifecycle contracts and Daytona 0.220.0 client
 construction against the pinned SDK.
 """
 
@@ -461,9 +461,19 @@ async def test_missing_mount_does_not_retry_when_retirement_is_unconfirmed() -> 
 
 # --- Runtime lifecycle -------------------------------------------------
 @pytest.mark.asyncio
-async def test_root_acquisition_maps_sdk_bad_request_without_publishing_a_root() -> None:
+@pytest.mark.parametrize("cause", ["bad_request", "queue_timeout", "spot_evicted"])
+async def test_root_acquisition_maps_sdk_failure_without_publishing_a_root(cause: str) -> None:
+    from daytona.common.errors import DaytonaQueueTimeoutError, DaytonaSpotEvictedError
+
+    errors = {
+        "bad_request": BadRequestException(status=400, reason="api_key=private"),
+        "queue_timeout": DaytonaQueueTimeoutError("api_key=private"),
+        "spot_evicted": DaytonaSpotEvictedError("api_key=private"),
+    }
+    error = errors[cause]
+
     async def acquire(_request: object, **_kwargs: object) -> object:
-        raise BadRequestException(status=400, reason="api_key=private")
+        raise error
 
     runtime = make_daytona_runtime()
     runtime.acquire = acquire  # type: ignore[method-assign]
@@ -472,9 +482,13 @@ async def test_root_acquisition_maps_sdk_bad_request_without_publishing_a_root()
     with pytest.raises(ProviderRequestError) as raised:
         await runtime.acquire_root_session(spec)
 
-    assert raised.value.cause_type == "BadRequestException"
-    assert raised.value.status_code == 400
-    assert classify_provider_error(raised.value) == "request_validation"
+    assert raised.value.cause_type == type(error).__name__
+    if cause == "bad_request":
+        assert raised.value.status_code == 400
+    assert (
+        classify_provider_error(raised.value)
+        == {"bad_request": "request_validation", "queue_timeout": "timeout", "spot_evicted": "unknown"}[cause]
+    )
     assert "private" not in str(raised.value)
     assert runtime.roots == ()
 
@@ -491,13 +505,23 @@ async def test_root_acquisition_preserves_application_value_error() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("cause", ["bad_request", "queue_timeout", "spot_evicted"])
 async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
     caplog: pytest.LogCaptureFixture,
+    cause: str,
 ) -> None:
+    from daytona.common.errors import DaytonaQueueTimeoutError, DaytonaSpotEvictedError
+
+    error = {
+        "bad_request": BadRequestException(status=400, reason="api_key=private"),
+        "queue_timeout": DaytonaQueueTimeoutError("api_key=private"),
+        "spot_evicted": DaytonaSpotEvictedError("api_key=private"),
+    }[cause]
+
     class FailingInterpreter:
         def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
             del strict_broker_cleanup
-            raise BadRequestException(status=400, reason="api_key=private")
+            raise error
 
     lease = InterpreterLease(
         sandbox_id="sandbox-1",
@@ -515,11 +539,12 @@ async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
     with pytest.raises(ProviderRequestError) as raised, caplog.at_level(logging.WARNING):
         await runtime.release(lease)
 
-    assert raised.value.cause_type == "BadRequestException"
-    assert raised.value.status_code == 400
+    assert raised.value.cause_type == type(error).__name__
+    if cause == "bad_request":
+        assert raised.value.status_code == 400
     assert lease.failed
     assert id(lease) in runtime._late_owners
-    assert "sandbox_id=sandbox-1 error_type=BadRequestException" in caplog.text
+    assert f"sandbox_id=sandbox-1 error_type={type(error).__name__}" in caplog.text
     assert "private" not in caplog.text
 
 
@@ -1231,7 +1256,7 @@ async def test_build_daytona_client_uses_explicit_api_url_without_deprecation(
         client = build_daytona_client(settings)
 
     try:
-        assert version("daytona") == "0.218.0"
+        assert version("daytona") == "0.220.0"
         assert client._api_url == "https://app.daytona.io/api"
         assert client._api_client.default_headers["X-Daytona-Organization-ID"] == "test-org"
         assert not any("server_url" in str(item.message) for item in caught)

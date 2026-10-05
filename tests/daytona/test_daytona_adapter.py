@@ -782,7 +782,7 @@ async def test_exact_sdk_accumulates_output_even_with_a_callback(monkeypatch):
     import json
     from importlib.metadata import version
 
-    assert version("daytona") == "0.218.0"
+    assert version("daytona") == "0.220.0"
     interpreter, ws = _sdk_interpreter(monkeypatch, [{"type": "stdout", "text": "x" * 4096}] * 32)
     seen = []
     result = await interpreter.run_code(
