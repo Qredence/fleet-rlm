@@ -5,6 +5,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import dataclasses
+import functools
 import hashlib
 import json
 import threading
@@ -17,29 +20,46 @@ import dspy
 import pytest
 from pydantic import ValidationError
 
+from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
-from fleet_rlm.rlm.events import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
-from fleet_rlm.rlm.execution import materialize_child_inputs
-from fleet_rlm.rlm.program import RLMModelBundle
+from fleet_rlm.rlm.events import ChildProgress, RunCompleted, Status, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+    materialize_child_inputs,
+)
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.rlm.recursion import (
     ChildInputFailureError,
     ChildRequest,
     ChildRuntimeAuthorizationError,
     ChildRuntimeCleanupError,
     ChildRuntimeNotStartedError,
+    RecursiveBatchError,
     RecursiveRLMOptions,
+    RecursiveSubtaskSignature,
+    RLMConfigError,
     _child_progress_outcome,
+    recursive_rlm_options,
 )
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor as ProductionRecursiveRLMExecutor
+from fleet_rlm.sessions.context import SessionContextManifest
+from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.catalog import build_bundled_skill_catalog, stable_skill_id
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.workspace.errors import FilesystemToolError
 from tests.live.backend.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
+from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
+from tests.unit.backend.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
 
 
 # --- from test_recursion_tools.py -------------------------------------
@@ -56,6 +76,7 @@ def _executor(
     child_runtime_factory: Callable[..., ChildRuntimeLease] | None = None,
     parent_run_id: str | None = None,
     loaded_skills=None,
+    deadline: float | None = None,
 ) -> RecursiveRLMExecutor:
     """
     Construct a recursive executor backed by dummy root and sub-models for tests.
@@ -101,7 +122,7 @@ def _executor(
         models=RLMModelBundle(root, sub),
         options=options or RecursiveRLMOptions(),
         child_runtime_factory=child_runtime_factory or factory,
-        deadline=time.monotonic() + 30,
+        deadline=deadline if deadline is not None else time.monotonic() + 30,
         observer=observer,
         is_authorized=is_authorized,
         input_materializer=input_materializer,
@@ -109,6 +130,62 @@ def _executor(
         parent_run_id=parent_run_id,
         loaded_skills=loaded_skills,
     )
+
+
+def _context(
+    *,
+    root: dspy.utils.DummyLM,
+    sub: dspy.utils.DummyLM,
+    factory: Callable[[int], ChildRuntimeLease] | None,
+    recursive_options: RecursiveRLMOptions,
+    root_options: RLMOptions | None = None,
+    deadline: float | None = None,
+    runner_factory: Callable[..., object] | None = None,
+) -> tuple[RLMExecutionContext, RLMRunner]:
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="delegate",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=root_options or RLMOptions(max_iters=6, max_llm_calls=6),
+            deadline=deadline if deadline is not None else time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=not_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=recursive_options,
+            child_runtime_factory=factory,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    return context, RLMRunner(program_builder=runner_factory) if runner_factory is not None else RLMRunner()
+
+
+class _SpyInvocationFactory:
+    """Record the kwargs each child lease interpreter's factory receives."""
+
+    def __init__(self, recorder: ChildLeaseRecorder | None = None) -> None:
+        self.recorder = recorder or ChildLeaseRecorder()
+        self.invocation_kwargs: list[dict[str, object]] = []
+
+    def __call__(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
+        lease = self.recorder.factory(call_index, profile=profile)
+        real_new_invocation = lease.interpreter.new_invocation
+
+        @functools.wraps(real_new_invocation)
+        def recording_new_invocation(**kwargs: object) -> object:
+            self.invocation_kwargs.append(dict(kwargs))
+            return real_new_invocation(**kwargs)
+
+        lease.interpreter.new_invocation = recording_new_invocation
+        return lease
 
 
 def test_child_inherits_only_loaded_skill_guidance_and_private_resources(
@@ -1748,3 +1825,583 @@ def test_child_request_rejects_invalid_or_ambiguous_inputs(inputs: object) -> No
 def test_child_request_rejects_model_authored_runtime_policy() -> None:
     with pytest.raises((ValueError, ValidationError)):
         ChildRequest.from_mapping({"task": "Inspect", "inputs": [], "max_children": 100, "credentials": "grant access"})
+
+
+# --- Fencing and claim loss contracts ---
+
+
+def test_child_call_wait_is_fenced_by_the_absolute_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The synchronous child call returns at the deadline and retains cleanup."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    recorder = ChildLeaseRecorder()
+    entered = threading.Event()
+    release = threading.Event()
+
+    class HangingChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            entered.set()
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: HangingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    deadline = time.monotonic() + 0.2
+    events: list[object] = []
+    executor = _executor([], child_runtime_factory=recorder.factory, deadline=deadline, observer=events.append)
+
+    began = time.monotonic()
+    outcome = executor.tool(task="hanging child", inputs=[])
+    assert outcome["status"] == "timed_out"
+    elapsed = time.monotonic() - began
+
+    assert entered.is_set()
+    assert 0.1 <= elapsed < 1.5
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.raise_if_cleanup_failed()
+    release.set()
+    executor.wait_owned()
+    assert recorder.close_calls.get(1) == 1
+    assert recorder.interpreters[1]._shutdown
+    failed = [event for event in events if isinstance(event, Status) and event.status == "child_failed"]
+    assert len(failed) == 1
+    assert failed[0].message is not None
+    assert "failure_category=timeout" in failed[0].message
+    assert "cleanup_status=completed" in failed[0].message
+    assert executor.summary().termination_modes == ("child_error",)
+    executor.raise_if_cleanup_failed()
+
+
+@pytest.mark.asyncio
+async def test_uninterruptible_sync_child_is_retained_not_blocking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out synchronous child remains owned until it can settle."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    recorder = ChildLeaseRecorder()
+    entered = threading.Event()
+    release = threading.Event()
+
+    class SwallowingChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            entered.set()
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    child = SwallowingChild()
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: child)
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    deadline = time.monotonic() + 0.1
+    executor = _executor([], child_runtime_factory=recorder.factory, deadline=deadline)
+
+    began = time.monotonic()
+    outcome = executor.tool(task="swallowing child", inputs=[])
+    elapsed = time.monotonic() - began
+
+    assert entered.is_set()
+    assert elapsed < 1.5
+    assert outcome["status"] == "timed_out"
+    assert recorder.close_calls.get(1) is None
+    with pytest.raises(ChildRuntimeCleanupError, match="cleanup is still pending"):
+        executor.raise_if_cleanup_failed()
+    release.set()
+    await asyncio.to_thread(executor.wait_owned)
+    assert recorder.close_calls.get(1) == 1
+    executor.raise_if_cleanup_failed()
+
+
+@pytest.mark.asyncio
+async def test_fenced_child_wait_preserves_batch_deadline_semantics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timed-out batch retains the synchronous child until owned cleanup."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    recorder = ChildLeaseRecorder()
+    entered = threading.Event()
+    release = threading.Event()
+
+    class HangingChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            entered.set()
+            release.wait(5)
+            return dspy.Prediction(answer="late", evidence=[], gaps=[], result_files=[], trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: HangingChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    deadline = time.monotonic() + 1.0
+    executor = _executor([], child_runtime_factory=recorder.factory, deadline=deadline)
+
+    began = time.monotonic()
+    with pytest.raises((TimeoutError, RecursiveBatchError)) as raised:
+        executor.batched_tool(tasks=[{"task": task} for task in ["hanging"]])
+    if isinstance(raised.value, RecursiveBatchError):
+        assert isinstance(raised.value.__cause__, TimeoutError)
+    assert entered.is_set()
+    assert time.monotonic() - began < 2.0
+    with pytest.raises(ChildRuntimeCleanupError, match="pending"):
+        executor.raise_if_cleanup_failed()
+    release.set()
+    await asyncio.to_thread(executor.wait_owned)
+    executor.raise_if_cleanup_failed()
+    assert recorder.close_calls.get(1) == 1
+
+
+def test_completed_child_is_not_disturbed_by_the_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child that completes within the deadline returns its answer through
+    the same fenced seam without timeout classification."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    recorder = ChildLeaseRecorder()
+
+    class PromptChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            return dspy.Prediction(
+                answer=f"echo:{json.loads(prompt)['task']}", evidence=[], gaps=[], result_files=[], trajectory=[]
+            )
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: PromptChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    executor = _executor([], child_runtime_factory=recorder.factory, deadline=time.monotonic() + 10)
+
+    assert executor.tool(task="fast child", inputs=[])["answer"] == "echo:fast child"
+    assert recorder.close_calls.get(1) == 1
+    executor.wait_owned()
+    executor.raise_if_cleanup_failed()
+
+
+def test_child_lm_deadline_error_keeps_its_own_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A child that fails with its own deadline-bound LM error propagates unchanged."""
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    recorder = ChildLeaseRecorder()
+
+    class LmDeadlineChild:
+        def __call__(self, *, prompt: str) -> object:
+            del prompt
+            raise TimeoutError("recursive child LM deadline exceeded")
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: LmDeadlineChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+    executor = _executor([], child_runtime_factory=recorder.factory, deadline=time.monotonic() + 10)
+
+    outcome = executor.tool(task="lm deadline child", inputs=[])
+    assert outcome["status"] == "timed_out"
+    assert outcome["error_category"] == "timeout"
+    assert recorder.close_calls.get(1) == 1
+    executor.wait_owned()
+    executor.raise_if_cleanup_failed()
+
+
+def test_claim_loss_before_allocation_performs_no_reservation_or_acquisition() -> None:
+    authority = RunAuthority()
+    recorder = ChildLeaseRecorder()
+    executor = _executor(
+        [{"reasoning": "submit", "code": "SUBMIT(answer='never-runs', evidence=[], gaps=[], result_files=[])"}],
+        child_runtime_factory=recorder.factory,
+        is_authorized=lambda: not authority.revoked,
+    )
+    authority.revoke()
+
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.tool(task="claimed slice", inputs=[])
+
+    assert recorder.call_indexes == []
+    summary = executor.summary()
+    assert summary.call_count == 0
+    assert summary.delegated_prompt_chars == 0
+    assert summary.recursive_batch_calls == 0
+    assert summary.delegation_metrics.recursive_child_calls == 0
+
+
+def test_claim_loss_rejects_every_subsequent_recursive_call() -> None:
+    authority = RunAuthority()
+    recorder = ChildLeaseRecorder()
+    executor = _executor(
+        [{"reasoning": "submit", "code": "SUBMIT(answer='held-ok', evidence=[], gaps=[], result_files=[])"}],
+        child_runtime_factory=recorder.factory,
+        is_authorized=lambda: not authority.revoked,
+        options=RecursiveRLMOptions(max_calls=4),
+    )
+
+    assert executor.tool(task="held slice", inputs=[])["answer"] == "held-ok"
+    authority.revoke()
+
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.tool(task="late single", inputs=[])
+    with pytest.raises(RuntimeError, match="no longer authorized"):
+        executor.batched_tool(tasks=[{"task": task} for task in ["late batch"]])
+
+    assert recorder.call_indexes == [1]
+    assert executor.summary().call_count == 1
+    executor.wait_owned()
+    executor.raise_if_cleanup_failed()
+
+
+@pytest.mark.asyncio
+async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class BlockedChild:
+        def __call__(self, *, prompt: str) -> dspy.Prediction:
+            del prompt
+            started.set()
+            release.wait(10)
+            return dspy.Prediction(answer="late-claimed-answer", trajectory=[])
+
+    monkeypatch.setattr(recursive_calls, "build_native_rlm", lambda **_kwargs: BlockedChild())
+    monkeypatch.setattr(recursive_calls, "is_native_rlm", lambda _child: True)
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [{"reasoning": "delegate", "code": "answer = rlm_query(task='claimed slice', inputs=[])"}],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    recorder = ChildLeaseRecorder()
+    authority = RunAuthority()
+
+    async def never_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(
+            run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4()), authority=authority
+        ),
+        session=SessionView(
+            request="claim loss during recursive child",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=RLMModelBundle(root, sub),
+            options=RLMOptions(max_iters=3, max_llm_calls=4),
+            deadline=time.monotonic() + 30,
+            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            cancellation_requested=never_cancelled,
+        ),
+        delegation=DelegationPolicy(
+            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            child_runtime_factory=recorder.factory,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+
+    stream = RLMRunner().stream(context)
+    events: list[object] = []
+
+    async def consume() -> None:
+        async for event in stream:
+            events.append(event)
+
+    consume_task = asyncio.create_task(consume())
+    assert await asyncio.to_thread(started.wait, 10)
+    assert not authority.revoked
+    authority.revoke()
+    release.set()
+    await asyncio.wait_for(consume_task, timeout=15)
+
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "failed"
+    assert stream.outcome.prediction is None
+    assert not any(isinstance(event.detail, RunCompleted) for event in events)
+    assert "late-claimed-answer" not in repr(events)
+    assert recorder.call_indexes == [1]
+    await asyncio.wait_for(stream.wait_owned(), timeout=10)
+    assert recorder.close_calls.get(1) == 1
+    assert all(lease.interpreter._shutdown for lease in recorder.leases)
+
+
+# --- Policy surface and public composition contracts ---
+
+
+def test_public_composition_fixes_root_depth_zero() -> None:
+    events: list[object] = []
+    recorder = ChildLeaseRecorder()
+    executor = _executor(
+        [
+            {
+                "reasoning": "submit",
+                "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])",
+            }
+        ],
+        child_runtime_factory=recorder.factory,
+        observer=events.append,
+    )
+
+    assert executor.tool(task="classify selected row", inputs=[])["answer"] == "child-ok"
+    completed = next(event for event in events if isinstance(event, ToolCompleted))
+    assert completed.output["recursive_depth"] == 1
+    statuses = [event for event in events if isinstance(event, Status)]
+    assert [status.status for status in statuses] == ["child_started", "child_completed"]
+    assert all("recursive_depth=1" in (status.message or "") for status in statuses)
+
+    options = RecursiveRLMOptions(enabled=True)
+    assert not any("depth" in field.name for field in dataclasses.fields(options))
+    with pytest.raises(TypeError):
+        RecursiveRLMOptions(depth=1)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        RecursiveRLMOptions(max_depth=2)  # type: ignore[call-arg]
+
+
+@pytest.mark.asyncio
+async def test_public_runner_first_child_reservation_reports_depth_one() -> None:
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "single", "code": "a = rlm_query(task='slice one', inputs=[])['answer']"},
+            {"reasoning": "child one", "code": "SUBMIT(answer='one-done', evidence=[], gaps=[], result_files=[])"},
+            {"reasoning": "batch", "code": "b = rlm_query_batched(tasks=[{'task': 'slice two', 'inputs': []}])"},
+            {"reasoning": "child two", "code": "SUBMIT(answer='two-done', evidence=[], gaps=[], result_files=[])"},
+            {"reasoning": "submit", "code": "SUBMIT(answer=a + b[0]['answer'])"},
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    recorder = ChildLeaseRecorder()
+    context, runner = _context(
+        root=root,
+        sub=sub,
+        factory=recorder.factory,
+        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+        root_options=RLMOptions(max_iters=6, max_llm_calls=6),
+    )
+
+    stream = runner.stream(context)
+    events = [event async for event in stream]
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.answer == "one-donetwo-done"
+
+    single_completed = next(
+        event.detail
+        for event in events
+        if isinstance(event.detail, ToolCompleted) and event.detail.tool_name == "rlm_query"
+    )
+    assert single_completed.output == {
+        "status": "completed",
+        "call_index": 1,
+        "recursive_depth": 1,
+        "child_iterations": 1,
+        "termination_mode": "typed_submit",
+    }
+    statuses = [
+        event.detail for event in events if isinstance(event.detail, Status) and event.detail.phase == "recursive"
+    ]
+    assert [status.status for status in statuses] == [
+        "child_started",
+        "child_completed",
+        "child_started",
+        "child_completed",
+    ]
+    assert all("recursive_depth=1" in (status.message or "") for status in statuses)
+
+
+def test_public_settings_surface_exposes_no_recursion_depth() -> None:
+    recursion_settings = [name for name in Settings.model_fields if name.startswith("rlm_recursion")]
+    assert recursion_settings
+    assert not any("depth" in name for name in recursion_settings)
+
+
+def test_invocation_factory_scopes_the_child_action_deadline_from_options() -> None:
+    root_actions = [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"}]
+
+    spy = _SpyInvocationFactory()
+    executor = _executor(
+        root_actions, child_runtime_factory=spy, options=RecursiveRLMOptions(child_execution_timeout_s=45)
+    )
+    assert executor.tool(task="bounded child", inputs=[])["answer"] == "child-ok"
+    assert spy.invocation_kwargs
+    assert all(kwargs.get("timeout_s") == 45 for kwargs in spy.invocation_kwargs)
+    assert all(isinstance(kwargs.get("deadline_monotonic"), float) for kwargs in spy.invocation_kwargs)
+    assert all(callable(kwargs.get("admission")) for kwargs in spy.invocation_kwargs)
+
+    inherited = _SpyInvocationFactory()
+    executor = _executor(root_actions, child_runtime_factory=inherited, options=RecursiveRLMOptions())
+    assert executor.tool(task="inheriting child", inputs=[])["answer"] == "child-ok"
+    assert inherited.invocation_kwargs
+    assert all("timeout_s" not in kwargs for kwargs in inherited.invocation_kwargs)
+
+
+def test_recursive_subtask_instructions_state_the_scratch_relative_contract() -> None:
+    instructions = RecursiveSubtaskSignature.instructions
+    assert "predefined Python variable" in instructions
+    assert "environment variable" in instructions
+    assert "not the current working directory" in instructions
+    assert "os.path.join(FLEET_RUN_SCRATCH, relative_path)" in instructions
+    assert "Never put absolute sandbox paths" in instructions
+    result_files = RecursiveSubtaskSignature.output_fields["result_files"].json_schema_extra["desc"]
+    assert "relative to it" in result_files
+
+
+def test_recursive_options_reject_non_positive_child_timeouts() -> None:
+    for value in (0, -5):
+        with pytest.raises(RLMConfigError, match="child_execution_timeout_s"):
+            RecursiveRLMOptions(child_execution_timeout_s=value)
+
+
+def test_settings_resolved_child_deadline_derives_from_and_never_exceeds_the_parent() -> None:
+    derived = recursive_rlm_options(Settings(rlm_execution_timeout_s=300))
+    assert derived.child_execution_timeout_s == 270
+
+    explicit = recursive_rlm_options(Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=120))
+    assert explicit.child_execution_timeout_s == 120
+
+
+def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
+    recorder = ChildLeaseRecorder()
+    executor = _executor(
+        [
+            {
+                "reasoning": "attempt batch inside the child",
+                "code": (
+                    "try:\n"
+                    "    rlm_query_batched(prompts=['x'])\n"
+                    "    batch_result = 'resolved'\n"
+                    "except NameError:\n"
+                    "    batch_result = 'unresolved'\n"
+                    "SUBMIT(answer=batch_result, evidence=[], gaps=[], result_files=[])"
+                ),
+            },
+        ],
+        child_runtime_factory=recorder.factory,
+        options=RecursiveRLMOptions(max_calls=4),
+    )
+
+    assert executor.tool(task="outer slice", inputs=[])["answer"] == "unresolved"
+    assert recorder.call_indexes == [1]
+    summary = executor.summary()
+    assert summary.call_count == 1
+    assert summary.recursive_batch_calls == 0
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_root_receives_exactly_the_approved_recursive_tools_through_public_composition(
+    enabled: bool,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def capturing_builder(**kwargs: object) -> object:
+        captured.update(kwargs)
+        return build_native_rlm_for_test(**kwargs)
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM([{"reasoning": "direct", "code": "SUBMIT(answer='direct')"}], adapter=adapter)
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    context, runner = _context(
+        root=root,
+        sub=sub,
+        factory=ChildLeaseRecorder().factory,
+        recursive_options=RecursiveRLMOptions(enabled=enabled),
+        root_options=RLMOptions(max_iters=2, max_llm_calls=2),
+        runner_factory=capturing_builder,
+    )
+
+    async def drive() -> None:
+        stream = runner.stream(context)
+        async for _event in stream:
+            pass
+
+    asyncio.run(drive())
+
+    tool_names = [str(tool.name) for tool in (captured.get("tools") or ())]
+    assert tool_names == (["rlm_query", "rlm_query_batched"] if enabled else [])
+
+
+@pytest.mark.asyncio
+async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> None:
+    import fleet_rlm.rlm.recursion as recursive_calls
+
+    child_types: list[type] = []
+    child_interpreters: list[object] = []
+    root_invocations: list[tuple[type, object, dict[str, object]]] = []
+    root_types: list[type] = []
+    real_build = recursive_calls.build_native_rlm
+
+    def recording_build(**kwargs: object) -> object:
+        original_factory = kwargs["interpreter_factory"]
+
+        def recording_factory() -> object:
+            interpreter = original_factory()
+            child_interpreters.append(interpreter)
+            return interpreter
+
+        kwargs["interpreter_factory"] = recording_factory
+        rlm = real_build(**kwargs)
+        child_types.append(type(rlm))
+        return rlm
+
+    def root_builder(**kwargs: object) -> object:
+        rlm = build_native_rlm_for_test(**kwargs)
+        root_types.append(type(rlm))
+        original_acall = rlm.acall
+
+        async def acall(*args: object, **input_args: object) -> object:
+            assert not args
+            root_invocations.append((type(rlm), input_args.get("interpreter_factory"), dict(input_args)))
+            return await original_acall(**input_args)
+
+        rlm.acall = acall
+        return rlm
+
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {"reasoning": "delegate", "code": "answer = rlm_query(task='native marker child', inputs=[])['answer']"},
+            {
+                "reasoning": "child submit",
+                "code": "SUBMIT(answer='child-native-ok', evidence=[], gaps=[], result_files=[])",
+            },
+            {"reasoning": "submit", "code": "SUBMIT(answer=answer)"},
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+    recorder = ChildLeaseRecorder()
+    context, runner = _context(
+        root=root,
+        sub=sub,
+        factory=recorder.factory,
+        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+        root_options=RLMOptions(max_iters=4, max_llm_calls=4),
+        runner_factory=root_builder,
+    )
+
+    recursive_calls.build_native_rlm = recording_build
+    try:
+        stream = runner.stream(context)
+        _events = [event async for event in stream]
+    finally:
+        recursive_calls.build_native_rlm = real_build
+
+    assert stream.outcome is not None and stream.outcome.succeeded
+    assert stream.outcome.prediction is not None
+    assert stream.outcome.prediction.answer == "child-native-ok", _events
+
+    assert root_types == [dspy.RLM]
+    assert child_types == [dspy.RLM]
+    assert len(root_invocations) == 1
+    assert len(child_interpreters) == 1
+    assert child_interpreters[0] is not recorder.interpreters[1]
+    assert child_interpreters[0]._shutdown
+    assert root_invocations[0][1] is None
+    assert "request" in root_invocations[0][2]
+    prediction = stream.outcome.prediction
+    assert prediction.answer == "child-native-ok"
