@@ -58,7 +58,7 @@ def test_composition_module_imports_without_credentials() -> None:
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_bounds_provider_fence() -> None:
     import fleet_rlm.app_lifecycle as composition
-    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+    from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 
     session_id = uuid4()
     fence_calls: list[object] = []
@@ -149,7 +149,7 @@ async def test_daytona_install_cancellation_clears_dispatcher(monkeypatch: pytes
 @pytest.mark.asyncio
 async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
     import fleet_rlm.app_lifecycle as composition
-    from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+    from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 
     session_ids = [uuid4(), uuid4()]
     fence_calls: list[object] = []
@@ -723,7 +723,7 @@ def test_testing_database_is_created_and_closed_by_lifespan() -> None:
 
 def test_local_startup_reconciles_sql_runs_once(monkeypatch) -> None:
     from fleet_rlm.app_services import no_provider_recovery_fence
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
 
     calls: list[object] = []
 

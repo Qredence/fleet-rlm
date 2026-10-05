@@ -278,6 +278,7 @@ def deps__forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
         return (
             ("sessions must not import chat", "fleet_rlm.chat"),
             ("sessions must not import turn coordination", "fleet_rlm.turns"),
+            ("sessions must not import persistence", "fleet_rlm.persistence"),
         )
     if scope == "chat":
         return (

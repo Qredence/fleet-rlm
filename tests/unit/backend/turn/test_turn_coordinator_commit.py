@@ -298,12 +298,11 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
-    from fleet_rlm.sessions.catalog import SequenceCursor
     from fleet_rlm.sessions.committed_turn import TextPart, UsagePart
-    from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput, UserTurnRecord
+    from fleet_rlm.sessions.models import AssistantTurnRecord, SequenceCursor, TurnAccess, TurnInput, UserTurnRecord
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()

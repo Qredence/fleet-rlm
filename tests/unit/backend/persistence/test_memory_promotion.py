@@ -130,7 +130,7 @@ async def _seed_store():
         create_tables,
     )
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunClaim
 

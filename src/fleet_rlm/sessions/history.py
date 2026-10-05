@@ -29,7 +29,7 @@ import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Final, NoReturn, Self, cast
+from typing import Any, Final, NoReturn, cast
 
 import dspy
 
@@ -356,7 +356,7 @@ _PREVIEW_BUDGET_CHARS = 500
 class _ImmutableHistoryRecord(dict[str, str]):
     """Dict-shaped canonical record that cannot be mutated after snapshotting."""
 
-    def _immutable(self, *args: Any, **kwargs: Any) -> NoReturn:
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> NoReturn:
         raise TypeError("committed Session History is immutable")
 
     __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable  # type: ignore[assignment]

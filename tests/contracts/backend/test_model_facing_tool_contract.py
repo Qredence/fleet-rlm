@@ -120,7 +120,7 @@ def _source_tools() -> dict[str, dspy.Tool]:
     from fleet_rlm.rlm.recursion import (
         RecursiveRLMOptions,
     )
-    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
+    from fleet_rlm.sessions.history import SessionHistoryToolHost
     from fleet_rlm.sessions.models import SessionHistory
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.tools import SkillToolHost

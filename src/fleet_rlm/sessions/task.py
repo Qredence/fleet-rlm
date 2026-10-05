@@ -14,8 +14,7 @@ import dspy
 
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.paths import VolumePaths
-from fleet_rlm.sessions.catalog import SessionCatalog
-from fleet_rlm.sessions.errors import SessionError
+from fleet_rlm.sessions.models import SessionCatalog, SessionError
 from fleet_rlm.tool_events import ToolEventView
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 

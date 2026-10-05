@@ -58,9 +58,7 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.recursion import ChildRuntimeFactory, RecursiveRLMOptions
 from fleet_rlm.sessions.context import build_session_context_manifest
-from fleet_rlm.sessions.history import dspy_history_for_claim
-from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
-from fleet_rlm.sessions.history_transport import committed_history_for_claim
+from fleet_rlm.sessions.history import SessionHistoryToolHost, committed_history_for_claim, dspy_history_for_claim
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.sessions.task import (
     SessionTaskService,

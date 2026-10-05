@@ -6,9 +6,7 @@ import asyncio
 from typing import Protocol
 from uuid import UUID
 
-from fleet_rlm.sessions.catalog import SessionCatalog
-from fleet_rlm.sessions.errors import SessionRetirementPendingError
-from fleet_rlm.sessions.models import SessionRecord
+from fleet_rlm.sessions.models import SessionCatalog, SessionRecord, SessionRetirementPendingError
 
 
 class SessionRootRetirement(Protocol):

@@ -50,7 +50,7 @@ from fleet_rlm.workspace.models import (
 
 if TYPE_CHECKING:
     from fleet_rlm.sessions.context import SessionContextManifest
-    from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+    from fleet_rlm.sessions.history import CommittedSessionHistory
 
 # ---------------------------------------------------------------------------
 # Bounded re-ask adapter for the pinned JSON action protocol
@@ -1009,7 +1009,7 @@ def build_rlm_input_kwargs(
     if not isinstance(active_task_summary, str) or len(active_task_summary) > 2048:
         raise RLMConfigError("Turn input metadata is invalid")
     if history is not None and type(history) is not dspy.History:
-        from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+        from fleet_rlm.sessions.history import CommittedSessionHistory
 
         if not isinstance(history, CommittedSessionHistory):
             raise RLMConfigError("Turn input metadata is invalid")

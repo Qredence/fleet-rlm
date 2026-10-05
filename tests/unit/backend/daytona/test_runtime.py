@@ -658,6 +658,12 @@ async def test_workspace_io_warm_lease_reuses_resident_sandbox_and_closes_on_acl
         assert create_count == 1
         assert not deleted
 
+    # Body exception during warm reuse propagates cleanly without generator athrow error
+    with pytest.raises(FileNotFoundError, match=r"task\.json"):
+        async with runtime.open_workspace_sandbox(ws_id, purpose="read-task", reuse_warm=True) as acquired3:
+            assert acquired3 is sandbox
+            raise FileNotFoundError("task.json")
+
     # Calling aclose() cleanly terminates and confirms deletion of the warm sandbox
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)
     assert sandbox.id in deleted
@@ -1153,7 +1159,7 @@ def _make_claim(*, history_messages=()):
 
 
 def test_turn_preparation_exposes_committed_session_history_builder() -> None:
-    from fleet_rlm.sessions import history_transport
+    from fleet_rlm.sessions import history as history_transport
 
     assert callable(history_transport.committed_history_for_claim)
 
@@ -1161,7 +1167,7 @@ def test_turn_preparation_exposes_committed_session_history_builder() -> None:
 def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> None:
     import dspy
 
-    from fleet_rlm.sessions.history_transport import CommittedSessionHistory, committed_history_for_claim
+    from fleet_rlm.sessions.history import CommittedSessionHistory, committed_history_for_claim
     from fleet_rlm.sessions.models import HistoryMessage
 
     claim = _make_claim(

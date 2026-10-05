@@ -25,7 +25,7 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.result import observed_usage
 from fleet_rlm.sessions.context import build_session_context_manifest
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.history import CommittedSessionHistory
 from fleet_rlm.sessions.models import SessionHistory
 from scripts.benchmarks.campaign import observed_spend
 from scripts.benchmarks.oolong.scoring import (

@@ -39,9 +39,14 @@ from fleet_rlm.observability.feedback import (
     TraceFeedbackUnavailableError,
 )
 from fleet_rlm.observability.posthog import capture
-from fleet_rlm.sessions.catalog import SequenceCursor
-from fleet_rlm.sessions.errors import SessionNotFoundError, SessionRetirementPendingError
-from fleet_rlm.sessions.models import AssistantTurnRecord, SessionRecord, TurnAccess
+from fleet_rlm.sessions.models import (
+    AssistantTurnRecord,
+    SequenceCursor,
+    SessionNotFoundError,
+    SessionRecord,
+    SessionRetirementPendingError,
+    TurnAccess,
+)
 from fleet_rlm.sessions.run_state import RunNotFoundError
 from fleet_rlm.sessions.task import TaskCheckpointCorruptError, TaskCheckpointMissingError
 

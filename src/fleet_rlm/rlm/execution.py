@@ -99,7 +99,7 @@ from fleet_rlm.rlm.result import (
     rlm_termination_mode,
     truncate_public_text,
 )
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.history import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.models import SkillCard, SkillDefinition

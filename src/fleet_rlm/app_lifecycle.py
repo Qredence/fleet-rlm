@@ -42,7 +42,7 @@ from fleet_rlm.observability.turn_capture import TurnCaptureStore
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, VolumePaths
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
-from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
@@ -866,4 +866,3 @@ def build_run_preparation(
             task_service=task_service,
         ),
     )
-

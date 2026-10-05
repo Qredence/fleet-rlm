@@ -17,7 +17,7 @@ from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
 from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
 from fleet_rlm.persistence.repositories.sessions import SqlAlchemySandboxBindingStore
 from fleet_rlm.sessions.bindings import SandboxBinding
-from fleet_rlm.sessions.errors import SessionNotFoundError
+from fleet_rlm.sessions.models import SessionNotFoundError
 
 
 def test_normalize_database_url_drops_libpq_channel_binding_for_asyncpg() -> None:

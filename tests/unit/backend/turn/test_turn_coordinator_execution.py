@@ -271,7 +271,7 @@ async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() ->
 @pytest.mark.asyncio
 async def test_finalization_failure_after_claim_loss_routes_to_claim_loss_cleanup() -> None:
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
-    from fleet_rlm.turns import _ClaimLost
+    from fleet_rlm.turns.models import _ClaimLost
 
     lifecycle = _CleanupLifecycle(outcome=None)
     driver = _driver(lifecycle, object(), RunCleanupSupervisor())

@@ -11,8 +11,8 @@ from fastapi import HTTPException
 
 from fleet_rlm.api.dependencies import get_session_prewarm
 from fleet_rlm.app_services import RouteServices, RuntimeInventory
-from fleet_rlm.sessions.errors import SessionRetirementPendingError
 from fleet_rlm.sessions.lifecycle import NoOpSessionRetirement, SessionLifecycle
+from fleet_rlm.sessions.models import SessionRetirementPendingError
 from fleet_rlm.skills.models import SkillSelectionRef
 from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
@@ -208,7 +208,7 @@ def test_turn_input_rejects_duplicate_or_oversized_skill_selections() -> None:
 
 
 def test_sequence_cursor_is_an_actual_nonnegative_sequence() -> None:
-    from fleet_rlm.sessions.catalog import SequenceCursor
+    from fleet_rlm.sessions.models import SequenceCursor
 
     assert SequenceCursor().after_sequence is None
     assert SequenceCursor(after_sequence=0).after_sequence == 0

@@ -26,6 +26,17 @@ behavior and tests define what the system does.
 
 - `src/fleet_rlm/` is the canonical backend. Application composition builds
   route services; API routes validate requests and project transport.
+- Package layering is `sessions/` (Session, Run, and Turn domain contracts) ←
+  `persistence/` ← `turns/` (orchestration) ← `api/`; `rlm/` is a sibling that
+  shares event and result value types with `sessions/` (an existing two-way
+  edge: do not widen it). Types that both persistence and turns need live in
+  `sessions/`, never in `turns/`; `sessions/` imports neither `turns/` nor
+  `persistence/` (`scripts/check_architecture.py` enforces this). Do not invert
+  a boundary to avoid a move.
+- Import from the owning module. Do not add re-export shim modules, or
+  sub-50-line modules with one consumer; fold small helpers into their owner.
+  Name a module for what it holds (`persistence/repositories/run_state.py`
+  holds `SqlAlchemyRunStateStore`).
 - Use the pinned native `dspy.RLM` and `dspy.LM`. DSPy owns its reasoning loop,
   `REPLHistory`, and trajectory. Do not add a parallel loop, planner, model
   router, or permanent compatibility layer.

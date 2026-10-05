@@ -261,7 +261,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
     from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
-    from fleet_rlm.sessions.history_transport import committed_history_for_claim
+    from fleet_rlm.sessions.history import committed_history_for_claim
     from fleet_rlm.turns.preparation import RunEnvironment
 
     claim = _make_claim(

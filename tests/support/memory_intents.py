@@ -23,7 +23,7 @@ async def _seed_with_intents(database_url: str, *, intents: tuple = (), commit: 
         create_tables,
     )
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunClaim

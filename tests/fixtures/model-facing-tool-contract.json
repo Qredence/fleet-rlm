@@ -2075,7 +2075,7 @@
     {
       "name": "read_session_history",
       "category": "session_history",
-      "source": "src/fleet_rlm/sessions/history_tools.py:SessionHistoryToolHost",
+      "source": "src/fleet_rlm/sessions/history.py:SessionHistoryToolHost",
       "description": "Read a bounded page dictionary of older committed messages only when the current request requires prior-turn evidence. Iterate result[\"messages\"]; each message contains role and content; do not read history for self-contained requests.",
       "argument_schema": {
         "type": "object",
@@ -2123,7 +2123,7 @@
           "messages",
           "message.content"
         ],
-        "source": "src/fleet_rlm/sessions/history_tools.py:SessionHistoryToolHost.event_views"
+        "source": "src/fleet_rlm/sessions/history.py:SessionHistoryToolHost.event_views"
       }
     },
     {

@@ -41,11 +41,11 @@ through successful settlement and Turn Commit.
 
 | Owner | Responsibility |
 | --- | --- |
-| `turns.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
-| `turn_preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
-| `turn_settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
+| `turns/coordinator.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
+| `turns/preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
+| `turns/settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
 | `persistence/` | Owns SQL-backed Session and Run state, durable repositories, and commit operations; Alembic owns live schema changes. |
-| `sessions/` | Projects committed history and owns the bounded, revisioned task checkpoint. |
+| `sessions/` | Owns the Session, Run, and Turn domain contracts shared by `persistence/`, `rlm/`, and `turns/` (it shares event and result value types with `rlm/`), projects committed history, and owns the bounded, revisioned task checkpoint. It must not import `turns/` or `persistence/`. |
 | `attachments/`, `artifacts/`, `workspace/` | Own durable content, scoped file access, host I/O, and workspace memory. |
 
 One Daytona Volume holds each Workspace under `workspaces/<workspace_id>`, and

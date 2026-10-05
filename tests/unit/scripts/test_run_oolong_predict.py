@@ -15,7 +15,7 @@ import pytest
 from fleet_rlm.daytona.runtime import EphemeralInterpreterLease
 from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, VolumePaths
 from fleet_rlm.rlm.program import AttachmentContextCapsule, FleetJSONAdapter, FleetRLMSignature
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.history import CommittedSessionHistory
 from scripts.benchmarks import run_oolong_predict as runner
 from scripts.benchmarks.oolong import adapter as oolong_adapter
 from scripts.benchmarks.oolong.adapter import (

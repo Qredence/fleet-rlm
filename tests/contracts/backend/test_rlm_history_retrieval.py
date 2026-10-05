@@ -9,7 +9,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.sessions.history_tools import SESSION_HISTORY_RESULT_BYTE_BUDGET
+from fleet_rlm.sessions.history import SESSION_HISTORY_RESULT_BYTE_BUDGET
 from tests.support.native_rlm import build_native_rlm_for_test
 
 
@@ -33,7 +33,7 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     )
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import build_session_context_manifest
-    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
+    from fleet_rlm.sessions.history import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 
     older_detail = "project codename is cobalt-orchid"
@@ -125,7 +125,7 @@ async def test_native_rlm_continues_history_across_truncated_pages() -> None:
     )
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.context import build_session_context_manifest
-    from fleet_rlm.sessions.history_tools import SessionHistoryToolHost
+    from fleet_rlm.sessions.history import SessionHistoryToolHost
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess
 
     chunk = "y" * 150_000

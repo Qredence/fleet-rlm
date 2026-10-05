@@ -19,8 +19,8 @@ from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
 from fleet_rlm.observability.mlflow import MLflowRuntime
-from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.models import SessionCatalog
 from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.turns import TurnRuntime

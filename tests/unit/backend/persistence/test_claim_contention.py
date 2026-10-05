@@ -10,7 +10,7 @@ import asyncpg
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from fleet_rlm.persistence.repositories.turns import _expected_claim_conflict
+from fleet_rlm.persistence.repositories.run_state import _expected_claim_conflict
 from tests.support import claim_scenarios
 from tests.support.sqlite_claims import postgres_claim_store
 

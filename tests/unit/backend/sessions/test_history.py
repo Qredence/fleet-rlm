@@ -278,7 +278,7 @@ async def test_sql_store_level_cross_session_history_isolation(tmp_path) -> None
     """The authoritative SQL store scopes claimed checkpoints to the claimed Session."""
     from fleet_rlm.persistence.database import create_async_engine_from_url, create_session_factory, create_tables
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
-    from fleet_rlm.persistence.repositories.turns import SqlAlchemyRunStateStore
+    from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.history import dspy_history_for_claim
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
