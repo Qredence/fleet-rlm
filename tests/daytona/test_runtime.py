@@ -953,16 +953,22 @@ async def test_workspace_io_warm_lease_reuses_resident_sandbox_and_closes_on_acl
     assert ws_id in runtime._warm_workspace_io_sandboxes
 
     # Second call reuses the existing warm sandbox without creating a new one
+    creates_before_reuse = create_count
     async with runtime.open_workspace_sandbox(ws_id, purpose="mem-append", reuse_warm=True) as acquired2:
         assert acquired2 is sandbox
-        assert create_count == 1
+        assert create_count == creates_before_reuse
         assert not deleted
 
-    # Body exception during warm reuse propagates cleanly without generator athrow error
-    with pytest.raises(FileNotFoundError, match=r"task\.json"):
+    # Body exception during warm reuse propagates cleanly without generator athrow error.
+    # Raise inside a nested coroutine so static analysis does not treat later cleanup
+    # as unreachable past the intentional FileNotFoundError.
+    async def _read_missing_task() -> None:
         async with runtime.open_workspace_sandbox(ws_id, purpose="read-task", reuse_warm=True) as acquired3:
             assert acquired3 is sandbox
             raise FileNotFoundError("task.json")
+
+    with pytest.raises(FileNotFoundError, match=r"task\.json"):
+        await _read_missing_task()
 
     # Calling aclose() cleanly terminates and confirms deletion of the warm sandbox
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)

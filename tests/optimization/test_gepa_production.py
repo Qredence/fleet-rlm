@@ -423,29 +423,16 @@ def test_preflight_translates_candidate_rounds_and_hides_sealed_ids(tmp_path: Pa
         assert marker not in str(receipt)
 
 
-def test_preflight_rejects_obsolete_usd_reflection_cost_cap(tmp_path: Path) -> None:
-    """The unsupported USD reflection-cost cap is removed, not tolerated."""
-    export_path = _write_export(tmp_path)
-
-    with pytest.raises(TypeError):
-        preflight(export_path=export_path, split_seed=0, **{"max_total_cost_usd": 1.0})
-
+def test_gepa_entrypoints_omit_obsolete_usd_reflection_cost_caps() -> None:
+    """USD reflection-cost caps were removed from the public entrypoint signatures."""
+    # Assert via inspect only: do not call with unsupported kwargs (Code Quality
+    # flags those call sites even when the TypeError is intentional).
     for entrypoint in (preflight, run_development_smoke):
         parameters = inspect.signature(entrypoint).parameters
-        for marker in ("max_total_cost_usd", "max_token_cost", "max_reflection_cost"):
+        for marker in _USD_CAP_MARKERS:
+            if "-" in marker:
+                continue  # receipt/doc hyphen form; signatures use underscores
             assert marker not in parameters
-
-
-def test_run_development_smoke_rejects_obsolete_usd_reflection_cost_cap(tmp_path: Path) -> None:
-    with pytest.raises(TypeError):
-        run_development_smoke(
-            export_path=_write_export(tmp_path),
-            split_seed=0,
-            max_metric_calls=1,
-            evidence_root=tmp_path / "evidence",
-            run_id="run-1",
-            **{"max_total_cost_usd": 1.0},
-        )
 
 
 def test_smoke_requires_bounded_metric_call_budget(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
