@@ -451,3 +451,589 @@ class TestSandboxIsolationInvariants:
         call_kwargs = mock_platform.create.call_args.kwargs
 
         assert call_kwargs.get("network_block_all") is True
+
+
+# --- Interpreter Output Bounding and Feedback ---
+def test_typed_submit_size_feedback_is_recoverable_and_matches_declared_json() -> None:
+    import json
+
+    from fleet_rlm.rlm.output_contract import FleetOutputContract, OutputField
+
+    answer = "é" * 4
+    limit = len(json.dumps({"answer": answer}, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        output_fields=[{"name": "answer", "type": "str"}],
+    )
+    interpreter.bind_output_contract(FleetOutputContract((OutputField("answer", True),), limit))
+
+    with pytest.raises(CodeExecutionError, match=f"{limit + 1} > {limit} characters") as error:
+        interpreter.execute(f"SUBMIT(answer={answer + 'é'!r})")
+    assert answer not in str(error.value)
+
+    result = interpreter.execute(f"SUBMIT(answer={answer!r})")
+    assert isinstance(result, FinalOutput)
+    assert result.output == {"answer": answer}
+
+
+def test_turn_output_budget_is_shared_and_fail_closed() -> None:
+    import time
+
+    from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=400)
+    observed: list[object] = []
+    budget = TurnBudget(
+        deadline=time.monotonic() + 60,
+        limits=BudgetLimits(execution_output_bytes=3),
+    )
+    interpreter.bind_observer(observed.append)
+    interpreter.bind_turn_budget(budget)
+
+    with pytest.raises(TurnBudgetExhausted) as caught:
+        interpreter.execute("_out = 'abcd'")
+
+    assert caught.value.dimension == BudgetDimension.EXECUTION_OUTPUT_BYTES
+    assert budget.snapshot()[BudgetDimension.EXECUTION_OUTPUT_BYTES.value] == 0
+    assert not any(getattr(item, "output", "") == "Execution failed" for item in observed)
+
+
+def test_error_feedback_includes_capped_stderr() -> None:
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult, OutputCallback
+
+    class _StderrBackend:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
+            return BackendExecutionResult(
+                stdout="", error="NameError: name 'missing' is not defined", stderr="s" * 5000
+            )
+
+        def close(self) -> None:
+            return None
+
+    interpreter = DaytonaCodeInterpreter(backend=_StderrBackend(), execution_output_cap=300)
+
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("missing + 1")
+    result = str(caught.value)
+
+    assert isinstance(result, str)
+    assert result.startswith("NameError")
+    assert "stderr:" in result
+    assert len(result) < 450
+    assert "characters omitted" in result
+
+
+def test_typed_stdout_is_capped_before_returning_feedback() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), execution_output_cap=300)
+    result = interpreter.execute("print('head' + 'x' * 5_000 + 'tail')")
+    assert result.startswith("head")
+    assert result.endswith("tail\n")
+    assert "characters omitted" in result
+    assert len(result) < 400
+    interpreter.shutdown()
+
+
+def test_sandbox_backend_retains_timeout_for_broker_execution() -> None:
+    backend = sandbox_backend(object(), timeout_s=45)
+    assert backend.timeout_s == 45
+
+    unbounded = sandbox_backend(object(), timeout_s=None)
+    assert unbounded.timeout_s is None
+
+
+# --- Interpreter MLflow Tracing ---
+@pytest.fixture
+def interpreter_trace_active():
+    from fleet_rlm.observability import tracing as turn_tracing
+
+    token = turn_tracing._fleet_trace_active.set(True)
+    yield
+    turn_tracing._fleet_trace_active.reset(token)
+
+
+def _install_interpreter_fake_mlflow(monkeypatch: pytest.MonkeyPatch):
+    import sys
+    from collections.abc import Iterator
+    from contextlib import contextmanager
+    from types import ModuleType, SimpleNamespace
+
+    calls = SimpleNamespace(start_span_names=[], span_inputs=[], span_outputs=[], span_statuses=[])
+
+    class _FakeSpan:
+        def set_inputs(self, payload: dict[str, object]) -> None:
+            calls.span_inputs.append(payload)
+
+        def set_outputs(self, payload: dict[str, object]) -> None:
+            calls.span_outputs.append(payload)
+
+        def set_status(self, status: str) -> None:
+            calls.span_statuses.append(status)
+
+    active_span = _FakeSpan()
+
+    @contextmanager
+    def start_span(*, name: str = "span", span_type: Any = None, **_kwargs: Any) -> Iterator[Any]:
+        del span_type
+        calls.start_span_names.append(name)
+        yield active_span
+
+    mlflow = ModuleType("mlflow")
+    mlflow.start_span = start_span  # type: ignore[attr-defined]
+    mlflow.get_current_active_span = lambda: active_span  # type: ignore[attr-defined]
+
+    entities = ModuleType("mlflow.entities")
+    entities.SpanType = SimpleNamespace(CHAIN="CHAIN")  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
+    monkeypatch.setitem(sys.modules, "mlflow.entities", entities)
+    return calls
+
+
+def test_sandbox_execute_span_emits_bounded_metadata(
+    monkeypatch: pytest.MonkeyPatch, interpreter_trace_active: None
+) -> None:
+    del interpreter_trace_active
+    calls = _install_interpreter_fake_mlflow(monkeypatch)
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+    result = interpreter.execute("_out = 'hello'")
+
+    assert result == "hello"
+    assert calls.start_span_names == ["sandbox.execute"]
+    assert calls.span_inputs[0] == {
+        "iteration": 1,
+        "code_chars": len("_out = 'hello'"),
+        "variable_count": 0,
+        "code_preview": "_out = 'hello'",
+    }
+    outputs = dict(calls.span_outputs[0])
+    timings = {name: outputs.pop(name) for name in ("ensure_bindings_ms", "execute_ms")}
+    assert all(isinstance(value, int) and 0 <= value < 1_000 for value in timings.values())
+    assert outputs == {
+        "path": "InProcessInterpreterBackend",
+        "result_kind": "output",
+        "stdout_chars": 5,
+        "output_preview": "hello",
+        "phase_status": "completed",
+    }
+
+
+@pytest.mark.parametrize(
+    ("cause_type", "expected_category"),
+    [("BrokerExecutionTimeout", "timeout"), ("BrokerExecutionError", "adapter_error")],
+)
+def test_sandbox_execute_span_classifies_broker_failure_and_keeps_it_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    interpreter_trace_active: None,
+    cause_type: str,
+    expected_category: str,
+) -> None:
+    del interpreter_trace_active
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult, OutputCallback
+
+    calls = _install_interpreter_fake_mlflow(monkeypatch)
+
+    class FailingBackend:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
+            raise DaytonaAdapterError("safe failure", cause_type=cause_type)
+
+        def close(self) -> None:
+            return None
+
+    interpreter = DaytonaCodeInterpreter(backend=FailingBackend())
+    with pytest.raises(DaytonaAdapterError):
+        interpreter.execute("print('never')")
+
+    assert calls.span_outputs[0]["failure_category"] == expected_category
+    assert calls.span_outputs[0]["phase_status"] == "failed"
+
+
+def test_sandbox_execute_span_classifies_budget_exhaustion(
+    monkeypatch: pytest.MonkeyPatch, interpreter_trace_active: None
+) -> None:
+    del interpreter_trace_active
+    import time
+
+    from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget, TurnBudgetExhausted
+
+    calls = _install_interpreter_fake_mlflow(monkeypatch)
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter.bind_turn_budget(
+        TurnBudget(deadline=time.monotonic() + 60, limits=BudgetLimits(execution_output_bytes=1))
+    )
+
+    with pytest.raises(TurnBudgetExhausted):
+        interpreter.execute("_out = 'too large'")
+
+    assert calls.span_outputs[0]["failure_category"] == "budget_execution_output_bytes"
+    assert calls.span_outputs[0]["phase_status"] == "failed"
+
+
+def test_sandbox_execute_without_active_trace_is_noop() -> None:
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    assert interpreter.execute("_out = 'untraced'") == "untraced"
+
+
+# --- Interpreter Callback Shadow ---
+def test_shadow_recorder_matches_manual_interpreter_lifecycle() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder, compare_callback_records
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        callbacks=[recorder],
+    )
+
+    interpreter.start()
+    assert interpreter.execute("_out = 'ok'") == "ok"
+    interpreter.shutdown()
+
+    records = recorder.records()
+    assert [record.operation for record in records] == [
+        "startup",
+        "execute",
+        "shutdown",
+    ]
+    assert all(record.status == "completed" for record in records)
+    assert all(record.duration_ms >= 0 for record in records)
+    assert all(record.parent_call_id is None for record in records)
+    assert compare_callback_records(records, records).semantic_differences == ()
+
+
+def test_shadow_recorder_tracks_recoverable_and_terminal_exceptions() -> None:
+    from dspy.primitives.code_interpreter import CodeInterpreterError
+
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult, OutputCallback
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    class BrokenBackend:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
+            raise CodeInterpreterError("terminal")
+
+        def close(self) -> None:
+            return None
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=BrokenBackend(),
+        callbacks=[recorder],
+    )
+
+    with pytest.raises(CodeInterpreterError):
+        interpreter.execute("_out = 'never'")
+    interpreter.shutdown()
+
+    records = recorder.records()
+    assert [record.operation for record in records] == ["execute", "startup", "shutdown"]
+    execute = records[0]
+    assert execute.status == "failed"
+    assert execute.exception_category == "CodeInterpreterError"
+    assert execute.parent_call_id is None
+
+
+def test_shadow_tool_callback_is_nested_under_execute_and_has_one_terminal() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    recorder = CallbackShadowRecorder()
+
+    def helper(value: str) -> str:
+        return f"done:{value}"
+
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": helper},
+        callbacks=[recorder],
+    )
+
+    assert interpreter.execute("result = helper(value='a')\n_out = result") == "done:a"
+    interpreter.shutdown()
+
+    records = recorder.records()
+    tool_records = [record for record in records if record.operation == "tool_call"]
+    assert len(tool_records) == 1
+    tool = tool_records[0]
+    execute = next(record for record in records if record.operation == "execute")
+    assert tool.tool_name == "helper"
+    assert tool.status == "completed"
+    assert tool.parent_call_id == execute.call_id
+    assert [record.operation for record in records].count("tool_call") == 1
+
+
+def test_callback_handler_failures_are_fail_soft_for_result_and_product_observer() -> None:
+    from dspy.utils.callback import BaseCallback
+
+    class ExplodingCallback(BaseCallback):
+        def on_interpreter_startup_start(self, **_kwargs: Any) -> None:
+            raise RuntimeError("callback start failure")
+
+        def on_interpreter_execute_end(self, **_kwargs: Any) -> None:
+            raise RuntimeError("callback end failure")
+
+    observed: list[object] = []
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        callbacks=[ExplodingCallback()],
+    )
+    interpreter.bind_observer(observed.append)
+
+    assert interpreter.execute("_out = 'unchanged'") == "unchanged"
+    interpreter.shutdown()
+    assert [type(item).__name__ for item in observed] == [
+        "StepStarted",
+        "RLMCode",
+        "RLMOutput",
+        "StepFinished",
+    ]
+
+
+def test_callback_export_failure_is_fail_soft() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    def explode(_record: object) -> None:
+        raise RuntimeError("MLflow export unavailable")
+
+    recorder = CallbackShadowRecorder(exporter=explode)
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        callbacks=[recorder],
+    )
+
+    assert interpreter.execute("_out = 'export-failure-does-not-change-result'") == (
+        "export-failure-does-not-change-result"
+    )
+    interpreter.shutdown()
+    assert len(recorder.records()) == 3
+
+
+def test_tool_failure_callback_is_terminal_and_sanitized() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    def helper(value: int) -> str:
+        if value == 2:
+            raise RuntimeError("provider secret and private path")
+        return str(value)
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": helper},
+        callbacks=[recorder],
+    )
+
+    with pytest.raises(RuntimeError):
+        interpreter.execute("helper(value=2)")
+    interpreter.shutdown()
+
+    tool = next(record for record in recorder.records() if record.operation == "tool_call")
+    assert tool.status == "failed"
+    assert tool.exception_category == "RuntimeError"
+    assert "provider secret" not in str(tool)
+    assert "private path" not in str(tool)
+
+
+def test_callback_parity_classifies_duration_only_differences() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder, compare_callback_records
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        callbacks=[recorder],
+    )
+    assert interpreter.execute("_out = 'same'") == "same"
+    interpreter.shutdown()
+    records = recorder.records()
+
+    shifted = tuple(record.with_duration(record.duration_ms + 1) for record in records)
+    comparison = compare_callback_records(records, shifted)
+    assert comparison.semantic_differences == ()
+    assert comparison.timing_only_differences
+
+
+@pytest.mark.parametrize(
+    ("failure", "raised_type", "expected_category"),
+    [
+        (asyncio.CancelledError(), asyncio.CancelledError, "CancelledError"),
+        (TimeoutError("bounded timeout"), ProviderRequestError, "ProviderRequestError"),
+    ],
+)
+def test_shadow_lifecycle_parity_covers_cancellation_and_timeout(
+    failure: BaseException,
+    raised_type: type[BaseException],
+    expected_category: str,
+) -> None:
+    from fleet_rlm.daytona.interpreter import BackendExecutionResult, OutputCallback
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    class FailingBackend:
+        def run(
+            self,
+            code: str,
+            variables: dict[str, object] | None = None,
+            *,
+            on_stdout: OutputCallback | None = None,
+        ) -> BackendExecutionResult:
+            del code, variables, on_stdout
+            raise failure
+
+        def close(self) -> None:
+            return None
+
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=FailingBackend(),
+        callbacks=[recorder],
+    )
+
+    with pytest.raises(raised_type):
+        interpreter.execute("_out = 'never'")
+    interpreter.shutdown()
+
+    execute = next(record for record in recorder.records() if record.operation == "execute")
+    assert execute.status == "failed"
+    assert execute.exception_category == expected_category
+    assert execute.duration_ms >= 0
+
+
+@pytest.mark.asyncio
+async def test_shadow_tool_parity_covers_async_callable() -> None:
+    import dspy
+
+    from fleet_rlm.daytona.interpreter import _SyncBridgeLoop
+    from fleet_rlm.rlm.events import ToolEventView, observe_tool
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    async def helper(value: str) -> str:
+        await asyncio.sleep(0)
+        return f"async:{value}"
+
+    manual: list[object] = []
+    observed_tool = observe_tool(
+        dspy.Tool(helper, name="helper"),
+        manual.append,
+        ToolEventView.metadata_only(),
+        async_bridge=_SyncBridgeLoop(caller_loop=asyncio.get_running_loop()),
+    )
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": observed_tool.func},
+        callbacks=[recorder],
+    )
+
+    result = await asyncio.to_thread(interpreter.execute, "result = helper(value='a')\n_out = result")
+    interpreter.shutdown()
+
+    assert result == "async:a"
+    tool_records = [record for record in recorder.records() if record.operation == "tool_call"]
+    assert len(tool_records) == 1
+    assert tool_records[0].tool_name == "helper"
+    assert tool_records[0].status == "completed"
+    assert [type(item).__name__ for item in manual] == ["ToolStarted", "ToolCompleted"]
+
+
+def test_shadow_recursive_tool_parity_has_one_nested_terminal_pair() -> None:
+    import dspy
+
+    from fleet_rlm.rlm.events import ToolEventView, observe_tool
+    from tests.support.dspy_callbacks import CallbackShadowRecorder
+
+    manual: list[object] = []
+    observed_tool = observe_tool(
+        dspy.Tool(lambda prompt: f"child:{prompt}", name="rlm_query"),
+        manual.append,
+        ToolEventView.metadata_only(),
+    )
+    recorder = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"rlm_query": observed_tool.func},
+        callbacks=[recorder],
+    )
+    interpreter.bind_observer(manual.append)
+
+    assert interpreter.execute("child = rlm_query(prompt='bounded')\n_out = child") == "child:bounded"
+    interpreter.shutdown()
+
+    records = recorder.records()
+    execute = next(record for record in records if record.operation == "execute")
+    tool_records = [record for record in records if record.operation == "tool_call"]
+    assert len(tool_records) == 1
+    assert tool_records[0].tool_name == "rlm_query"
+    assert tool_records[0].parent_call_id == execute.call_id
+    assert tool_records[0].status == "completed"
+    assert [record.operation for record in records].count("tool_call") == 1
+    assert [type(item).__name__ for item in manual] == [
+        "StepStarted",
+        "RLMCode",
+        "ToolStarted",
+        "ToolCompleted",
+        "RLMOutput",
+        "StepFinished",
+    ]
+
+
+def test_callback_parent_comparison_distinguishes_missing_from_external_parent() -> None:
+    from tests.support.dspy_callbacks import CallbackShadowRecorder, compare_callback_records
+
+    base = CallbackShadowRecorder()
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        tools={"helper": lambda: "ok"},
+        callbacks=[base],
+    )
+    assert interpreter.execute("_out = helper()") == "ok"
+    interpreter.shutdown()
+    records = base.records()
+
+    missing_parent = tuple(
+        record
+        if record.operation != "tool_call"
+        else record.__class__(
+            operation=record.operation,
+            call_id=record.call_id,
+            parent_call_id=None,
+            status=record.status,
+            duration_ms=record.duration_ms,
+            exception_category=record.exception_category,
+            tool_name=record.tool_name,
+        )
+        for record in records
+    )
+    external_parent = tuple(
+        record
+        if record.operation != "tool_call"
+        else record.__class__(
+            operation=record.operation,
+            call_id=record.call_id,
+            parent_call_id="framework-parent",
+            status=record.status,
+            duration_ms=record.duration_ms,
+            exception_category=record.exception_category,
+            tool_name=record.tool_name,
+        )
+        for record in records
+    )
+
+    comparison = compare_callback_records(missing_parent, external_parent)
+    assert any(".parent" in difference for difference in comparison.semantic_differences)

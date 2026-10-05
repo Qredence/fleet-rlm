@@ -960,3 +960,453 @@ async def test_deadline_exhaustion_does_not_consume_capacity() -> None:
     held.release()
     available = await admission.acquire(deadline=loop.time() + 10)
     available.release()
+
+
+# --- Phase 2 Preservation Seam Contracts ---
+def _closable_lease(*, sandbox_id: str = "sandbox-1") -> object:
+    class Interpreter:
+        closed = False
+
+        def shutdown(self, **_kwargs: object) -> None:
+            self.closed = True
+
+    return InterpreterLease(
+        sandbox_id=sandbox_id,
+        interpreter_id=f"interpreter-{sandbox_id}",
+        volume_id="volume-1",
+        mount_path="/workspace",
+        interpreter=Interpreter(),
+        sandbox=type("Sandbox", (), {"id": sandbox_id})(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_sequential_root_reuse_returns_same_lease() -> None:
+    from fleet_rlm.daytona.runtime import DaytonaSessionRecord, RootSessionSpec, SessionCleanupState
+
+    creates = 0
+
+    async def acquire(_request: object, **_kwargs: object) -> object:
+        nonlocal creates
+        creates += 1
+        return _closable_lease()
+
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
+    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+
+    first = await runtime.acquire_root_session(spec)
+    second = await runtime.acquire_root_session(spec)
+
+    assert second is first
+    assert creates == 1
+    record = runtime.session_record(spec.workspace_id, spec.session_id)
+    assert isinstance(record, DaytonaSessionRecord)
+    assert record.cleanup_state is SessionCleanupState.ACTIVE
+    assert await runtime.aclose() is True
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_sessions_acquire_independently() -> None:
+    from fleet_rlm.daytona.runtime import RootSessionSpec
+
+    started = asyncio.Event()
+    release_second = asyncio.Event()
+    calls: list[str] = []
+
+    async def acquire(request: LeaseRequest, **_kwargs: object) -> object:
+        calls.append(str(request.session_id))
+        if len(calls) == 1:
+            started.set()
+            await release_second.wait()
+        return _closable_lease(sandbox_id=f"sandbox-{len(calls)}")
+
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
+    first_spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+    second_spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+
+    first_task = asyncio.create_task(runtime.acquire_root_session(first_spec))
+    await started.wait()
+    second = await asyncio.wait_for(runtime.acquire_root_session(second_spec), timeout=5.0)
+    release_second.set()
+    first = await asyncio.wait_for(first_task, timeout=5.0)
+
+    assert first is not second
+    assert len(runtime.roots) == 2
+    assert await runtime.aclose() is True
+
+
+@pytest.mark.asyncio
+async def test_failed_root_creation_keeps_late_ownership_visible() -> None:
+    from fleet_rlm.daytona.runtime import RootSessionSpec
+
+    landed = asyncio.Event()
+    lease = _closable_lease()
+
+    async def acquire(_request: object, **_kwargs: object) -> object:
+        await landed.wait()
+        return lease
+
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
+    spec = RootSessionSpec(
+        workspace_id=uuid4(),
+        session_id=uuid4(),
+        deadline=asyncio.get_running_loop().time() + 0.05,
+    )
+
+    with pytest.raises((TimeoutError, asyncio.TimeoutError)):
+        await runtime.acquire_root_session(spec)
+
+    assert runtime.has_pending_ownership
+    assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 0.01) is False
+    assert not lease.closed
+    landed.set()
+    assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 5.0) is True
+    assert lease.closed
+    assert not runtime.has_pending_ownership
+
+
+@pytest.mark.asyncio
+async def test_cancelled_acquisition_does_not_publish_a_root() -> None:
+    from fleet_rlm.daytona.runtime import RootSessionSpec
+
+    started = asyncio.Event()
+    landed = asyncio.Event()
+    lease = _closable_lease()
+
+    async def acquire(_request: object, **_kwargs: object) -> object:
+        started.set()
+        await landed.wait()
+        return lease
+
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
+    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+
+    task = asyncio.create_task(runtime.acquire_root_session(spec))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert runtime.roots == ()
+    assert runtime.session_record(spec.workspace_id, spec.session_id) is None
+    assert runtime.has_pending_ownership
+    landed.set()
+    assert await runtime.aclose() is True
+    assert lease.closed
+
+
+@pytest.mark.asyncio
+async def test_tainted_root_rotates_on_next_acquisition() -> None:
+    from fleet_rlm.daytona.runtime import RootSessionSpec
+
+    leases = [_closable_lease(sandbox_id="sandbox-old"), _closable_lease(sandbox_id="sandbox-new")]
+    calls = 0
+
+    async def acquire(_request: object, **_kwargs: object) -> object:
+        nonlocal calls
+        lease = leases[calls]
+        calls += 1
+        return lease
+
+    runtime = make_daytona_runtime()
+    runtime.acquire = acquire  # type: ignore[method-assign]
+    spec = RootSessionSpec(workspace_id=uuid4(), session_id=uuid4())
+
+    first = await runtime.acquire_root_session(spec)
+    assert first.sandbox_id == "sandbox-old"
+    runtime.mark_root_tainted(spec.workspace_id, spec.session_id)
+    second = await runtime.acquire_root_session(spec)
+
+    assert second is not first
+    assert second.sandbox_id == "sandbox-new"
+    assert calls == 2
+    assert await runtime.aclose() is True
+
+
+def test_broker_transport_limits_preserved() -> None:
+    from fleet_rlm.daytona.broker import _MAX_REQUEST_BYTES
+
+    assert _MAX_REQUEST_BYTES == 2 * 1024 * 1024
+
+
+# --- Run Environment History and Attachment Routing ---
+def _make_claim(*, history_messages=()):
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import ClaimedRun, _RunClaimToken
+
+    async def not_cancelled() -> bool:
+        return False
+
+    return ClaimedRun(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("current"),
+        SessionHistory(messages=history_messages),
+        not_cancelled,
+        _RunClaimToken(uuid4(), base_checkpoint_version=2),
+    )
+
+
+def test_turn_preparation_exposes_committed_session_history_builder() -> None:
+    from fleet_rlm.sessions import history_transport
+
+    assert callable(history_transport.committed_history_for_claim)
+
+
+def test_daytona_helper_returns_committed_session_history_not_dspy_history() -> None:
+    import dspy
+
+    from fleet_rlm.sessions.history_transport import CommittedSessionHistory, committed_history_for_claim
+    from fleet_rlm.sessions.models import HistoryMessage
+
+    claim = _make_claim(
+        history_messages=(
+            HistoryMessage("user", "earlier user request"),
+            HistoryMessage("assistant", "earlier assistant answer"),
+        )
+    )
+    history = committed_history_for_claim(claim)
+
+    assert type(history) is CommittedSessionHistory
+    assert not isinstance(history, dspy.History)
+
+
+@pytest.mark.asyncio
+async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() -> None:
+    from pathlib import PurePosixPath
+
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+    from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
+
+    class Fs:
+        def __init__(self) -> None:
+            self.directories = {"/tmp/fleet"}
+            self.files: dict[str, bytes] = {}
+
+        async def create_folder(self, path: str, _mode: str) -> None:
+            assert str(PurePosixPath(path).parent) in self.directories
+            self.directories.add(path)
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            self.files[path] = bytes(data)
+
+        async def download_file(self, path: str) -> bytes:
+            return self.files[path]
+
+        async def delete_file(self, path: str) -> None:
+            self.files.pop(path)
+
+    run_id = uuid4()
+    attachment_id = uuid4()
+    fs = Fs()
+    fs.directories.add(f"/tmp/fleet/{run_id}")
+    sandbox = SimpleNamespace(fs=fs)
+    paths = VolumePaths.from_mount("/volume")
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    host_io = daytona_host_io_for_test_sandbox(
+        sandbox,
+        workspace_id=uuid4(),
+        dispatcher=dispatcher,
+        volume_root=str(paths.mount_path),
+        max_file_bytes=1_000_000,
+    )
+    sink = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=paths,
+        host_io=host_io,
+        run_id=run_id,
+    )
+    path = f"/tmp/fleet/{run_id}/attachments/{attachment_id}/notes.txt"
+
+    await sink.write_private(path, b"body")
+    assert await sink.read(path, max_bytes=4) == b"body"
+    assert f"/tmp/fleet/{run_id}/attachments/{attachment_id}" in fs.directories
+    await sink.remove_private(path)
+    assert path not in fs.files
+
+
+@pytest.mark.asyncio
+async def test_run_sink_routes_sync_storage_to_host_or_private_scratch() -> None:
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+
+    class SandboxFs:
+        def __init__(self) -> None:
+            self.files: dict[str, bytes] = {}
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            self.files[path] = bytes(data)
+
+        async def download_file(self, path: str) -> bytes:
+            return self.files[path]
+
+        async def delete_file(self, path: str) -> None:
+            self.files.pop(path, None)
+
+    class HostFs:
+        def __init__(self) -> None:
+            self.files: dict[str, bytes] = {}
+
+        def write_bytes(self, path: str, data: bytes, *, max_bytes: int | None = None) -> None:
+            assert max_bytes is None or len(data) <= max_bytes
+            self.files[path] = bytes(data)
+
+        def read_bytes(self, path: str, *, max_bytes: int | None = None) -> bytes:
+            value = self.files[path]
+            return value if max_bytes is None else value[:max_bytes]
+
+        def exists(self, path: str) -> bool:
+            return path in self.files
+
+        def remove_bytes(self, path: str) -> None:
+            self.files.pop(path, None)
+
+        def remove(self, path: str) -> None:
+            self.remove_bytes(path)
+
+    run_id = uuid4()
+    sandbox_fs = SandboxFs()
+    host_fs = HostFs()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    sink = DaytonaRunStorage(
+        SimpleNamespace(fs=sandbox_fs),
+        dispatcher=dispatcher,
+        paths=VolumePaths.from_mount("/volume"),
+        host_io=SimpleNamespace(volume_fs=host_fs),
+        run_id=run_id,
+    )
+    scratch_path = f"/tmp/fleet/{run_id}/attachments/source.txt"
+    host_path = "/volume/sessions/session/runs/run/result.json"
+
+    await asyncio.to_thread(sink.volume_fs.write_bytes, scratch_path, b"scratch")
+    await asyncio.to_thread(sink.volume_fs.write_bytes, host_path, b"host")
+
+    assert scratch_path in sandbox_fs.files
+    assert host_fs.files == {host_path: b"host"}
+    assert await asyncio.to_thread(sink.volume_fs.read_bytes, scratch_path) == b"scratch"
+    assert await asyncio.to_thread(sink.volume_fs.read_bytes, host_path) == b"host"
+
+
+# --- Live Proof Cleanup Contracts ---
+class _LivePlatformDouble:
+    def __init__(self) -> None:
+        self.get_calls: list[str] = []
+        self.delete_calls: list[str] = []
+
+    async def get(self, sandbox_id: str) -> SimpleNamespace:
+        self.get_calls.append(sandbox_id)
+        return SimpleNamespace(id=sandbox_id)
+
+    async def delete(self, sandbox: SimpleNamespace) -> None:
+        self.delete_calls.append(str(sandbox.id))
+
+
+class _LiveVolumeClientDouble:
+    def __init__(self) -> None:
+        self.get_calls: list[tuple[str, bool]] = []
+        self.delete_calls: list[object] = []
+
+    async def get(self, name: str, *, create: bool) -> SimpleNamespace:
+        self.get_calls.append((name, create))
+        return SimpleNamespace(name=name)
+
+    async def delete(self, volume: SimpleNamespace) -> None:
+        self.delete_calls.append(volume)
+
+
+def test_strict_cleanup_awaits_provider_operations_before_returning() -> None:
+    from tests.live.backend._cleanup import _strict_cleanup
+
+    platform = _LivePlatformDouble()
+    volume = _LiveVolumeClientDouble()
+    resources = SimpleNamespace(
+        _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
+        _platform=platform,
+        _client=SimpleNamespace(volume=volume),
+    )
+
+    failures = asyncio.run(_strict_cleanup(resources, "phase1-volume"))
+
+    assert failures == ()
+    assert platform.get_calls == ["sandbox-a", "sandbox-b"]
+    assert platform.delete_calls == ["sandbox-a", "sandbox-b"]
+    assert volume.get_calls == [("phase1-volume", False)]
+    assert len(volume.delete_calls) == 1
+    assert resources._tracked_sandbox_ids == []
+
+
+@pytest.mark.parametrize("failed_resource", ["sandbox", "volume"])
+def test_cleanup_failure_is_reported_and_other_resources_still_settle(monkeypatch, failed_resource) -> None:
+    from tests.live.backend import _cleanup
+    from tests.live.backend._cleanup import _strict_cleanup
+
+    monkeypatch.setattr(_cleanup, "_CLEANUP_RETRY_DELAYS", ())
+    platform, volume = _LivePlatformDouble(), _LiveVolumeClientDouble()
+    resources = SimpleNamespace(
+        _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
+    )
+
+    async def fail(_resource):
+        raise RuntimeError("private provider diagnostic must not enter the receipt")
+
+    monkeypatch.setattr(platform if failed_resource == "sandbox" else volume, "delete", fail)
+
+    failures = asyncio.run(_strict_cleanup(resources, "owned-volume"))
+
+    assert failures == (failed_resource,)
+    assert resources._tracked_sandbox_ids == []
+    if failed_resource == "sandbox":
+        assert len(volume.delete_calls) == 1
+    else:
+        assert platform.delete_calls == ["sandbox-a"]
+
+
+def test_mvp_cleanup_skips_configured_shared_volume() -> None:
+    from tests.live.backend._mvp_support import _strict_cleanup as _mvp_strict_cleanup
+
+    platform = _LivePlatformDouble()
+    volume = _LiveVolumeClientDouble()
+    resources = SimpleNamespace(
+        _tracked_sandbox_ids=["sandbox-b", "sandbox-a"],
+        _platform=platform,
+        _client=SimpleNamespace(volume=volume),
+    )
+
+    failures = asyncio.run(_mvp_strict_cleanup(resources, set(), "fleet-volume"))
+
+    assert failures == ()
+    assert platform.get_calls == ["sandbox-a", "sandbox-b"]
+    assert platform.delete_calls == ["sandbox-a", "sandbox-b"]
+    assert volume.get_calls == []
+    assert volume.delete_calls == []
+    assert resources._tracked_sandbox_ids == []
+
+
+def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
+    from tests.live.backend._mvp_support import _strict_cleanup as _mvp_strict_cleanup
+
+    platform = _LivePlatformDouble()
+    volume = _LiveVolumeClientDouble()
+    resources = SimpleNamespace(
+        _tracked_sandbox_ids=["sandbox-a"], _platform=platform, _client=SimpleNamespace(volume=volume)
+    )
+    name = "fleet-rlm-live-mvp-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    failures = asyncio.run(_mvp_strict_cleanup(resources, set(), name))
+
+    assert failures == ()
+    assert platform.delete_calls == ["sandbox-a"]
+    assert volume.get_calls == [(name, False)]
+    assert len(volume.delete_calls) == 1
+    assert resources._tracked_sandbox_ids == []

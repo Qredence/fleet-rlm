@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import dataclass, field
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -426,3 +429,459 @@ def test_sanitize_provider_message_keeps_url_trailing_delimiters() -> None:
     cleaned = sanitize_provider_message('requests.get("http://host/preview?token=abc123")')
 
     assert cleaned == 'requests.get("[redacted-url]")'
+
+
+# --- Sandbox Spec and Environment Profiles ---
+def test_spec_requires_an_immutable_versioned_name() -> None:
+    for name in ("", "latest", "fleet-rlm-python313", "fleet-rlm-python313-v0"):
+        with pytest.raises(ValueError):
+            DaytonaSandboxSpec(name)
+
+
+def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependencies() -> None:
+    from fleet_rlm.daytona.diagnostics import (
+        build_snapshot_image,
+        snapshot_dependency_sha256,
+        snapshot_execution_dependencies,
+    )
+    from fleet_rlm.daytona.runtime import BASE_IMAGE
+
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    dockerfile = build_snapshot_image(spec).dockerfile()
+    digest = snapshot_dependency_sha256()
+
+    assert f"FROM {BASE_IMAGE}" in dockerfile
+    assert "groupadd --gid 1000 daytona" in dockerfile
+    assert "USER daytona" in dockerfile
+    assert "PYTHONUNBUFFERED=1" in dockerfile
+    assert f"FLEET_SNAPSHOT_DEPENDENCIES_SHA256={digest}" in dockerfile
+    assert "WORKDIR /home/daytona" in dockerfile
+    assert snapshot_execution_dependencies() == (
+        "mpmath==1.4.1",
+        "numpy==2.5.1",
+        "pandas==3.0.5",
+        "beautifulsoup4==4.15.0",
+    )
+    install_line = "pip install beautifulsoup4==4.15.0 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
+    assert install_line in dockerfile
+    assert dockerfile.index(install_line) < dockerfile.index("USER daytona")
+    assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
+    assert dockerfile.index("apt-get install") < dockerfile.index("USER daytona")
+    assert "dspy" not in dockerfile
+
+
+@pytest.mark.asyncio
+async def test_live_platform_builds_session_workspace_sdk_mount_offline() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.daytona.runtime import DEFAULT_SNAPSHOT_NAME
+    from fleet_rlm.sessions.bindings import session_workspace_volume_subpath
+
+    class _Client:
+        params: Any | None = None
+
+        async def create(self, params: Any) -> Any:
+            self.params = params
+            return params
+
+    workspace_id = uuid4()
+    session_id = uuid4()
+    client = _Client()
+    platform = LiveDaytonaPlatform(client, DaytonaSandboxSpec(DEFAULT_SNAPSHOT_NAME))
+
+    params = await platform.create(
+        volume_id="offline-test-volume",
+        mount_path="/workspace",
+        volume_subpath=session_workspace_volume_subpath(workspace_id, session_id),
+    )
+
+    assert params is client.params
+    mount = params.volumes[0]
+    assert mount.volume_id == "offline-test-volume"
+    assert mount.mount_path == "/workspace"
+    assert mount.subpath == session_workspace_volume_subpath(workspace_id, session_id)
+
+
+def test_snapshot_provenance_is_exact() -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.runtime import verify_sandbox_spec
+
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    verify_sandbox_spec(SimpleNamespace(snapshot=spec.snapshot), spec)
+    with pytest.raises(DaytonaAdapterError, match="snapshot"):
+        verify_sandbox_spec(SimpleNamespace(snapshot="fleet-rlm-python313-v2"), spec)
+
+
+def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
+    from fleet_rlm.daytona.diagnostics import build_snapshot_image, environment_manifest
+    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    workspace_spec = DaytonaSandboxSpec(
+        "fleet-rlm-python313-v1",
+        profile=DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+    )
+    session = environment_manifest(spec, DaytonaEnvironmentProfile.SESSION)
+    semantic = environment_manifest(spec, DaytonaEnvironmentProfile.SEMANTIC_CHILD)
+    workspace = environment_manifest(spec, DaytonaEnvironmentProfile.WORKSPACE_CHILD)
+
+    assert session.image_kind == workspace.image_kind == "session-analysis"
+    assert session.volume_allowed and workspace.volume_allowed
+    assert not session.warm_pool_eligible and not workspace.warm_pool_eligible
+    assert session.resources == workspace.resources == (4, 8, 8)
+    assert session.profile is DaytonaEnvironmentProfile.SESSION
+    assert workspace.profile is DaytonaEnvironmentProfile.WORKSPACE_CHILD
+    assert session.image_identity() == workspace.image_identity()
+    assert session.digest == workspace.digest
+    assert (
+        session.compatible_profiles
+        == workspace.compatible_profiles
+        == (
+            DaytonaEnvironmentProfile.SESSION,
+            DaytonaEnvironmentProfile.WORKSPACE_CHILD,
+        )
+    )
+    assert semantic.image_kind == "lean-child"
+    assert semantic.dependencies == ()
+    semantic_image = build_snapshot_image(
+        DaytonaSandboxSpec(
+            "fleet-child-test-v1", cpu=2, memory_gib=4, disk_gib=4, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        )
+    ).dockerfile()
+    assert "pip install" not in semantic_image
+    assert "dspy" not in semantic_image
+    assert not semantic.volume_allowed and semantic.warm_pool_eligible
+    assert semantic.resources == (2, 4, 4)
+    assert semantic.digest != session.digest
+    assert build_snapshot_image(spec).dockerfile() == build_snapshot_image(workspace_spec).dockerfile()
+
+
+# --- Deletion Lifecycle and Absence Confirmation ---
+@dataclass
+class _FakeDeletionSandbox:
+    state: str
+
+
+@dataclass
+class _FakeDeletionProvider:
+    seen_deletes: list[str] = field(default_factory=list)
+    target: _FakeDeletionSandbox | None = None
+    deleted: bool = False
+
+    async def delete(self, sandbox_id: str) -> None:
+        self.seen_deletes.append(sandbox_id)
+
+    async def get(self, _sandbox_id: str) -> Any | None:
+        if self.deleted:
+            return None
+        return self.target
+
+
+class _StepClock:
+    def __init__(self, step: float = 0.5) -> None:
+        self.now = 0.0
+        self._step = step
+
+    def __call__(self) -> float:
+        value = self.now
+        self.now += self._step
+        return value
+
+    async def sleep(self, _seconds: float) -> None:
+        self.now += self._step
+
+
+@pytest.mark.parametrize(
+    ("raw", "phase"),
+    [
+        ("started", "requested"),
+        ("stopped", "requested"),
+        ("archived", "requested"),
+        ("creating", "requested"),
+        ("unknown", "requested"),
+        ("", "requested"),
+        ("destroying", "deleting"),
+        ("deleting", "deleting"),
+        ("archiving", "deleting"),
+        ("stopping", "deleting"),
+        ("destroyed", "absent"),
+        ("deleted", "absent"),
+        ("error", "failed"),
+        ("build_failed", "failed"),
+    ],
+)
+def test_classify_deletion_phase_maps_raw_states(raw: str, phase: str) -> None:
+    from fleet_rlm.daytona.runtime import classify_deletion_phase
+
+    assert classify_deletion_phase(raw) == phase
+
+
+@pytest.mark.asyncio
+async def test_delete_request_acceptance_is_not_absence() -> None:
+    from fleet_rlm.daytona.runtime import AbsenceTimeout, confirm_absence
+
+    provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="started"))
+    await provider.delete("sb-1")
+    assert provider.seen_deletes == ["sb-1"]
+    outcome = await confirm_absence(
+        probe=provider.get,
+        sandbox_id="sb-1",
+        timeout_s=5.0,
+        clock=_StepClock(),
+        sleep=_StepClock().sleep,
+    )
+    assert isinstance(outcome, AbsenceTimeout)
+    assert outcome.absent is False
+    assert outcome.last_state == "started"
+
+
+@pytest.mark.asyncio
+async def test_requested_then_deleting_then_absent_and_purged() -> None:
+    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+
+    provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="started"))
+    clock = _StepClock()
+
+    async def scripted_probe(sandbox_id: str) -> Any | None:
+        calls = scripted_probe.calls
+        scripted_probe.calls = calls + 1
+        if calls == 0:
+            provider.target = _FakeDeletionSandbox(state="started")
+        elif calls == 1:
+            provider.target = _FakeDeletionSandbox(state="destroying")
+        else:
+            provider.deleted = True
+        return await provider.get(sandbox_id)
+
+    scripted_probe.calls = 0
+
+    outcome = await confirm_absence(
+        probe=scripted_probe,
+        sandbox_id="sb-2",
+        timeout_s=30.0,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    assert isinstance(outcome, AbsenceConfirmation)
+    assert outcome.absent is True
+    assert outcome.observations == ("started", "destroying", "not_found")
+
+
+@pytest.mark.asyncio
+async def test_terminal_destroyed_state_confirms_without_purge() -> None:
+    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+
+    provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="destroyed"))
+    outcome = await confirm_absence(
+        probe=provider.get,
+        sandbox_id="sb-3",
+        timeout_s=30.0,
+        clock=_StepClock(),
+        sleep=_StepClock().sleep,
+    )
+    assert isinstance(outcome, AbsenceConfirmation)
+    assert outcome.observations == ("destroyed",)
+
+
+@pytest.mark.asyncio
+async def test_provider_error_state_is_classified_failure_not_absence() -> None:
+    from fleet_rlm.daytona.runtime import AbsenceProbeError, confirm_absence
+
+    provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="error"))
+    outcome = await confirm_absence(
+        probe=provider.get,
+        sandbox_id="sb-4",
+        timeout_s=30.0,
+        clock=_StepClock(),
+        sleep=_StepClock().sleep,
+    )
+    assert isinstance(outcome, AbsenceProbeError)
+    assert outcome.absent is False
+    assert "provider error state" in outcome.error
+
+
+@pytest.mark.asyncio
+async def test_probe_error_is_classified_not_silent() -> None:
+    from fleet_rlm.daytona.runtime import AbsenceProbeError, confirm_absence
+
+    async def failing_probe(_sandbox_id: str) -> Any | None:
+        raise RuntimeError("provider 503")
+
+    outcome = await confirm_absence(
+        probe=failing_probe,
+        sandbox_id="sb-5",
+        timeout_s=30.0,
+        clock=_StepClock(),
+        sleep=_StepClock().sleep,
+    )
+    assert isinstance(outcome, AbsenceProbeError)
+    assert "provider 503" in outcome.error
+
+
+@pytest.mark.asyncio
+async def test_cancellation_propagates_instead_of_classifying() -> None:
+    from fleet_rlm.daytona.runtime import confirm_absence
+
+    async def cancelled_probe(_sandbox_id: str) -> Any | None:
+        raise asyncio.CancelledError
+
+    with pytest.raises(asyncio.CancelledError):
+        await confirm_absence(
+            probe=cancelled_probe,
+            sandbox_id="sb-6",
+            timeout_s=30.0,
+            clock=_StepClock(),
+            sleep=_StepClock().sleep,
+        )
+
+
+@dataclass
+class _SandboxStub:
+    id: str
+    state: str = "started"
+
+
+class _FsStub:
+    async def list_files(self, _root: str, *, depth: int | None) -> list[Any]:
+        assert depth is None
+        return []
+
+    async def delete_file(self, _path: str, *, recursive: bool = False) -> None:
+        del recursive
+        raise AssertionError("no files should be purged in this test")
+
+
+class _ScriptedPlatform:
+    def __init__(self, states: list[str | None], *, delete_error: BaseException | None = None) -> None:
+        self.states = list(states)
+        self.delete_error = delete_error
+        self.deletes: list[str] = []
+        self.probes: int = 0
+
+    async def delete(self, sandbox_id: str) -> None:
+        self.deletes.append(sandbox_id)
+        if self.delete_error is not None:
+            raise self.delete_error
+
+    async def get(self, sandbox_id: str) -> _SandboxStub | None:
+        self.probes += 1
+        if not self.states:
+            return None
+        state = self.states.pop(0)
+        if state is None:
+            return None
+        return _SandboxStub(id=sandbox_id, state=state)
+
+
+async def _take_permit():
+    from fleet_rlm.daytona.runtime import DaytonaAdmission
+
+    admission = DaytonaAdmission(max_active_leases=1)
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 5)
+    return admission, permit
+
+
+def _cleanup_coroutine(platform: _ScriptedPlatform, permit, **overrides: Any) -> Any:
+    from fleet_rlm.daytona.runtime import cleanup_child_runtime_async
+
+    kwargs: dict[str, Any] = {
+        "platform": platform,
+        "sandbox": _sandbox_helper(),
+        "sandbox_id": "sb-ephemeral",
+        "mount_path": "/mnt/data",
+        "permit": permit,
+        "confirm_poll_interval_s": 0.01,
+        "confirm_timeout_s": 0.25,
+    }
+    kwargs.update(overrides)
+    return cleanup_child_runtime_async(**kwargs)
+
+
+def _sandbox_helper() -> Any:
+    return SimpleNamespace(id="sb-ephemeral", fs=_FsStub())
+
+
+@pytest.mark.asyncio
+async def test_permit_released_only_after_confirmed_absent() -> None:
+    platform = _ScriptedPlatform(states=["destroying", "started", None])
+    _, permit = await _take_permit()
+    await _cleanup_coroutine(platform, permit)
+    assert platform.deletes == ["sb-ephemeral"]
+    assert platform.probes == 3
+    assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_request_acceptance_alone_never_releases() -> None:
+    platform = _ScriptedPlatform(states=["destroying", "destroying", "destroying", None])
+    _, permit = await _take_permit()
+    await _cleanup_coroutine(platform, permit)
+    assert platform.probes == 4
+    assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_unconfirmed_teardown_is_explicit_quarantine_failure() -> None:
+    from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
+
+    platform = _ScriptedPlatform(states=["destroying"] * 100)
+    _, permit = await _take_permit()
+    with pytest.raises(ChildRuntimeCleanupError) as excinfo:
+        await _cleanup_coroutine(platform, permit)
+    assert "absence unconfirmed" in str(excinfo.value)
+    assert permit._released is False
+    permit.release()
+
+
+@pytest.mark.asyncio
+async def test_delete_request_error_still_probes_and_surfaces_error() -> None:
+    platform = _ScriptedPlatform(states=[None], delete_error=RuntimeError("provider 503"))
+    _, permit = await _take_permit()
+    with pytest.raises(RuntimeError, match="provider 503"):
+        await _cleanup_coroutine(platform, permit)
+    assert platform.probes == 1
+    assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_provider_error_state_is_quarantine_failure() -> None:
+    from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
+
+    platform = _ScriptedPlatform(states=["error"])
+    _, permit = await _take_permit()
+    with pytest.raises(ChildRuntimeCleanupError):
+        await _cleanup_coroutine(platform, permit)
+    assert permit._released is False
+    permit.release()
+
+
+@pytest.mark.asyncio
+async def test_already_absent_sandbox_releases_promptly() -> None:
+    platform = _ScriptedPlatform(states=[None])
+    _, permit = await _take_permit()
+    await _cleanup_coroutine(platform, permit)
+    assert platform.probes == 1
+    assert permit._released is True
+
+
+@pytest.mark.asyncio
+async def test_double_release_is_idempotent() -> None:
+    platform = _ScriptedPlatform(states=[None])
+    admission, permit = await _take_permit()
+    await _cleanup_coroutine(platform, permit)
+    permit.release()
+    permit.release()
+    permit2 = await admission.acquire(deadline=asyncio.get_running_loop().time() + 5)
+    permit2.release()
+
+
+@pytest.mark.asyncio
+async def test_confirmation_timeout_retains_permit_for_recovery() -> None:
+    from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
+
+    platform = _ScriptedPlatform(states=["destroying"] * 1000)
+    _, permit = await _take_permit()
+    with pytest.raises(ChildRuntimeCleanupError):
+        await _cleanup_coroutine(platform, permit, confirm_timeout_s=0.05)
+    assert permit._released is False
+    permit.release()

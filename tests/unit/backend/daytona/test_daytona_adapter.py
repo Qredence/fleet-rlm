@@ -823,3 +823,335 @@ async def test_callback_failure_closes_transport_without_claiming_remote_termina
     with pytest.raises(Exception, match="output budget exhausted"):
         await interpreter.run_code("pass", on_stdout=reject)
     ws.close.assert_awaited_once()
+
+
+# --- SDK Resource Errors and Provider Normalization ---
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param("DaytonaFileNotFoundError", id="file-not-found"),
+        pytest.param("DaytonaProcessNotFoundError", id="process-not-found"),
+        pytest.param("DaytonaNotFoundError", id="daemon-not-found"),
+    ],
+)
+def test_toolbox_absence_is_not_sandbox_absence(error: str) -> None:
+    from daytona.common.errors import (
+        DaytonaFileNotFoundError,
+        DaytonaNotFoundError,
+        DaytonaProcessNotFoundError,
+    )
+
+    from fleet_rlm.daytona.errors import is_sandbox_not_found, map_provider_error
+
+    err_map = {
+        "DaytonaFileNotFoundError": DaytonaFileNotFoundError("missing", status_code=404),
+        "DaytonaProcessNotFoundError": DaytonaProcessNotFoundError("missing", status_code=404),
+        "DaytonaNotFoundError": DaytonaNotFoundError("missing context", status_code=404, source="DAYTONA_DAEMON"),
+    }
+    err = err_map[error]
+    assert not is_sandbox_not_found(err)
+    assert not is_sandbox_not_found(map_provider_error(err))
+
+
+def test_control_plane_sandbox_absence_is_recognized() -> None:
+    from daytona.common.errors import DaytonaNotFoundError
+
+    from fleet_rlm.daytona.errors import is_sandbox_not_found
+
+    assert is_sandbox_not_found(DaytonaNotFoundError("missing", status_code=404, source="DAYTONA_API"))
+
+
+_CREATE_RACE_ERRORS = [
+    ("DaytonaConflictError", 409, "already exists"),
+    ("DaytonaBadRequestError", 400, "Volume with name shared already exists"),
+    ("DaytonaInternalServerError", 500, "An unexpected error occurred."),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("err_name", "status", "msg"), _CREATE_RACE_ERRORS)
+async def test_volume_creation_race_reconciles_without_another_create(err_name: str, status: int, msg: str) -> None:
+    from unittest.mock import AsyncMock, call
+
+    from daytona.common.errors import (
+        DaytonaBadRequestError,
+        DaytonaConflictError,
+        DaytonaInternalServerError,
+    )
+
+    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+
+    cls_map = {
+        "DaytonaConflictError": DaytonaConflictError,
+        "DaytonaBadRequestError": DaytonaBadRequestError,
+        "DaytonaInternalServerError": DaytonaInternalServerError,
+    }
+    error = cls_map[err_name](msg, status_code=status)
+    volume = SimpleNamespace(id="volume", state="ready")
+    get = AsyncMock(side_effect=[error, volume])
+    adapter = LiveDaytonaVolumeClient(SimpleNamespace(volume=SimpleNamespace(get=get)))
+    assert await adapter.get("shared", create=True) is volume
+    assert get.call_args_list == [call("shared", create=True), call("shared", create=False)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("err_name", "status", "msg"), _CREATE_RACE_ERRORS)
+async def test_volume_creation_failure_without_winner_keeps_the_create_error(
+    err_name: str, status: int, msg: str
+) -> None:
+    from unittest.mock import AsyncMock, call
+
+    from daytona.common.errors import (
+        DaytonaBadRequestError,
+        DaytonaConflictError,
+        DaytonaInternalServerError,
+        DaytonaNotFoundError,
+    )
+
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+
+    cls_map = {
+        "DaytonaConflictError": DaytonaConflictError,
+        "DaytonaBadRequestError": DaytonaBadRequestError,
+        "DaytonaInternalServerError": DaytonaInternalServerError,
+    }
+    error = cls_map[err_name](msg, status_code=status)
+    get = AsyncMock(side_effect=[error, DaytonaNotFoundError("missing", status_code=404)])
+    adapter = LiveDaytonaVolumeClient(SimpleNamespace(volume=SimpleNamespace(get=get)))
+    with pytest.raises(DaytonaAdapterError) as caught:
+        await adapter.get("shared", create=True)
+    assert caught.value.__cause__ is error
+    assert get.call_args_list == [call("shared", create=True), call("shared", create=False)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "err_cls_name",
+    [
+        "DaytonaAuthenticationError",
+        "DaytonaForbiddenError",
+        "DaytonaRateLimitError",
+        "DaytonaConnectionError",
+    ],
+)
+async def test_volume_failures_are_normalized_without_retry(err_cls_name: str) -> None:
+    from unittest.mock import AsyncMock
+
+    from daytona.common.errors import (
+        DaytonaAuthenticationError,
+        DaytonaConnectionError,
+        DaytonaForbiddenError,
+        DaytonaRateLimitError,
+    )
+
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+
+    cls_map = {
+        "DaytonaAuthenticationError": DaytonaAuthenticationError,
+        "DaytonaForbiddenError": DaytonaForbiddenError,
+        "DaytonaRateLimitError": DaytonaRateLimitError,
+        "DaytonaConnectionError": DaytonaConnectionError,
+    }
+    error_type = cls_map[err_cls_name]
+    get = AsyncMock(side_effect=error_type("token=sentinel /private/provider"))
+    adapter = LiveDaytonaVolumeClient(SimpleNamespace(volume=SimpleNamespace(get=get)))
+    with pytest.raises(DaytonaAdapterError) as caught:
+        await adapter.get("shared", create=True)
+    assert "sentinel" not in str(caught.value)
+    assert "/private/provider" not in str(caught.value)
+    assert get.await_count == 1
+
+
+def test_provider_error_redaction_covers_json_quoted_credentials() -> None:
+    from fleet_rlm.daytona.errors import sanitize_provider_message
+
+    message = sanitize_provider_message('{"api_key":"secret-value","token": "another-secret"}')
+    assert "secret-value" not in message
+    assert "another-secret" not in message
+
+
+# --- Result Snapshot Encoding and Path Contract ---
+def test_result_snapshot_is_deterministic_strict_utf8_and_closed() -> None:
+    import json
+    from uuid import uuid4
+
+    from fleet_rlm.result_snapshot import encode_result_snapshot
+    from fleet_rlm.rlm.result import PredictionResult
+
+    session_id, run_id = uuid4(), uuid4()
+    prediction = PredictionResult(
+        "display must not be duplicated",
+        {"zeta": ["café", 2], "answer": "done"},
+        "fleet.report",
+        "7",
+    )
+    usage = {
+        "iterations": 3,
+        "observed_lm_usage": {"provider": {"completion_tokens": 5}},
+        "duration_ms": 11,
+    }
+
+    first = encode_result_snapshot(session_id, run_id, prediction, usage)
+    second = encode_result_snapshot(session_id, run_id, prediction, usage)
+
+    assert first == second
+    assert first.decode("utf-8") == (
+        '{"contract_id":"fleet.report","contract_version":"7",'
+        '"outputs":{"answer":"done","zeta":["café",2]},'
+        f'"run_id":"{run_id}","schema_version":1,"session_id":"{session_id}",'
+        '"usage":{"duration_ms":11,"iterations":3,'
+        '"observed_lm_usage":{"provider":{"completion_tokens":5}}}}'
+    )
+    decoded = json.loads(first)
+    assert set(decoded) == {
+        "schema_version",
+        "session_id",
+        "run_id",
+        "contract_id",
+        "contract_version",
+        "outputs",
+        "usage",
+    }
+    encoded = first.decode("utf-8")
+    for excluded in (
+        "display_text",
+        "display must not be duplicated",
+        "trajectory",
+        "final_reasoning",
+        "prompt",
+        "history",
+        "locals",
+        "credential",
+        "provider_internal",
+    ):
+        assert excluded not in encoded
+
+
+def test_result_snapshot_rejects_non_strict_usage() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.result_snapshot import encode_result_snapshot
+    from fleet_rlm.rlm.result import PredictionResult
+
+    with pytest.raises(ValueError, match="usage must contain exactly"):
+        encode_result_snapshot(
+            uuid4(),
+            uuid4(),
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            {
+                "iterations": 1,
+                "observed_lm_usage": {},
+                "duration_ms": 2,
+                "provider_internal": 9,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+    from tests.support.turn_settlement import TestingRunSettlement
+    from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
+
+    values: dict[str, bytes] = {}
+    deleted: list[str] = []
+
+    class Fs:
+        async def create_folder(self, path: str, mode: str | None = None) -> None:
+            del path, mode
+            return None
+
+        async def upload_file(self, data: bytes, path: str) -> None:
+            values[path] = data
+
+        async def download_file(self, path: str) -> bytes:
+            return values[path]
+
+        async def delete_file(self, path: str) -> None:
+            deleted.append(path)
+            values.pop(path, None)
+
+    access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    paths = VolumePaths.from_mount()
+    sandbox = type("Sandbox", (), {"fs": Fs()})()
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.set_loop(asyncio.get_running_loop())
+    host_io = daytona_host_io_for_test_sandbox(
+        sandbox,
+        workspace_id=access.workspace_id,
+        dispatcher=dispatcher,
+        volume_root=str(paths.mount_path),
+        max_file_bytes=1_000_000,
+    )
+    sink = DaytonaRunStorage(
+        sandbox,
+        dispatcher=dispatcher,
+        paths=paths,
+        host_io=host_io,
+        run_id=run_id,
+    )
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
+            raise RuntimeError("commit failed")
+
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            return FailedRunReceipt(
+                claimed.run_id,
+                "failed",
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+        ),
+        result_snapshot_sink=sink,
+    )
+
+    result_path = str(paths.run_result_path(session_id, run_id))
+    assert isinstance(receipt, FailedRunReceipt)
+    assert deleted == [result_path]
+    assert values == {}
