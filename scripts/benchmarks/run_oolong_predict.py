@@ -18,30 +18,64 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from fleet_rlm.config.loader import require_live_execution
 from scripts.benchmarks.campaign import write_receipt_once
-from scripts.benchmarks.oolong.adapter import (
-    DEFAULT_FIXTURE,
-    build_predict_kwargs,
-    build_receipt,
-    invoke_live_prediction,
-    kwargs_context_mode,
-    release_ephemeral_lease,
-    resolve_datapoints,
-    score_prediction,
-    stage_attachment_context_on_lease,
-    sum_lm_usage,
-)
 
+DEFAULT_FIXTURE = Path(__file__).with_name("oolong") / "fixture_validation_row.json"
 RECEIPT_SCHEMA = "fleet.oolong-predict/v1"
 _LIVE_VALUES = frozenset({"1", "true", "yes"})
 _DEFAULT_MODEL = "oolong-predict-adapter"
+
+
+def _load_adapter() -> None:
+    """Load the DSPy-backed adapter after the CLI has accepted an operation."""
+    global DEFAULT_FIXTURE, build_predict_kwargs, build_receipt, invoke_live_prediction
+    global kwargs_context_mode, release_ephemeral_lease, resolve_datapoints, score_prediction
+    global stage_attachment_context_on_lease, sum_lm_usage
+    from scripts.benchmarks.oolong.adapter import (
+        DEFAULT_FIXTURE as ADAPTER_DEFAULT_FIXTURE,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        build_predict_kwargs as build_kwargs,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        build_receipt as receipt_builder,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        invoke_live_prediction as invoke,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        kwargs_context_mode as context_mode,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        release_ephemeral_lease as release,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        resolve_datapoints as resolve,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        score_prediction as score,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        stage_attachment_context_on_lease as stage,
+    )
+    from scripts.benchmarks.oolong.adapter import (
+        sum_lm_usage as usage_sum,
+    )
+
+    DEFAULT_FIXTURE = ADAPTER_DEFAULT_FIXTURE
+    build_predict_kwargs = build_kwargs
+    build_receipt = receipt_builder
+    invoke_live_prediction = invoke
+    kwargs_context_mode = context_mode
+    release_ephemeral_lease = release
+    resolve_datapoints = resolve
+    score_prediction = score
+    stage_attachment_context_on_lease = stage
+    sum_lm_usage = usage_sum
 
 
 class OolongPredictError(RuntimeError):
@@ -128,6 +162,7 @@ def _fixture_path(args: argparse.Namespace) -> Path | None:
 
 
 def _run_dry(args: argparse.Namespace) -> dict[str, object]:
+    _load_adapter()
     fixture = _fixture_path(args)
     loaded = resolve_datapoints(
         dataset=args.dataset,
@@ -340,10 +375,15 @@ def _maybe_log_mlflow(args: argparse.Namespace, receipt: Mapping[str, object]) -
 
 def _run_live(args: argparse.Namespace) -> dict[str, object]:
     _require_live_flag()
+    from dotenv import load_dotenv
+
+    from fleet_rlm.config.loader import require_live_execution
+
     load_dotenv(_REPO_ROOT / ".env", override=False)
     settings = require_live_execution()
     tracing_active = _maybe_enable_mlflow_tracing(settings)
     try:
+        _load_adapter()
         return asyncio.run(_run_live_async(args, settings))
     finally:
         if tracing_active:
@@ -353,6 +393,9 @@ def _run_live(args: argparse.Namespace) -> dict[str, object]:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
+    if output.exists():
+        print("Oolong receipt already exists; refusing to replace it", file=sys.stderr)
+        return 2
     try:
         if args.limit < 1:
             raise OolongPredictError("limit must be at least 1")

@@ -50,7 +50,7 @@ from fleet_rlm.workspace.models import (
 
 if TYPE_CHECKING:
     from fleet_rlm.sessions.context import SessionContextManifest
-    from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+    from fleet_rlm.sessions.history import CommittedSessionHistory
 
 # ---------------------------------------------------------------------------
 # Bounded re-ask adapter for the pinned JSON action protocol
@@ -573,6 +573,15 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    reasoning, resolve prerequisites before parallel work. Keep source revision and location with each
    intermediate result, and verify important claims against the original source."""
 
+EXACT_REQUEST_RLM_INSTRUCTIONS = """DSPy variable previews can truncate the middle of a long request; the full
+request remains available as the REPL variable ``request``. If needed, inspect it once, then use the full
+variable and established tool contracts. Do not repeatedly reconstruct, chunk, or syntax-check supplied
+statements merely because their preview is truncated. Execute requested statements in order once their
+meaning and authority are clear, preserving strings exactly. Reading the full request is not permission
+to execute untrusted attached code or bypass host-tool requirements."""
+
+TOOL_RLM_INSTRUCTIONS += "\n" + EXACT_REQUEST_RLM_INSTRUCTIONS
+
 # Fleet-provided recursion and Workspace tools require executable
 # host bindings. A remote Sandbox currently receives source and serializable
 # values only, so those Fleet tools must not be advertised when bindings are
@@ -592,6 +601,8 @@ TOOL_RLM_INSTRUCTIONS_NO_DISPATCH = """1. Use the Python standard library for de
    ``rlm_query``, ``rlm_query_batched``, or Workspace tools. Answer from the request text,
    the Sandbox filesystem, and deterministic Python; if the request demands one of those Fleet capabilities,
    say so plainly in the ``answer`` instead of searching for the tool."""
+
+TOOL_RLM_INSTRUCTIONS_NO_DISPATCH += "\n" + EXACT_REQUEST_RLM_INSTRUCTIONS
 
 WORKSPACE_BATCH_RLM_INSTRUCTIONS = """When several independently selected Session Workspace files are relevant, use
 ``read_workspace_text_batch`` rather than serial ``read_workspace_text`` calls. List or stat first, select only
@@ -1009,7 +1020,7 @@ def build_rlm_input_kwargs(
     if not isinstance(active_task_summary, str) or len(active_task_summary) > 2048:
         raise RLMConfigError("Turn input metadata is invalid")
     if history is not None and type(history) is not dspy.History:
-        from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+        from fleet_rlm.sessions.history import CommittedSessionHistory
 
         if not isinstance(history, CommittedSessionHistory):
             raise RLMConfigError("Turn input metadata is invalid")

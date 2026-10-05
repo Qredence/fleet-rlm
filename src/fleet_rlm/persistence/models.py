@@ -55,17 +55,12 @@ class SessionRow(Base):
     __tablename__ = "fleet_sessions"
     __table_args__ = (
         Index("ix_fleet_sessions_workspace_updated", "workspace_id", "updated_at"),
-        Index("uq_fleet_sessions_id_workspace", "id", "workspace_id", unique=True),
         CheckConstraint("status IN ('active', 'archived')", name="ck_fleet_sessions_status"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_users.id", ondelete="CASCADE"), nullable=False
-    )
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Session")
     checkpoint_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -168,14 +163,6 @@ class RunRow(Base):
 
 class SandboxBindingRow(Base):
     __tablename__ = "fleet_sandbox_bindings"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["session_id", "workspace_id"],
-            ["fleet_sessions.id", "fleet_sessions.workspace_id"],
-            name="fk_fleet_bindings_session_workspace",
-            ondelete="CASCADE",
-        ),
-    )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(
@@ -185,11 +172,7 @@ class SandboxBindingRow(Base):
         unique=True,
     )
     sandbox_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey("fleet_workspaces.id", name="fk_fleet_bindings_workspace", ondelete="CASCADE"),
-        nullable=False,
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
     volume_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     volume_subpath: Mapped[str] = mapped_column(String(512), nullable=False)
     mount_path: Mapped[str] = mapped_column(String(512), nullable=False, default=SESSION_WORKSPACE_MOUNT_PATH)
@@ -233,12 +216,8 @@ class AttachmentRow(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_users.id", ondelete="CASCADE"), nullable=False
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
     filename: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     byte_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -257,12 +236,8 @@ class ArtifactRow(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_users.id", ondelete="CASCADE"), nullable=False
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
     session_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("fleet_sessions.id", ondelete="CASCADE"), nullable=False
     )
@@ -284,9 +259,7 @@ class SkillRow(Base):
     __tablename__ = "fleet_skills"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
-    workspace_id: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=True
-    )
+    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.0.0")
     trust: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
@@ -336,12 +309,8 @@ class MemoryPromotionIntentRow(Base):
     session_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("fleet_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    workspace_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_workspaces.id", ondelete="CASCADE"), nullable=False
-    )
-    user_id: Mapped[uuid.UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("fleet_users.id", ondelete="CASCADE"), nullable=False
-    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=_uuid)
     candidate_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     candidate_id: Mapped[str] = mapped_column(String(12), nullable=False)
     category: Mapped[str] = mapped_column(String(64), nullable=False)

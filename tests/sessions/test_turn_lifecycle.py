@@ -1,0 +1,1074 @@
+"""Turn lifecycle settlement across its caller-facing seam."""
+
+from __future__ import annotations
+
+import asyncio
+from hashlib import sha256
+from typing import ClassVar
+from uuid import uuid4
+
+import pytest
+
+from tests.support.turn_settlement import TestingRunSettlement
+
+
+@pytest.mark.asyncio
+async def test_success_validates_and_publishes_before_atomic_commit() -> None:
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
+
+    data = b"{}"
+    access = TurnAccess(uuid4(), uuid4())
+    run_id, session_id, artifact_id = uuid4(), uuid4(), uuid4()
+    candidate = ArtifactCandidate(
+        artifact_id,
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "json",
+        "result",
+        "application/json",
+        len(data),
+        sha256(data).hexdigest(),
+        "/staging/result.json",
+        "/artifacts/result.json",
+    )
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        committed = None
+
+        async def commit(self, claimed, committed, artifacts):
+            self.committed = committed
+            assert claimed is turn
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            raise AssertionError((claimed, failure))
+
+    class Sink:
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+        operations: ClassVar[list[tuple[str, str]]] = []
+
+        async def read(self, location, *, max_bytes):
+            assert max_bytes >= len(data)
+            self.operations.append(("read", location))
+            return self.values[location]
+
+        async def write(self, location, value):
+            self.operations.append(("write", location))
+            self.values[location] = value
+
+        async def remove(self, location):
+            self.operations.append(("remove", location))
+            self.values.pop(location, None)
+
+    store, sink = Store(), Sink()
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            artifact_candidates=(candidate,),
+        ),
+        artifact_sink=sink,
+    )
+
+    assert receipt.committed_turn.text == "done"
+    assert sink.operations == [
+        ("read", candidate.staging_path),
+        ("write", candidate.durable_path),
+        ("remove", candidate.staging_path),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_authority_revocation_after_artifact_publish_rolls_back_before_commit() -> None:
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
+
+    data = b"artifact"
+    access = TurnAccess(uuid4(), uuid4())
+    run_id, session_id = uuid4(), uuid4()
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/staging/result.txt",
+        "/artifacts/result.txt",
+    )
+
+    async def not_cancelled() -> bool:
+        """
+        Determine whether cancellation has occurred.
+
+        Returns:
+                bool: `False`, indicating that cancellation has occurred.
+        """
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        commits = 0
+
+        async def commit(self, *_args):
+            self.commits += 1
+            raise AssertionError("revoked Turn must not reach commit")
+
+        async def transition_claim(self, claimed, command):
+            """
+            Create a failed-run receipt from the claimed run and command failure.
+
+            Parameters:
+                claimed: The claimed run whose identifier is included in the receipt.
+                command: The command containing the failure code and public message.
+
+            Returns:
+                FailedRunReceipt: A receipt representing the failed run.
+            """
+            from fleet_rlm.sessions.run_state import FailedRunReceipt
+
+            return FailedRunReceipt(
+                claimed.run_id,
+                "failed",
+                command.failure.code,
+                command.failure.public_message,
+                True,
+            )
+
+    class Sink:
+        values: ClassVar[dict[str, bytes]] = {candidate.staging_path: data}
+
+        async def read(self, location, *, max_bytes):
+            """Read the value stored at the specified location."""
+            del max_bytes
+            return self.values[location]
+
+        async def write(self, location, value):
+            """
+            Store a value at the specified location and revoke turn authority.
+            """
+            self.values[location] = value
+            turn.authority.revoke()
+
+        async def remove(self, location):
+            """
+            Remove the value associated with a location.
+
+            Parameters:
+                location: The location whose value should be removed.
+            """
+            self.values.pop(location, None)
+
+    store, sink = Store(), Sink()
+    receipt = await TestingRunSettlement(store, max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            artifact_candidates=(candidate,),
+        ),
+        artifact_sink=sink,
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+    assert store.commits == 0
+    assert sink.values == {}
+
+
+@pytest.mark.asyncio
+async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        3,
+        sha256(b"abc").hexdigest(),
+        "/s/a",
+        "/d/a",
+    )
+
+    class Store:
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            return FailedRunReceipt(
+                claimed.run_id,
+                failure.terminal_status,
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+        async def commit(self, *args):
+            raise AssertionError(args)
+
+    class Sink:
+        async def read(self, location, *, max_bytes):
+            del location, max_bytes
+            return b"bad-value"
+
+        async def write(self, location, value):
+            raise AssertionError((location, value))
+
+        async def remove(self, location):
+            del location
+            return None
+
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            terminal_status="completed",
+            prediction=PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            artifact_candidates=(candidate,),
+        ),
+        artifact_sink=Sink(),
+    )
+
+    assert receipt.public_message == "Turn could not be committed"
+
+
+@pytest.mark.asyncio
+async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() -> None:
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        _RunClaimToken,
+    )
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    operations: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            assert claimed is turn
+            assert snapshot.values.keys() == {snapshot.path}
+            operations.append("commit")
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            raise AssertionError((claimed, failure))
+
+    class SnapshotSink:
+        path = f"/sessions/{session_id}/runs/{run_id}/result.json"
+        values: ClassVar[dict[str, bytes]] = {}
+
+        def result_path(self, requested_session_id, requested_run_id):
+            assert (requested_session_id, requested_run_id) == (session_id, run_id)
+            return self.path
+
+        async def write(self, location, data):
+            operations.append("snapshot.write")
+            self.values[location] = data
+
+        async def remove(self, location):
+            operations.append("snapshot.remove")
+            self.values.pop(location, None)
+
+    snapshot = SnapshotSink()
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            usage={"iterations": 2, "observed_lm_usage": {}, "duration_ms": 3},
+        ),
+        result_snapshot_sink=snapshot,
+    )
+
+    assert isinstance(receipt, CommittedTurnReceipt)
+    assert operations == ["snapshot.write", "commit"]
+    assert snapshot.values.keys() == {snapshot.path}
+
+
+@pytest.mark.asyncio
+async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failure_opaque(caplog) -> None:
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    data = b"artifact"
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/staging/a",
+        "/artifacts/a",
+    )
+    operations: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
+            operations.append("commit")
+            raise RuntimeError("database unavailable")
+
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            operations.append("fail")
+            return FailedRunReceipt(
+                claimed.run_id,
+                "failed",
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+    class ArtifactSink:
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+
+        async def read(self, location, *, max_bytes):
+            del max_bytes
+            return self.values[location]
+
+        async def write(self, location, value):
+            operations.append(f"artifact.write:{location}")
+            self.values[location] = value
+
+        async def remove(self, location):
+            operations.append(f"artifact.remove:{location}")
+            self.values.pop(location, None)
+
+    class SnapshotSink:
+        path = f"/sessions/{session_id}/runs/{run_id}/result.json"
+        values: ClassVar[dict[str, bytes]] = {}
+
+        def result_path(self, requested_session_id, requested_run_id):
+            del requested_session_id, requested_run_id
+            return self.path
+
+        async def write(self, location, value):
+            operations.append(f"snapshot.write:{location}")
+            self.values[location] = value
+
+        async def remove(self, location):
+            operations.append(f"snapshot.remove:{location}")
+            self.values.pop(location, None)
+
+    artifacts, snapshot = ArtifactSink(), SnapshotSink()
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            PredictionResult("done", {"answer": "done"}, "fleet.default", "1"),
+            usage={"iterations": 1, "observed_lm_usage": {}, "duration_ms": 2},
+            artifact_candidates=(candidate,),
+        ),
+        artifact_sink=artifacts,
+        result_snapshot_sink=snapshot,
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+    assert receipt.failure_code == "commit_failed"
+    assert receipt.public_message == "Turn could not be committed"
+    record = next(record for record in caplog.records if record.message.startswith("Turn finalization failed"))
+    assert record.levelname == "ERROR"
+    assert "stage=commit_turn" in record.message
+    assert f"session_id={session_id}" in record.message
+    assert f"run_id={run_id}" in record.message
+    assert record.exc_info is not None
+    assert record.exc_info[0] is RuntimeError
+    assert "database unavailable" not in receipt.public_message
+    assert candidate.durable_path not in artifacts.values
+    assert snapshot.values == {}
+    assert operations == [
+        f"artifact.write:{candidate.durable_path}",
+        f"snapshot.write:{snapshot.path}",
+        "commit",
+        f"snapshot.remove:{snapshot.path}",
+        f"artifact.remove:{candidate.durable_path}",
+        f"artifact.remove:{candidate.staging_path}",
+        "fail",
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
+async def test_non_success_never_writes_result_snapshot(status: str) -> None:
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            return FailedRunReceipt(
+                claimed.run_id,
+                failure.terminal_status,
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+    class NeverSnapshot:
+        def __getattr__(self, name):
+            raise AssertionError(name)
+
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(status, public_error_message="Turn failed"),
+        result_snapshot_sink=NeverSnapshot(),
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
+async def test_non_success_removes_run_local_artifact_candidate_bytes(status: str) -> None:
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
+
+    access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
+    data = b"uncommitted"
+    candidate = ArtifactCandidate(
+        uuid4(),
+        access.user_id,
+        access.workspace_id,
+        session_id,
+        run_id,
+        "text",
+        None,
+        "text/plain",
+        len(data),
+        sha256(data).hexdigest(),
+        "/runs/current/artifact-candidate.txt",
+        "/artifacts/never-published.txt",
+    )
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("hello"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+
+    class Store:
+        async def transition_claim(self, claimed, command):
+            from fleet_rlm.rlm.result import empty_rlm_usage
+            from fleet_rlm.sessions.run_claim import FailClaim
+            from fleet_rlm.sessions.run_state import RunFailure
+
+            assert isinstance(command, FailClaim)
+            failure = RunFailure(
+                command.failure.status,
+                command.failure.code,
+                command.failure.public_message,
+                command.usage or empty_rlm_usage(),
+            )
+            return FailedRunReceipt(
+                claimed.run_id,
+                failure.terminal_status,
+                failure.failure_code,
+                failure.public_message,
+                True,
+            )
+
+    class Sink:
+        values: ClassVar[dict[object, object]] = {candidate.staging_path: data}
+        removals: ClassVar[list[str]] = []
+
+        async def remove(self, location):
+            self.removals.append(location)
+            self.values.pop(location, None)
+
+    sink = Sink()
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=100).finish(
+        turn,
+        RLMOutcome(status, artifact_candidates=(candidate,)),
+        artifact_sink=sink,
+    )
+
+    assert isinstance(receipt, FailedRunReceipt)
+    assert sink.values == {}
+    assert sink.removals == [candidate.staging_path]
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_happens_after_atomic_commit_and_fails_soft() -> None:
+
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.workspace.memory import MemoryCandidate
+
+    run_id, session_id = uuid4(), uuid4()
+    access = TurnAccess(uuid4(), uuid4())
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        access,
+        TurnInput("promote this later"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    candidate = MemoryCandidate(
+        candidate_id="cand00000001",
+        category="Project",
+        learning="settlement-visible learning",
+        byte_size=len(b"settlement-visible learning"),
+    )
+    order: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed
+            order.append("commit")
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+    class BrokenPromotion:
+        def __call__(self, candidates):
+            assert candidates == (candidate,)
+            order.append("promote")
+            raise RuntimeError("promotion storage unavailable")
+
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(candidate,),
+        ),
+        memory_promotion=OwnedPostCommitMemoryPromotion(BrokenPromotion()),
+    )
+
+    assert order == ["commit", "promote"]
+    assert receipt.checkpoint_version == 1
+    # The turn remains durably committed; optional promotion failure is only a warning.
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_never_runs_after_a_commit_failure() -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        FailedRunReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.workspace.memory import MemoryCandidate
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("commit must fail"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    seen: list[str] = []
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed, committed, artifacts
+            raise RuntimeError("commit backend unavailable")
+
+        async def transition_claim(self, claimed, command):
+            del claimed, command
+            return FailedRunReceipt(
+                run_id=run_id,
+                terminal_status="failed",
+                failure_code="commit_failed",
+                public_message="Turn could not be committed",
+                durable=True,
+            )
+
+    def promotion(candidates):
+        seen.extend(candidates)
+
+    receipt = await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(
+                MemoryCandidate(
+                    candidate_id="cand00000001",
+                    category="Project",
+                    learning="must not promote",
+                    byte_size=18,
+                ),
+            ),
+        ),
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
+    )
+
+    assert seen == []
+    assert receipt.failure_code == "commit_failed"
+
+
+@pytest.mark.asyncio
+async def test_memory_candidate_promotion_trace_never_copies_learning(monkeypatch: pytest.MonkeyPatch) -> None:
+    import contextlib
+    from uuid import uuid4
+
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        CommittedTurnReceipt,
+        _RunClaimToken,
+    )
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
+    from fleet_rlm.workspace.memory import MemoryCandidate, MemoryCandidatePromotionResult
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("promote privately"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    spans: list[tuple[str, dict[str, object], dict[str, object]]] = []
+
+    @contextlib.contextmanager
+    def fake_span(name, *, inputs):
+        outputs: dict[str, object] = {}
+        spans.append((name, dict(inputs), outputs))
+
+        class Handle:
+            def set_outputs(self, value):
+                outputs.update(value)
+
+        yield Handle()
+
+    monkeypatch.setattr("fleet_rlm.turns.settlement.turn_phase_span", fake_span)
+
+    class Store:
+        async def commit(self, claimed, committed, artifacts):
+            del claimed
+            return CommittedTurnReceipt(run_id, 1, committed, artifacts)
+
+    def promotion(candidates):
+        return MemoryCandidatePromotionResult(
+            proposed_count=len(candidates),
+            promoted_count=len(candidates),
+            candidate_bytes=sum(item.byte_size for item in candidates),
+        )
+
+    secret = "secret autonomous promotion learning"
+    await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RLMOutcome(
+            "completed",
+            prediction=PredictionResult("answer", {"answer": "done"}, "fleet.default", "1"),
+            memory_candidates=(
+                MemoryCandidate(
+                    candidate_id="cand00000001",
+                    category="Project",
+                    learning=secret,
+                    byte_size=len(secret.encode()),
+                ),
+            ),
+        ),
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
+    )
+
+    assert any(name == "Turn.memory_candidate_promotion" for name, _inputs, _outputs in spans)
+    assert secret not in str(spans)
+    assert all(isinstance(value, (int, str, bool, tuple)) for _n, _i, outputs in spans for value in outputs.values())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["failed", "cancelled", "timeout"])
+async def test_memory_candidate_promotion_is_unreachable_for_failure_resolution(terminal: str) -> None:
+    from uuid import uuid4
+
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunFailure,
+        _RunClaimToken,
+    )
+    from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
+
+    run_id, session_id = uuid4(), uuid4()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    turn = ClaimedRun(
+        run_id,
+        session_id,
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("do not promote"),
+        SessionHistory(),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    seen: list[str] = []
+
+    class Store:
+        async def transition_claim(self, claimed, command):
+            del claimed, command
+
+            from fleet_rlm.sessions.run_state import FailedRunReceipt
+
+            return FailedRunReceipt(
+                run_id=run_id,
+                terminal_status=terminal,  # type: ignore[arg-type]
+                failure_code=terminal if terminal != "failed" else "execution_failed",  # type: ignore[arg-type]
+                public_message=terminal,
+                durable=True,
+            )
+
+    def promotion(candidates):
+        seen.extend(candidates)
+
+    await TestingRunSettlement(Store(), max_artifact_bytes=1024).finish(
+        turn,
+        RunFailure(
+            terminal,  # type: ignore[arg-type]
+            terminal if terminal != "failed" else "execution_failed",  # type: ignore[arg-type]
+            terminal,
+            empty_rlm_usage(),
+        ),
+        memory_promotion=OwnedPostCommitMemoryPromotion(promotion),
+    )
+
+    assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_cleanup_supervisor_is_bounded_and_drains_owned_work() -> None:
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor, RunCleanupUnavailableError
+
+    release = asyncio.Event()
+    supervisor = RunCleanupSupervisor(max_jobs=1)
+
+    async def cleanup() -> None:
+        await release.wait()
+
+    supervisor.submit(cleanup())
+    assert supervisor.active_jobs == 1
+    with pytest.raises(RunCleanupUnavailableError):
+        supervisor.require_capacity()
+
+    release.set()
+    await supervisor.shutdown(drain_seconds=1)
+    assert supervisor.active_jobs == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_supervisor_observes_cancelled_cleanup(caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+
+    supervisor = RunCleanupSupervisor()
+
+    async def cleanup() -> None:
+        raise asyncio.CancelledError
+
+    with caplog.at_level(logging.ERROR):
+        supervisor.submit(cleanup())
+        await supervisor.shutdown(drain_seconds=1)
+
+    assert "detached Run cleanup failed" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
+    from fleet_rlm.sessions.run_state import (
+        RunClaim,
+        RunFailure,
+        RunInProgressError,
+        RunStateError,
+    )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="settling",
+    )
+    turn = await store.begin(RunClaim(access, session.id, TurnInput("one"), "one", uuid4()))
+    failure = RunFailure("timeout", "timeout", "Turn timed out", empty_rlm_usage())
+    receipt = await store.transition_claim(
+        turn,
+        BeginSettlement(
+            ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage
+        ),
+    )
+    assert receipt is not None
+    assert receipt.durable is False
+
+    with pytest.raises(RunStateError):
+        await store.commit(turn, None, ())  # type: ignore[arg-type]
+    with pytest.raises(RunInProgressError):
+        await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
+
+    terminal = await store.transition_claim(turn, CompleteSettlement())
+    assert terminal is not None
+    assert terminal.durable is True
+    assert terminal.terminal_status == "timeout"
+    await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
+
+
+@pytest.mark.asyncio
+async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
+    from fleet_rlm.sessions.run_state import (
+        ClaimedRun,
+        RunClaim,
+        RunFailure,
+    )
+    from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
+
+    access = TurnAccess(uuid4(), uuid4())
+    store = InMemoryRunStateStore()
+    session = await InMemorySessionCatalog(store).create(
+        user_id=access.user_id,
+        workspace_id=access.workspace_id,
+        title="stale claim parity",
+    )
+    turn = await store.begin(RunClaim(access, session.id, TurnInput("one"), "one", uuid4()))
+    assert isinstance(turn, ClaimedRun)
+
+    failure = RunFailure("timeout", "timeout", "Timed out", empty_rlm_usage())
+    revoked = await store.transition_claim(
+        turn,
+        RevokeClaim(ClaimFailure(failure.terminal_status, failure.failure_code, failure.public_message), failure.usage),
+    )
+    assert revoked is not None
+    assert (revoked.terminal_status, revoked.failure_code, revoked.durable) == ("failed", "stale_claim", False)
+
+    run = store._runs[turn.run_id]
+    assert (run.status, run.failure_code, run.terminal_intent.terminal_status) == (
+        "settling",
+        "stale_claim",
+        "failed",
+    )
+
+    terminal = await store.transition_claim(turn, CompleteSettlement())
+    assert terminal is not None
+    assert (terminal.terminal_status, terminal.failure_code, terminal.durable) == ("failed", "stale_claim", True)
+    assert (run.status, run.failure_code) == ("failed", "stale_claim")
+    replacement = await store.begin(RunClaim(access, session.id, TurnInput("two"), "two", uuid4()))
+    assert isinstance(replacement, ClaimedRun)

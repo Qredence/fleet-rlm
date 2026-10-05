@@ -2,13 +2,13 @@
 
 from uuid import uuid4
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
     ClaimedRun,
     _RunClaimToken,
 )
+from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
 
 def claimed_run() -> ClaimedRun:

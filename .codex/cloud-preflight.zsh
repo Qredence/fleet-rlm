@@ -37,5 +37,5 @@ echo "Codex Cloud branch guard: current=$branch base=origin/main"
 git status --short --branch --untracked-files=all
 
 if [[ "$run_harness" == true ]]; then
-  uv run python scripts/check_harness_engineering.py --skip-script-help
+  uv run python scripts/check_repo_hygiene.py --skip-script-help
 fi

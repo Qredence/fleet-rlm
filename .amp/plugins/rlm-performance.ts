@@ -4,13 +4,13 @@ export const description =
 	'Adds a safe local validation command for Fleet DSPy RLM and Daytona broker performance changes.'
 
 const FOCUSED_TEST_PATHS = [
-	'tests/contracts/backend/test_host_tool_submit_binding.py',
-	'tests/unit/backend/daytona/test_broker.py',
-	'tests/unit/backend/daytona/test_interpreter_tracing.py',
-	'tests/unit/backend/rlm/test_program_instructions.py',
-	'tests/unit/backend/config/test_config.py',
-	'tests/unit/backend/config/test_config_policy.py',
-	'tests/unit/scripts/test_run_rlm_latency.py',
+	'tests/daytona/test_host_tool_submit_binding.py',
+	'tests/daytona/test_broker.py',
+	'tests/daytona/test_runtime.py',
+	'tests/rlm/test_program_inputs.py',
+	'tests/config/test_config.py',
+	'tests/config/test_config_policy.py',
+	'tests/scripts/test_run_rlm_latency.py',
 ].join(' ')
 
 const FOCUSED_SOURCE_PATHS = [

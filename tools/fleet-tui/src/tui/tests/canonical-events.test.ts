@@ -45,6 +45,65 @@ const scenarios = readdirSync(FIXTURE_DIR)
   .map((name) => name.replace(/\.jsonl$/, ""))
   .sort();
 
+describe("terminal text snapshots", () => {
+  it.each([false, true])("live and reload agree with structured result=%s", (structured) => {
+    const live = new LiveTurnProjector(clock);
+    const chunks = [
+      { type: "turn_start", runId: "run", messageId: "message" },
+      ...(structured
+        ? [
+            {
+              type: "structured_result",
+              schemaId: "result",
+              schemaVersion: "1",
+              value: { answer: 42 },
+            },
+          ]
+        : []),
+      { type: "text", streamId: "text", delta: "Hello", final: false },
+      { type: "text", streamId: "text", delta: "", text: "Hello", final: true },
+      { type: "turn_finish", finishReason: "stop" },
+    ];
+    const events = chunks.flatMap((chunk) => live.push(chunk as FleetUIMessageChunk));
+    const durable = projectDurableTurns(
+      [
+        {
+          id: "message",
+          role: "assistant",
+          metadata: { runId: "run" },
+          parts: [
+            ...(structured
+              ? [
+                  {
+                    type: "data-structured-result",
+                    data: { schemaId: "result", schemaVersion: "1", value: { answer: 42 } },
+                  },
+                ]
+              : []),
+            { type: "text", text: "Hello" },
+          ],
+        },
+      ] as unknown as FleetTurn[],
+      clock,
+    );
+    expect(semanticView(events)).toEqual(semanticView(durable));
+  });
+
+  it("preserves an explicit empty delta and still accepts text-only chunks", () => {
+    expect(
+      adaptLiveChunk({
+        type: "text",
+        delta: "",
+        text: "Hello",
+        final: true,
+      } as FleetUIMessageChunk)[0],
+    ).toMatchObject({ textDelta: "", final: true });
+    expect(adaptLiveChunk({ type: "text", text: "Hello" } as FleetUIMessageChunk)[0]).toMatchObject(
+      { textDelta: "Hello" },
+    );
+  });
+});
+
 function semanticView(events: StoreEvent[], dropKinds: string[] = []): unknown[] {
   const byId = new Map<string, Message>();
   for (const event of events) {

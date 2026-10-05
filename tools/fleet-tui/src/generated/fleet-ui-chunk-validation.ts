@@ -1,5 +1,5 @@
 /**
- * REGENERATED from openapi.yaml by scripts/generate_tui_chunk_validation.py.
+ * REGENERATED from openapi.yaml by scripts/contracts.py api generate.
  * Do not hand-edit — run `make api-sync`. The dataAlternatives
  * snake_case/camelCase id tolerances are the generator's declared input.
  */
@@ -7,118 +7,32 @@
 export type FieldCheck = (value: unknown) => boolean;
 
 export const chunkTypes = [
-  "start",
-  "start-step",
-  "finish-step",
-  "reasoning-start",
-  "reasoning-delta",
-  "reasoning-end",
-  "data-status",
-  "data-child-progress",
-  "data-skill",
-  "data-rlm-code",
-  "data-rlm-output",
-  "tool-input-available",
-  "tool-output-available",
-  "tool-output-error",
-  "data-attachment",
-  "data-warning",
-  "data-artifact",
-  "data-usage",
-  "data-structured-result",
-  "text-start",
-  "text-delta",
-  "text-end",
-  "finish",
-  "abort",
-  "error"
+  "turn_start",
+  "turn_status",
+  "step_start",
+  "step_finish",
+  "reasoning",
+  "code",
+  "output",
+  "tool_call",
+  "tool_result",
+  "text",
+  "skill",
+  "child_progress",
+  "attachment",
+  "warning",
+  "artifact",
+  "usage",
+  "structured_result",
+  "turn_finish",
+  "turn_cancelled",
+  "turn_error"
 ] as const;
 
 export const dataFieldChecks: Record<string, Record<string, FieldCheck>> = {
-  "data-status": {
-    phase: isString,
-    status: isNullableString,
-    detail: isNullableString,
-    message: isNullableString,
-  },
-  "data-child-progress": {
-    child_id: isString,
-    task_label: isString,
-    state: (value) => value === "not_started" || value === "running" || value === "completed" || value === "failed" || value === "cancelled" || value === "timed_out",
-    elapsed_ms: isInteger,
-    outcome: isNullableString,
-    evidence: isStringArray,
-    gaps: isStringArray,
-    result_file_count: isInteger,
-    code_excerpt: isNullableString,
-    output_excerpt: isNullableString,
-    cleanup_state: (value) => value === "pending" || value === "complete" || value === "failed" || value === "not_required",
-    parent_run_id: isNullableString,
-  },
-  "data-skill": {
-    skill_id: isString,
-    name: isString,
-    version: isString,
-    phase: isNullableString,
-    trust: isNullableString,
-    affordances: isNullableStringArray,
-  },
-  "data-rlm-code": {
-    code: isString,
-    step: isNullableInteger,
-    stream_id: isNullableString,
-    is_delta: isNullableBoolean,
-    is_final: isNullableBoolean,
-  },
-  "data-rlm-output": {
-    output: isString,
-    step: isNullableInteger,
-    stream_id: isNullableString,
-    is_delta: isNullableBoolean,
-    is_final: isNullableBoolean,
-  },
-  "data-attachment": {
-    attachment_id: isString,
-    filename: isString,
-    phase: isNullableString,
-    byte_size: isNullableInteger,
-    attachmentId: isNullableString,
-    byteSize: isNullableInteger,
-  },
-  "data-warning": {
-    message: isString,
-    code: isNullableString,
-  },
-  "data-artifact": {
-    artifact_id: isString,
-    artifact_kind: isNullableString,
-    kind: isNullableString,
-    title: isNullableString,
-    name: isNullableString,
-    media_type: isNullableString,
-    byte_size: isNullableInteger,
-    checksum_sha256: isNullableString,
-  },
-  "data-usage": {
-    usage: isRecord,
-  },
-  "data-structured-result": {
-    schema_id: isString,
-    schema_version: isString,
-  },
 };
 
 export const dataRequiredFields: Record<string, readonly string[]> = {
-  "data-status": ["phase"],
-  "data-child-progress": ["child_id", "task_label", "state", "elapsed_ms", "cleanup_state"],
-  "data-skill": ["skill_id", "name", "version"],
-  "data-rlm-code": ["code"],
-  "data-rlm-output": ["output"],
-  "data-attachment": ["attachment_id", "filename"],
-  "data-warning": ["message"],
-  "data-artifact": ["artifact_id"],
-  "data-usage": ["usage"],
-  "data-structured-result": ["schema_id", "schema_version", "value"],
 };
 
 export const dataAlternatives: Record<string, readonly (readonly string[])[]> = {

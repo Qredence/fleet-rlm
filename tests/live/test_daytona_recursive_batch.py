@@ -1,0 +1,632 @@
+"""Live canary: Root ``rlm_query_batched`` with two simultaneous Daytona child RLMs."""
+
+from __future__ import annotations
+
+import ast
+import json
+import os
+import queue
+import threading
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+from uuid import UUID, uuid4
+
+import dspy
+import pytest
+from dotenv import load_dotenv
+from fastapi.testclient import TestClient
+
+from fleet_rlm.api.local_scope import LocalScope
+from fleet_rlm.app import create_app
+from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
+from fleet_rlm.config.settings import FleetConfigurationError, Settings
+from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.rlm.events import ToolEventView
+from fleet_rlm.rlm.program import has_llm_credentials
+from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
+from tests.live._cleanup import _strict_cleanup
+from tests.live._database import upgrade_to_head
+from tests.live._evidence import candidate_identity, write_receipt
+from tests.live._mvp_support import live_runtime
+
+pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(960)]
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_CONFIGURED_MODELS = load_configuration_environment_contract()
+_LIVE_ROOT_MODEL = os.environ.get("FLEET_LIVE_ROOT_MODEL", _CONFIGURED_MODELS.root_model)
+_LIVE_SUB_MODEL = os.environ.get("FLEET_LIVE_SUB_MODEL", _CONFIGURED_MODELS.sub_model)
+_CONTRACT_ID = "fleet.daytona-recursive-batch"
+_TOKEN_A = "BATCH_TOKEN_ALPHA"
+_TOKEN_B = "BATCH_TOKEN_BETA"
+_LIVE_VALUES = frozenset({"1", "true", "yes"})
+_TRACE_WAIT_SECONDS = 20.0
+_TRACE_OPERATION_TIMEOUT_SECONDS = 5.0
+
+
+class BatchResult(dspy.Signature):
+    """Return a multi-field Root result so completion is necessarily typed."""
+
+    request: str = dspy.InputField()
+    history: dspy.History = dspy.InputField()
+    session_context: dict = dspy.InputField()
+    skill_cards: list[dict] = dspy.InputField()
+    attachments: list[dict] = dspy.InputField()
+    answer: str = dspy.OutputField()
+    evidence: str = dspy.OutputField()
+
+
+@dataclass(slots=True)
+class _ProofCapabilityPreparer:
+    delegate: Any
+    tools: tuple[dspy.Tool, ...]
+    event_views: MappingProxyType[str, ToolEventView]
+
+    async def prepare(self, turn: Any, environment: Any, attachments: Any, *, deadline: float) -> Any:
+        prepared = await self.delegate.prepare(turn, environment, attachments, deadline=deadline)
+        prepared.spec = replace(
+            prepared.spec,
+            signature=BatchResult,
+            output_schema_id=_CONTRACT_ID,
+            output_schema_version="1",
+            tools=(*prepared.spec.tools, *self.tools),
+            tool_event_views={**prepared.spec.tool_event_views, **self.event_views},
+        )
+        return prepared
+
+
+@dataclass(slots=True)
+class _ProofLedger:
+    calls: int = 0
+    ordered: bool = False
+
+    def verify_batch(self, results: list[str]) -> dict[str, bool]:
+        self.calls += 1
+        if self.calls != 1:
+            raise ValueError("batch verifier must be called exactly once")
+        if not isinstance(results, list) or len(results) != 2:
+            raise ValueError("batch verifier requires exactly two ordered results")
+        normalized = [str(item).strip() for item in results]
+        self.ordered = normalized == [_TOKEN_A, _TOKEN_B]
+        if not self.ordered:
+            raise ValueError("batch results must preserve [prompt_a, prompt_b] order")
+        return {"ok": True}
+
+
+@dataclass(slots=True)
+class _PartialProofLedger:
+    calls: int = 0
+    verified: bool = False
+    batch_calls: int = 0
+    outcomes: list[dict[str, object]] | None = None
+
+    def verify_partial(self, statuses: list[str], surviving_answer: str, failed_trusted_fields: int) -> dict[str, bool]:
+        self.calls += 1
+        self.verified = (
+            self.calls == 1
+            and statuses == ["failed", "completed"]
+            and surviving_answer == _TOKEN_B
+            and failed_trusted_fields == 0
+        )
+        if not self.verified:
+            raise ValueError("ordered partial outcomes were not verified")
+        return {"ok": True}
+
+
+@dataclass(slots=True)
+class _ChildEvidence:
+    sandbox_ids: list[str] = field(default_factory=list)
+    volume_subpaths: list[str] = field(default_factory=list)
+    call_indexes: list[int] = field(default_factory=list)
+    peak_observed: int = 0
+    cleanups: int = 0
+    _active: int = 0
+    batch_answers: list[str] | None = None
+
+
+def _trace_id_from_chunks(chunks: list[dict[str, Any]]) -> str:
+    """Return the root trace ID emitted in the public Turn metadata."""
+    for chunk in chunks:
+        for key in ("messageMetadata", "metadata"):
+            value = chunk.get(key)
+            if isinstance(value, dict) and isinstance(value.get("traceId"), str) and value["traceId"]:
+                return value["traceId"]
+    raise AssertionError("live canary did not expose a root MLflow trace ID")
+
+
+def _trace_hierarchy(trace: Any, *, trace_id: str) -> dict[str, object]:
+    """Require one Fleet root and two recursive child spans in one trace."""
+    spans = list(getattr(getattr(trace, "data", None), "spans", ()) or ())
+    matching = [span for span in spans if getattr(span, "trace_id", None) == trace_id]
+    roots = [
+        span
+        for span in matching
+        if getattr(span, "name", None) == "fleet_turn" and not getattr(span, "parent_id", None)
+    ]
+    if len(roots) != 1:
+        raise AssertionError("MLflow trace must contain exactly one fleet_turn root span")
+    root = roots[0]
+    root_span_id = getattr(root, "span_id", None)
+    spans_by_id = {
+        span_id: span for span in matching if isinstance(span_id := getattr(span, "span_id", None), str) and span_id
+    }
+    children = [span for span in matching if getattr(span, "name", None) == "RLM.recursive_call"]
+    if len(children) < 2:
+        raise AssertionError("MLflow trace must contain two recursive child spans")
+    for child in children:
+        parent_id = getattr(child, "parent_id", None)
+        visited: set[str] = set()
+        while parent_id != root_span_id:
+            if not isinstance(parent_id, str) or parent_id in visited or parent_id not in spans_by_id:
+                raise AssertionError("MLflow recursive child span has no valid parent chain to fleet_turn")
+            visited.add(parent_id)
+            parent_id = getattr(spans_by_id[parent_id], "parent_id", None)
+    return {"root_span": "fleet_turn", "child_spans": len(children), "trace_id": trace_id}
+
+
+def _bounded_call(function: Any, *, timeout: float) -> Any:
+    """Run one blocking MLflow SDK call without extending the canary deadline."""
+    result: queue.Queue[tuple[bool, Any]] = queue.Queue(maxsize=1)
+
+    def invoke() -> None:
+        try:
+            result.put((True, function()))
+        except BaseException:
+            result.put((False, None))
+
+    worker = threading.Thread(target=invoke, name="fleet-mlflow-canary-call", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise TimeoutError("MLflow SDK operation exceeded its bounded wait")
+    try:
+        succeeded, value = result.get_nowait()
+    except queue.Empty:
+        raise RuntimeError("MLflow SDK operation produced no result") from None
+    if not succeeded:
+        raise RuntimeError("MLflow SDK operation failed")
+    return value
+
+
+def _retrieve_trace_hierarchy(trace_id: str) -> dict[str, object]:
+    """Flush and retrieve the trace with a bounded wait for async export."""
+    import mlflow
+    from mlflow import MlflowClient
+
+    flush = getattr(mlflow, "flush_trace_async_logging", None)
+    if callable(flush):
+        try:
+            _bounded_call(lambda: flush(terminate=False), timeout=_TRACE_OPERATION_TIMEOUT_SECONDS)
+        except Exception:
+            raise AssertionError("MLflow trace flush did not complete within its bounded wait") from None
+    deadline = time.monotonic() + _TRACE_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        try:
+            trace = _bounded_call(
+                lambda: MlflowClient().get_trace(trace_id, display=False, flush=True),
+                timeout=min(_TRACE_OPERATION_TIMEOUT_SECONDS, max(0.1, deadline - time.monotonic())),
+            )
+            return _trace_hierarchy(trace, trace_id=trace_id)
+        except AssertionError:
+            raise
+        except Exception:
+            time.sleep(0.5)
+    raise AssertionError("MLflow root/child trace was not retrievable before the canary deadline") from None
+
+
+def _live_enabled() -> bool:
+    return os.environ.get("FLEET_LIVE", "").strip().lower() in _LIVE_VALUES
+
+
+def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    if not _live_enabled():
+        pytest.skip("Set FLEET_LIVE=1 for the two-child rlm_query_batched canary")
+    load_dotenv(_REPO_ROOT / ".env", override=False)
+    import fleet_rlm.config.loader as configuration
+
+    copied_policy = tmp_path / "batch-fleet.toml"
+    copied_policy.write_text((_REPO_ROOT / "config" / "fleet.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    monkeypatch.setattr(configuration, "_CONFIG_PATH", copied_policy)
+    try:
+        policy = require_live_execution()
+    except FleetConfigurationError:
+        pytest.fail("Recursive batch canary requires runtime.live_enabled=true")
+    if policy.run_environment != "daytona":
+        pytest.fail("Recursive batch canary requires runtime.environment=daytona")
+    if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
+        _LIVE_ROOT_MODEL,
+        _LIVE_SUB_MODEL,
+    ):
+        pytest.fail("Recursive batch canary requires the selected configured recursive policy")
+    if policy.rlm_recursion_max_parallel_children < 2:
+        pytest.fail("Recursive batch canary requires recursion_max_parallel_children >= 2")
+    if policy.daytona_api_key is None or not has_llm_credentials(policy):
+        pytest.fail("Recursive batch canary is missing configured provider credentials")
+    database_url = f"sqlite+aiosqlite:///{(tmp_path / 'recursive-batch.db').resolve()}"
+    upgrade_to_head(database_url)
+    return policy.model_copy(
+        update={
+            "database_url": database_url,
+            "volume_name": f"fleet-rlm-recursive-batch-{uuid4()}",
+            "rlm_max_iters": 8,
+            "rlm_max_llm_calls": 14,
+            "turn_timeout_seconds": 900,
+            # Daytona Root + two child sandboxes can exceed the default 60s claim
+            # stale window during preparation; match other live canaries.
+            "run_stale_after_seconds": 600,
+            "mlflow_tracing_enabled": True,
+            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_URI", "http://127.0.0.1:5001"),
+            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-canary"),
+        }
+    )
+
+
+def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
+    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
+    lock = threading.Lock()
+
+    async def observed(
+        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: Any
+    ) -> recursive_child_runtime.ChildRuntimeLease:
+        lease = await original(owner, **kwargs)
+        with lock:
+            evidence._active += 1
+            evidence.peak_observed = max(evidence.peak_observed, evidence._active)
+            evidence.sandbox_ids.append(lease.sandbox_id)
+            evidence.volume_subpaths.append(lease.volume_subpath)
+            evidence.call_indexes.append(int(kwargs["call_index"]))
+        close = lease._close
+
+        def observed_close() -> None:
+            try:
+                close()
+            except BaseException:
+                with lock:
+                    evidence._active = max(0, evidence._active - 1)
+                raise
+            else:
+                with lock:
+                    evidence._active = max(0, evidence._active - 1)
+                    evidence.cleanups += 1
+
+        lease._close = observed_close
+        return lease
+
+    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
+
+
+def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
+    """Record host-side ``rlm_query_batched`` answers so Root cannot fake order via verify_batch alone."""
+    original = RecursiveRLMExecutor._call_children_batched
+
+    def observed(self: RecursiveRLMExecutor, tasks: list[Mapping[str, object]]) -> list[dict[str, object]]:
+        outcomes = original(self, tasks)
+        assert all(item["status"] == "completed" for item in outcomes)
+        evidence.batch_answers = [str(item["answer"]).strip() for item in outcomes]
+        return outcomes
+
+    monkeypatch.setattr(RecursiveRLMExecutor, "_call_children_batched", observed)
+
+
+def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
+    chunks: list[dict[str, Any]] = []
+    done = 0
+    for line in response.text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = line.removeprefix("data: ")
+        if payload == "[DONE]":
+            done += 1
+        else:
+            chunks.append(json.loads(payload))
+    return chunks, done
+
+
+def _batch_completion(chunks: list[dict[str, Any]]) -> dict[str, object] | None:
+    for chunk in chunks:
+        if chunk.get("type") != "tool-output-available":
+            continue
+        output = chunk.get("output")
+        if (
+            isinstance(output, dict)
+            and output.get("status") == "completed"
+            and "answer_count" in output
+            and "peak_child_concurrency" in output
+        ):
+            return output
+    return None
+
+
+def test_daytona_recursive_batch_two_children_through_fastapi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = _load_live_settings(tmp_path, monkeypatch)
+    ledger = _ProofLedger()
+    child_evidence = _ChildEvidence()
+    _install_child_evidence(monkeypatch, child_evidence)
+    _install_batch_answer_capture(monkeypatch, child_evidence)
+    proof_tool = dspy.Tool(
+        ledger.verify_batch,
+        name="verify_batch",
+        desc="Verify ordered two-child batch answers exactly once.",
+    )
+    proof_views = MappingProxyType(
+        {
+            "verify_batch": ToolEventView(
+                input_projection=lambda values: {"result_count": len(values.get("results") or ())},
+                output_projection=lambda result: {"ok": bool(result.get("ok"))},
+            )
+        }
+    )
+    cleanup_failures: tuple[str, ...] = ()
+    app = create_app(settings=settings)
+    with TestClient(app) as client:
+        resources, preparation = live_runtime(app)
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
+        session_id: UUID | None = None
+        try:
+            created = client.post("/api/sessions", json={"title": "Daytona recursive batch canary"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            prompt_a = (
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_A}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
+            )
+            prompt_b = (
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_B}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
+            )
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Execute the narrow native DSPy two-child batch proof. Run exactly one recursive"
+                        " Daytona batch. First set prompt_a and prompt_b to the exact strings below, then"
+                        " call outcomes = rlm_query_batched(tasks=["
+                        "{'task': prompt_a, 'inputs': []}, {'task': prompt_b, 'inputs': []}]) once."
+                        f" prompt_a = {prompt_a!r}. prompt_b = {prompt_b!r}."
+                        " Do not call rlm_query, do not call llm_query, and do not nest batching."
+                        " After the batch returns, require every outcome status to be completed and set"
+                        " results = [outcome['answer'] for outcome in outcomes]. In a later iteration call"
+                        " verify_batch(results=results) exactly once and require its ok result. Finally"
+                        " issue exactly one typed SUBMIT with a brief completion answer and evidence='two-child"
+                        " rlm_query_batched'. Do not retry and do not use extraction fallback."
+                    ),
+                },
+                headers={"Idempotency-Key": f"daytona-recursive-batch-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("finishReason") == "stop"
+            batch = _batch_completion(chunks)
+            assert batch is not None
+            assert batch["answer_count"] == 2
+            assert batch["peak_child_concurrency"] == 2
+            assert ledger.calls == 1
+            assert ledger.ordered
+            assert child_evidence.batch_answers == [_TOKEN_A, _TOKEN_B]
+            assert child_evidence.sandbox_ids == list(dict.fromkeys(child_evidence.sandbox_ids))
+            assert len(child_evidence.sandbox_ids) == 2
+            assert child_evidence.sandbox_ids[0] != child_evidence.sandbox_ids[1]
+            assert len(child_evidence.volume_subpaths) == 2
+            # Semantic children are deliberately volumeless. Session-analysis
+            # children instead receive distinct scoped Volume subpaths.
+            assert (
+                child_evidence.volume_subpaths == ["", ""]
+                or child_evidence.volume_subpaths[0] != child_evidence.volume_subpaths[1]
+            )
+            assert sorted(child_evidence.call_indexes) == [1, 2]
+            assert child_evidence.peak_observed == 2
+            assert child_evidence.cleanups == 2
+            assert child_evidence._active == 0
+            trace_id = _trace_id_from_chunks(chunks)
+            trace_evidence = _retrieve_trace_hierarchy(trace_id)
+            runtime = getattr(resources, "runtime", resources)
+            retained_roots = tuple(runtime.roots)
+            assert len(retained_roots) == 1
+            followup = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Verify the fresh execution namespace for this second Turn. Do not call any tools. "
+                        "Execute assert 'outcomes' not in globals(), then typed "
+                        "SUBMIT(answer='fresh invocation confirmed', evidence='namespace reset')."
+                    )
+                },
+                headers={"Idempotency-Key": f"daytona-retained-root-{uuid4()}"},
+            )
+            assert followup.status_code == 200
+            followup_chunks, followup_done = _sse_chunks(followup)
+            assert followup_done == 1
+            assert followup_chunks[-1].get("finishReason") == "stop"
+            assert tuple(runtime.roots) == retained_roots
+            followup_code = "\n".join(
+                str(chunk.get("data", {}).get("code", ""))
+                for chunk in followup_chunks
+                if chunk.get("type") == "data-rlm-code"
+            )
+            assert "globals()" in followup_code
+            assert "fresh invocation confirmed" in str(followup_chunks)
+            close = getattr(runtime, "close_root_session", None)
+            if callable(close):
+                assert client.portal is not None
+                client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
+            assert resources._admission._semaphore._value == settings.max_active_daytona_leases
+            assert resources.active_leases.holder(session_id) is None
+            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            assert len(structured) == 1
+            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+            generated_code = "\n".join(
+                str(chunk.get("data", {}).get("code", "")) for chunk in chunks if chunk.get("type") == "data-rlm-code"
+            )
+            assert "rlm_query_batched" in generated_code
+        finally:
+            assert client.portal is not None
+            cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
+            assert cleanup_failures == (), "recursive batch canary cleanup did not settle"
+    write_receipt(
+        {
+            "schema": "fleet.p35d-root-batch/v1",
+            "candidate": candidate_identity(),
+            "assertions": {
+                "ordered_root_batch": True,
+                "retained_root_second_turn": True,
+                "native_child_count": 2,
+                "peak_child_concurrency": child_evidence.peak_observed,
+            },
+            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "trace": trace_evidence,
+            "passed": True,
+        }
+    )
+
+
+def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One real sibling survives an injected ordinary failure after the first lease is acquired."""
+    settings = _load_live_settings(tmp_path, monkeypatch)
+    ledger = _PartialProofLedger()
+    child_evidence = _ChildEvidence()
+    _install_child_evidence(monkeypatch, child_evidence)
+    original_invoke = RecursiveRLMExecutor._run_native_child
+    original_batch = RecursiveRLMExecutor._call_children_batched
+
+    def inject_first_failure(self: RecursiveRLMExecutor, *args: Any, **kwargs: Any) -> Any:
+        call = args[1]
+        if call.call_index == 1:
+            raise ValueError("P6D.4 injected ordinary child invocation failure")
+        return original_invoke(self, *args, **kwargs)
+
+    def capture_batch(self: RecursiveRLMExecutor, tasks: list[Mapping[str, object]]) -> list[dict[str, object]]:
+        ledger.batch_calls += 1
+        outcomes = original_batch(self, tasks)
+        ledger.outcomes = outcomes
+        return outcomes
+
+    monkeypatch.setattr(RecursiveRLMExecutor, "_run_native_child", inject_first_failure)
+    monkeypatch.setattr(RecursiveRLMExecutor, "_call_children_batched", capture_batch)
+    proof_tool = dspy.Tool(
+        ledger.verify_partial,
+        name="verify_partial",
+        desc="Verify one failed child and one preserved successful child exactly once.",
+    )
+    proof_views = MappingProxyType(
+        {
+            "verify_partial": ToolEventView(
+                input_projection=lambda values: {"status_count": len(values.get("statuses") or ())},
+                output_projection=lambda result: {"ok": bool(result.get("ok"))},
+            )
+        }
+    )
+    app = create_app(settings=settings)
+    cleanup_failures: tuple[str, ...] = ()
+    trace_id: str | None = None
+    with TestClient(app) as client:
+        resources, preparation = live_runtime(app)
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(preparation.capabilities, (proof_tool,), proof_views),
+        )
+        try:
+            created = client.post("/api/sessions", json={"title": "Daytona recursive partial canary"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            failed_prompt = "Investigate the first isolated child task. This test injects a failure at invocation."
+            successful_prompt = (
+                f'In one iteration call typed SUBMIT(answer="{_TOKEN_B}", evidence=[], gaps=[], '
+                "result_files=[]). Do not call rlm_query or rlm_query_batched."
+            )
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Run exactly one rlm_query_batched call with two independent input-free tasks. "
+                        "Set outcomes = rlm_query_batched(tasks=[{'task': failed_prompt, 'inputs': []}, "
+                        "{'task': successful_prompt, 'inputs': []}]) once. "
+                        f"failed_prompt = {failed_prompt!r}. successful_prompt = {successful_prompt!r}. "
+                        "After it returns, require statuses = [item['status'] for item in outcomes] "
+                        "to equal ['failed', 'completed']. Require the failed answer, evidence, and result_files "
+                        "to be empty. Call verify_partial(statuses=statuses, "
+                        "surviving_answer=outcomes[1]['answer'], failed_trusted_fields="
+                        "int(bool(outcomes[0]['answer'])) + len(outcomes[0]['evidence']) + "
+                        "len(outcomes[0]['result_files'])) exactly once and require ok. "
+                        "Then issue one typed SUBMIT with a brief answer identifying the surviving child and "
+                        "evidence='ordered partial child outcomes'. Do not retry or run any other recursive call."
+                    )
+                },
+                headers={"Idempotency-Key": f"daytona-recursive-partial-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("finishReason") == "stop"
+            assert ledger.batch_calls == ledger.calls == 1
+            assert ledger.verified
+            assert ledger.outcomes is not None
+            assert [item["status"] for item in ledger.outcomes] == ["failed", "completed"]
+            assert ledger.outcomes[0]["answer"] == ""
+            assert ledger.outcomes[0]["evidence"] == ledger.outcomes[0]["result_files"] == []
+            assert ledger.outcomes[1]["answer"] == _TOKEN_B
+            assert sorted(child_evidence.call_indexes) == [1, 2]
+            assert len(set(child_evidence.sandbox_ids)) == 2
+            assert child_evidence.cleanups == 2
+            assert child_evidence._active == 0
+            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            assert len(structured) == 1
+            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+            code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+            submit_calls = [
+                node
+                for chunk in code_chunks
+                for node in ast.walk(ast.parse(str(chunk.get("data", {}).get("code", ""))))
+                if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SUBMIT"
+            ]
+            assert len(submit_calls) == 1
+            trace_ids = {
+                metadata["traceId"]
+                for chunk in chunks
+                for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                if isinstance(metadata, dict) and isinstance(metadata.get("traceId"), str)
+            }
+            assert len(trace_ids) <= 1
+            trace_id = next(iter(trace_ids), None)
+        finally:
+            assert client.portal is not None
+            cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
+            assert cleanup_failures == (), "recursive partial canary cleanup did not settle"
+    write_receipt(
+        {
+            "schema": "fleet.p6d4-partial/v1",
+            "candidate": candidate_identity(),
+            "recursion_enabled": True,
+            "root_model": settings.root_model,
+            "sub_model": settings.sub_model,
+            "trace_id": trace_id,
+            "trace_status": "available" if trace_id else "unavailable",
+            "assertions": {
+                "one_turn_post": True,
+                "ordered_failed_completed": True,
+                "surviving_answer_verified": True,
+                "failed_trusted_fields_empty": True,
+                "batch_calls": ledger.batch_calls,
+                "child_leases": len(child_evidence.sandbox_ids),
+                "typed_root_submission": True,
+            },
+            "cleanup": {"confirmed_absent": not cleanup_failures, "child_closes": child_evidence.cleanups},
+            "passed": True,
+        }
+    )

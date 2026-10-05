@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime
 from threading import Lock
 from typing import Protocol
@@ -168,65 +168,8 @@ def validate_sandbox_binding(binding: SandboxBinding) -> SandboxBinding:
     return binding
 
 
-class InMemorySandboxBindingStore:
-    """Test/local binding store that does not require SQL."""
-
-    def __init__(self) -> None:
-        self._items: dict[UUID, SandboxBinding] = {}
-
-    async def get(self, session_id: UUID) -> SandboxBinding | None:
-        return self._items.get(session_id)
-
-    async def get_scoped(self, session_id: UUID, *, workspace_id: UUID) -> SandboxBinding | None:
-        binding = self._items.get(session_id)
-        if binding is None or binding.workspace_id != workspace_id:
-            return None
-        return binding
-
-    async def upsert(self, binding: SandboxBinding) -> SandboxBinding:
-        validate_sandbox_binding(binding)
-        existing = self._items.get(binding.session_id)
-        if existing is not None and existing.workspace_id != binding.workspace_id:
-            raise ValueError("sandbox binding workspace scope mismatch")
-        if existing is not None and binding.generation < existing.generation:
-            raise ValueError("stale sandbox binding generation")
-        if (
-            existing is not None
-            and binding.generation == existing.generation
-            and binding.sandbox_id != existing.sandbox_id
-        ):
-            raise ValueError("conflicting sandbox binding identity for generation")
-        if (
-            existing is not None
-            and binding.generation == existing.generation
-            and existing.sandbox_id == binding.sandbox_id
-            and existing.provider_state != "running"
-            and binding.provider_state == "running"
-        ):
-            raise ValueError("stale running sandbox binding generation")
-        self._items[binding.session_id] = binding
-        return binding
-
-    async def replace_with_next_generation(self, binding: SandboxBinding) -> SandboxBinding:
-        """Atomically allocate the next identity generation for local state."""
-        validate_sandbox_binding(binding)
-        existing = self._items.get(binding.session_id)
-        if existing is not None and existing.workspace_id != binding.workspace_id:
-            raise ValueError("sandbox binding workspace scope mismatch")
-        if existing is None:
-            generation = binding.generation
-        elif existing.sandbox_id == binding.sandbox_id and existing.provider_state == "running":
-            generation = existing.generation
-        else:
-            generation = existing.generation + 1
-        replacement = replace(binding, generation=generation)
-        self._items[binding.session_id] = replacement
-        return replacement
-
-
 __all__ = [
     "BindingGenerationAuthority",
-    "InMemorySandboxBindingStore",
     "SandboxBinding",
     "SandboxBindingStore",
     "require_non_zero_workspace_id",

@@ -1,39 +1,35 @@
-{"type": "start", "messageId": "11111111-1111-1111-1111-111111111111", "messageMetadata": {"schemaVersion": 1, "runId": "11111111-1111-1111-1111-111111111111", "sessionId": "00000000-0000-0000-0000-000000000000", "createdAt": "2026-01-01T00:00:00+00:00", "delivery": "live"}}
-{"type": "data-status", "data": {"phase": "execution", "status": "running", "message": "preparing skills"}, "transient": true}
-{"type": "data-child-progress", "id": "child-1", "data": {"child_id": "child-1", "task_label": "Inspect selected evidence", "state": "running", "elapsed_ms": 12, "evidence": [], "gaps": [], "result_file_count": 0, "cleanup_state": "pending", "parent_run_id": "11111111-1111-1111-1111-111111111111"}}
-{"type": "data-skill", "id": "skill-inspect", "data": {"skill_id": "skill-inspect", "name": "inspect", "version": "1.0.0", "phase": "activated", "trust": "system", "affordances": ["read"]}}
-{"type": "data-skill", "id": "skill-exec", "data": {"skill_id": "skill-exec", "name": "exec", "version": "1.2.0", "phase": "loaded"}}
-{"type": "start-step"}
-{"type": "reasoning-start", "id": "reasoning-11111111-1111-1111-1111-111111111111-1"}
-{"type": "reasoning-delta", "id": "reasoning-11111111-1111-1111-1111-111111111111-1", "delta": "Let me think"}
-{"type": "reasoning-delta", "id": "reasoning-11111111-1111-1111-1111-111111111111-1", "delta": "Let me think through the steps"}
-{"type": "reasoning-end", "id": "reasoning-11111111-1111-1111-1111-111111111111-1"}
-{"type": "data-rlm-code", "id": "code-11111111-1111-1111-1111-111111111111-1", "data": {"code": "print(1)", "step": 1, "is_delta": false, "is_final": true}}
-{"type": "data-rlm-output", "id": "output-11111111-1111-1111-1111-111111111111-1", "data": {"output": "1", "step": 1, "is_delta": false, "is_final": true}}
-{"type": "finish-step"}
-{"type": "start-step"}
-{"type": "tool-input-available", "toolCallId": "tool-1", "toolName": "shell", "input": {"cmd": "ls"}, "dynamic": true, "providerExecuted": true}
-{"type": "tool-output-available", "toolCallId": "tool-1", "output": {"exit_code": 0}, "dynamic": true, "providerExecuted": true}
-{"type": "tool-input-available", "toolCallId": "tool-2", "toolName": "shell", "input": {"cmd": "missing"}, "dynamic": true, "providerExecuted": true}
-{"type": "tool-output-error", "toolCallId": "tool-2", "errorText": "command not found", "dynamic": true, "providerExecuted": true}
-{"type": "data-attachment", "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "data": {"attachment_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "filename": "input.txt", "phase": "read", "byte_size": 2, "attachmentId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "byteSize": 2}}
-{"type": "data-artifact", "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "data": {"artifact_id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "artifact_kind": "markdown", "title": "report", "media_type": "text/markdown", "byte_size": 3, "checksum_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
-{"type": "data-usage", "id": "usage-11111111-1111-1111-1111-111111111111", "data": {"usage": {"iterations": 2, "observed_lm_usage": {}, "duration_ms": 10}}}
-{"type": "data-structured-result", "id": "result-11111111-1111-1111-1111-111111111111", "data": {"schema_id": "answer", "schema_version": "1", "value": 7}}
-{"type": "data-warning", "data": {"message": "deprecated option", "code": "warn-1"}}
-{"type": "text-start", "id": "text-11111111-1111-1111-1111-111111111111"}
-{"type": "text-delta", "id": "text-11111111-1111-1111-1111-111111111111", "delta": "hello"}
-{"type": "text-end", "id": "text-11111111-1111-1111-1111-111111111111"}
-{"type": "finish-step"}
-{"type": "finish", "finishReason": "stop", "messageMetadata": {"schemaVersion": 1, "runId": "11111111-1111-1111-1111-111111111111", "sessionId": "00000000-0000-0000-0000-000000000000", "checkpointVersion": 1, "durationMs": 42, "idempotentReplay": false}}
+{"type": "turn_start", "runId": "11111111-1111-1111-1111-111111111111", "sessionId": "00000000-0000-0000-0000-000000000000", "delivery": "live"}
+{"type": "turn_status", "phase": "execution", "status": "running", "message": "preparing skills"}
+{"childId": "child-1", "taskLabel": "Inspect selected evidence", "state": "running", "elapsedMs": 12, "type": "child_progress", "cleanupState": "pending", "parentRunId": "11111111-1111-1111-1111-111111111111", "evidence": [], "gaps": [], "resultFileCount": 0}
+{"type": "skill", "skillId": "skill-inspect", "name": "inspect", "phase": "activated", "version": "1.0.0", "trust": "system", "affordances": ["read"]}
+{"type": "skill", "skillId": "skill-exec", "name": "exec", "phase": "loaded", "version": "1.2.0"}
+{"type": "step_start", "step": 1}
+{"type": "reasoning", "streamId": "1", "step": 1, "text": "Let me think", "delta": "Let me think", "final": false}
+{"type": "reasoning", "streamId": "1", "step": 1, "text": "Let me think through the steps", "delta": "Let me think through the steps", "final": true}
+{"type": "code", "streamId": "1", "step": 1, "code": "print(1)", "isDelta": false, "final": true}
+{"type": "output", "streamId": "1", "step": 1, "output": "1", "isDelta": false, "final": true}
+{"type": "step_finish", "step": 1}
+{"type": "step_start", "step": 2}
+{"type": "tool_call", "toolCallId": "tool-1", "toolName": "shell", "input": {"cmd": "ls"}}
+{"type": "tool_result", "toolCallId": "tool-1", "toolName": "shell", "output": {"exit_code": 0}}
+{"type": "tool_call", "toolCallId": "tool-2", "toolName": "shell", "input": {"cmd": "missing"}}
+{"type": "tool_result", "toolCallId": "tool-2", "toolName": "shell", "error": "command not found"}
+{"type": "attachment", "attachmentId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", "phase": "read", "filename": "input.txt", "byteSize": 2}
+{"type": "artifact", "artifactId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", "artifactKind": "markdown", "title": "report", "mediaType": "text/markdown", "byteSize": 3, "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
+{"type": "usage", "iterations": 2, "durationMs": 10, "usage": {"iterations": 2, "observed_lm_usage": {}, "duration_ms": 10}}
+{"type": "structured_result", "schemaId": "answer", "schemaVersion": "1", "value": 7}
+{"type": "warning", "message": "deprecated option", "code": "warn-1"}
+{"type": "text", "streamId": "text", "delta": "hello", "text": "", "final": false, "role": "assistant"}
+{"type": "text", "streamId": "text", "delta": "", "text": "hello world", "final": true, "role": "assistant"}
+{"type": "step_finish", "step": 2}
+{"type": "turn_finish", "finishReason": "stop", "status": "completed", "checkpointVersion": 1, "durationMs": 42}
 [DONE]
-{"type": "start", "messageId": "22222222-2222-2222-2222-222222222222", "messageMetadata": {"schemaVersion": 1, "runId": "22222222-2222-2222-2222-222222222222", "sessionId": "00000000-0000-0000-0000-000000000000", "createdAt": "2026-01-01T00:00:00+00:00", "delivery": "live"}}
-{"type": "text-start", "id": "text-22222222-2222-2222-2222-222222222222"}
-{"type": "text-delta", "id": "text-22222222-2222-2222-2222-222222222222", "delta": "partial answer"}
-{"type": "error", "errorText": "Turn failed"}
-{"type": "finish", "finishReason": "error"}
+{"type": "turn_start", "runId": "22222222-2222-2222-2222-222222222222", "sessionId": "00000000-0000-0000-0000-000000000000", "delivery": "live"}
+{"type": "text", "streamId": "text", "delta": "partial answer", "text": "", "final": false, "role": "assistant"}
+{"type": "turn_error", "message": "Turn failed", "code": "execution_failed"}
+{"type": "turn_finish", "finishReason": "error", "status": "error"}
 [DONE]
-{"type": "start", "messageId": "33333333-3333-3333-3333-333333333333", "messageMetadata": {"schemaVersion": 1, "runId": "33333333-3333-3333-3333-333333333333", "sessionId": "00000000-0000-0000-0000-000000000000", "createdAt": "2026-01-01T00:00:00+00:00", "delivery": "live"}}
-{"type": "start-step"}
-{"type": "abort", "reason": "Turn cancelled"}
+{"type": "turn_start", "runId": "33333333-3333-3333-3333-333333333333", "sessionId": "00000000-0000-0000-0000-000000000000", "delivery": "live"}
+{"type": "step_start", "step": 1}
+{"type": "turn_cancelled", "reason": "Turn cancelled"}
 [DONE]

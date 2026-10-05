@@ -196,5 +196,3 @@ notebooks/
 
 # chunk review context artifacts
 .chunk/context/
-
-tests/unit/backend/daytona/__pycache__/

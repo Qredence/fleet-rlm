@@ -106,6 +106,15 @@ def _invalid_category() -> MemoryToolError:
     return MemoryToolError("invalid_category", "Workspace Memory category is invalid")
 
 
+def _norm_tool_cat(category: str | None) -> str | None:
+    if category is None:
+        return None
+    try:
+        return normalize_workspace_memory_category(category)
+    except WorkspaceMemoryCategoryError as exc:
+        raise _invalid_category() from exc
+
+
 def _invalid_id() -> MemoryToolError:
     return MemoryToolError("invalid_id", "Workspace Memory id is invalid")
 
@@ -274,13 +283,13 @@ def search_workspace_memory_entries(
         for t in tokens:
             doc_counts[t] = doc_counts.get(t, 0) + 1
 
+    unique_query = tuple(dict.fromkeys(query_tokens))
+    query_set = set(unique_query)
+    num_docs = len(entries)
     scored: list[_ScoredMemoryEntry] = []
     for ordinal, (entry, text, tokens) in enumerate(zip(entries, doc_texts, doc_tokens, strict=True)):
-        score = 0.0
-        for t in dict.fromkeys(query_tokens):
-            if t in tokens:
-                score += 1.0 + math.log2((1 + len(entries)) / (1 + doc_counts[t]))
-        if set(dict.fromkeys(query_tokens)) <= tokens:
+        score = sum(1.0 + math.log2((1 + num_docs) / (1 + doc_counts[t])) for t in unique_query if t in tokens)
+        if query_set <= tokens:
             score += 1.0
         if normalized_query in text:
             score += 3.0
@@ -425,9 +434,6 @@ class WorkspaceMemory:
             raise MemoryMigrationError("Workspace Memory legacy migration failed verification")
         self._retire_legacy(legacy)
         return verified.content
-
-    def _read_content(self) -> str:
-        return self._ensure_canonical_locked()
 
     def _read_bounded_tail(self, byte_budget: int) -> MemoryStorageRead:
         if type(byte_budget) is not int or byte_budget < 1:
@@ -1186,14 +1192,7 @@ class WorkspaceMemoryToolHost:
             normalized_after = self._normalize_id(after) if after else None
             if type(limit) is not int or not 1 <= limit <= WORKSPACE_MEMORY_MAX_LIST_LIMIT:
                 raise _invalid_entry()
-            normalized_category: str | None
-            if category is None:
-                normalized_category = None
-            else:
-                try:
-                    normalized_category = normalize_workspace_memory_category(category)
-                except WorkspaceMemoryCategoryError as exc:
-                    raise _invalid_category() from exc
+            normalized_category = _norm_tool_cat(category)
             try:
                 res = self._store.list_entries(after=normalized_after, limit=limit, category=normalized_category)
             except WorkspaceMemoryEntryNotFoundError as exc:
@@ -1219,14 +1218,7 @@ class WorkspaceMemoryToolHost:
             norm_q = normalize_memory_search_query(query)
             if type(limit) is not int or not 1 <= limit <= SEARCH_MEMORIES_MAX_LIMIT:
                 raise _invalid_entry()
-            normalized_category: str | None
-            if category is None:
-                normalized_category = None
-            else:
-                try:
-                    normalized_category = normalize_workspace_memory_category(category)
-                except WorkspaceMemoryCategoryError as exc:
-                    raise _invalid_category() from exc
+            normalized_category = _norm_tool_cat(category)
             try:
                 scored, warnings = search_workspace_memory_entries(
                     self._store, normalized_query=norm_q, category=normalized_category
@@ -1255,12 +1247,7 @@ class WorkspaceMemoryToolHost:
         ) -> dict[str, object]:
             """Append a provenance-aware correction that supersedes one active entry."""
             normalized_id = self._normalize_id(memory_id)
-            norm_cat: str | None = None
-            if category is not None:
-                try:
-                    norm_cat = normalize_workspace_memory_category(category)
-                except WorkspaceMemoryCategoryError as exc:
-                    raise _invalid_category() from exc
+            norm_cat = _norm_tool_cat(category)
             try:
                 record = self._store.edit_entry(normalized_id, key_learning, category=norm_cat)
             except WorkspaceMemoryEntryNotFoundError as exc:
@@ -1410,107 +1397,102 @@ class WorkspaceMemoryToolHost:
             raise _invalid_entry() from exc
 
     def event_views(self) -> Mapping[str, ToolEventView]:
-        def read_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                (
-                    "ok",
-                    "namespace",
-                    "truncated",
-                    "bytes_returned",
-                    "byte_budget",
-                    "total_bytes",
-                    "skipped_malformed_records",
-                ),
-            )
+        read_fields = (
+            "ok",
+            "namespace",
+            "truncated",
+            "bytes_returned",
+            "byte_budget",
+            "total_bytes",
+            "skipped_malformed_records",
+        )
+        rem_fields = ("ok", "namespace", "memory_id", "category", "entry_bytes", "total_bytes")
+        list_fields = ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records")
+        edit_fields = (
+            "ok",
+            "namespace",
+            "memory_id",
+            "category",
+            "source",
+            "record_version",
+            "updated_at",
+            "entry_bytes",
+        )
+        forget_fields = ("ok", "namespace", "memory_id", "removed")
 
         def remember_input(arguments: Mapping[str, Any]) -> JsonValue:
             learning = arguments.get("key_learning")
-            category = _event_category(arguments.get("category", "General"))
             return {
-                "category": category,
+                "category": _event_category(arguments.get("category", "General")),
                 "key_learning_bytes": len(learning.encode("utf-8")) if isinstance(learning, str) else 0,
             }
 
-        def remember_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "memory_id", "category", "entry_bytes", "total_bytes"))
-
         def list_input(arguments: Mapping[str, Any]) -> JsonValue:
-            projected: dict[str, JsonValue] = {}
-            if arguments.get("after") is not None:
-                projected["after"] = _event_id(arguments.get("after"))
             limit = arguments.get("limit")
-            projected["limit"] = limit if type(limit) is int else None
+            res: dict[str, JsonValue] = {"limit": limit if type(limit) is int else None}
+            if arguments.get("after") is not None:
+                res["after"] = _event_id(arguments.get("after"))
             if arguments.get("category") is not None:
-                projected["category"] = _event_category(arguments.get("category"))
-            return projected
-
-        def list_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                ("ok", "namespace", "count", "truncated", "next_cursor", "skipped_malformed_records"),
-            )
+                res["category"] = _event_category(arguments.get("category"))
+            return res
 
         def search_input(arguments: Mapping[str, Any]) -> JsonValue:
-            query = arguments.get("query")
-            projected: dict[str, JsonValue] = {
-                "query_bytes": len(query.encode("utf-8")) if isinstance(query, str) else 0,
-                "limit": arguments.get("limit") if type(arguments.get("limit")) is int else None,
+            q = arguments.get("query")
+            limit = arguments.get("limit")
+            res: dict[str, JsonValue] = {
+                "query_bytes": len(q.encode("utf-8")) if isinstance(q, str) else 0,
+                "limit": limit if type(limit) is int else None,
             }
             if arguments.get("category") is not None:
-                projected["category"] = _event_category(arguments.get("category"))
-            return projected
+                res["category"] = _event_category(arguments.get("category"))
+            return res
 
         def search_output(result: object) -> JsonValue:
             if not isinstance(result, Mapping):
                 return {}
             entries = result.get("entries")
-            top_ids: list[str] = []
-            if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray)):
-                for item in list(entries)[:8]:
-                    if isinstance(item, Mapping):
-                        raw_id = item.get("id")
-                        if isinstance(raw_id, str):
-                            top_ids.append(raw_id)
-            projected = cast(
-                Mapping[str, JsonValue],
-                _output(result, ("ok", "namespace", "count", "truncated", "skipped_malformed_records")),
-            )
-            return {**dict(projected), "top_memory_ids": tuple(top_ids)}
+            top_ids = [
+                item.get("id")
+                for item in (
+                    entries[:8]
+                    if isinstance(entries, Sequence) and not isinstance(entries, (str, bytes, bytearray))
+                    else ()
+                )
+                if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+            ]
+            projected = _output(result, ("ok", "namespace", "count", "truncated", "skipped_malformed_records"))
+            return {**cast(Mapping[str, JsonValue], projected), "top_memory_ids": tuple(top_ids)}
 
         def edit_input(arguments: Mapping[str, Any]) -> JsonValue:
             learning = arguments.get("key_learning")
-            projected: dict[str, JsonValue] = {
+            res: dict[str, JsonValue] = {
                 "memory_id": _event_id(arguments.get("memory_id")),
                 "key_learning_bytes": len(learning.encode("utf-8")) if isinstance(learning, str) else 0,
             }
             if arguments.get("category") is not None:
-                projected["category"] = _event_category(arguments.get("category"))
-            return projected
-
-        def edit_output(result: object) -> JsonValue:
-            return _output(
-                result,
-                ("ok", "namespace", "memory_id", "category", "source", "record_version", "updated_at", "entry_bytes"),
-            )
-
-        def forget_input(arguments: Mapping[str, Any]) -> JsonValue:
-            return {"memory_id": _event_id(arguments.get("memory_id"))}
-
-        def forget_output(result: object) -> JsonValue:
-            return _output(result, ("ok", "namespace", "memory_id", "removed"))
+                res["category"] = _event_category(arguments.get("category"))
+            return res
 
         return MappingProxyType(
             {
-                "read_workspace_memory": ToolEventView(output_projection=read_output),
-                "remember": ToolEventView(input_projection=remember_input, output_projection=remember_output),
-                "update_workspace_memory": ToolEventView(
-                    input_projection=remember_input, output_projection=remember_output
+                "read_workspace_memory": ToolEventView(output_projection=lambda res: _output(res, read_fields)),
+                "remember": ToolEventView(
+                    input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
                 ),
-                "list_memories": ToolEventView(input_projection=list_input, output_projection=list_output),
+                "update_workspace_memory": ToolEventView(
+                    input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
+                ),
+                "list_memories": ToolEventView(
+                    input_projection=list_input, output_projection=lambda res: _output(res, list_fields)
+                ),
                 "search_memories": ToolEventView(input_projection=search_input, output_projection=search_output),
-                "edit_memory": ToolEventView(input_projection=edit_input, output_projection=edit_output),
-                "forget": ToolEventView(input_projection=forget_input, output_projection=forget_output),
+                "edit_memory": ToolEventView(
+                    input_projection=edit_input, output_projection=lambda res: _output(res, edit_fields)
+                ),
+                "forget": ToolEventView(
+                    input_projection=lambda args: {"memory_id": _event_id(args.get("memory_id"))},
+                    output_projection=lambda res: _output(res, forget_fields),
+                ),
             }
         )
 

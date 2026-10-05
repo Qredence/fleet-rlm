@@ -685,8 +685,12 @@ class _SandboxProcessBackend:
             self._install_setup(broker, timeout)
         if loader_source:
             code = f"{loader_source}\n\n{code}"
+        execute_kwargs: dict[str, Any] = {"timeout_s": timeout}
+        with contextlib.suppress(ValueError, TypeError):
+            if "on_stdout" in inspect.signature(broker.execute).parameters:
+                execute_kwargs["on_stdout"] = on_stdout
         try:
-            result = broker.execute(code, variables or {}, timeout_s=timeout)
+            result = broker.execute(code, variables or {}, **execute_kwargs)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -694,7 +698,7 @@ class _SandboxProcessBackend:
             raise mapped from exc
 
         stdout = str(result.get("stdout") or "")
-        if on_stdout is not None and stdout:
+        if on_stdout is not None and stdout and not result.get("streamed_stdout"):
             on_stdout(stdout)
         failure = result.get("tool_error")
         error = str(result.get("error") or "") or None

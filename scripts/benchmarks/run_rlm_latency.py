@@ -22,11 +22,11 @@ from collections.abc import Iterator, Mapping, Sequence
 from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-import httpx
-from dotenv import load_dotenv
+if TYPE_CHECKING:
+    import httpx
 
 
 def _evaluation_dataset_name(tracking_url: str) -> str:
@@ -981,6 +981,8 @@ def _require_live() -> None:
 
 def _load_repository_env() -> None:
     """Load environment variables from the repository's `.env` file without overriding existing values."""
+    from dotenv import load_dotenv
+
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
@@ -1879,7 +1881,7 @@ def _usage_totals(value: object) -> dict[str, int]:
     return result
 
 
-from scripts.benchmarks.usage_cost import observed_spend as _observed_spend
+from scripts.benchmarks.campaign import observed_spend as _observed_spend
 
 
 def _enforce_campaign_concurrency(row: Mapping[str, Any], campaign: CampaignPreflight) -> None:
@@ -1933,6 +1935,8 @@ def _metrics_query(
     Returns:
         dict[str, Any]: Latency metric results grouped by span name.
     """
+    import httpx
+
     common = {
         "experiment_ids": [experiment_id],
         "view_type": 2,
@@ -2060,6 +2064,8 @@ def run_benchmark(args: argparse.Namespace) -> dict[str, Any]:
         and MLflow span metrics.
     """
     _require_live()
+    import httpx
+
     campaign = _campaign_preflight(args)
     if args.warmups + args.runs > campaign.max_admissions:
         raise BenchmarkError("campaign admission limit is smaller than the requested benchmark samples")
@@ -2394,6 +2400,8 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
         BenchmarkError: If live execution is not enabled or no judge model is configured.
     """
     _require_live()
+    import httpx
+
     if not args.judge_model:
         raise BenchmarkError("evaluate requires --judge-model with an MLflow-supported model URI")
     _configure_judge_environment(args.judge_model)
@@ -2454,7 +2462,7 @@ def run_evaluation(args: argparse.Namespace) -> dict[str, Any]:
             get_scorer(name="evidence_coverage", experiment_id=args.experiment_id),
         ]
     if args.scorers:
-        from scripts.benchmarks.scorers import build_scorers
+        from scripts.benchmarks.judges import build_scorers
 
         requested = [name.strip() for name in args.scorers.split(",") if name.strip()]
         scorers.extend(build_scorers(requested, judge_model=args.judge_model, guidelines=args.guidelines or None))
@@ -2603,145 +2611,95 @@ def _judge_ab_receipt(result: Any, baseline: Sequence[Any], rationale_first: Seq
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """
-    Create the command-line argument parser for benchmark, evaluation, and comparison workflows.
-
-    Returns:
-        argparse.ArgumentParser: Parser configured with command, endpoint, sampling, evaluation, input,
-        and output options.
-    """
+    """Build command-specific options so unrelated flags are rejected early."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "command",
-        choices=(
-            "benchmark",
-            "prepare-evaluation",
-            "evaluate",
-            "compare",
-            "phase6-plan",
-            "phase6-dry-run",
-            "phase6-analyze",
-        ),
-    )
-    parser.add_argument("--api-url", default=DEFAULT_API_URL)
-    parser.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
-    parser.add_argument("--experiment-id", default="1")
-    parser.add_argument("--variant", default="baseline")
-    parser.add_argument("--campaign", help="Explicit bounded live campaign reference")
-    parser.add_argument(
-        "--target",
-        "--campaign-target",
-        dest="campaign_target",
-        help="Explicit non-secret provider target reference",
-    )
-    parser.add_argument("--max-elapsed-seconds", type=int)
-    parser.add_argument("--max-admissions", type=int)
-    parser.add_argument("--max-sandbox-concurrency", type=int)
-    parser.add_argument("--spend-cap", type=float)
-    parser.add_argument(
-        "--max-trial-cost-usd",
-        type=float,
-        help="Per-sample LM spend reservation; provider-reported overruns are detected only after the Turn",
-    )
-    parser.add_argument(
-        "--cleanup-reserve-seconds",
-        type=int,
-        default=900,
-        help="Campaign time held for cleanup and receipt finalization after provider admissions",
-    )
-    parser.add_argument("--workload", choices=WORKLOAD_CHOICES, default=EVIDENCE_WORKLOAD_ID)
-    parser.add_argument("--corpus-seed", choices=CORPUS_SEEDS, type=int, default=CORPUS_SEEDS[0])
-    parser.add_argument("--warmups", type=int, default=3)
-    parser.add_argument("--runs", type=int, default=20)
-    parser.add_argument(
-        "--fixed-input",
-        action="store_true",
-        help="Submit the exact frozen workload text without a per-trial prompt nonce",
-    )
-    parser.add_argument(
-        "--skill-selection",
-        action="append",
-        default=[],
-        metavar="UUID@VERSION",
-        help="Select an exact manifested Skill version for matched benchmark runs",
-    )
-    parser.add_argument(
-        "--reuse-session",
-        action="store_true",
-        help="Reuse the first sample's Session for later Turns; records warm reuse with prior Turn history",
-    )
-    parser.add_argument(
-        "--native-only",
-        action="store_true",
-        help="Require recursion disabled in the configuration before admission and reject observed full-child tool use",
-    )
-    parser.add_argument("--timeout", type=float, default=2_000.0)
-    parser.add_argument(
-        "--judge-model",
-        default=DEFAULT_JUDGE_MODEL,
-        help="MLflow-supported judge URI (default: the probe-verified qwen serving endpoint)",
-    )
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--scorers",
-        default="",
-        help=(
-            "Comma-separated extra scorers beyond correctness/evidence_coverage: "
-            "response_present, tool_evidence_used, guidelines, retrieval_groundedness"
-        ),
-    )
-    parser.add_argument(
-        "--guidelines",
-        default="",
-        help="Guideline text for the guidelines scorer",
-    )
-    parser.add_argument(
-        "--run-name",
-        default="",
-        help="MLflow run name for evaluate (default: quality-<UTC timestamp>); reuse a name to build baselines",
-    )
-    parser.add_argument(
-        "--judge-ab",
-        action="store_true",
-        help="Evaluate baseline and rationale-first judges in memory; never registers either variant",
-    )
-    parser.add_argument(
-        "--evaluation-experiment-id",
-        default="",
-        help="Separate MLflow experiment for --judge-ab evaluation runs",
-    )
-    parser.add_argument("--baseline", type=Path)
-    parser.add_argument("--candidate", type=Path)
-    parser.add_argument("--quality", type=Path)
-    parser.add_argument("--phase6-cases", type=Path, default=PHASE6_CASES_PATH)
-    parser.add_argument("--phase6-outcomes", type=Path)
-    parser.add_argument("--phase6-trials", type=int, default=PHASE6_TRIALS)
-    parser.add_argument("--output", type=Path, required=True)
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    def output(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument("--output", type=Path, required=True)
+
+    def tracking(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument("--api-url", default=DEFAULT_API_URL)
+        command_parser.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
+        command_parser.add_argument("--experiment-id", default="1")
+
+    benchmark = commands.add_parser("benchmark", help="Run the bounded live latency campaign")
+    tracking(benchmark)
+    output(benchmark)
+    benchmark.add_argument("--variant", default="baseline")
+    benchmark.add_argument("--campaign", help="Explicit bounded live campaign reference")
+    benchmark.add_argument("--target", "--campaign-target", dest="campaign_target")
+    benchmark.add_argument("--max-elapsed-seconds", type=int)
+    benchmark.add_argument("--max-admissions", type=int)
+    benchmark.add_argument("--max-sandbox-concurrency", type=int)
+    benchmark.add_argument("--spend-cap", type=float)
+    benchmark.add_argument("--max-trial-cost-usd", type=float)
+    benchmark.add_argument("--cleanup-reserve-seconds", type=int, default=900)
+    benchmark.add_argument("--workload", choices=WORKLOAD_CHOICES, default=EVIDENCE_WORKLOAD_ID)
+    benchmark.add_argument("--corpus-seed", choices=CORPUS_SEEDS, type=int, default=CORPUS_SEEDS[0])
+    benchmark.add_argument("--warmups", type=int, default=3)
+    benchmark.add_argument("--runs", type=int, default=20)
+    benchmark.add_argument("--fixed-input", action="store_true")
+    benchmark.add_argument("--skill-selection", action="append", default=[], metavar="UUID@VERSION")
+    benchmark.add_argument("--reuse-session", action="store_true")
+    benchmark.add_argument("--native-only", action="store_true")
+    benchmark.add_argument("--timeout", type=float, default=2_000.0)
+
+    prepare = commands.add_parser("prepare-evaluation", help="Create or reuse the frozen quality dataset and judges")
+    prepare.add_argument("--mlflow-url", default=DEFAULT_MLFLOW_URL)
+    prepare.add_argument("--experiment-id", default="1")
+    prepare.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
+    output(prepare)
+
+    evaluate = commands.add_parser("evaluate", help="Run the bounded MLflow GenAI quality evaluation")
+    tracking(evaluate)
+    output(evaluate)
+    evaluate.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL)
+    evaluate.add_argument("--timeout", type=float, default=2_000.0)
+    evaluate.add_argument("--dry-run", action="store_true", help="Score the first three dataset rows")
+    evaluate.add_argument("--scorers", default="")
+    evaluate.add_argument("--guidelines", default="")
+    evaluate.add_argument("--run-name", default="")
+    evaluate.add_argument("--judge-ab", action="store_true")
+    evaluate.add_argument("--evaluation-experiment-id", default="")
+
+    compare = commands.add_parser("compare", help="Compare existing benchmark receipts")
+    compare.add_argument("--baseline", type=Path)
+    compare.add_argument("--candidate", type=Path)
+    compare.add_argument("--quality", type=Path)
+    output(compare)
+
+    for command_name, help_text in (
+        ("phase6-plan", "Create the offline Phase 6 schedule receipt"),
+        ("phase6-dry-run", "Validate frozen cases without provider execution"),
+        ("phase6-analyze", "Analyze a supplied Phase 6 outcome receipt"),
+    ):
+        phase = commands.add_parser(command_name, help=help_text)
+        phase.add_argument("--phase6-cases", type=Path, default=PHASE6_CASES_PATH)
+        phase.add_argument("--phase6-trials", type=int, default=PHASE6_TRIALS)
+        if command_name == "phase6-analyze":
+            phase.add_argument("--phase6-outcomes", type=Path)
+        output(phase)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """
-    Run the selected CLI command and write its result as a JSON receipt.
-
-    Parameters:
-        argv (Sequence[str] | None): Optional command-line arguments; uses the process arguments when omitted.
-
-    Returns:
-        int: `0` when the command succeeds, `1` when it fails.
-    """
-    _load_repository_env()
+    """Run one selected benchmark operation and save an exclusive receipt."""
     args = build_parser().parse_args(argv)
+    if args.output.exists():
+        print("benchmark receipt already exists; refusing to replace it", file=sys.stderr)
+        return 2
     try:
-        if args.judge_ab and args.command != "evaluate":
-            raise BenchmarkError("--judge-ab is only valid with the evaluate command")
         if args.command == "benchmark":
             if args.warmups < 0 or args.runs < 1:
                 raise BenchmarkError("warmups must be nonnegative and runs must be positive")
+            _load_repository_env()
             receipt = run_benchmark(args)
         elif args.command == "prepare-evaluation":
+            _load_repository_env()
             receipt = prepare_evaluation(args)
         elif args.command == "evaluate":
+            _load_repository_env()
             receipt = run_evaluation(args)
         elif args.command == "phase6-plan":
             receipt = phase6_plan_receipt(args.phase6_cases, trials=args.phase6_trials)
@@ -2753,7 +2711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             payload = json.loads(args.phase6_outcomes.read_text(encoding="utf-8"))
             outcomes = payload.get("outcomes") if isinstance(payload, Mapping) else None
             if not isinstance(outcomes, list):
-                raise BenchmarkError("Phase 6 outcome file must contain an outcomes list")
+                raise BenchmarkError("phase6 outcome file must contain an outcomes list")
             receipt = analyze_phase6_outcomes(outcomes, cases_path=args.phase6_cases, trials=args.phase6_trials)
         else:
             if args.baseline is None or args.candidate is None:
@@ -2774,8 +2732,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         exit_code = 1
     else:
         exit_code = 0
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    from scripts.benchmarks.campaign import write_receipt_once
+
+    try:
+        write_receipt_once(args.output, receipt)
+    except FileExistsError:
+        print("benchmark receipt was claimed during execution; preserving existing file", file=sys.stderr)
+        return 2
     print(json.dumps(receipt, indent=2, sort_keys=True))
     return exit_code
 

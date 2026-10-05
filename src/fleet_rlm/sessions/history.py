@@ -25,18 +25,27 @@ History container; the function only ever returns the exact installed class.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
-from typing import Final
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, Final, NoReturn, cast
 
 import dspy
 
+from fleet_rlm.rlm.events import JsonValue, ToolEventView
 from fleet_rlm.rlm.result import empty_rlm_usage
 from fleet_rlm.sessions.committed_turn import CommittedTurn, StatusPart, TextPart, UsagePart
-from fleet_rlm.sessions.models import HistoryMessage
+from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
 from fleet_rlm.sessions.run_state import ClaimedRun
 
 __all__ = [
+    "SESSION_HISTORY_RESULT_BYTE_BUDGET",
+    "CommittedSessionHistory",
+    "SessionHistoryToolHost",
     "claimed_history_records",
+    "committed_history_for_claim",
+    "committed_session_history_payload",
     "dspy_history_for_claim",
     "is_committed_conversation_turn",
     "to_canonical_history_records",
@@ -229,3 +238,205 @@ def validate_legacy_records(
             )
         normalized.append({"request": request_value, "answer": answer_value})
     return normalized
+
+
+SESSION_HISTORY_RESULT_BYTE_BUDGET = 262_144
+
+
+@dataclass(frozen=True, slots=True)
+class SessionHistoryToolHost:
+    """Bind one immutable authorized Session History to generated code."""
+
+    history: SessionHistory
+
+    def as_tools(self) -> tuple[dspy.Tool, ...]:
+        def read_session_history(offset: int, limit: int) -> dict[str, object]:
+            """Read a bounded page of canonical committed Session messages."""
+            if offset < 0 or limit < 1 or limit > 20:
+                raise ValueError("Session history request is invalid")
+            total = len(self.history.messages)
+            selected: list[dict[str, object]] = []
+            bytes_returned = 0
+            truncated = False
+            skipped_ordinal: int | None = None
+            current_offset = offset
+            while len(selected) < limit and current_offset < total:
+                message = self.history.messages[current_offset]
+                ordinal = current_offset + 1
+                content_bytes = len(message.content.encode("utf-8"))
+                if content_bytes > SESSION_HISTORY_RESULT_BYTE_BUDGET:
+                    skipped_ordinal = ordinal
+                    truncated = True
+                    current_offset += 1
+                    continue
+                if bytes_returned + content_bytes > SESSION_HISTORY_RESULT_BYTE_BUDGET:
+                    truncated = True
+                    break
+                selected.append(
+                    {
+                        "ordinal": ordinal,
+                        "role": message.role,
+                        "content": message.content,
+                    }
+                )
+                bytes_returned += content_bytes
+                current_offset += 1
+            done = current_offset >= total
+            result: dict[str, object] = {
+                "offset": offset,
+                "next_offset": None if done else current_offset,
+                "total": total,
+                "has_more": not done,
+                "done": done,
+                "messages": selected,
+                "truncated": truncated,
+                "bytes_returned": bytes_returned,
+                "byte_budget": SESSION_HISTORY_RESULT_BYTE_BUDGET,
+            }
+            if skipped_ordinal is not None:
+                result["skipped_ordinal"] = skipped_ordinal
+            return result
+
+        return (
+            dspy.Tool(
+                read_session_history,
+                name="read_session_history",
+                desc=(
+                    "Read a bounded page dictionary of older committed messages only when the current request "
+                    'requires prior-turn evidence. Iterate result["messages"]; each message contains role and '
+                    "content; do not read history for self-contained requests."
+                ),
+                args={
+                    "offset": {"type": "integer", "minimum": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                },
+            ),
+        )
+
+    def event_views(self) -> Mapping[str, ToolEventView]:
+        def project_input(arguments: Mapping[str, Any]) -> JsonValue:
+            return {key: arguments[key] for key in ("offset", "limit") if key in arguments}
+
+        def project_output(result: object) -> JsonValue:
+            if not isinstance(result, Mapping):
+                return {}
+            messages = result.get("messages")
+            values = cast(Mapping[str, JsonValue], result)
+            projected: dict[str, JsonValue] = {
+                key: values[key]
+                for key in (
+                    "offset",
+                    "next_offset",
+                    "total",
+                    "has_more",
+                    "done",
+                    "truncated",
+                    "bytes_returned",
+                    "byte_budget",
+                    "skipped_ordinal",
+                )
+                if key in values
+            }
+            projected["message_count"] = len(messages) if isinstance(messages, list) else 0
+            return projected
+
+        return MappingProxyType(
+            {
+                "read_session_history": ToolEventView(
+                    input_projection=project_input,
+                    output_projection=project_output,
+                )
+            }
+        )
+
+
+_PREVIEW_BUDGET_CHARS = 500
+
+
+class _ImmutableHistoryRecord(dict[str, str]):
+    """Dict-shaped canonical record that cannot be mutated after snapshotting."""
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> NoReturn:
+        raise TypeError("committed Session History is immutable")
+
+    __setitem__ = __delitem__ = clear = pop = popitem = setdefault = update = _immutable  # type: ignore[assignment]
+
+
+def _validate_messages(messages: tuple[dict[str, str], ...]) -> None:
+    for record in messages:
+        if not isinstance(record, dict) or set(record) != {"request", "answer"}:
+            raise ValueError("committed Session History records must have exactly 'request' and 'answer' keys")
+        if not isinstance(record["request"], str) or not isinstance(record["answer"], str):
+            raise ValueError("committed Session History record fields must be strings")
+
+
+@dataclass(frozen=True, slots=True)
+class CommittedSessionHistory(dspy.SandboxSerializable):
+    """Complete canonical Session conversation materialized inside a Sandbox."""
+
+    messages: tuple[dict[str, str], ...]
+
+    def __init__(self, messages: list[dict[str, str]] | tuple[dict[str, str], ...]) -> None:
+        if not all(isinstance(record, dict) for record in messages):
+            raise ValueError("committed Session History records must be dictionaries")
+        validated = tuple(_ImmutableHistoryRecord(record) for record in messages)
+        _validate_messages(validated)
+        object.__setattr__(self, "messages", validated)
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(messages={len(self.messages)})"
+
+    def __str__(self) -> str:
+        return repr(self)
+
+    def sandbox_setup(self) -> str:
+        return (
+            "import json as _fleet_history_json\n"
+            "\n"
+            "class _FleetCommittedHistory:\n"
+            '    """Host-materialized committed Session conversation."""\n'
+            "\n"
+            '    __slots__ = ("messages",)\n'
+            "\n"
+            "    def __init__(self, messages):\n"
+            '        object.__setattr__(self, "messages", list(messages))\n'
+            "\n"
+            "    def __repr__(self):\n"
+            '        return f"_FleetCommittedHistory(messages={len(self.messages)})"\n'
+            "\n"
+            "def _fleet_load_committed_history(raw):\n"
+            "    return _FleetCommittedHistory(_fleet_history_json.loads(raw))\n"
+        )
+
+    def to_sandbox(self) -> bytes:
+        return json.dumps(
+            list(self.messages),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+    def sandbox_assignment(self, var_name: str, data_expr: str) -> str:
+        return (
+            "try:\n"
+            f"    {var_name} = _fleet_load_committed_history({data_expr})\n"
+            "finally:\n"
+            "    del _fleet_load_committed_history\n"
+        )
+
+    def rlm_preview(self, max_chars: int = _PREVIEW_BUDGET_CHARS) -> str:
+        preview = (
+            f"committed session conversation: {len(self.messages)} request/answer records "
+            "(inspect `history.messages` with Python when earlier turns matter)"
+        )
+        return preview[: max(1, min(max_chars, _PREVIEW_BUDGET_CHARS))]
+
+
+def committed_session_history_payload(value: Any) -> Any:
+    if isinstance(value, CommittedSessionHistory):
+        return [dict(record) for record in value.messages]
+    raise TypeError(f"expected CommittedSessionHistory, got {type(value).__name__}")
+
+
+def committed_history_for_claim(claim: ClaimedRun) -> CommittedSessionHistory:
+    committed_turns, user_requests = claimed_history_records(claim)
+    return CommittedSessionHistory(to_canonical_history_records(committed_turns, user_requests=user_requests))

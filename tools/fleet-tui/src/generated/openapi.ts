@@ -1025,403 +1025,298 @@ export interface components {
              * Type
              * @constant
              */
-            type: "start";
+            type: "turn_start";
+            /** Runid */
+            runId: string;
+            /** Sessionid */
+            sessionId?: string | null;
             /**
-             * Messageid
-             * Format: uuid
+             * Delivery
+             * @enum {string}
              */
-            messageId: string;
-            /** Messagemetadata */
-            messageMetadata: {
-                [key: string]: unknown;
-            };
+            delivery?: "live" | "replay";
+            /** Traceid */
+            traceId?: string | null;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "start-step";
+            type: "turn_status";
+            /** Phase */
+            phase: string;
+            /** Status */
+            status?: string | null;
+            /** Message */
+            message?: string | null;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "finish-step";
+            type: "step_start";
+            /** Step */
+            step: number;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "reasoning-start";
-            /** Id */
-            id: string;
+            type: "step_finish";
+            /** Step */
+            step: number;
+            /** Durationms */
+            durationMs?: number | null;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "reasoning-delta";
-            /** Id */
-            id: string;
+            type: "reasoning";
+            /** Streamid */
+            streamId: string;
+            /** Step */
+            step?: number;
+            /** Text */
+            text?: string;
             /** Delta */
-            delta: string;
+            delta?: string;
+            /** Final */
+            final?: boolean;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "reasoning-end";
-            /** Id */
-            id: string;
+            type: "code";
+            /** Streamid */
+            streamId: string;
+            /** Step */
+            step?: number;
+            /** Code */
+            code: string;
+            /** Isdelta */
+            isDelta?: boolean;
+            /** Final */
+            final?: boolean;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "data-status";
-            /** Id */
-            id?: string;
-            /** StatusData */
-            data: {
-                /** Phase */
-                phase: string;
-                /** Status */
-                status?: string | null;
-                /** Detail */
-                detail?: string | null;
-                /** Message */
-                message?: string | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
+            type: "output";
+            /** Streamid */
+            streamId: string;
+            /** Step */
+            step?: number;
+            /** Output */
+            output: string;
+            /** Isdelta */
+            isDelta?: boolean;
+            /** Final */
+            final?: boolean;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "data-child-progress";
-            /** Id */
-            id?: string;
-            /** ChildProgressData */
-            data: {
-                /** Child Id */
-                child_id: string;
-                /** Task Label */
-                task_label: string;
-                /**
-                 * State
-                 * @enum {string}
-                 */
-                state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
-                /** Elapsed Ms */
-                elapsed_ms: number;
-                /** Outcome */
-                outcome?: string | null;
-                /** Evidence */
-                evidence?: string[];
-                /** Gaps */
-                gaps?: string[];
-                /** Result File Count */
-                result_file_count?: number;
-                /** Code Excerpt */
-                code_excerpt?: string | null;
-                /** Output Excerpt */
-                output_excerpt?: string | null;
-                /**
-                 * Cleanup State
-                 * @enum {string}
-                 */
-                cleanup_state: "pending" | "complete" | "failed" | "not_required";
-                /** Parent Run Id */
-                parent_run_id?: string | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-skill";
-            /** Id */
-            id?: string;
-            /** SkillData */
-            data: {
-                /** Skill Id */
-                skill_id: string;
-                /** Name */
-                name: string;
-                /** Version */
-                version: string;
-                /** Phase */
-                phase?: ("activated" | "loaded") | null;
-                /** Trust */
-                trust?: string | null;
-                /** Affordances */
-                affordances?: string[] | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-rlm-code";
-            /** Id */
-            id?: string;
-            /** RLMCodeData */
-            data: {
-                /** Code */
-                code: string;
-                /** Step */
-                step?: number | null;
-                /** Stream Id */
-                stream_id?: string | null;
-                /** Is Delta */
-                is_delta?: boolean | null;
-                /** Is Final */
-                is_final?: boolean | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-rlm-output";
-            /** Id */
-            id?: string;
-            /** RLMOutputData */
-            data: {
-                /** Output */
-                output: string;
-                /** Step */
-                step?: number | null;
-                /** Stream Id */
-                stream_id?: string | null;
-                /** Is Delta */
-                is_delta?: boolean | null;
-                /** Is Final */
-                is_final?: boolean | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "tool-input-available";
+            type: "tool_call";
             /** Toolcallid */
             toolCallId: string;
             /** Toolname */
             toolName: string;
             /** Input */
-            input: unknown;
-            /** Dynamic */
-            dynamic?: boolean | null;
-            /** Providerexecuted */
-            providerExecuted?: boolean | null;
+            input?: unknown;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "tool-output-available";
+            type: "tool_result";
             /** Toolcallid */
             toolCallId: string;
+            /** Toolname */
+            toolName?: string | null;
             /** Output */
-            output: unknown;
-            /** Dynamic */
-            dynamic?: boolean | null;
-            /** Providerexecuted */
-            providerExecuted?: boolean | null;
+            output?: unknown;
+            /** Error */
+            error?: string | null;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "tool-output-error";
-            /** Toolcallid */
-            toolCallId: string;
-            /** Errortext */
-            errorText: string;
-            /** Dynamic */
-            dynamic?: boolean | null;
-            /** Providerexecuted */
-            providerExecuted?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-attachment";
-            /** Id */
-            id?: string;
-            /** AttachmentData */
-            data: {
-                /**
-                 * Attachment Id
-                 * Format: uuid
-                 */
-                attachment_id: string;
-                /** Filename */
-                filename: string;
-                /** Phase */
-                phase?: string | null;
-                /** Byte Size */
-                byte_size?: number | null;
-                /** Attachmentid */
-                attachmentId?: string | null;
-                /** Bytesize */
-                byteSize?: number | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-warning";
-            /** Id */
-            id?: string;
-            /** WarningData */
-            data: {
-                /** Message */
-                message: string;
-                /** Code */
-                code?: string | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-artifact";
-            /** Id */
-            id?: string;
-            /** ArtifactData */
-            data: {
-                /**
-                 * Artifact Id
-                 * Format: uuid
-                 */
-                artifact_id: string;
-                /** Artifact Kind */
-                artifact_kind?: string | null;
-                /** Kind */
-                kind?: string | null;
-                /** Title */
-                title?: string | null;
-                /** Name */
-                name?: string | null;
-                /** Media Type */
-                media_type?: string | null;
-                /** Byte Size */
-                byte_size?: number | null;
-                /** Checksum Sha256 */
-                checksum_sha256?: string | null;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-usage";
-            /** Id */
-            id?: string;
-            /** UsageData */
-            data: {
-                /** Usage */
-                usage: {
-                    [key: string]: unknown;
-                };
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "data-structured-result";
-            /** Id */
-            id?: string;
-            /** StructuredResultData */
-            data: {
-                /** Schema Id */
-                schema_id: string;
-                /** Schema Version */
-                schema_version: string;
-                /** Value */
-                value: unknown;
-            };
-            /** Transient */
-            transient?: boolean | null;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "text-start";
-            /** Id */
-            id: string;
-        } | {
-            /**
-             * Type
-             * @constant
-             */
-            type: "text-delta";
-            /** Id */
-            id: string;
+            type: "text";
+            /** Streamid */
+            streamId?: string;
             /** Delta */
-            delta: string;
+            delta?: string;
+            /** Text */
+            text?: string;
+            /** Final */
+            final?: boolean;
+            /** Role */
+            role?: string;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "text-end";
-            /** Id */
-            id: string;
+            type: "skill";
+            /** Skillid */
+            skillId: string;
+            /** Name */
+            name?: string | null;
+            /** Phase */
+            phase?: string | null;
+            /** Version */
+            version?: string | null;
+            /** Trust */
+            trust?: string | null;
+            /** Affordances */
+            affordances?: string[] | null;
         } | {
+            /** Childid */
+            childId: string;
+            /** Tasklabel */
+            taskLabel: string;
             /**
-             * Type
-             * @constant
-             */
-            type: "finish";
-            /**
-             * Finishreason
+             * State
              * @enum {string}
              */
-            finishReason: "stop" | "error";
-            /** Messagemetadata */
-            messageMetadata?: {
+            state: "not_started" | "running" | "completed" | "failed" | "cancelled" | "timed_out";
+            /** Elapsedms */
+            elapsedMs: number;
+            /**
+             * Type
+             * @constant
+             */
+            type: "child_progress";
+            /** Outcome */
+            outcome?: string | null;
+            /**
+             * Cleanupstate
+             * @enum {string}
+             */
+            cleanupState?: "pending" | "complete" | "failed" | "not_required";
+            /** Parentrunid */
+            parentRunId?: string | null;
+            /** Evidence */
+            evidence?: string[];
+            /** Gaps */
+            gaps?: string[];
+            /** Resultfilecount */
+            resultFileCount?: number;
+            /** Codeexcerpt */
+            codeExcerpt?: string | null;
+            /** Outputexcerpt */
+            outputExcerpt?: string | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "attachment";
+            /** Attachmentid */
+            attachmentId: string;
+            /** Phase */
+            phase?: string | null;
+            /** Filename */
+            filename?: string | null;
+            /** Bytesize */
+            byteSize?: number | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "warning";
+            /** Message */
+            message: string;
+            /** Code */
+            code?: string | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "artifact";
+            /** Artifactid */
+            artifactId: string;
+            /** Artifactkind */
+            artifactKind?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Mediatype */
+            mediaType?: string | null;
+            /** Bytesize */
+            byteSize?: number | null;
+            /** Checksumsha256 */
+            checksumSha256?: string | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "usage";
+            /** Iterations */
+            iterations?: number;
+            /** Durationms */
+            durationMs?: number | null;
+            /** Usage */
+            usage?: {
                 [key: string]: unknown;
-            } | null;
+            };
         } | {
             /**
              * Type
              * @constant
              */
-            type: "abort";
+            type: "structured_result";
+            /** Schemaid */
+            schemaId: string;
+            /** Schemaversion */
+            schemaVersion: string;
+            /** Value */
+            value?: unknown;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "turn_finish";
+            /** Finishreason */
+            finishReason?: string;
+            /** Status */
+            status?: string;
+            /** Checkpointversion */
+            checkpointVersion?: number | null;
+            /** Durationms */
+            durationMs?: number | null;
+            /** Traceid */
+            traceId?: string | null;
+        } | {
+            /**
+             * Type
+             * @constant
+             */
+            type: "turn_cancelled";
             /** Reason */
-            reason: string;
+            reason?: string;
+            /** Durationms */
+            durationMs?: number | null;
         } | {
             /**
              * Type
              * @constant
              */
-            type: "error";
-            /** Errortext */
-            errorText: string;
+            type: "turn_error";
+            /** Message */
+            message: string;
+            /** Code */
+            code?: string;
+            /** Durationms */
+            durationMs?: number | null;
         };
     };
     responses: never;
@@ -1501,7 +1396,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description AI SDK UI v1 UIMessage SSE stream. It opens immediately with a transient data-status prelude (phase=preparation) that repeats every runtime heartbeat until the Turn is claimed and prepared. Claim or preparation failures no longer change the HTTP status: they project closed error + finish chunks inside the stream, and cancellation projects one abort chunk. */
+            /** @description Fleet Turn SSE stream. It opens immediately with a transient turn_status prelude (phase=preparation) that repeats every runtime heartbeat until the Turn is claimed and prepared. Claim or preparation failures project closed turn_error + turn_finish events inside the stream, and cancellation projects one turn_cancelled event. */
             200: {
                 headers: {
                     "Cache-Control"?: string;

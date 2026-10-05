@@ -16,9 +16,9 @@ import dspy
 from pydantic import TypeAdapter
 from pydantic_core import PydanticSerializationError
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.sessions.usage import RLMUsage, empty_rlm_usage
+from fleet_rlm.workspace.artifacts import ArtifactCandidate
 from fleet_rlm.workspace.memory import MemoryCandidate
 
 if TYPE_CHECKING:

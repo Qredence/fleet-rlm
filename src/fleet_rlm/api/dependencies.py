@@ -13,17 +13,17 @@ from fastapi import Depends, HTTPException, Request
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
 from fleet_rlm.app_services import RouteServices, RuntimeInventory, get_route_services, get_runtime_inventory
-from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments import AttachmentLifecycle
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
 from fleet_rlm.observability.mlflow import MLflowRuntime
-from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.models import SessionCatalog
 from fleet_rlm.sessions.task import SessionTaskService
 from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.turns import TurnRuntime
+from fleet_rlm.workspace.artifacts import ArtifactReader
+from fleet_rlm.workspace.attachments import AttachmentLifecycle
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 

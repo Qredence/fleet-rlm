@@ -25,7 +25,7 @@ from fleet_rlm.persistence.database import (
 # operator role must be able to perform the complete write lifecycle; checking
 # only SELECT on ``fleet_sessions`` would let a read-only role pass readiness.
 _REQUIRED_DML_PRIVILEGES: tuple[tuple[str, str], ...] = (
-    *tuple(
+    *(
         (table, action)
         for table in (
             "fleet_sessions",
@@ -38,8 +38,7 @@ _REQUIRED_DML_PRIVILEGES: tuple[tuple[str, str], ...] = (
         )
         for action in ("INSERT", "UPDATE", "DELETE")
     ),
-    # SessionCatalog and AttachmentCatalog lazily create these parent rows
-    # before inserting their dependent records.
+    # Session and Attachment catalogs still seed these local identity rows.
     ("fleet_users", "INSERT"),
     ("fleet_workspaces", "INSERT"),
 )

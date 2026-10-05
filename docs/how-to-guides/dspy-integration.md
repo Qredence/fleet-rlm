@@ -369,7 +369,7 @@ immutable Daytona snapshot name, then run:
 FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
 FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
 uv run pytest -q -n 0 --timeout=900 \
-  tests/live/backend/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
+  tests/live/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
 ```
 
 The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
@@ -394,7 +394,7 @@ credentials, and a clean tracked non-`main` candidate.
 export FLEET_LIVE=1
 export FLEET_LIVE_ROOT_MODEL="your-root-model-id"
 export FLEET_LIVE_SUB_MODEL="your-sub-model-id"
-uv run python scripts/live_daytona_verify.py \
+uv run python scripts/live_daytona_verify.py native \
   --output .scratch/live/native-daytona-run-001.json
 ```
 
@@ -416,7 +416,7 @@ enabled live policy, configured Daytona/model credentials, and a clean tracked
 non-`main` candidate.
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/live_recursive_batch_canary.py \
+FLEET_LIVE=1 uv run python scripts/live_daytona_verify.py recursive-batch \
   --output /tmp/fleet-rlm-recursive-batch-run-001.json
 ```
 

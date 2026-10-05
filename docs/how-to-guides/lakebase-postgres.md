@@ -22,7 +22,7 @@ Project (fleet-rlm)
 
 Fleet RLM accepts a PostgreSQL URL with `sslmode=require` and normalizes it to
 asyncpg's `ssl` connection option. Alembic uses the synchronous psycopg driver
-and owns Fleet's schema (`migrations/`); `scripts/db_init.py` applies the chain
+and owns Fleet's schema (`migrations/`); `scripts/database.py upgrade` applies the chain
 to head. Obtain actual endpoint and database names from the Lakebase Connect
 dialog rather than assuming the example names below.
 
@@ -124,7 +124,7 @@ Databricks MLflow client when a local policy routes traces to Databricks. Then
 initialize the schema:
 
 ```bash
-uv run python scripts/db_init.py
+uv run python scripts/database.py upgrade
 uv run alembic check
 ```
 
@@ -137,7 +137,7 @@ Lakebase target, copies canonical Fleet rows in foreign-key-safe order, and
 retains only counts and deterministic digests in the receipt.
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/migrate_sqlite_to_postgres.py \
+FLEET_LIVE=1 uv run python scripts/database.py import-sqlite \
   --maintenance-window \
   --source-url-env FLEET_SQLITE_SOURCE_URL \
   --target-url-env FLEET_DATABASE_URL \

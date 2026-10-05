@@ -16,7 +16,7 @@ from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionO
 from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
 from fleet_rlm.sessions.models import TurnInput
 from fleet_rlm.sessions.run_state import RunClaim
-from scripts.benchmarks.certify_postgres import project_query_plan
+from scripts.database import postgres_project_query_plan as project_query_plan
 
 
 async def repository_query_plan(postgres_claim_store, record_testsuite_property, operation):

@@ -2,7 +2,7 @@
 
 Organized into 3 authoritative persistence domains:
 1. `sessions.py`: Session catalog, artifacts, attachments, warm pools, sandbox bindings
-2. `turns.py`: Run/turn lifecycle, CAS claims, settlement, recovery, liveness
+2. `run_state.py`: Run/turn lifecycle, CAS claims, settlement, recovery, liveness
 3. `outbox.py`: Memory promotion outbox with CAS claim fencing
 """
 
@@ -11,8 +11,11 @@ from fleet_rlm.persistence.repositories.outbox import (
     MemoryPromotionOutboxSummary,
     SqlAlchemyMemoryPromotionOutbox,
 )
+from fleet_rlm.persistence.repositories.run_state import (
+    ReconciliationSummary,
+    SqlAlchemyRunStateStore,
+)
 from fleet_rlm.persistence.repositories.sessions import (
-    InMemorySessionCatalog,
     SandboxBinding,
     SessionRecord,
     SqlAlchemyArtifactCatalog,
@@ -20,16 +23,9 @@ from fleet_rlm.persistence.repositories.sessions import (
     SqlAlchemySandboxBindingStore,
     SqlAlchemySessionCatalog,
 )
-from fleet_rlm.persistence.repositories.turns import (
-    InMemoryRunStateStore,
-    ReconciliationSummary,
-    SqlAlchemyRunStateStore,
-)
 
 __all__ = [
     "ClaimedMemoryPromotionIntent",
-    "InMemoryRunStateStore",
-    "InMemorySessionCatalog",
     "MemoryPromotionOutboxSummary",
     "ReconciliationSummary",
     "SandboxBinding",

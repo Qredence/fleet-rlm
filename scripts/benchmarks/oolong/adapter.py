@@ -25,14 +25,14 @@ from fleet_rlm.rlm.program import (
 )
 from fleet_rlm.rlm.result import observed_usage
 from fleet_rlm.sessions.context import build_session_context_manifest
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.history import CommittedSessionHistory
 from fleet_rlm.sessions.models import SessionHistory
+from scripts.benchmarks.campaign import observed_spend
 from scripts.benchmarks.oolong.scoring import (
     OOLONG_EVAL_HELPERS_REVISION,
     dnd_process_response,
     synth_process_response,
 )
-from scripts.benchmarks.usage_cost import observed_spend
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_FIXTURE = Path(__file__).with_name("fixture_validation_row.json")
@@ -448,7 +448,7 @@ async def stage_attachment_context_on_lease(
     content_type: str = "text/plain; charset=utf-8",
 ) -> AttachmentContextCapsule:
     """Stage ``context_window_text`` on the lease volume using Turn path policy."""
-    from fleet_rlm.attachments import AttachmentRun, WorkspaceAttachmentPathPolicy
+    from fleet_rlm.workspace.attachments import AttachmentRun, WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.storage import AsyncDaytonaVolumeFS
 
     body = context_text.encode("utf-8")

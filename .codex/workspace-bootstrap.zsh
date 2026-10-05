@@ -32,7 +32,7 @@ else
 fi
 
 echo "python: $(uv run python --version 2>&1)"
-uv run python scripts/check_harness_engineering.py --skip-script-help
+uv run python scripts/check_repo_hygiene.py --skip-script-help
 
 echo "==> Bootstrap complete"
 echo "Use Codex actions for common development commands; use the Makefile for the full command set."

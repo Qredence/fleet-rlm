@@ -55,7 +55,7 @@ and [environment reference](docs/reference/configuration-environment.md).
 ### 3. Initialize and start
 
 ```bash
-uv run python scripts/db_init.py
+uv run python scripts/database.py upgrade
 uv run fleet cli
 ```
 

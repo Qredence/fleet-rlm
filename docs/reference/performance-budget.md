@@ -155,7 +155,7 @@ startup orphan-cleanup race fix:
   with Attachment preparation, Artifact publication, stateful RLM iterations,
   fresh interpreter replacement, Workspace reload, secret audit, and cleanup
   in 197 seconds.
-- `tests/live/backend/test_attachment_artifact_durability.py` and the historical
+- `tests/live/test_attachment_artifact_durability.py` and the historical
   URL-cache durability test (retired in Phase 5) passed after loading the
   repository environment.
 - `uv run fleet doctor daytona` passed repeatedly, proving policy, database,

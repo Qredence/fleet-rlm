@@ -29,8 +29,6 @@ import dspy
 from dspy import CodeInterpreter
 from dspy.utils.exceptions import AdapterParseError
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
-from fleet_rlm.attachments import PreparedAttachment
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
@@ -99,10 +97,12 @@ from fleet_rlm.rlm.result import (
     rlm_termination_mode,
     truncate_public_text,
 )
-from fleet_rlm.sessions.history_transport import CommittedSessionHistory
+from fleet_rlm.sessions.history import CommittedSessionHistory
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
 from fleet_rlm.skills.models import SkillCard, SkillDefinition
+from fleet_rlm.workspace.artifacts import ArtifactCandidate
+from fleet_rlm.workspace.attachments import PreparedAttachment
 from fleet_rlm.workspace.errors import FilesystemToolError
 from fleet_rlm.workspace.memory import MemoryCandidate
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY, WorkspaceCapabilityMetadata

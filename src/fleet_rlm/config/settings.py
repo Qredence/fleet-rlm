@@ -368,6 +368,26 @@ class Settings(BaseModel):
         le=8,
         description="Daytona lease limit with one slot reserved for short-lived host I/O",
     )
+    workspace_io_idle_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="runtime.workspace_io_idle_seconds",
+            group="Runtime",
+            label="Workspace Sandbox idle seconds",
+            editor="number",
+            rank=121,
+        ),
+    ] = Field(default=300, gt=0, description="Idle retention of the single warm Workspace I/O Sandbox")
+    workspace_io_acquisition_timeout_seconds: Annotated[
+        int,
+        FleetFieldPolicy(
+            toml_path="runtime.workspace_io_acquisition_timeout_seconds",
+            group="Runtime",
+            label="Workspace acquisition timeout seconds",
+            editor="number",
+            rank=122,
+        ),
+    ] = Field(default=30, gt=0, description="Bound on Workspace I/O queueing, admission and Sandbox preparation")
     rlm_max_iters: Annotated[
         int,
         FleetFieldPolicy(

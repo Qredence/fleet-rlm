@@ -3,7 +3,7 @@ name: report-builder
 description: Create, save, read back, and verify reports from trusted source data.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   affordances:
     - workspace.files
     - artifacts.publish
@@ -36,7 +36,9 @@ Create the requested report from verified source data.
    and call
    `write_project_text(path="<slug>/<report-path>", content=..., overwrite=False)`.
    The slug is the first path segment and nested subdirectories are allowed;
-   `projects/` is implicit. List or stat the target when needed. Require
+   `projects/` is implicit; an optional `projects/` prefix is an accepted alias
+   for the same path. List or stat only when existing content is a prerequisite,
+   never to infer path syntax from a nonexistent new file. Require
    `ok: true`; use `overwrite=True` only when replacing an intentionally
    chosen existing file.
 5. If the report is at most 10,000 characters, read the same path back with

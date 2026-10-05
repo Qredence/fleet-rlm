@@ -1,0 +1,223 @@
+"""Unit tests for scripts/benchmarks/judges.py: judge and scorer construction and contracts."""
+
+from __future__ import annotations
+
+import sys
+from types import ModuleType, SimpleNamespace
+from typing import Any
+
+import pytest
+
+from scripts.benchmarks.judges import (
+    BUILTIN_SCORER_NAMES,
+    CORRECTNESS_INSTRUCTIONS,
+    CUSTOM_SCORER_NAMES,
+    DEFAULT_EMBEDDING_MODEL,
+    DEFAULT_GUIDELINES,
+    DEFAULT_JUDGE_MODEL,
+    DEFAULT_REFLECTION_MODEL,
+    EVIDENCE_COVERAGE_INSTRUCTIONS,
+    JUDGE_INFERENCE_PARAMS,
+    JUDGE_NAMES,
+    SCORER_NAMES,
+    build_judge,
+    build_scorer,
+    build_scorers,
+    normalized_judge_policy,
+    response_present_impl,
+    tool_evidence_used_impl,
+)
+
+
+def _install_fake_genai(monkeypatch: pytest.MonkeyPatch, *, registered: list | None = None) -> SimpleNamespace:
+    calls = SimpleNamespace(registered=[])
+
+    def make_judge(**kwargs: Any) -> Any:
+        scorer = SimpleNamespace(**kwargs)
+
+        def register(*, experiment_id: str) -> None:
+            calls.registered.append((scorer.name, experiment_id))
+
+        scorer.register = register
+        return scorer
+
+    judges_mod = ModuleType("mlflow.genai.judges")
+    judges_mod.make_judge = make_judge  # type: ignore[attr-defined]
+    scorers_mod = ModuleType("mlflow.genai.scorers")
+    scorers_mod.list_scorers = lambda **_kwargs: list(registered or [])  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "mlflow.genai.judges", judges_mod)
+    monkeypatch.setitem(sys.modules, "mlflow.genai.scorers", scorers_mod)
+    return calls
+
+
+def _install_fake_mlflow_scorers(monkeypatch: pytest.MonkeyPatch) -> None:
+    scorers_mod = ModuleType("mlflow.genai.scorers")
+
+    def fake_scorer(func=None, **_kwargs):
+        if func is not None:
+            return func
+        return lambda function: function
+
+    class _FakeGuidelines:
+        def __init__(self, *, name, guidelines, model) -> None:
+            self.name = name
+            self.guidelines = guidelines
+            self.model = model
+
+    class _FakeRetrievalGroundedness:
+        def __init__(self, *, name, model) -> None:
+            self.name = name
+            self.model = model
+
+    scorers_mod.scorer = fake_scorer  # type: ignore[attr-defined]
+    scorers_mod.Guidelines = _FakeGuidelines  # type: ignore[attr-defined]
+    scorers_mod.RetrievalGroundedness = _FakeRetrievalGroundedness  # type: ignore[attr-defined]
+
+    genai_mod = ModuleType("mlflow.genai")
+    genai_mod.scorers = scorers_mod  # type: ignore[attr-defined]
+
+    monkeypatch.setitem(sys.modules, "mlflow.genai", genai_mod)
+    monkeypatch.setitem(sys.modules, "mlflow.genai.scorers", scorers_mod)
+
+
+class _FakeSpan:
+    def __init__(self, span_type: str, outputs: Any = None) -> None:
+        self.span_type = span_type
+        self.outputs = outputs
+
+
+class _FakeTrace:
+    def __init__(self, spans: list[_FakeSpan] | None = None) -> None:
+        self.data = SimpleNamespace(spans=list(spans or []))
+
+
+# --- Judge Tests ---
+
+
+def test_judge_registry_contract_is_two_boolean_gateway_judges() -> None:
+    assert JUDGE_NAMES == ("correctness", "evidence_coverage")
+    assert DEFAULT_JUDGE_MODEL == "databricks:/databricks-qwen35-122b-a10b"
+    assert DEFAULT_REFLECTION_MODEL.startswith("databricks:/")
+    assert DEFAULT_EMBEDDING_MODEL == "databricks:/databricks-gte-large-en"
+    assert JUDGE_INFERENCE_PARAMS == {"temperature": 0, "reasoning_effort": "low", "max_tokens": 1024}
+    assert "expected_response" in CORRECTNESS_INSTRUCTIONS
+    assert "required_evidence" in EVIDENCE_COVERAGE_INSTRUCTIONS
+
+
+def test_build_judge_wires_fleet_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_genai(monkeypatch)
+    judge = build_judge("correctness", "databricks:/databricks-qwen35-122b-a10b")
+    assert judge.name == "correctness"
+    assert judge.model == "databricks:/databricks-qwen35-122b-a10b"
+    assert judge.feedback_value_type is bool
+
+    with pytest.raises(ValueError, match="unknown Fleet judge"):
+        build_judge("not-a-judge", "databricks:/databricks-qwen35-122b-a10b")
+
+
+def test_build_judge_supports_rationale_first_without_changing_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_genai(monkeypatch)
+    baseline = build_judge("correctness", "databricks:/judge")
+    rationale_first = build_judge("correctness", "databricks:/judge", generate_rationale_first=True)
+
+    assert baseline.generate_rationale_first is False
+    assert rationale_first.generate_rationale_first is True
+    assert normalized_judge_policy(baseline)["generate_rationale_first"] is False
+    assert normalized_judge_policy(rationale_first)["generate_rationale_first"] is True
+
+
+def test_normalized_real_mlflow_judge_uses_behavior_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delitem(sys.modules, "mlflow.genai.judges", raising=False)
+    judge = build_judge("correctness", "databricks:/judge", generate_rationale_first=True)
+
+    policy = normalized_judge_policy(judge)
+
+    assert policy["model"] == "databricks:/judge"
+    assert policy["instructions"] == CORRECTNESS_INSTRUCTIONS
+    assert policy["inference_params"] == JUDGE_INFERENCE_PARAMS
+    assert policy["generate_rationale_first"] is True
+
+
+# --- Scorer Tests ---
+
+
+def test_tool_evidence_used_requires_tool_spans_covering_evidence() -> None:
+    trace = _FakeTrace([_FakeSpan("TOOL", "checked A1 and A8, confirmed receipt on 2025-02-28")])
+    assert tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["A1", "A8"]})
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["A1", "A9"]})
+
+
+def test_tool_evidence_used_is_strict_without_evidence() -> None:
+    trace = _FakeTrace([_FakeSpan("TOOL", "checked A1")])
+    assert not tool_evidence_used_impl(trace=trace, expectations={})
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": []})
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": "A1"})
+    assert not tool_evidence_used_impl(trace=None, expectations={"required_evidence": ["A1"]})
+    llm_only = _FakeTrace([_FakeSpan("LLM", "A1 appears")])
+    assert not tool_evidence_used_impl(trace=llm_only, expectations={"required_evidence": ["A1"]})
+
+
+@pytest.mark.parametrize("required", [[""], [" "], ["A1", ""], [None], [1]])
+def test_tool_evidence_rejects_malformed_requirements(required: list[Any]) -> None:
+    trace = _FakeTrace([_FakeSpan("TOOL", "A1")])
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": required})
+
+
+@pytest.mark.parametrize("expectations", [None, [], "A1", 1])
+def test_tool_evidence_rejects_non_mapping_expectations(expectations: Any) -> None:
+    assert not tool_evidence_used_impl(expectations=expectations)
+
+
+def test_tool_evidence_does_not_accept_identifier_prefixes_or_attributes() -> None:
+    span = SimpleNamespace(span_type="TOOL", outputs="A10", attributes={"requested": "A1"})
+    trace = SimpleNamespace(data=SimpleNamespace(spans=[span]))
+    assert not tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["A1"]})
+    span.outputs = "Verified (A1), source A.2+"
+    assert tool_evidence_used_impl(trace=trace, expectations={"required_evidence": ["a1", "A.2+"]})
+
+
+def test_custom_scorers_build_without_judge_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow_scorers(monkeypatch)
+
+    present = build_scorer("response_present")
+    evidence = build_scorer("tool_evidence_used")
+
+    assert present is response_present_impl
+    assert evidence is tool_evidence_used_impl
+
+
+def test_builtin_scorers_require_judge_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow_scorers(monkeypatch)
+
+    with pytest.raises(ValueError, match="judge-model"):
+        build_scorer("guidelines")
+    with pytest.raises(ValueError, match="judge-model"):
+        build_scorer("retrieval_groundedness")
+
+    guidelines = build_scorer("guidelines", judge_model="databricks:/model")
+    assert guidelines.name == "guidelines"
+    assert guidelines.guidelines == DEFAULT_GUIDELINES
+    assert guidelines.model == "databricks:/model"
+
+    groundedness = build_scorer("retrieval_groundedness", judge_model="databricks:/model")
+    assert groundedness.name == "retrieval_groundedness"
+    assert groundedness.model == "databricks:/model"
+
+
+def test_build_scorer_rejects_unknown_name() -> None:
+    with pytest.raises(ValueError, match="unknown"):
+        build_scorer("not_a_scorer")
+
+
+def test_build_scorers_preserves_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_mlflow_scorers(monkeypatch)
+
+    scorers = build_scorers(["response_present", "tool_evidence_used"], judge_model="databricks:/model")
+    assert scorers == [response_present_impl, tool_evidence_used_impl]
+
+
+def test_scorer_name_catalog_is_disjoint_and_explicit() -> None:
+    assert set(CUSTOM_SCORER_NAMES).isdisjoint(BUILTIN_SCORER_NAMES)
+    assert SCORER_NAMES == CUSTOM_SCORER_NAMES + BUILTIN_SCORER_NAMES
+    assert SCORER_NAMES == ("response_present", "tool_evidence_used", "guidelines", "retrieval_groundedness")

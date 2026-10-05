@@ -79,31 +79,26 @@ _RUNTIME_TYPES = {
 def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
     assert {detail.kind for detail in RUNTIME_DETAIL_TYPES} == _RUNTIME_TYPES
     assert tuple(FLEET_UI_CHUNK_TYPES) == (
-        "start",
-        "start-step",
-        "finish-step",
-        "reasoning-start",
-        "reasoning-delta",
-        "reasoning-end",
-        "data-status",
-        "data-child-progress",
-        "data-skill",
-        "data-rlm-code",
-        "data-rlm-output",
-        "tool-input-available",
-        "tool-output-available",
-        "tool-output-error",
-        "data-attachment",
-        "data-warning",
-        "data-artifact",
-        "data-usage",
-        "data-structured-result",
-        "text-start",
-        "text-delta",
-        "text-end",
-        "finish",
-        "abort",
-        "error",
+        "turn_start",
+        "turn_status",
+        "step_start",
+        "step_finish",
+        "reasoning",
+        "code",
+        "output",
+        "tool_call",
+        "tool_result",
+        "text",
+        "skill",
+        "child_progress",
+        "attachment",
+        "warning",
+        "artifact",
+        "usage",
+        "structured_result",
+        "turn_finish",
+        "turn_cancelled",
+        "turn_error",
     )
     durable = {model.model_fields["type"].default for model in AssistantPartModelUnion}
     assert durable == {
@@ -122,7 +117,7 @@ def test_runtime_and_transport_vocabularies_are_exact_and_disjoint() -> None:
         "structured_result",
         "text",
     }
-    assert {"tool_call", "structured_result"}.isdisjoint(FLEET_UI_CHUNK_TYPES)
+    assert {"turn_start", "turn_finish", "turn_cancelled", "turn_error"}.isdisjoint(durable)
 
 
 def test_public_api_keeps_one_stream_route_and_no_new_auth_surface() -> None:
@@ -199,12 +194,12 @@ def test_projector_preserves_step_pairing_and_settlement_order() -> None:
         chunks.extend(projector.project(event))
 
     types = [chunk["type"] for chunk in chunks]
-    assert types.count("start") == 1
-    assert types.count("start-step") == types.count("finish-step") == 1
-    assert types.index("start-step") < types.index("reasoning-delta") < types.index("data-rlm-code")
-    assert types.index("data-rlm-code") < types.index("data-rlm-output") < types.index("finish-step")
-    assert types.index("data-usage") < types.index("data-structured-result") < types.index("text-start")
-    assert types[-1] == "finish"
+    assert types.count("turn_start") == 1
+    assert types.count("step_start") == types.count("step_finish") == 1
+    assert types.index("step_start") < types.index("reasoning") < types.index("code")
+    assert types.index("code") < types.index("output") < types.index("step_finish")
+    assert types.index("usage") < types.index("structured_result") < types.index("text")
+    assert types[-1] == "turn_finish"
     assert all(FleetUIMessageChunkAdapter.validate_python(chunk, strict=False) is not None for chunk in chunks)
 
 
@@ -267,8 +262,8 @@ def test_trace_metadata_is_confined_to_existing_start_finish_chunks() -> None:
         recorder.record(RunCompleted(1, "live", trace_id=trace_id)),
     )
     chunks = [chunk for event in events for chunk in projector.project(event)]
-    assert chunks[0]["messageMetadata"]["traceId"] == trace_id
-    assert chunks[-1]["messageMetadata"]["traceId"] == trace_id
+    assert chunks[0]["traceId"] == trace_id
+    assert chunks[-1]["traceId"] == trace_id
     assert all(trace_id not in json.dumps(chunk) for chunk in chunks[1:-1])
 
 

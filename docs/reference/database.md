@@ -19,7 +19,7 @@ compatibility and never upgrades automatically.
 
 ```bash
 export FLEET_DATABASE_URL='postgresql+asyncpg://...'
-uv run python scripts/db_init.py
+uv run python scripts/database.py upgrade
 uv run alembic check
 ```
 

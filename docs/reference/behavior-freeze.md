@@ -24,22 +24,22 @@ the behaviors below keep passing their lanes.
 
 | Frozen behavior | Public surface | Owner | Enforcing lanes |
 | --- | --- | --- | --- |
-| Exact `dspy==3.4.0` published dependency | Runtime version guard; locked install; wheel/sdist metadata | Release policy | `tests/unit/backend/packaging/`, `tests/unit/backend/rlm/` |
-| Native RLM execution per Turn | Typed outputs, one native `dspy.RLM` per Turn, stock `dspy.LM` role calls with DSPy-owned retries and no Fleet per-Turn LM deadline or provider-attempt admission, DSPy-owned invocation adapter lifecycle with Fleet-owned Sandbox lease | RLM runner | `tests/unit/backend/rlm/` |
-| Recursion contract | Root depth 0, one native child depth, Root-only batch, shared finalization ledger, Sub-LM fallback | Recursion policy | `tests/unit/backend/rlm/`, `tests/live/backend/` |
-| Turn orchestration | Claim/open/cancellation/deadline/heartbeat, stream settlement, replay determinism | Turn orchestration (`TurnRuntime`) | `tests/unit/backend/chat/` |
-| Atomic Turn settlement | Commit, failure, cancellation settlement; result snapshot and Memory intents | Turn settlement (`RunLifecycleService`) | `tests/unit/backend/chat/`, `tests/unit/backend/turn/test_committed_turn*.py` |
-| Runtime Event vocabulary | Closed v1 event kinds, immutable identity, contiguous ordering, terminal semantics | Runtime Event recorder | `tests/freeze/test_public_stream_gate.py` |
-| SSE transport | Closed projected chunk vocabulary and ordering; wire terminator per ending | SSE projector and stream route | `tests/freeze/test_public_stream_gate.py`, `make api-check` |
+| Exact `dspy==3.4.0` published dependency | Runtime version guard; locked install; wheel/sdist metadata | Release policy | `tests/packaging/`, `tests/rlm/` |
+| Native RLM execution per Turn | Typed outputs, one native `dspy.RLM` per Turn, stock `dspy.LM` role calls with DSPy-owned retries and no Fleet per-Turn LM deadline or provider-attempt admission, DSPy-owned invocation adapter lifecycle with Fleet-owned Sandbox lease | RLM runner | `tests/rlm/` |
+| Recursion contract | Root depth 0, one native child depth, Root-only batch, shared finalization ledger, Sub-LM fallback | Recursion policy | `tests/rlm/`, `tests/live/` |
+| Turn orchestration | Claim/open/cancellation/deadline/heartbeat, stream settlement, replay determinism | Turn orchestration (`TurnRuntime`) | `tests/sessions/` |
+| Atomic Turn settlement | Commit, failure, cancellation settlement; result snapshot and Memory intents | Turn settlement (`RunLifecycleService`) | `tests/sessions/` |
+| Runtime Event vocabulary | Closed v1 event kinds, immutable identity, contiguous ordering, terminal semantics | Runtime Event recorder | `tests/api/` |
+| SSE transport | Closed projected chunk vocabulary and ordering; wire terminator per ending | SSE projector and stream route | `tests/api/`, `make api-check` |
 | pi-tui client | Live/durable projection convergence, timeline/cards/viewport behavior | pi-tui terminal client | `make tui-check`, tuistory interactive lanes |
-| Public failure taxonomy | Closed sanitized HTTP/open-path/terminal categories, messages, phases | Public failure adapters | `tests/freeze/test_failure_taxonomy_golden.py` |
-| Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/unit/backend/workspace/`, `tests/contracts/backend/test_skills_api.py` |
-| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/unit/backend/workspace/test_memory_*.py`, `tests/live/backend/` |
-| Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/unit/backend/workspace/test_attachment_*.py`, `tests/contracts/backend/` |
-| Daytona provider lifecycle | Admission accounting, leases, cleanup and confirmed absence, Volume safety | Daytona runtime owner | `tests/live/backend/` (serial, `FLEET_LIVE=1`) |
-| FastAPI and OpenAPI surface | Route set, one stream route, generated client types | API surface | `make api-check`, `tests/freeze/test_public_stream_gate.py` |
+| Public failure taxonomy | Closed sanitized HTTP/open-path/terminal categories, messages, phases | Public failure adapters | `tests/api/` |
+| Session Workspace and Project products | Explicit tool hosts, tool catalogs, path rules, delete/edit preconditions | Workspace/Project tool hosts | `tests/workspace/`, `tests/skills/` |
+| Workspace Memory | Format, caps, digests, process-local append serialization | Workspace Memory host | `tests/workspace/`, `tests/live/` |
+| Attachments and Artifacts | Upload/list/read, commit-gated publication, checksum integrity | Attachment/Artifact pipeline | `tests/workspace/`, `tests/api/` |
+| Daytona provider lifecycle | Admission accounting, leases, cleanup and confirmed absence, Volume safety | Daytona runtime owner | `tests/live/` (serial, `FLEET_LIVE=1`) |
+| FastAPI and OpenAPI surface | Route set, one stream route, generated client types | API surface | `make api-check`, `tests/api/` |
 | Packaging | Wheel/sdist metadata, entry points, supported Python releases | Release machinery | `make build-release`, `make check-release` |
-| CLI | `fleet cli` supervised loopback composition and bind guard; `fleet doctor daytona` probe; `fleet web`/`fleet-rlm serve-api` | CLI launchers | `tests/unit/backend/cli/`, live lanes |
+| CLI | `fleet cli` supervised loopback composition and bind guard; `fleet doctor daytona` probe; `fleet web`/`fleet-rlm serve-api` | CLI launchers | `tests/cli/`, live lanes |
 
 ## What is not frozen
 
@@ -66,7 +66,7 @@ replacement on the shared Volume — that is durability, not coordination.
 - Deterministic freeze lanes live under `tests/freeze/` and run inside
   `make check`; `make api-check`, `make tui-check`, and `make check-docs`
   gate the generated contracts and these docs.
-- Live Daytona lanes under `tests/live/backend/` run serially with
+- Live Daytona lanes under `tests/live/` run serially with
   `FLEET_LIVE=1` and write sanitized same-SHA receipts under
   `.fleet-evidence/receipts/`; the terminal cleanup proof ties each Runtime
   Event terminal to resource absence and admission baseline.

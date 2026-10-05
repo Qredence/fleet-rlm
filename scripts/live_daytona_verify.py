@@ -20,24 +20,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
-
-from fleet_rlm.config.loader import (
-    ConfigurationEnvironmentContract,
-    load_configuration_environment_contract,
-    require_live_execution,
-)
-from fleet_rlm.config.settings import FleetConfigurationError
-
 RECEIPT_SCHEMA = "fleet.live-daytona-verification/v1"
 EVIDENCE_ENV = "FLEET_LIVE_EVIDENCE_PATH"
 LIVE_AUTH_VALUES = frozenset({"1", "true", "yes"})
 ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
 SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
 _REPO_ROOT = Path(__file__).resolve().parents[1]
-_NATIVE_TEST = "tests/live/backend/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
+_NATIVE_TEST = "tests/live/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi"
 _DURABILITY_TEST = (
-    "tests/live/backend/test_attachment_artifact_durability.py::"
+    "tests/live/test_attachment_artifact_durability.py::"
     "test_staged_attachment_is_readable_and_artifact_survives_replacement"
 )
 DURABILITY_EVIDENCE_RELATIVE = Path(".fleet-evidence/receipts/p35d") / (
@@ -115,7 +106,23 @@ def _candidate() -> tuple[str, str]:
     return sha, branch
 
 
-def _configuration_contract() -> ConfigurationEnvironmentContract:
+def _load_native_integrations() -> None:
+    """Import policy integrations only after the native lane accepts authorization."""
+    global FleetConfigurationError, load_configuration_environment_contract, require_live_execution
+    from fleet_rlm.config.loader import (
+        load_configuration_environment_contract as load_contract,
+    )
+    from fleet_rlm.config.loader import (
+        require_live_execution as require_live,
+    )
+    from fleet_rlm.config.settings import FleetConfigurationError as LoadedFleetConfigurationError
+
+    load_configuration_environment_contract = load_contract
+    require_live_execution = require_live
+    FleetConfigurationError = LoadedFleetConfigurationError
+
+
+def _configuration_contract() -> Any:
     contract = load_configuration_environment_contract()
     if contract.runtime_environment != "daytona" or contract.recursion_enabled:
         raise FleetConfigurationError(
@@ -381,10 +388,12 @@ def _run_contract(
 
 
 def _load_repo_env() -> None:
+    from dotenv import load_dotenv
+
     load_dotenv(_REPO_ROOT / ".env", override=False)
 
 
-def main(argv: list[str] | None = None) -> int:
+def _native_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     output = args.output.expanduser().resolve()
     started_at = _utc_now()
@@ -403,6 +412,7 @@ def main(argv: list[str] | None = None) -> int:
         print("Set FLEET_LIVE=1 to authorize the credentialed live verification.", file=sys.stderr)
         return EXIT_PRECONDITION
 
+    _load_native_integrations()
     _load_repo_env()
     try:
         require_live_execution()
@@ -532,6 +542,158 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_RECEIPT
     print(f"Native Daytona contracts passed; receipt: {output}")
     return 0
+
+
+# Recursive-batch canary lane.
+
+
+from pathlib import Path
+
+CANARY_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+CANARY_TEST = "tests/live/test_daytona_recursive_batch.py::test_daytona_recursive_batch_two_children_through_fastapi"
+
+
+def canary__require_clean_candidate() -> str:
+    """Require the run to start from a clean, named candidate branch."""
+    try:
+        branch = subprocess.run(
+            ["git", "branch", "--show-current"],
+            cwd=CANARY_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=CANARY_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=CANARY_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.splitlines()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("canary candidate identity is unavailable") from exc
+    unexpected = [line for line in status if line and not line.startswith("?? .factory/")]
+    if not branch or branch in {"main", "master"} or unexpected:
+        raise RuntimeError("canary requires a clean tracked candidate branch")
+    return sha
+
+
+def canary__validate_receipt(output: Path) -> None:
+    """Require the canary's complete, metadata-only evidence contract."""
+    try:
+        receipt = json.loads(output.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("canary receipt is not valid JSON") from exc
+    if not isinstance(receipt, dict) or receipt.get("schema") != "fleet.p35d-root-batch/v1":
+        raise RuntimeError("canary receipt has an unexpected schema")
+    candidate = receipt.get("candidate")
+    try:
+        expected_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=CANARY_REPO_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        expected_lock = hashlib.sha256((CANARY_REPO_ROOT / "uv.lock").read_bytes()).hexdigest()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError("canary candidate identity is unavailable") from exc
+    if (
+        not isinstance(candidate, dict)
+        or candidate.get("sha") != expected_sha
+        or candidate.get("tracked_tree_clean") is not True
+        or candidate.get("lockfile_sha256") != expected_lock
+    ):
+        raise RuntimeError("canary receipt does not match the clean candidate")
+    if receipt.get("passed") is not True:
+        raise RuntimeError("canary receipt does not prove success")
+    cleanup = receipt.get("cleanup")
+    if (
+        not isinstance(cleanup, dict)
+        or cleanup.get("confirmed_absent") is not True
+        or cleanup.get("admission_restored") is not True
+    ):
+        raise RuntimeError("canary receipt does not prove cleanup")
+    trace = receipt.get("trace")
+    if (
+        not isinstance(trace, dict)
+        or trace.get("root_span") != "fleet_turn"
+        or not isinstance(trace.get("trace_id"), str)
+        or not trace["trace_id"]
+        or not isinstance(trace.get("child_spans"), int)
+        or trace["child_spans"] < 2
+    ):
+        raise RuntimeError("canary receipt does not prove root and child traces")
+    assertions = receipt.get("assertions")
+    if (
+        not isinstance(assertions, dict)
+        or assertions.get("native_child_count") != 2
+        or assertions.get("ordered_root_batch") is not True
+        or assertions.get("peak_child_concurrency") != 2
+        or assertions.get("retained_root_second_turn") is not True
+    ):
+        raise RuntimeError("canary receipt does not prove recursive execution and root reuse")
+
+
+def canary_parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Parse an explicit evidence destination without loading credentials."""
+    parser = argparse.ArgumentParser(description="Run the maintained two-child Daytona recursive-batch canary.")
+    parser.add_argument("--output", type=Path, required=True, help="New JSON receipt path outside the repository.")
+    return parser.parse_args(argv)
+
+
+def canary_main(argv: list[str] | None = None) -> int:
+    args = canary_parse_args(argv)
+    output = args.output.expanduser().resolve()
+    if output.is_relative_to(CANARY_REPO_ROOT):
+        raise SystemExit("--output must be outside the repository")
+    if output.exists():
+        raise SystemExit("--output must name a new receipt")
+    if os.environ.get("FLEET_LIVE", "").strip().lower() not in {"1", "true", "yes"}:
+        raise SystemExit("set FLEET_LIVE=1 to authorize the credentialed canary")
+    try:
+        canary__require_clean_candidate()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    environment = {**os.environ, "FLEET_LIVE_EVIDENCE_PATH": str(output)}
+    result = subprocess.run(
+        ["uv", "run", "pytest", "-q", CANARY_TEST], cwd=CANARY_REPO_ROOT, env=environment, check=False
+    )
+    if result.returncode:
+        return result.returncode
+    if not output.is_file() or output.stat().st_size == 0:
+        print("canary passed without a receipt", file=sys.stderr)
+        return 1
+    try:
+        canary__validate_receipt(output)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Run a bounded live Daytona verification lane")
+    parser.add_argument("lane", choices=("native", "recursive-batch"))
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv or argv in (["-h"], ["--help"]):
+        parser.print_help()
+        return 0
+    lane, *arguments = argv
+    if lane not in {"native", "recursive-batch"}:
+        parser.error(f"invalid choice: {lane!r} (choose from 'native', 'recursive-batch')")
+    if lane == "native":
+        return _native_main(arguments)
+    return canary_main(arguments)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,463 @@
+"""Attachment lifecycle public seam."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from uuid import UUID, uuid4
+
+import pytest
+
+
+class _Source:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self._chunks = chunks
+        self.read_sizes: list[int] = []
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+@dataclass
+class _Catalog:
+    calls: list[tuple[str, object]]
+    stored: dict[UUID, object] = field(default_factory=dict)
+
+    async def create(self, *, access: object, ref: object, storage_ref: str) -> None:
+        self.calls.append(("catalog", (access, ref, storage_ref)))
+
+    async def get_many(self, *, access: object, attachment_ids: object) -> tuple[object, ...]:
+        from fleet_rlm.workspace.attachments import AttachmentNotFoundError
+
+        ids = tuple(attachment_ids)  # type: ignore[arg-type]
+        self.calls.append(("metadata", (access, ids)))
+        try:
+            return tuple(self.stored[attachment_id] for attachment_id in reversed(ids))
+        except KeyError as exc:
+            raise AttachmentNotFoundError("Attachment not found") from exc
+
+
+@dataclass
+class _Blobs:
+    calls: list[tuple[str, object]]
+    stored: dict[str, bytes] = field(default_factory=dict)
+
+    async def write_bytes(self, workspace_id: UUID, logical_path: str, data: bytes) -> None:
+        self.calls.append(("blob", (workspace_id, logical_path, data)))
+        self.stored[logical_path] = data
+
+    async def read_bytes(self, workspace_id: UUID, logical_path: str) -> bytes:
+        self.calls.append(("read", (workspace_id, logical_path)))
+        return self.stored[logical_path]
+
+    async def remove_bytes(self, workspace_id: UUID, logical_path: str) -> None:
+        self.calls.append(("remove-blob", (workspace_id, logical_path)))
+        self.stored.pop(logical_path, None)
+
+
+class _Paths:
+    def attachment_blob(self, attachment_id: UUID) -> str:
+        return f"private/attachments/{attachment_id}.bin"
+
+    def run_attachment(self, run: object, attachment_id: UUID, filename: str) -> str:
+        return f"runs/{run.session_id}/{run.run_id}/attachments/{attachment_id}/{filename}"  # type: ignore[attr-defined]
+
+
+@dataclass
+class _Sink:
+    calls: list[tuple[str, object]]
+    stored: dict[str, bytes] = field(default_factory=dict)
+    fail_after: int | None = None
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        completed = sum(name == "stage" for name, _ in self.calls)
+        if self.fail_after is not None and completed >= self.fail_after:
+            raise RuntimeError("provider detail must not escape")
+        self.calls.append(("stage", (logical_path, data)))
+        self.stored[logical_path] = data
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.calls.append(("remove", logical_path))
+        self.stored.pop(logical_path, None)
+
+
+@dataclass
+class _PartiallyFailingSink:
+    calls: list[tuple[str, object]]
+    stored: dict[str, bytes] = field(default_factory=dict)
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        self.calls.append(("stage", (logical_path, data)))
+        self.stored[logical_path] = data
+        raise RuntimeError("write completed before provider error")
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.calls.append(("remove", logical_path))
+        self.stored.pop(logical_path, None)
+
+
+@pytest.mark.asyncio
+async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
+    from fleet_rlm.workspace.attachments import AttachmentAccess, AttachmentLifecycleService, AttachmentUpload
+
+    calls: list[tuple[str, object]] = []
+    source = _Source([b"abc", b"def", b""])
+    access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
+    module = AttachmentLifecycleService(
+        catalog=_Catalog(calls),
+        blobs=_Blobs(calls),
+        paths=_Paths(),
+        max_bytes=8,
+        chunk_bytes=3,
+    )
+
+    ref = await module.upload(
+        access,
+        AttachmentUpload(filename=" report.txt ", content_type="text/plain", source=source),
+    )
+
+    assert ref.filename == "report.txt"
+    assert ref.byte_size == 6
+    assert ref.checksum_sha256 == "bef57ec7f53a6d40beb640a780a639c83bc29ac8a9816f1fc6c5c6dcd93c4721"
+    assert source.read_sizes == [3, 3, 3]
+    assert [name for name, _ in calls] == ["blob", "catalog"]
+    assert "private" not in repr(ref)
+
+
+@pytest.mark.asyncio
+async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentStorageError,
+        AttachmentUpload,
+    )
+
+    class FailingCatalog(_Catalog):
+        async def create(self, *, access: object, ref: object, storage_ref: str) -> None:
+            del access, ref, storage_ref
+            raise RuntimeError("database unavailable")
+
+    calls: list[tuple[str, object]] = []
+    blobs = _Blobs(calls)
+    access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
+    module = AttachmentLifecycleService(catalog=FailingCatalog(calls), blobs=blobs, paths=_Paths(), max_bytes=8)
+
+    with pytest.raises(AttachmentStorageError):
+        await module.upload(access, AttachmentUpload("report.txt", "text/plain", _Source([b"abc", b""])))
+
+    assert not blobs.stored
+    assert [name for name, _ in calls] == ["blob", "remove-blob"]
+
+
+@pytest.mark.asyncio
+async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None:
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentValidationError,
+        StoredAttachment,
+    )
+
+    first_id, second_id = uuid4(), uuid4()
+    first = AttachmentRef(first_id, "first.txt", "text/plain", 1, "a" * 64)
+    second = AttachmentRef(second_id, "second.txt", "text/plain", 2, "b" * 64)
+    calls: list[tuple[str, object]] = []
+    catalog = _Catalog(
+        calls,
+        {
+            first_id: StoredAttachment(first, "private/first"),
+            second_id: StoredAttachment(second, "private/second"),
+        },
+    )
+    module = AttachmentLifecycleService(
+        catalog=catalog,
+        blobs=_Blobs(calls),
+        paths=_Paths(),
+        max_bytes=8,
+    )
+    access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
+
+    assert await module.metadata(access, (first_id, second_id)) == (first, second)
+    assert await module.metadata(access, ()) == ()
+    with pytest.raises(AttachmentValidationError):
+        await module.metadata(access, (first_id, first_id))
+
+    assert [name for name, _ in calls] == ["metadata"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -> None:
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentRun,
+        StoredAttachment,
+    )
+
+    first_id, second_id = uuid4(), uuid4()
+    first_data, second_data = b"a", b"bc"
+    first = AttachmentRef(
+        first_id,
+        "first.txt",
+        "text/plain",
+        len(first_data),
+        "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+    )
+    second = AttachmentRef(
+        second_id,
+        "second.txt",
+        "text/plain",
+        len(second_data),
+        "1e0bbd6c686ba050b8eb03ffeedc64fdc9d80947fce821abbe5d6dc8d252c5ac",
+    )
+    calls: list[tuple[str, object]] = []
+    catalog = _Catalog(
+        calls,
+        {
+            first_id: StoredAttachment(first, "private/first"),
+            second_id: StoredAttachment(second, "private/second"),
+        },
+    )
+    blobs = _Blobs(calls, {"private/first": first_data, "private/second": second_data})
+    sink = _Sink(calls)
+    module = AttachmentLifecycleService(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
+    access = AttachmentAccess(user_id=uuid4(), workspace_id=uuid4())
+    run = AttachmentRun(session_id=uuid4(), run_id=uuid4())
+
+    prepared = await module.prepare_run(access, (second_id, first_id), run, sink)
+
+    assert prepared.refs == (second, first)
+    assert [item.attachment_id for item in prepared.staged] == [second_id, first_id]
+    assert [name for name, _ in calls] == ["metadata", "read", "read", "stage", "stage"]
+    assert all(path.startswith(f"runs/{run.session_id}/{run.run_id}/") for path in sink.stored)
+
+
+@pytest.mark.asyncio
+async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() -> None:
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentRun,
+        AttachmentStorageError,
+        StoredAttachment,
+    )
+
+    ids = (uuid4(), uuid4())
+    refs = (
+        AttachmentRef(
+            ids[0], "a.txt", "text/plain", 1, "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb"
+        ),
+        AttachmentRef(
+            ids[1], "b.txt", "text/plain", 1, "3e23e8160039594a33894f6564e1b1348bbd7a0088d42c4acb73eeaed59c009d"
+        ),
+    )
+    calls: list[tuple[str, object]] = []
+    catalog = _Catalog(
+        calls,
+        {
+            ids[0]: StoredAttachment(refs[0], "private/a"),
+            ids[1]: StoredAttachment(refs[1], "private/b"),
+        },
+    )
+    blobs = _Blobs(calls, {"private/a": b"a", "private/b": b"b"})
+    sink = _Sink(calls, fail_after=1)
+    module = AttachmentLifecycleService(catalog=catalog, blobs=blobs, paths=_Paths(), max_bytes=8)
+
+    with pytest.raises(AttachmentStorageError, match="unavailable"):
+        await module.prepare_run(
+            AttachmentAccess(user_id=uuid4(), workspace_id=uuid4()),
+            ids,
+            AttachmentRun(session_id=uuid4(), run_id=uuid4()),
+            sink,
+        )
+
+    assert sink.stored == {}
+    assert [name for name, _ in calls][-3:] == ["stage", "remove", "remove"]
+
+
+@pytest.mark.asyncio
+async def test_prepare_run_rolls_back_a_path_when_write_reports_after_persisting() -> None:
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRef,
+        AttachmentRun,
+        AttachmentStorageError,
+        StoredAttachment,
+    )
+
+    attachment_id = uuid4()
+    ref = AttachmentRef(
+        attachment_id,
+        "partial.txt",
+        "text/plain",
+        1,
+        "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb",
+    )
+    calls: list[tuple[str, object]] = []
+    sink = _PartiallyFailingSink(calls)
+    module = AttachmentLifecycleService(
+        catalog=_Catalog(calls, {attachment_id: StoredAttachment(ref, "private/partial")}),
+        blobs=_Blobs(calls, {"private/partial": b"a"}),
+        paths=_Paths(),
+        max_bytes=8,
+    )
+
+    with pytest.raises(AttachmentStorageError):
+        await module.prepare_run(
+            AttachmentAccess(user_id=uuid4(), workspace_id=uuid4()),
+            (attachment_id,),
+            AttachmentRun(session_id=uuid4(), run_id=uuid4()),
+            sink,
+        )
+
+    assert sink.stored == {}
+    assert [name for name, _ in calls][-2:] == ["stage", "remove"]
+
+
+# --- Attachment Upload and Validation Contracts ---
+class _UploadSource:
+    def __init__(self, data: bytes) -> None:
+        self.data = data
+        self.offset = 0
+
+    async def read(self, size: int = -1) -> bytes:
+        if size < 0:
+            size = len(self.data)
+        chunk = self.data[self.offset : self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+
+class _UploadSink:
+    def __init__(self, mirror) -> None:
+        self.mirror = mirror
+
+    async def write_private(self, logical_path: str, data: bytes) -> None:
+        self.mirror.write_bytes(logical_path, data)
+
+    async def remove_private(self, logical_path: str) -> None:
+        self.mirror.remove(logical_path)
+
+
+class _UploadHybridPaths:
+    def __init__(self, volume_paths) -> None:
+        self.volume_paths = volume_paths
+
+    def attachment_blob(self, attachment_id):
+        return f"{attachment_id}.bin"
+
+    def run_attachment(self, run, attachment_id, filename):
+        return str(self.volume_paths.run_attachment_file(run.session_id, run.run_id, attachment_id, filename))
+
+
+def test_sanitize_filename_rejects_paths() -> None:
+    from fleet_rlm.workspace.attachments import AttachmentValidationError, sanitize_filename
+
+    assert sanitize_filename("note.txt") == "note.txt"
+    with pytest.raises(AttachmentValidationError):
+        sanitize_filename("../etc/passwd")
+    with pytest.raises(AttachmentValidationError):
+        sanitize_filename("/abs/path.txt")
+    with pytest.raises(AttachmentValidationError):
+        sanitize_filename("")
+
+
+def test_validate_upload_size() -> None:
+    from fleet_rlm.workspace.attachments import AttachmentValidationError, validate_upload_size
+
+    validate_upload_size(1, max_bytes=10)
+    with pytest.raises(AttachmentValidationError):
+        validate_upload_size(0, max_bytes=10)
+    with pytest.raises(AttachmentValidationError):
+        validate_upload_size(11, max_bytes=10)
+
+
+def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
+    import asyncio
+
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentNotFoundError,
+        AttachmentUpload,
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+        LocalAttachmentPathPolicy,
+    )
+
+    module = AttachmentLifecycleService(
+        catalog=LocalAttachmentCatalog(tmp_path),
+        blobs=LocalAttachmentBlobGateway(tmp_path),
+        paths=LocalAttachmentPathPolicy(tmp_path),
+        max_bytes=1024,
+    )
+    user, ws = uuid4(), uuid4()
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("hello.txt", "text/plain", _UploadSource(b"hello world")),
+        )
+    )
+    assert ref.filename == "hello.txt"
+    assert ref.byte_size == 11
+    assert len(ref.checksum_sha256) == 64
+    got = asyncio.run(module.metadata(access, (ref.id,)))[0]
+    assert got.id == ref.id
+    with pytest.raises(AttachmentNotFoundError):
+        asyncio.run(module.metadata(AttachmentAccess(uuid4(), ws), (ref.id,)))
+    with pytest.raises(AttachmentNotFoundError):
+        asyncio.run(module.metadata(access, (uuid4(),)))
+
+
+def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
+    import asyncio
+
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.attachments import (
+        AttachmentAccess,
+        AttachmentLifecycleService,
+        AttachmentRun,
+        AttachmentUpload,
+        LocalAttachmentBlobGateway,
+        LocalAttachmentCatalog,
+    )
+    from tests.support.workspace_storage import HostVolumeMirror
+
+    mirror = HostVolumeMirror(tmp_path / "volume")
+    module = AttachmentLifecycleService(
+        catalog=LocalAttachmentCatalog(tmp_path / "blobs"),
+        blobs=LocalAttachmentBlobGateway(tmp_path / "blobs"),
+        paths=_UploadHybridPaths(VolumePaths.from_mount()),
+        max_bytes=1024,
+    )
+    user, ws = uuid4(), uuid4()
+    access = AttachmentAccess(user, ws)
+    ref = asyncio.run(
+        module.upload(
+            access,
+            AttachmentUpload("doc.txt", "text/plain", _UploadSource(b"payload")),
+        )
+    )
+    session_id, run_id = uuid4(), uuid4()
+    prepared = asyncio.run(
+        module.prepare_run(
+            access,
+            (ref.id,),
+            AttachmentRun(session_id, run_id),
+            _UploadSink(mirror),
+        )
+    )
+    staged = prepared.staged[0]
+    assert staged.sandbox_path.startswith("/home/daytona/fleet/sessions/")
+    assert str(ref.id) in staged.sandbox_path
+    assert "doc.txt" in staged.sandbox_path
+    assert not staged.sandbox_path.startswith(str(tmp_path))
+    assert mirror.exists(staged.sandbox_path)
+    assert mirror.read_bytes(staged.sandbox_path) == b"payload"

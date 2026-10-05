@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fleet_rlm.sessions.run_state import ClaimedRun
-from fleet_rlm.turn_preparation import PreparedTurn, TurnPreparationPlan, prepare_turn
+from fleet_rlm.turns.preparation import PreparedTurn, TurnPreparationPlan, prepare_turn
 
 
 class TestingRunPreparer:

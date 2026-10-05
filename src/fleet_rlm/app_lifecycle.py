@@ -24,63 +24,57 @@ from fleet_rlm.app_services import (
     RuntimeInventory,
     SettlingRunStateStore,
 )
-from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.config.validation import CompositionError, require_daytona_settings
+from fleet_rlm.daytona.diagnostics import environment_manifest
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher, sync_sandbox, tombstone_sync_sandbox
+from fleet_rlm.daytona.runtime import (
+    DaytonaAdmissionTimeoutError,
+    DaytonaLeaseAcquisitionTimeoutError,
+    DaytonaRuntime,
+    DaytonaSandboxSpec,
+    InterpreterLease,
+    RootSessionSpec,
+    ensure_volume_layout,
+)
 from fleet_rlm.observability.turn_capture import TurnCaptureStore
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, VolumePaths
 from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.persistence.repositories.outbox import SqlAlchemyMemoryPromotionOutbox
-from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.program import RLMModelBundle, rlm_options
 from fleet_rlm.rlm.recursion import recursive_rlm_options
 from fleet_rlm.sessions.lifecycle import SessionActiveTurnDrain, SessionLifecycle
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.skills.catalog import SkillCatalog
-from fleet_rlm.turn_preparation import DaytonaCapabilityPreparer, TurnPreparationPlan
+from fleet_rlm.turns.preparation import (
+    DaytonaCapabilityPreparer,
+    RunEnvironment,
+    RunPreparationTimeoutError,
+    RunPreparationUnavailableError,
+    TurnPreparationPlan,
+)
+from fleet_rlm.workspace.artifacts import ArtifactReader
+from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler, run_deferred_memory_outbox_reconcile
 from fleet_rlm.workspace.mounted_gateway import (
     DaytonaWorkspaceGateway,
     DaytonaWorkspaceVolumeGateway,
     run_deferred_orphan_cleanup,
 )
+from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from fleet_rlm.daytona.runtime import DaytonaRuntime, DaytonaSandboxSpec, InterpreterLease
-    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
 
 _STARTUP_RECOVERY_FENCE_TIMEOUT_SECONDS = 15
 _STARTUP_CLEANUP_RECOVERY_BUDGET_SECONDS = 75.0
 _COMPOSITION_DISPOSAL_RETRY_BUDGET_SECONDS = 60.0
 _COMPOSITION_DISPOSAL_TASKS: set[asyncio.Task[Any]] = set()
 _COMPOSITION_DISPOSAL_OWNERS: dict[int, RuntimeInventory] = {}
-
-
-async def _cleanup_scratch_before_releasing_invocation(
-    cleanup: Callable[[], Any] | None,
-    release_invocation: Callable[[], None] | None,
-) -> None:
-    """Keep the Session invocation gate held until threaded scratch cleanup settles."""
-    try:
-        if cleanup is None:
-            return
-        cleanup_task = asyncio.create_task(asyncio.to_thread(cleanup))
-        try:
-            await asyncio.shield(cleanup_task)
-        except asyncio.CancelledError:
-            while not cleanup_task.done():
-                try:
-                    await asyncio.shield(cleanup_task)
-                except asyncio.CancelledError:
-                    continue
-            cleanup_task.result()
-            raise
-    finally:
-        if release_invocation is not None:
-            release_invocation()
 
 
 async def _dispose_components(
@@ -262,10 +256,6 @@ async def build_daytona_composition(
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.attachments import (
-        AttachmentLifecycleService,
-        DaytonaRunAttachmentPathPolicy,
-    )
     from fleet_rlm.config.policy import ConfigPolicyService
     from fleet_rlm.daytona.errors import map_provider_error
     from fleet_rlm.daytona.runtime import DEFAULT_IDLE_STOP_SECONDS, DaytonaRuntime, sandbox_spec_from_settings
@@ -282,13 +272,13 @@ async def build_daytona_composition(
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.program import build_model_bundle
     from fleet_rlm.sessions.task import SessionTaskService
-    from fleet_rlm.turn_settlement import RunSettlementPlan, bind_settlement
     from fleet_rlm.turns import TurnRuntime
-    from fleet_rlm.workspace.host_io import DaytonaWorkspaceFiles
-    from fleet_rlm.workspace.mounted_gateway import (
-        DaytonaWorkspaceGateway,
-        DaytonaWorkspaceVolumeGateway,
+    from fleet_rlm.turns.settlement import RunSettlementPlan, bind_settlement
+    from fleet_rlm.workspace.attachments import (
+        AttachmentLifecycleService,
+        DaytonaRunAttachmentPathPolicy,
     )
+    from fleet_rlm.workspace.host_io import DaytonaWorkspaceFiles
     from fleet_rlm.workspace.workspace import WorkspaceFileService
 
     resolved = settings
@@ -659,6 +649,30 @@ async def close_daytona_services(inventory: RuntimeInventory) -> None:
         raise BaseExceptionGroup("Daytona composition disposal failed", errors)
 
 
+async def _cleanup_scratch_before_releasing_invocation(
+    cleanup: Callable[[], Any] | None,
+    release_invocation: Callable[[], None] | None,
+) -> None:
+    """Keep the Session invocation gate held until threaded scratch cleanup settles."""
+    try:
+        if cleanup is None:
+            return
+        cleanup_task = asyncio.create_task(asyncio.to_thread(cleanup))
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    continue
+            cleanup_task.result()
+            raise
+    finally:
+        if release_invocation is not None:
+            release_invocation()
+
+
 def build_run_preparation(
     runtime: DaytonaRuntime,
     *,
@@ -674,35 +688,9 @@ def build_run_preparation(
     artifact_reader: ArtifactReader | None = None,
     task_service: Any | None = None,
 ) -> TurnPreparationPlan:
-    """
-    Create a Daytona run preparer configured with models, runtime limits,
+    """Create a Daytona run preparer configured with models, runtime limits,
     attachments, environments, and live capabilities.
-
-    Parameters:
-        runtime (DaytonaRuntime): Process-owned Daytona runtime for Session and child resources.
-        attachment_lifecycle (Any): Attachment lifecycle used during run preparation.
-        skill_catalog (SkillCatalog): Skills available to live capabilities.
-        settings (Settings): Runtime and budget configuration.
-        models (RLMModelBundle): Models used for run execution.
-
-    Returns:
-        TurnPreparationPlan: Immutable Turn preparation inputs.
     """
-    from fleet_rlm.daytona.diagnostics import environment_manifest
-    from fleet_rlm.daytona.runtime import (
-        DaytonaAdmissionTimeoutError,
-        DaytonaLeaseAcquisitionTimeoutError,
-        RootSessionSpec,
-        ensure_volume_layout,
-    )
-    from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
-    from fleet_rlm.turn_preparation import (
-        RunEnvironment,
-        RunPreparationTimeoutError,
-        RunPreparationUnavailableError,
-    )
-    from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
-    from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
 
     def context_key(run: ClaimedRun) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]:
         attachment_ids = tuple(str(attachment_id) for attachment_id in run.input.attachment_ids)

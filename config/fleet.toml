@@ -9,6 +9,8 @@ environment = "daytona"
 live_enabled = true
 turn_timeout_seconds = 1800
 max_active_daytona_leases = 8
+workspace_io_idle_seconds = 300
+workspace_io_acquisition_timeout_seconds = 30
 heartbeat_seconds = 10
 stale_after_seconds = 60
 

@@ -16,19 +16,19 @@ if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
     from fleet_rlm.observability.turn_capture import TurnCaptureStore
 
-from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments import AttachmentLifecycle
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.validation import CompositionError
-from fleet_rlm.persistence.repositories.turns import ReconciliationSummary
+from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 from fleet_rlm.rlm.execution import RLMRunner
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import RLMModelBundle
-from fleet_rlm.sessions.catalog import SessionCatalog
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
+from fleet_rlm.sessions.models import SessionCatalog
 from fleet_rlm.sessions.task import SessionTaskService
-from fleet_rlm.turn_preparation import RunPreparation
 from fleet_rlm.turns import TurnRuntime
+from fleet_rlm.turns.preparation import RunPreparation
+from fleet_rlm.workspace.artifacts import ArtifactReader
+from fleet_rlm.workspace.attachments import AttachmentLifecycle
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
 

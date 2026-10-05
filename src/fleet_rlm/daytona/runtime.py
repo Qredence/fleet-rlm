@@ -12,7 +12,7 @@ import inspect
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping, Sequence
 from concurrent.futures import Future, wait
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -41,7 +41,58 @@ from fleet_rlm.daytona.interpreter import (
     SyncBridgeDispatcher,
     sandbox_backend,
 )
-from fleet_rlm.paths import DEFAULT_VOLUME_MOUNT_PATH, SESSION_WORKSPACE_MOUNT_PATH, VolumePaths, validate_mount_path
+from fleet_rlm.daytona.specs import (
+    BASE_IMAGE,
+    DEFAULT_CHILD_SNAPSHOT_NAME,
+    DEFAULT_IDLE_STOP_SECONDS,
+    DEFAULT_SNAPSHOT_NAME,
+    DEFAULT_VOLUME_NAME,
+    DIRECTORY_MODE,
+    PREWARM_RUN_ID,
+    PYTHON_VERSION,
+    SEMANTIC_CHILD_RESOURCES,
+    SESSION_RESOURCES,
+    VOLUME_FAILED_STATES,
+    VOLUME_READY_RETRY_DELAYS,
+    ZERO_UUID,
+    DaytonaEnvironmentProfile,
+    DaytonaSandboxSpec,
+    ExpectedWorkspaceMount,
+    ProviderState,
+    SandboxPlatform,
+    VolumeClient,
+    VolumeConfig,
+    _create_daytona_sandbox,
+    _expected_workspace_mount,
+    assert_directory,
+    ensure_directories,
+    ensure_execution_layout,
+    ensure_shared_volume_layout,
+    ensure_volume_layout,
+    execution_timeout_s_from_settings,
+    file_info,
+    get_or_create_volume_id,
+    is_not_found,
+    normalize_state,
+    recursive_child_volume_subpath,
+    require_directory,
+    require_recursive_child_volume_subpath,
+    require_volume_mount_subpath,
+    required_volume_directories,
+    run_volume_directories,
+    sandbox_filesystem,
+    sandbox_spec_from_settings,
+    sandbox_state,
+    session_volume_directories,
+    shared_volume_directories,
+    verify_execution_mount,
+    verify_sandbox_spec,
+    verify_sandbox_workspace_mount,
+    volume_config_from_settings,
+    volume_mount_spec,
+)
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, VolumePaths
+from fleet_rlm.rlm.budget import current_host_action_deadline
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
 from fleet_rlm.sessions.bindings import (
     BindingGenerationAuthority,
@@ -52,7 +103,6 @@ from fleet_rlm.sessions.bindings import (
     session_workspace_volume_subpath,
     workspace_volume_subpath,
 )
-from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 if TYPE_CHECKING:
     from daytona import AsyncDaytona
@@ -60,8 +110,6 @@ if TYPE_CHECKING:
     from fleet_rlm.config.settings import Settings
 
 
-PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
-DEFAULT_IDLE_STOP_SECONDS = 300.0
 _WORKSPACE_IO_DELETE_GRACE_SECONDS = 15.0
 _PREWARM_CLAIM_WAIT_SECONDS = 60.0
 DEFAULT_CLOSE_RESULT_TIMEOUT_S = 60.0
@@ -73,17 +121,7 @@ _CHILD_STAGE_MAX_FILES = 256
 _CHILD_RESULT_MAX_BYTES = 16 * 1024 * 1024
 _CHILD_RESULT_MAX_ENTRIES = 1024
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
-
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
-DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v2"
-DEFAULT_VOLUME_NAME = "fleet-volume"
 _PROVIDER_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
-PYTHON_VERSION = "3.13.13"
-BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
-SESSION_RESOURCES: tuple[int, int, int] = (4, 8, 8)
-SEMANTIC_CHILD_RESOURCES: tuple[int, int, int] = (2, 4, 4)
-_DIRECTORY_MODE = "700"
-_ZERO_UUID = UUID(int=0)
 
 
 def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: bool) -> None:
@@ -121,536 +159,53 @@ def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: boo
         shutdown(strict_broker_cleanup=strict_broker_cleanup)
 
 
-class DaytonaEnvironmentProfile(StrEnum):
-    """The three logical execution environments; capacity is not implied."""
-
-    SESSION = "session"
-    SEMANTIC_CHILD = "semantic-child"
-    WORKSPACE_CHILD = "workspace-child"
-
-
-class VolumeClient(Protocol):
-    async def get(self, name: str, *, create: bool = False) -> Any: ...
-
-
-class SandboxPlatform(Protocol):
-    async def get(self, sandbox_id: str) -> Any | None: ...
-
-    async def create(
-        self,
-        *,
-        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
-        volume_id: str | None = None,
-        mount_path: str | None = None,
-        volume_subpath: str | None = None,
-        labels: dict[str, str] | None = None,
-        with_volume: bool = True,
-        ephemeral: bool = False,
-        network_block_all: bool = False,
-        network_allow_list: str | None = None,
-        domain_allow_list: str | None = None,
-        auto_stop_interval: int | None = None,
-        auto_delete_interval: int | None = None,
-    ) -> Any: ...
-
-    async def delete(self, sandbox_id: Any) -> None: ...
-
-    async def start(self, sandbox_id: str) -> None: ...
-
-    async def stop(self, sandbox_id: str, *, timeout: float = 60, force: bool = False) -> None: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DaytonaSandboxSpec:
-    """Immutable image and resource contract for Fleet Daytona Sandboxes."""
-
-    snapshot: str
-    python_version: str = PYTHON_VERSION
-    base_image: str = BASE_IMAGE
-    cpu: int = SESSION_RESOURCES[0]
-    memory_gib: int = SESSION_RESOURCES[1]
-    disk_gib: int = SESSION_RESOURCES[2]
-    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "snapshot", validate_snapshot_name(self.snapshot))
-        profile = self.profile
-        if not isinstance(profile, DaytonaEnvironmentProfile):
-            try:
-                profile = DaytonaEnvironmentProfile(str(profile))
-            except ValueError as exc:
-                raise ValueError("unknown Daytona environment profile") from exc
-            object.__setattr__(self, "profile", profile)
-        expected = (
-            SEMANTIC_CHILD_RESOURCES if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else SESSION_RESOURCES
-        )
-        if (self.cpu, self.memory_gib, self.disk_gib) != expected:
-            raise ValueError(
-                "Fleet Daytona snapshot resources must be "
-                f"{expected[0]} CPU, {expected[1]} GiB memory, and {expected[2]} GiB disk for {profile.value}"
-            )
-
-    @classmethod
-    def from_settings(
-        cls,
-        settings: Any,
-        profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
-    ) -> DaytonaSandboxSpec:
-        field = "daytona_child_snapshot" if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else "daytona_snapshot"
-        value = getattr(settings, field, None)
-        if not isinstance(value, str) or not value.strip():
-            env_name = (
-                "FLEET_DAYTONA_CHILD_SNAPSHOT"
-                if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
-                else "FLEET_DAYTONA_SNAPSHOT"
-            )
-            raise ValueError(f"{env_name} is required")
-        resources = (
-            SEMANTIC_CHILD_RESOURCES if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD else SESSION_RESOURCES
-        )
-        return cls(
-            snapshot=value.strip(),
-            cpu=resources[0],
-            memory_gib=resources[1],
-            disk_gib=resources[2],
-            profile=profile,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class VolumeConfig:
-    """Server-owned Volume identity for Workspace-scoped Sandboxes."""
-
-    name: str = DEFAULT_VOLUME_NAME
-    mount_path: str = DEFAULT_VOLUME_MOUNT_PATH
-
-    def __post_init__(self) -> None:
-        if not self.name or not str(self.name).strip():
-            raise ValueError("volume name is required")
-        if any(character in self.name for character in ("/", "\\", "\x00", "..")):
-            raise ValueError("volume name must not contain path characters")
-        validate_mount_path(self.mount_path)
-
-    @classmethod
-    def from_settings(cls, settings: Any) -> VolumeConfig:
-        name = getattr(settings, "volume_name", None) or DEFAULT_VOLUME_NAME
-        mount = getattr(settings, "volume_mount_path", None) or DEFAULT_VOLUME_MOUNT_PATH
-        return cls(name=str(name), mount_path=str(mount))
-
-    def paths(self) -> VolumePaths:
-        return VolumePaths.from_mount(self.mount_path)
-
-
-@dataclass(frozen=True, slots=True)
-class ExpectedWorkspaceMount:
-    volume_id: str
-    volume_subpath: str
-    mount_path: str
-    workspace_id: UUID
-    session_id: UUID | None = None
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "mount_path", str(self.mount_path))
-
-
-def sandbox_spec_from_settings(
-    settings: Any,
-    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
-) -> DaytonaSandboxSpec:
-    return DaytonaSandboxSpec.from_settings(settings, profile)
-
-
-def volume_config_from_settings(settings: Any) -> VolumeConfig:
-    return VolumeConfig.from_settings(settings)
-
-
-def execution_timeout_s_from_settings(settings: Any) -> int:
-    configured = getattr(settings, "rlm_execution_timeout_s", DEFAULT_EXECUTION_TIMEOUT_S)
-    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
-        return configured
-    return DEFAULT_EXECUTION_TIMEOUT_S
-
-
-def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index: int) -> str:
-    workspace = require_non_zero_workspace_id(workspace_id)
-    if not isinstance(run_id, UUID):
-        raise TypeError("run_id must be a UUID")
-    if run_id == _ZERO_UUID:
-        raise ValueError("run_id must not be the zero UUID")
-    if not isinstance(call_index, int) or isinstance(call_index, bool) or call_index <= 0:
-        raise ValueError("call_index must be a positive integer")
-    return f"recursive/{workspace}/{run_id}/{call_index}"
-
-
-def require_recursive_child_volume_subpath(
-    subpath: str,
-    *,
-    workspace_id: UUID | None = None,
-    run_id: UUID | None = None,
-    call_index: int | None = None,
-) -> str:
-    if not isinstance(subpath, str) or not subpath.strip():
-        raise ValueError("recursive child volume subpath is required")
-    normalized = subpath.strip().strip("/")
-    parts = normalized.split("/")
-    if len(parts) != 4 or parts[0] != "recursive" or ".." in parts:
-        raise ValueError("recursive child volume subpath must be recursive/<workspace_id>/<run_id>/<call_index>")
-    try:
-        parsed_workspace = UUID(parts[1])
-        parsed_run = UUID(parts[2])
-    except (TypeError, ValueError):
-        raise ValueError("recursive child volume subpath must contain UUID ownership") from None
-    try:
-        parsed_index = int(parts[3])
-    except ValueError:
-        raise ValueError("recursive child volume subpath call index must be a positive integer") from None
-    expected = recursive_child_volume_subpath(parsed_workspace, parsed_run, parsed_index)
-    if normalized != expected:
-        raise ValueError("recursive child volume subpath is not canonical")
-    if workspace_id is not None and parsed_workspace != require_non_zero_workspace_id(workspace_id):
-        raise ValueError("recursive child volume subpath does not match workspace_id")
-    if run_id is not None and parsed_run != run_id:
-        raise ValueError("recursive child volume subpath does not match run_id")
-    if call_index is not None and parsed_index != call_index:
-        raise ValueError("recursive child volume subpath does not match call_index")
-    return normalized
-
-
-def require_volume_mount_subpath(subpath: str) -> str:
-    if not isinstance(subpath, str) or not subpath.strip():
-        return require_scoped_volume_subpath(subpath)
-    try:
-        return require_scoped_volume_subpath(subpath)
-    except ValueError:
-        pass
-    try:
-        return require_recursive_child_volume_subpath(subpath)
-    except ValueError:
-        pass
-
-    normalized = subpath.strip().strip("/")
-    parts = normalized.split("/")
-    if len(parts) != 5 or parts[0] != "workspaces" or parts[2] != "sessions" or parts[4] != "workspace":
-        raise ValueError("VolumeMount subpath is not a supported Fleet namespace") from None
-    try:
-        workspace_id = UUID(parts[1])
-        session_id = UUID(parts[3])
-    except ValueError:
-        raise ValueError("Session workspace VolumeMount subpath must contain canonical UUIDs") from None
-    return require_session_workspace_subpath(normalized, workspace_id=workspace_id, session_id=session_id)
-
-
-def volume_mount_spec(config: VolumeConfig, volume_id: str, *, workspace_id: UUID) -> dict[str, str]:
-    if not volume_id or not str(volume_id).strip():
-        raise ValueError("volume_id is required")
-    return {
-        "volume_id": str(volume_id),
-        "mount_path": str(validate_mount_path(config.mount_path)),
-        "subpath": workspace_volume_subpath(workspace_id),
-    }
-
-
-async def get_or_create_volume_id(client: VolumeClient, config: VolumeConfig) -> str:
-    from daytona.common.errors import DaytonaConflictError
-
-    try:
-        volume = await client.get(config.name, create=True)
-    except DaytonaConflictError:
-        # The SDK's get(create=True) performs a read followed by create. Two
-        # concurrent callers can both miss and one create receives a 409.
-        volume = await client.get(config.name, create=False)
-    volume_id = getattr(volume, "id", None)
-    if volume_id is None:
-        raise RuntimeError("volume client returned an object without id")
-    return str(volume_id)
-
-
-def shared_volume_directories(paths: VolumePaths) -> tuple[str, ...]:
-    return tuple(
-        str(path)
-        for path in (
-            paths.artifacts_root(),
-            paths.attachments_root(),
-            paths.files_root(),
-            paths.projects_root(),
-            paths.sessions_root(),
-        )
-    )
-
-
-def session_volume_directories(paths: VolumePaths, *, session_id: UUID) -> tuple[str, ...]:
-    return tuple(
-        str(path)
-        for path in (
-            paths.session_dir(session_id),
-            paths.session_workspace_dir(session_id),
-            paths.session_runs_dir(session_id),
-        )
-    )
-
-
-def run_volume_directories(paths: VolumePaths, *, session_id: UUID, run_id: UUID) -> tuple[str, ...]:
-    return tuple(
-        str(path)
-        for path in (
-            paths.run_dir(session_id, run_id),
-            paths.run_artifacts_dir(session_id, run_id),
-            paths.run_attachments_dir(session_id, run_id),
-        )
-    )
-
-
-def required_volume_directories(paths: VolumePaths, *, session_id: UUID, run_id: UUID) -> tuple[str, ...]:
-    return (
-        *shared_volume_directories(paths),
-        *session_volume_directories(paths, session_id=session_id),
-        *run_volume_directories(paths, session_id=session_id, run_id=run_id),
-    )
-
-
-def _sandbox_filesystem(sandbox: Any) -> Any:
-    fs = getattr(sandbox, "fs", None)
-    if fs is None:
-        raise DaytonaAdapterError(
-            message="Daytona Sandbox filesystem is unavailable",
-            cause_type="VolumeLayoutUnavailable",
-        )
-    return fs
-
-
-def _is_not_found(exc: BaseException) -> bool:
-    if isinstance(exc, FileNotFoundError) or getattr(exc, "status_code", None) == 404:
-        return True
-    response = getattr(exc, "response", None)
-    return response is not None and getattr(response, "status_code", None) == 404
-
-
-def _assert_directory(info: Any) -> None:
-    is_directory = info.get("is_dir", False) if isinstance(info, Mapping) else getattr(info, "is_dir", False)
-    if not bool(is_directory):
-        raise DaytonaAdapterError(
-            message="Workspace Volume layout conflicts with an existing file",
-            cause_type="VolumeLayoutConflict",
-        )
-
-
-async def _file_info(fs: Any, path: str) -> Any | None:
-    try:
-        return await fs.get_file_info(path)
-    except Exception as exc:
-        if _is_not_found(exc):
-            return None
-        raise map_provider_error(exc) from exc
-
-
-async def _require_directory(fs: Any, path: str, *, create: bool) -> None:
-    if not create:
-        info = await _file_info(fs, path)
-        if info is None:
-            raise DaytonaAdapterError(
-                message="Workspace Volume mount is unavailable",
-                cause_type="VolumeLayoutMissingMount",
-            )
-        _assert_directory(info)
-        return
-
-    try:
-        await fs.create_folder(path, _DIRECTORY_MODE)
-    except Exception as exc:
-        info = await _file_info(fs, path)
-        if info is None:
-            raise map_provider_error(exc) from exc
-        _assert_directory(info)
-        return
-
-
-async def _ensure_directories(fs: Any, directories: Iterable[str]) -> None:
-    batches: dict[int, list[str]] = {}
-    for directory in directories:
-        batches.setdefault(str(directory).strip("/").count("/"), []).append(directory)
-    for depth in sorted(batches):
-        await asyncio.gather(*(_require_directory(fs, d, create=True) for d in batches[depth]))
-
-
-async def ensure_shared_volume_layout(sandbox: Any, paths: VolumePaths) -> None:
-    fs = _sandbox_filesystem(sandbox)
-    await _require_directory(fs, str(paths.mount_path), create=False)
-    await _ensure_directories(fs, shared_volume_directories(paths))
-
-
-async def ensure_volume_layout(
-    sandbox: Any,
-    paths: VolumePaths,
-    *,
-    session_id: UUID,
-    run_id: UUID,
-) -> None:
-    fs = _sandbox_filesystem(sandbox)
-    await _require_directory(fs, str(paths.mount_path), create=False)
-    await _ensure_directories(fs, required_volume_directories(paths, session_id=session_id, run_id=run_id))
-
-
-async def ensure_execution_layout(sandbox: Any, *, run_id: UUID) -> None:
-    """Create only the shared Session workspace mount and Run-local scratch."""
-    fs = _sandbox_filesystem(sandbox)
-    await _require_directory(fs, SESSION_WORKSPACE_MOUNT_PATH, create=False)
-    await _ensure_directories(fs, ("/tmp/fleet", f"/tmp/fleet/{run_id}"))
-
-
-async def verify_execution_mount(sandbox: Any) -> None:
-    """Check the mount from the Python process used for RLM execution."""
-    process = getattr(sandbox, "process", None)
-    if process is None or not callable(getattr(process, "exec", None)):
-        raise DaytonaAdapterError(
-            message="Sandbox process cannot verify the Workspace mount",
-            cause_type="InterpreterConfigurationError",
-        )
-    check = await process.exec(
-        f"python -c 'import os; os.chdir(\"{SESSION_WORKSPACE_MOUNT_PATH}\")'",
-        timeout=10,
-    )
-    if getattr(check, "exit_code", None) != 0:
-        raise DaytonaAdapterError(
-            message="Workspace Volume mount is unavailable to Python execution",
-            cause_type="ExecutionMountNotVisible",
-        )
-
-
-def _mount_field(mount: Any, key: str) -> str | None:
-    value = mount.get(key) if isinstance(mount, dict) else getattr(mount, key, None)
-    return None if value is None else str(value)
-
-
-def verify_sandbox_workspace_mount(sandbox: Any, expected: ExpectedWorkspaceMount) -> None:
-    labels = getattr(sandbox, "labels", None)
-    if isinstance(labels, dict) and labels:
-        labeled = str(labels.get("workspace_id") or "").strip()
-        if labeled and labeled != str(expected.workspace_id):
-            raise DaytonaAdapterError(
-                message="sandbox workspace label does not match lease workspace",
-                cause_type="WorkspaceMountMismatch",
-            )
-    mounts = getattr(sandbox, "volumes", None)
-    if mounts is None:
-        mounts = getattr(sandbox, "mounts", None)
-    if not mounts:
-        flat = {
-            "volume_id": getattr(sandbox, "volume_id", None),
-            "mount_path": getattr(sandbox, "mount_path", None),
-            "subpath": getattr(sandbox, "volume_subpath", None),
-        }
-        if all(value is None for value in flat.values()):
-            raise DaytonaAdapterError(
-                message="sandbox volume mount metadata is unavailable",
-                cause_type="WorkspaceMountMetadataMissing",
-            )
-        mounts = [flat]
-    for mount in mounts:
-        if (
-            _mount_field(mount, "volume_id") == expected.volume_id
-            and _mount_field(mount, "mount_path") == str(expected.mount_path)
-            and (_mount_field(mount, "subpath") or _mount_field(mount, "volume_subpath")) == expected.volume_subpath
-        ):
-            return
-    raise DaytonaAdapterError(
-        message="sandbox volume mount does not match workspace scope",
-        cause_type="WorkspaceMountMismatch",
-    )
-
-
-def verify_sandbox_spec(sandbox: Any, spec: DaytonaSandboxSpec) -> None:
-    actual = getattr(sandbox, "snapshot", None)
-    if str(actual or "").strip() != spec.snapshot:
-        raise DaytonaAdapterError(
-            message="sandbox snapshot does not match configured Fleet snapshot",
-            cause_type="SandboxSnapshotMismatch",
-        )
-
-
-def _expected_workspace_mount(
-    volume_config: VolumeConfig,
-    volume_id: str,
-    workspace_id: UUID,
-) -> ExpectedWorkspaceMount:
-    mount = volume_mount_spec(volume_config, volume_id, workspace_id=workspace_id)
-    return ExpectedWorkspaceMount(
-        volume_id=mount["volume_id"],
-        volume_subpath=mount["subpath"],
-        mount_path=mount["mount_path"],
-        workspace_id=workspace_id,
-    )
-
-
-async def _create_daytona_sandbox(
-    platform: SandboxPlatform,
-    expected: ExpectedWorkspaceMount,
-    *,
-    labels: dict[str, str],
-    ephemeral: bool,
-) -> Any:
-    """Create a sandbox from its already validated Volume binding."""
-    try:
-        return await platform.create(
-            volume_id=expected.volume_id,
-            mount_path=str(expected.mount_path),
-            volume_subpath=(
-                require_session_workspace_subpath(
-                    expected.volume_subpath,
-                    workspace_id=expected.workspace_id,
-                    session_id=expected.session_id,
-                )
-                if expected.session_id is not None
-                else require_scoped_volume_subpath(
-                    expected.volume_subpath,
-                    workspace_id=expected.workspace_id,
-                )
-            ),
-            labels=labels,
-            ephemeral=ephemeral,
-        )
-    except Exception as exc:
-        raise map_provider_error(exc) from exc
-
-
-_VOLUME_READY_RETRY_DELAYS = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
-_VOLUME_FAILED_STATES = frozenset({"deleting", "deleted", "error"})
-ProviderState = Literal[
-    "missing",
-    "running",
-    "stopped",
-    "paused",
-    "archived",
-    "unrecoverable",
+__all__ = [
+    "BASE_IMAGE",
+    "DEFAULT_CHILD_SNAPSHOT_NAME",
+    "DEFAULT_IDLE_STOP_SECONDS",
+    "DEFAULT_SNAPSHOT_NAME",
+    "DEFAULT_VOLUME_NAME",
+    "PYTHON_VERSION",
+    "SEMANTIC_CHILD_RESOURCES",
+    "SESSION_RESOURCES",
+    "DaytonaEnvironmentProfile",
+    "DaytonaRuntime",
+    "DaytonaSandboxSpec",
+    "ExpectedWorkspaceMount",
+    "InterpreterLease",
+    "ProviderState",
+    "SandboxPlatform",
+    "VolumeClient",
+    "VolumeConfig",
+    "execution_timeout_s_from_settings",
+    "normalize_state",
+    "recursive_child_volume_subpath",
+    "require_recursive_child_volume_subpath",
+    "require_volume_mount_subpath",
+    "required_volume_directories",
+    "run_volume_directories",
+    "sandbox_spec_from_settings",
+    "sandbox_state",
+    "session_volume_directories",
+    "shared_volume_directories",
+    "verify_execution_mount",
+    "verify_sandbox_spec",
+    "verify_sandbox_workspace_mount",
+    "volume_config_from_settings",
+    "volume_mount_spec",
 ]
-_RUNNING_STATES = frozenset({"running", "started", "active"})
-_STOPPED_STATES = frozenset({"stopped", "stop"})
-_PAUSED_STATES = frozenset({"paused", "pause"})
-_ARCHIVED_STATES = frozenset({"archived", "archive"})
 
 
-def normalize_state(raw: Any) -> ProviderState:
-    """Normalize provider-specific states at the provider adapter boundary."""
-    if raw is None:
-        return "missing"
-    text = str(getattr(raw, "value", raw)).strip().lower()
-    if text in _RUNNING_STATES:
-        return "running"
-    if text in _STOPPED_STATES:
-        return "stopped"
-    if text in _PAUSED_STATES:
-        return "paused"
-    if text in _ARCHIVED_STATES:
-        return "archived"
-    if text in {"missing", "deleted", ""}:
-        return "missing"
-    return "unrecoverable"
-
-
-def sandbox_state(sandbox: Any) -> ProviderState:
-    raw = getattr(sandbox, "state", None)
-    if raw is None:
-        raw = getattr(sandbox, "status", None)
-    return normalize_state(raw)
+_sandbox_filesystem = sandbox_filesystem
+_is_not_found = is_not_found
+_assert_directory = assert_directory
+_file_info = file_info
+_require_directory = require_directory
+_ensure_directories = ensure_directories
+_DIRECTORY_MODE = DIRECTORY_MODE
+_ZERO_UUID = ZERO_UUID
+_VOLUME_FAILED_STATES = VOLUME_FAILED_STATES
+_VOLUME_READY_RETRY_DELAYS = VOLUME_READY_RETRY_DELAYS
 
 
 class LiveDaytonaVolumeClient:
@@ -1004,6 +559,7 @@ class DaytonaAdmission:
             raise ValueError("max_active_leases must be positive")
         if max_active_leases > 8:
             raise ValueError("max_active_leases must be at most 8")
+        self.max_active_leases = max_active_leases
         self._semaphore = asyncio.BoundedSemaphore(max_active_leases)
         self._execution_semaphore = asyncio.BoundedSemaphore(max(1, max_active_leases - 1))
 
@@ -2073,13 +1629,7 @@ async def _claim_session_lease(
         await asyncio.sleep(min(0.2, remaining))
 
 
-class ChildRuntimeLeaseState(StrEnum):
-    """States observed by callers of a child runtime lease."""
-
-    OPEN = "OPEN"
-    CLOSING = "CLOSING"
-    CLOSED = "CLOSED"
-    FAILED = "FAILED"
+ChildRuntimeLeaseState = LeaseState
 
 
 @dataclass(slots=True, eq=False)
@@ -2543,8 +2093,6 @@ def _validate_child_file_mapping(files: Mapping[str, bytes], *, max_bytes: int) 
     if not isinstance(files, Mapping):
         raise TypeError("child files must be a mapping of relative paths to bytes")
     paths = _validate_child_relative_paths(tuple(files))
-    if len(paths) > _CHILD_STAGE_MAX_FILES:
-        raise ValueError("too many child files")
     validated: dict[str, bytes] = {}
     total = 0
     for path in paths:
@@ -2688,13 +2236,7 @@ async def create_folder(sandbox: Any, path: str, mode: str = "755") -> None:
     await _maybe_await(_sandbox_fs(sandbox).create_folder(path, mode=mode))
 
 
-class DaytonaRuntimeState(StrEnum):
-    """Lifecycle of the process-scoped runtime facade."""
-
-    OPEN = "OPEN"
-    CLOSING = "CLOSING"
-    CLOSED = "CLOSED"
-    FAILED = "FAILED"
+DaytonaRuntimeState = LeaseState
 
 
 def _identity_text(value: UUID | str | None, name: str) -> str:
@@ -2985,6 +2527,8 @@ class DaytonaRuntime:
         idle_stop_seconds: float | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
+        workspace_io_idle_seconds: float = 300.0,
+        workspace_io_acquisition_timeout_seconds: float = 30.0,
         dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         self._tainted: set[tuple[str, str]] = set()
@@ -2992,6 +2536,9 @@ class DaytonaRuntime:
         self._unidentified_child_sandboxes: list[tuple[SandboxPlatform, Any, DaytonaAdmissionPermit]] = []
         self._child_factories: set[Any] = set()
         self._workspace_io_active: set[SandboxLease] = set()
+        self._workspace_io_contexts = 0
+        self._workspace_io_pending: set[asyncio.Task[Any]] = set()
+        self._workspace_io_idle_task: asyncio.Task[None] | None = None
         self._sandbox_leases: set[SandboxLease] = set()
         self._records: dict[tuple[str, str], DaytonaSessionRecord] = {}
         self._lock = asyncio.Lock()
@@ -3023,6 +2570,10 @@ class DaytonaRuntime:
         self._cleanup = cleanup or RunCleanupSupervisor()
         self._execution_output_cap = execution_output_cap
         self._execution_timeout_s = execution_timeout_s
+        if workspace_io_idle_seconds <= 0 or workspace_io_acquisition_timeout_seconds <= 0:
+            raise ValueError("Workspace I/O timeouts must be positive")
+        self._workspace_io_idle_seconds = workspace_io_idle_seconds
+        self._workspace_io_acquisition_timeout_seconds = workspace_io_acquisition_timeout_seconds
         if idle_stop_seconds is not None and idle_stop_seconds <= 0:
             raise ValueError("idle_stop_seconds must be positive")
         self._idle_stop_seconds = idle_stop_seconds
@@ -3036,6 +2587,8 @@ class DaytonaRuntime:
         self._client_close_lock = Lock()
         self._client_close_task: asyncio.Task[Any] | None = None
         self._client_closed = False
+        self._warm_workspace_io_sandboxes: dict[UUID, tuple[Any, SandboxLease, float]] = {}
+        self._warm_workspace_io_lock = asyncio.Lock()
 
     @classmethod
     def from_settings(
@@ -3079,6 +2632,8 @@ class DaytonaRuntime:
             idle_stop_seconds=idle_stop_seconds,
             execution_output_cap=execution_output_cap,
             execution_timeout_s=execution_timeout_s,
+            workspace_io_idle_seconds=settings.workspace_io_idle_seconds,
+            workspace_io_acquisition_timeout_seconds=settings.workspace_io_acquisition_timeout_seconds,
             dispatcher=dispatcher,
             client=client,
         )
@@ -3288,6 +2843,7 @@ class DaytonaRuntime:
             or self._unidentified_child_sandboxes
             or self._child_factories
             or self._workspace_io_active
+            or self._workspace_io_contexts
             or self._late_roots
             or self._late_tasks
             or self._acquisitions
@@ -3388,10 +2944,11 @@ class DaytonaRuntime:
             deadline = asyncio.get_running_loop().time() + drain_seconds
         self._state = DaytonaRuntimeState.CLOSING
         errors: list[BaseException] = []
+        await self._cancel_workspace_io_idle()
 
-        while self._workspace_io_active and asyncio.get_running_loop().time() < deadline:
+        while self._workspace_io_contexts and asyncio.get_running_loop().time() < deadline:
             await asyncio.sleep(min(0.05, max(0.0, deadline - asyncio.get_running_loop().time())))
-        if self._workspace_io_active:
+        if self._workspace_io_contexts:
             return False
 
         for lease in self._workspace_io_resources():
@@ -3505,6 +3062,7 @@ class DaytonaRuntime:
             if not retained:
                 self._key_locks.clear()
                 self._invocation_gates.clear()
+                self._warm_workspace_io_sandboxes.clear()
         self._state = DaytonaRuntimeState.FAILED if errors or retained else DaytonaRuntimeState.CLOSED
         return not errors and not retained
 
@@ -3525,72 +3083,187 @@ class DaytonaRuntime:
         )
         return lease
 
-    async def _close_workspace_io_lease(self, lease: SandboxLease, *, deadline: float | None = None) -> None:
+    async def _close_workspace_io_lease(self, lease: SandboxLease, *, deadline: float | None = None) -> bool:
         receipt = await lease.aclose(deadline=deadline)
         if not receipt.provider.confirmed_absent:
             logger.warning(
                 "Workspace I/O Sandbox deletion not confirmed absent within grace period",
                 extra={"sandbox_id": lease._sandbox_id, "provider_error": receipt.provider.error},
             )
+        return receipt.provider.confirmed_absent and not lease.has_pending_ownership
 
-    @contextlib.asynccontextmanager
-    async def open_workspace_sandbox(self, workspace_id: UUID, *, purpose: str) -> AsyncIterator[Any]:
-        """Own one temporary mounted Sandbox through confirmed remote cleanup."""
-        if self._state is not DaytonaRuntimeState.OPEN:
-            raise RuntimeError("Daytona runtime is not accepting Workspace I/O")
-        platform = self._platform
-        volume_config = self._volume_config
-        volume_id = await get_or_create_volume_id(self._volume_client, volume_config)
-        expected = _expected_workspace_mount(volume_config, volume_id, workspace_id)
-        permit = await self._admission.acquire(deadline=float("inf"), host_io=True)
-        if self._state is not DaytonaRuntimeState.OPEN:
-            permit.release()
-            raise RuntimeError("Daytona runtime closed during Workspace I/O admission")
-        create_task = asyncio.create_task(
-            _create_daytona_sandbox(
-                platform,
-                expected,
-                labels={"fleet-package": "fleet_rlm", "purpose": purpose, "workspace_id": str(workspace_id)},
-                ephemeral=True,
-            ),
-            name="fleet-daytona-workspace-io-create",
-        )
-        try:
-            sandbox = await asyncio.shield(create_task)
-        except BaseException:
+    def _retain_workspace_io_task(self, task: asyncio.Task[Any]) -> None:
+        self._workspace_io_pending.add(task)
+        task.add_done_callback(self._workspace_io_pending.discard)
+        _retain_provider_task(task, self._provider_tasks)
 
-            async def settle_late_create() -> None:
-                try:
-                    late_sandbox = await create_task
-                except BaseException:
-                    permit.release()
-                    return
-                await self._close_workspace_io_lease(self._workspace_io_lease(late_sandbox, permit))
+    async def _cancel_workspace_io_idle(self) -> None:
+        task = self._workspace_io_idle_task
+        self._workspace_io_idle_task = None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
 
-            task = asyncio.create_task(settle_late_create(), name="fleet-daytona-workspace-io-late-create")
-            _retain_provider_task(task, self._provider_tasks)
-            raise
-        lease = self._workspace_io_lease(sandbox, permit)
-        try:
-            await sandbox.refresh_data()
-            if sandbox_state(sandbox) != "running":
-                raise RuntimeError("Workspace I/O Sandbox did not reach running state")
-            verify_sandbox_workspace_mount(sandbox, expected)
-            verify_sandbox_spec(sandbox, self._sandbox_spec)
-            await ensure_shared_volume_layout(sandbox, volume_config.paths())
-            self._workspace_io_active.add(lease)
-            yield sandbox
-        finally:
-            self._workspace_io_active.discard(lease)
+    def _schedule_workspace_io_idle(self, workspace_id: UUID, lease: SandboxLease) -> None:
+        async def expire() -> None:
             try:
-                await self._close_workspace_io_lease(lease)
+                await asyncio.sleep(self._workspace_io_idle_seconds)
+                async with self._warm_workspace_io_lock:
+                    entry = self._warm_workspace_io_sandboxes.get(workspace_id)
+                    if self._state is DaytonaRuntimeState.OPEN and entry is not None and entry[1] is lease:
+                        self._warm_workspace_io_sandboxes.pop(workspace_id)
+                        await self._close_workspace_io_lease(lease)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.warning(
-                    "Workspace I/O cleanup remains runtime-owned",
-                    extra={"sandbox_id": lease._sandbox_id, "error_type": type(exc).__name__},
-                )
+                logger.warning("Workspace idle cleanup remains runtime-owned", extra={"error_type": type(exc).__name__})
+
+        self._workspace_io_idle_task = asyncio.create_task(expire(), name="fleet-daytona-workspace-io-idle")
+
+    @contextlib.asynccontextmanager
+    async def open_workspace_sandbox(
+        self,
+        workspace_id: UUID,
+        *,
+        purpose: str,
+        reuse_warm: bool = False,
+    ) -> AsyncIterator[Any]:
+        """Serialize local Workspace I/O through one bounded, runtime-owned slot."""
+        if self._state is not DaytonaRuntimeState.OPEN:
+            raise RuntimeError("Daytona runtime is not accepting Workspace I/O")
+        deadline = asyncio.get_running_loop().time() + self._workspace_io_acquisition_timeout_seconds
+        action_deadline = current_host_action_deadline()
+        if action_deadline is not None:
+            deadline = min(deadline, action_deadline)
+        if deadline <= asyncio.get_running_loop().time():
+            raise TimeoutError("Workspace I/O acquisition timed out")
+        retain_warm = reuse_warm and self._admission.max_active_leases > 1
+        locked = False
+        ready = False
+        lease: SandboxLease | None = None
+        self._workspace_io_contexts += 1
+        try:
+            # End this timeout before yielding: file operations keep their own
+            # bounds. The gate prevents overlapping use and replacement races.
+            async with asyncio.timeout_at(deadline):
+                await self._warm_workspace_io_lock.acquire()
+                locked = True
+                if self._state is not DaytonaRuntimeState.OPEN:
+                    raise RuntimeError("Daytona runtime closed during Workspace I/O acquisition")
+                await self._cancel_workspace_io_idle()
+                for task in tuple(self._workspace_io_pending):
+                    await asyncio.shield(task)
+                entry = self._warm_workspace_io_sandboxes.get(workspace_id) if retain_warm else None
+                sandbox: Any = None
+                if entry is not None and entry[1].state is LeaseState.OPEN:
+                    candidate, candidate_lease, _ = entry
+                    lease = candidate_lease
+                    self._workspace_io_active.add(lease)
+                    try:
+                        await candidate.refresh_data()
+                        if sandbox_state(candidate) == "stopped":
+                            await self._platform.start(candidate.id)
+                            await candidate.refresh_data()
+                        if sandbox_state(candidate) == "running":
+                            sandbox, lease = candidate, candidate_lease
+                    except Exception:
+                        # Failed probes do not release permits or ownership.
+                        pass
+                if sandbox is None:
+                    if lease is not None:
+                        self._workspace_io_active.discard(lease)
+                        lease = None
+                    self._warm_workspace_io_sandboxes.clear()
+                    while resources := self._workspace_io_resources():
+                        for obsolete in resources:
+                            await self._close_workspace_io_lease(obsolete, deadline=deadline)
+                        if self._workspace_io_resources():
+                            await asyncio.sleep(0.05)
+                    volume_config = self._volume_config
+                    volume_id = await get_or_create_volume_id(self._volume_client, volume_config)
+                    expected = _expected_workspace_mount(volume_config, volume_id, workspace_id)
+                    permit = await self._admission.acquire(deadline=deadline, host_io=True)
+                    if self._state is not DaytonaRuntimeState.OPEN:
+                        permit.release()
+                        raise RuntimeError("Daytona runtime closed during Workspace I/O admission")
+                    create_task = asyncio.create_task(
+                        _create_daytona_sandbox(
+                            self._platform,
+                            expected,
+                            labels={
+                                "fleet-package": "fleet_rlm",
+                                "purpose": purpose,
+                                "workspace_id": str(workspace_id),
+                            },
+                            ephemeral=not retain_warm,
+                        ),
+                        name="fleet-daytona-workspace-io-create",
+                    )
+                    try:
+                        sandbox = await asyncio.shield(create_task)
+                    except BaseException:
+
+                        async def settle_late_create() -> None:
+                            try:
+                                late_sandbox = await create_task
+                            except BaseException:
+                                permit.release()
+                                return
+                            await self._close_workspace_io_lease(self._workspace_io_lease(late_sandbox, permit))
+
+                        self._retain_workspace_io_task(
+                            asyncio.create_task(settle_late_create(), name="fleet-daytona-workspace-io-late-create")
+                        )
+                        raise
+                    lease = self._workspace_io_lease(sandbox, permit)
+                    self._workspace_io_active.add(lease)
+                    await sandbox.refresh_data()
+                    if sandbox_state(sandbox) != "running":
+                        raise RuntimeError("Workspace I/O Sandbox did not reach running state")
+                    verify_sandbox_workspace_mount(sandbox, expected)
+                    verify_sandbox_spec(sandbox, self._sandbox_spec)
+                    await ensure_shared_volume_layout(sandbox, volume_config.paths())
+                if self._state is not DaytonaRuntimeState.OPEN:
+                    raise RuntimeError("Daytona runtime closed during Workspace I/O preparation")
+                assert lease is not None
+                self._workspace_io_active.add(lease)
+                if retain_warm:
+                    self._warm_workspace_io_sandboxes[workspace_id] = (sandbox, lease, time.monotonic())
+                ready = True
+            yield sandbox
+        finally:
+            try:
+                if lease is not None:
+                    if ready and retain_warm and self._state is DaytonaRuntimeState.OPEN:
+                        self._schedule_workspace_io_idle(workspace_id, lease)
+                    else:
+                        self._warm_workspace_io_sandboxes.pop(workspace_id, None)
+                        if not ready:
+                            # Failed preparation returns within its bound;
+                            # the runtime keeps ownership of asynchronous cleanup.
+                            self._retain_workspace_io_task(
+                                asyncio.create_task(
+                                    self._close_workspace_io_lease(lease),
+                                    name="fleet-daytona-workspace-io-failed-prepare",
+                                )
+                            )
+                        else:
+                            try:
+                                await self._close_workspace_io_lease(lease)
+                            except asyncio.CancelledError:
+                                raise
+                            except Exception as exc:
+                                logger.warning(
+                                    "Workspace I/O cleanup remains runtime-owned",
+                                    extra={"sandbox_id": lease._sandbox_id, "error_type": type(exc).__name__},
+                                )
+            finally:
+                if lease is not None:
+                    self._workspace_io_active.discard(lease)
+                self._workspace_io_contexts -= 1
+                if locked:
+                    self._warm_workspace_io_lock.release()
 
     def track_sandbox(self, sandbox_id: str | None) -> None:
         """Retain a concrete Sandbox identity until process disposal confirms absence."""

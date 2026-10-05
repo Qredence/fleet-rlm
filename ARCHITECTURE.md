@@ -41,12 +41,12 @@ through successful settlement and Turn Commit.
 
 | Owner | Responsibility |
 | --- | --- |
-| `turns.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
-| `turn_preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
-| `turn_settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
+| `turns/coordinator.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
+| `turns/preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
+| `turns/settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
 | `persistence/` | Owns SQL-backed Session and Run state, durable repositories, and commit operations; Alembic owns live schema changes. |
-| `sessions/` | Projects committed history and owns the bounded, revisioned task checkpoint. |
-| `attachments/`, `artifacts/`, `workspace/` | Own durable content, scoped file access, host I/O, and workspace memory. |
+| `sessions/` | Owns the Session, Run, and Turn domain contracts shared by `persistence/`, `rlm/`, and `turns/` (it shares event and result value types with `rlm/`), projects committed history, and owns the bounded, revisioned task checkpoint. It must not import `turns/` or `persistence/`. |
+| `workspace/` | Owns durable content, scoped file access, host I/O, artifacts, attachments, and workspace memory. |
 
 One Daytona Volume holds each Workspace under `workspaces/<workspace_id>`, and
 Fleet mounts it two ways:
@@ -94,6 +94,19 @@ generated Python to Daytona. Its authenticated, JSON-only broker in
 model-authored code does not run in the Fleet process. A healthy root Sandbox
 may be reused across clean sequential Turns, but each invocation gets fresh
 bindings, tools, budget, and DSPy history.
+
+The single-user application serializes Workspace I/O operation groups through
+the runtime. One host I/O Sandbox may remain warm between operations, retaining
+its shared admission permit until confirmed deletion. Queueing and preparation
+have a finite acquisition deadline; idle expiry and obsolete replacement use
+the same cleanup owner. Shutdown drains preparation and active file operations
+before deleting their Sandbox. Unconfirmed cleanup blocks replacement and
+remains runtime-owned for retry.
+
+Broker SSE notifications wake host polling; only `/pending` issues tool leases.
+A dropped notification leaves unclaimed work available to polling. Claimed
+tools are not automatically re-executed, and `/result` fences late or duplicate
+delivery against the issued lease.
 
 The adapter calls one typed backend protocol: `run(code, variables,
 on_stdout=...)` returns `BackendExecutionResult`. `_SandboxProcessBackend`

@@ -109,7 +109,7 @@ class ManagedDatabasePolicyError(ValueError):
 
 
 # Single remediation path surfaced wherever migrations drift.
-REMEDIATION = "run `uv run python scripts/db_init.py`"
+REMEDIATION = "run `uv run python scripts/database.py upgrade`"
 
 
 def is_sqlite_url(url: str) -> bool:
