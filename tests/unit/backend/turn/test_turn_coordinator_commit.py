@@ -15,11 +15,11 @@ from uuid import UUID, uuid4
 import dspy
 import pytest
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.rlm.program import FleetRLMSignature
 from fleet_rlm.rlm.result import ResultContract, RLMOutcome, project_outcome_prediction
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import ClaimedRun
+from fleet_rlm.workspace.artifacts import ArtifactCandidate
 from tests.support.turn_settlement import TestingRunSettlement
 
 
@@ -30,7 +30,6 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from hashlib import sha256
 
     importlib.import_module("fleet_rlm.rlm.result")
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         ArtifactCreated,
@@ -45,6 +44,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunClaim
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
     from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
@@ -183,11 +183,11 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     from hashlib import sha256
 
     importlib.import_module("fleet_rlm.rlm.result")
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
     from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())
@@ -694,7 +694,7 @@ def test_invalid_native_prediction_cannot_reach_successful_settlement() -> None:
 def _make_candidate(access: TurnAccess, turn: ClaimedRun, name: str, data: bytes) -> ArtifactCandidate:
     from hashlib import sha256
 
-    from fleet_rlm.artifacts.models import ArtifactCandidate
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     return ArtifactCandidate(
         uuid4(),

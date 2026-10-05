@@ -108,8 +108,8 @@ def _source_tools() -> dict[str, dspy.Tool]:
     workspace_memory_store = _import_moved_symbol("WorkspaceMemoryStore", "fleet_rlm.workspace.memory")
     workspace_memory_tool_host = _import_moved_symbol("WorkspaceMemoryToolHost", "fleet_rlm.workspace.memory")
     project_tool_host = _import_moved_symbol("ProjectToolHost", "fleet_rlm.workspace.projects")
-    from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments import AttachmentToolHost
+    from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
+    from fleet_rlm.workspace.attachments import AttachmentToolHost
 
     volume_blob_fs = _import_moved_symbol("VolumeBlobFs", "fleet_rlm.workspace.storage")
     session_workspace_fs = _import_moved_symbol("SessionWorkspaceFS", "fleet_rlm.workspace.models")

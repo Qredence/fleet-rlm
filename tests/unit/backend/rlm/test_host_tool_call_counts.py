@@ -10,13 +10,13 @@ import pytest
 
 
 def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path) -> None:
-    from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.events import observe_tool
     from fleet_rlm.skills.catalog import SkillCatalog
     from fleet_rlm.skills.models import SkillCard, SkillDefinition, SkillResource
     from fleet_rlm.skills.tools import SkillToolHost
+    from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
+    from fleet_rlm.workspace.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
@@ -177,8 +177,8 @@ def test_repeated_authorized_host_tool_calls_have_no_fleet_count_limit(tmp_path)
 
 
 def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None:
-    from fleet_rlm.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.attachments import AttachmentRef, AttachmentToolHost, StagedAttachment
     from tests.support.workspace_storage import HostVolumeMirror
 
     session_id, run_id = uuid4(), uuid4()
@@ -212,11 +212,11 @@ def test_attachment_read_reverifies_staged_bytes_on_every_call(tmp_path) -> None
 
 @pytest.mark.asyncio
 async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes(tmp_path) -> None:
-    from fleet_rlm.artifacts.tools import ArtifactToolHost
-    from fleet_rlm.attachments import AttachmentToolHost
     from fleet_rlm.paths import VolumePaths
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.turns.preparation import PreparedHostCapabilities
+    from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
+    from fleet_rlm.workspace.attachments import AttachmentToolHost
     from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()
@@ -252,8 +252,8 @@ async def test_live_capability_teardown_removes_drained_artifact_candidate_bytes
 
 
 def test_workspace_artifact_publication_reads_source_and_stages_only_a_candidate(tmp_path) -> None:
-    from fleet_rlm.artifacts.tools import ArtifactToolHost
     from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
     from tests.support.workspace_storage import HostVolumeMirror
 
     user_id, workspace_id, session_id, run_id = uuid4(), uuid4(), uuid4(), uuid4()

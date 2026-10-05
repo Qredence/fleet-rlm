@@ -24,7 +24,6 @@ from fleet_rlm.app_services import (
     RuntimeInventory,
     SettlingRunStateStore,
 )
-from fleet_rlm.artifacts.reader import ArtifactReader
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.config.validation import CompositionError, require_daytona_settings
 from fleet_rlm.daytona.diagnostics import environment_manifest
@@ -56,6 +55,7 @@ from fleet_rlm.turns.preparation import (
     RunPreparationUnavailableError,
     TurnPreparationPlan,
 )
+from fleet_rlm.workspace.artifacts import ArtifactReader
 from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
 from fleet_rlm.workspace.memory import MemoryOutboxReconciler, run_deferred_memory_outbox_reconcile
 from fleet_rlm.workspace.mounted_gateway import (
@@ -256,10 +256,6 @@ async def build_daytona_composition(
     require_daytona_settings(settings)
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.attachments import (
-        AttachmentLifecycleService,
-        DaytonaRunAttachmentPathPolicy,
-    )
     from fleet_rlm.config.policy import ConfigPolicyService
     from fleet_rlm.daytona.errors import map_provider_error
     from fleet_rlm.daytona.runtime import DEFAULT_IDLE_STOP_SECONDS, DaytonaRuntime, sandbox_spec_from_settings
@@ -278,6 +274,10 @@ async def build_daytona_composition(
     from fleet_rlm.sessions.task import SessionTaskService
     from fleet_rlm.turns import TurnRuntime
     from fleet_rlm.turns.settlement import RunSettlementPlan, bind_settlement
+    from fleet_rlm.workspace.attachments import (
+        AttachmentLifecycleService,
+        DaytonaRunAttachmentPathPolicy,
+    )
     from fleet_rlm.workspace.host_io import DaytonaWorkspaceFiles
     from fleet_rlm.workspace.workspace import WorkspaceFileService
 

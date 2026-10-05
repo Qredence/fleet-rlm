@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fleet_rlm.artifacts.models import ArtifactCandidate
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.execution import RLMExecutionSpec
+from fleet_rlm.workspace.artifacts import ArtifactCandidate
 from fleet_rlm.workspace.memory import MemoryCandidate
 
 

@@ -21,8 +21,6 @@ from fleet_rlm.app_services import (
     close_inventory_services,
     no_provider_recovery_fence,
 )
-from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.rlm.execution import ProgramBuilder
 from fleet_rlm.rlm.program import FleetRLMSignature, RLMModelBundle, RLMOptions, assert_dspy_version, rlm_options
@@ -38,6 +36,8 @@ from fleet_rlm.turns.preparation import (
     prepare_host_capabilities,
     prepare_turn,
 )
+from fleet_rlm.workspace.artifacts import ArtifactReader
+from fleet_rlm.workspace.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
 
 
@@ -64,14 +64,14 @@ def build_local_storage_adapters(
     sql_artifact_blobs: Any | None,
 ) -> LocalStorageAdapters:
     """Build the local or SQL metadata adapters for a local runtime."""
-    from fleet_rlm.artifacts.reader import ArtifactReader
-    from fleet_rlm.attachments import (
+    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from fleet_rlm.workspace.artifacts import ArtifactReader
+    from fleet_rlm.workspace.attachments import (
         AttachmentLifecycleService,
         LocalAttachmentBlobGateway,
         LocalAttachmentCatalog,
         LocalAttachmentPathPolicy,
     )
-    from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
     from tests.support.local_catalog import (
         LocalArtifactBlobGateway,
         LocalArtifactCatalog,
@@ -318,7 +318,7 @@ class TestingCapabilityPreparer:
         deadline: float,
     ) -> PreparedHostCapabilities:
         """Prepare host capabilities for one turn within the execution deadline."""
-        from fleet_rlm.attachments import AttachmentToolHost
+        from fleet_rlm.workspace.attachments import AttachmentToolHost
 
         sink = environment.attachment_sink
         if not isinstance(sink, TestingRunSink):
@@ -409,8 +409,8 @@ def build_testing_services(
     database: RuntimeDatabaseLifecycle | None = None,
 ) -> RuntimeInventory:
     """Build credential-free deterministic adapters for a test lifespan."""
-    from fleet_rlm.attachments import WorkspaceAttachmentPathPolicy
     from fleet_rlm.paths import volume_paths_from_settings
+    from fleet_rlm.workspace.attachments import WorkspaceAttachmentPathPolicy
     from fleet_rlm.workspace.workspace import WorkspaceFileService
     from tests.support.workspace_storage import HostVolumeMirror, HostWorkspaceAccessGateway, OfflineHostVolumeGateway
 

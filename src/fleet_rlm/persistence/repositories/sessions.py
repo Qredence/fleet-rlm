@@ -12,16 +12,6 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.artifacts.errors import ArtifactNotFoundError
-from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef, CompletedRun
-from fleet_rlm.artifacts.reader import StoredArtifact
-from fleet_rlm.artifacts.safety import parse_kind
-from fleet_rlm.attachments import (
-    AttachmentAccess,
-    AttachmentNotFoundError,
-    AttachmentRef,
-    StoredAttachment,
-)
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH
 from fleet_rlm.persistence.models import (
     ArtifactRow,
@@ -44,6 +34,20 @@ from fleet_rlm.sessions.models import (
     SessionTurnPage,
     TurnInputCodec,
     UserTurnRecord,
+)
+from fleet_rlm.workspace.artifacts import (
+    ArtifactAccess,
+    ArtifactNotFoundError,
+    ArtifactRef,
+    CompletedRun,
+    StoredArtifact,
+    parse_kind,
+)
+from fleet_rlm.workspace.attachments import (
+    AttachmentAccess,
+    AttachmentNotFoundError,
+    AttachmentRef,
+    StoredAttachment,
 )
 
 if TYPE_CHECKING:

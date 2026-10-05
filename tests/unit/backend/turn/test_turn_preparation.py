@@ -15,7 +15,6 @@ from uuid import uuid4
 import pytest
 
 from fleet_rlm.app_lifecycle import build_run_preparation
-from fleet_rlm.attachments import AttachmentRef
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
 from fleet_rlm.daytona.runtime import DaytonaAdmission, DaytonaSandboxSpec, InterpreterLease
@@ -26,6 +25,7 @@ from fleet_rlm.sessions.run_state import (
     _RunClaimToken,
 )
 from fleet_rlm.turns.preparation import PreparedHostCapabilities, RunPreparationUnavailableError, prepare_turn
+from fleet_rlm.workspace.attachments import AttachmentRef
 from tests.support.role_lm import placeholder_bundle
 from tests.support.session_manager import make_daytona_runtime
 from tests.support.turn_preparation import TestingRunPreparer
@@ -35,7 +35,6 @@ from tests.support.workspace_storage import InMemoryDaytonaWorkspaceGateway
 
 @pytest.mark.asyncio
 async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
@@ -44,6 +43,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         _RunClaimToken,
     )
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     operations: list[str] = []
 
@@ -202,7 +202,6 @@ async def test_precommit_cleanup_closes_only_native_context_then_full_drain_skip
 async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_environment() -> None:
     import asyncio
 
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -210,6 +209,7 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
         _RunClaimToken,
     )
     from fleet_rlm.turns.preparation import RunEnvironment, RunPreparationTimeoutError
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     released = False
 
@@ -267,7 +267,6 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
 
 @pytest.mark.asyncio
 async def test_preparation_failure_removes_staged_run_bytes_but_not_session_workspace() -> None:
-    from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -275,6 +274,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
         _RunClaimToken,
     )
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 
     access, run_id, session_id, attachment_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4(), uuid4()
     staged_path = f"/sessions/{session_id}/runs/{run_id}/attachments/{attachment_id}.txt"
@@ -345,7 +345,6 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
 
 @pytest.mark.asyncio
 async def test_capsule_validation_failure_releases_all_prepared_resources() -> None:
-    from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -354,6 +353,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
         _RunClaimToken,
     )
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 
     attachment_id, run_id, session_id = uuid4(), uuid4(), uuid4()
     operations: list[str] = []
@@ -805,7 +805,6 @@ async def test_aclose_closes_artifacts_when_file_ownership_is_not_declared() -> 
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_capability_preparation_is_unavailable() -> None:
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -817,6 +816,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
         RunEnvironment,
         RunPreparationUnavailableError,
     )
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     class Sink:
         async def remove_private(self, location):
@@ -925,7 +925,6 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
 
 @pytest.mark.asyncio
 async def test_connection_reset_during_post_capability_cancellation_probe_is_unavailable() -> None:
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.persistence.database import DatabaseConnectionError
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
@@ -937,6 +936,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
         RunEnvironment,
         RunPreparationUnavailableError,
     )
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     class Sink:
         async def remove_private(self, location):
@@ -1170,7 +1170,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
         async def prepare_run(self, _access, _attachment_ids, _run, sink):
             logical_path = f"{sink.scratch_root}/attachments/notes.txt"
             await sink.write_private(logical_path, data)
-            from fleet_rlm.attachments import PreparedAttachments, StagedAttachment
+            from fleet_rlm.workspace.attachments import PreparedAttachments, StagedAttachment
 
             return PreparedAttachments((ref,), (StagedAttachment(ref.id, logical_path),))
 
@@ -1407,7 +1407,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
     # injected workspace_memory tail digest without any tool call.
     class NoAttachments:
         async def prepare_run(self, _access, _attachment_ids, _run, _sink):
-            from fleet_rlm.attachments import PreparedAttachments
+            from fleet_rlm.workspace.attachments import PreparedAttachments
 
             return PreparedAttachments((), ())
 

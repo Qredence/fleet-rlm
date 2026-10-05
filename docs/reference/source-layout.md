@@ -3,19 +3,17 @@
 ```text
 src/fleet_rlm/
 ├── api/                  # HTTP identity, dependencies, schemas, routes, and SSE
-├── artifacts/            # artifact candidates, validation, and stores
-├── attachments/          # Attachment lifecycle, storage, and host tools
 ├── cli/                  # maintained TUI/backend entry points and Daytona doctor
 ├── config/               # settings, TOML loading, and policy validation
 ├── daytona/              # SDK lifecycle, interpreter, broker, diagnostics, errors
 ├── observability/        # fail-soft tracing, diagnostics, evaluation, and analytics
-├── optimization/         # isolated GEPA and evidence workflow
+├── optimization/         # offline GEPA prompt optimization (not on Turn serving path)
 ├── persistence/          # SQLAlchemy models and repository adapters
 ├── rlm/                  # DSPy program, execution, recursion, and events
 ├── sessions/             # Session, Run, and Turn domain contracts, history, and task checkpoint
 ├── skills/               # bundled catalog, resolution, resources, and tools
 ├── turns/                # Turn coordinator, preparation, settlement, and stream projection
-├── workspace/            # file, project, memory, path, and storage owners
+├── workspace/            # files, projects, memory, artifacts, attachments, and storage
 ├── app.py                # FastAPI construction and lifespan
 ├── app_lifecycle.py      # provider resource construction and closure
 ├── app_services.py       # composed lifespan service inventory

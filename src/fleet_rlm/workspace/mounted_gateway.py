@@ -13,8 +13,8 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import UUID
 
-from fleet_rlm.artifacts.models import CompletedRun
 from fleet_rlm.paths import UnsafePathError, VolumePaths, validate_mount_path
+from fleet_rlm.workspace.artifacts import CompletedRun
 from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import WorkspaceEntry, WorkspaceListResult, WorkspaceTextPage
 from fleet_rlm.workspace.storage import (

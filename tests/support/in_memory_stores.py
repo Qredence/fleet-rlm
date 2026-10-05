@@ -9,8 +9,6 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 from uuid import UUID, uuid4
 
-from fleet_rlm.artifacts.models import ArtifactRef
-from fleet_rlm.artifacts.promotion import PromotedArtifact
 from fleet_rlm.persistence.database import observe_database_operation
 from fleet_rlm.persistence.repositories.run_state import (
     ReconciliationSummary,
@@ -71,6 +69,7 @@ from fleet_rlm.sessions.run_state import (
     _RunClaimToken,
 )
 from fleet_rlm.sessions.usage import RLMUsage, empty_rlm_usage
+from fleet_rlm.workspace.artifacts import ArtifactRef, PromotedArtifact
 from fleet_rlm.workspace.memory import MemoryPromotionIntent
 
 

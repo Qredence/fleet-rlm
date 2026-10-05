@@ -8,8 +8,8 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.artifacts.models import CompletedRun
 from fleet_rlm.paths import VolumePaths
+from fleet_rlm.workspace.artifacts import CompletedRun
 from fleet_rlm.workspace.mounted_gateway import OrphanCleanupReport, cleanup_orphan_bytes
 from tests.support.workspace_storage import HostVolumeMirror, OfflineHostVolumeGateway
 

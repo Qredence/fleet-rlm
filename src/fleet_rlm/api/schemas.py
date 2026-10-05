@@ -7,7 +7,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool, model_serializer, model_validator
 
-from fleet_rlm.artifacts.models import ArtifactKind
+from fleet_rlm.workspace.artifacts import ArtifactKind
 
 SkillScope = Literal["system", "workspace"]
 SkillTrust = Literal["system", "workspace", "untrusted"]

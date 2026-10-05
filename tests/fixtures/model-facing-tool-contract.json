@@ -1134,7 +1134,7 @@
     {
       "name": "create_artifact",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
+      "source": "src/fleet_rlm/workspace/artifact_tools.py:ArtifactToolHost",
       "description": "Stage generated text, markdown, or JSON as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1187,7 +1187,7 @@
           "artifact_candidate_id",
           "checksum_sha256"
         ],
-        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/artifact_tools.py:ArtifactToolHost.event_views"
       }
     },
     {
@@ -1856,7 +1856,7 @@
     {
       "name": "publish_workspace_artifact",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost",
+      "source": "src/fleet_rlm/workspace/artifact_tools.py:ArtifactToolHost",
       "description": "Stage an existing durable Session Workspace text file as a private Artifact Candidate; it is promoted only by a successful Turn Commit.",
       "argument_schema": {
         "type": "object",
@@ -1920,13 +1920,13 @@
         "omits": [
           "expected_sha256"
         ],
-        "source": "src/fleet_rlm/artifacts/tools.py:ArtifactToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/artifact_tools.py:ArtifactToolHost.event_views"
       }
     },
     {
       "name": "read_attachment",
       "category": "attachment_artifact",
-      "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost",
+      "source": "src/fleet_rlm/workspace/attachments.py:AttachmentToolHost",
       "description": "Read one immutable authorized Attachment by opaque identity only when its advertised metadata is relevant to the current request.",
       "argument_schema": {
         "type": "object",
@@ -1962,7 +1962,7 @@
           "content",
           "content_base64"
         ],
-        "source": "src/fleet_rlm/attachments/tools.py:AttachmentToolHost.event_views"
+        "source": "src/fleet_rlm/workspace/attachments.py:AttachmentToolHost.event_views"
       }
     },
     {

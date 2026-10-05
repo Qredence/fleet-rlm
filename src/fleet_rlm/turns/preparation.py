@@ -13,18 +13,6 @@ from uuid import UUID
 import dspy
 from sqlalchemy.exc import SQLAlchemyError
 
-from fleet_rlm.artifacts.models import ArtifactAccess
-from fleet_rlm.artifacts.promotion import RunArtifactSink
-from fleet_rlm.artifacts.reader import ArtifactReader
-from fleet_rlm.artifacts.tools import ArtifactToolHost
-from fleet_rlm.attachments import (
-    AttachmentAccess,
-    AttachmentRun,
-    AttachmentToolHost,
-    PreparedAttachment,
-    PreparedAttachments,
-    RunAttachmentSink,
-)
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.paths import VolumePaths
@@ -70,6 +58,16 @@ from fleet_rlm.skills.models import SkillDefinition
 from fleet_rlm.skills.resolver import resolve_selected_skills, resolved_schema, resolved_signature
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.turns.settlement import MemoryIntentBuilder, OwnedPostCommitMemoryPromotion
+from fleet_rlm.workspace.artifact_tools import ArtifactToolHost
+from fleet_rlm.workspace.artifacts import ArtifactAccess, ArtifactReader, RunArtifactSink
+from fleet_rlm.workspace.attachments import (
+    AttachmentAccess,
+    AttachmentRun,
+    AttachmentToolHost,
+    PreparedAttachment,
+    PreparedAttachments,
+    RunAttachmentSink,
+)
 from fleet_rlm.workspace.memory import (
     MemoryCandidate,
     MemoryCandidateCollector,

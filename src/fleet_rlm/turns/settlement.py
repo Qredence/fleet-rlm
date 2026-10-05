@@ -13,8 +13,6 @@ from types import SimpleNamespace
 from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
-from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate, ArtifactRef
-from fleet_rlm.artifacts.promotion import ArtifactPromotion, PromotedArtifact, RunArtifactSink
 from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.result_snapshot import ResultSnapshotSink, encode_result_snapshot
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor, RunCleanupUnavailableError
@@ -44,6 +42,14 @@ from fleet_rlm.sessions.run_state import (
     RunStateError,
     RunValidationError,
     _claim_failure,
+)
+from fleet_rlm.workspace.artifacts import (
+    ArtifactAccess,
+    ArtifactCandidate,
+    ArtifactPromotion,
+    ArtifactRef,
+    PromotedArtifact,
+    RunArtifactSink,
 )
 from fleet_rlm.workspace.memory import (
     OUTCOME_DEADLINE_EXCEEDED,

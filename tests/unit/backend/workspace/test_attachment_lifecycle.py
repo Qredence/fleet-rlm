@@ -28,7 +28,7 @@ class _Catalog:
         self.calls.append(("catalog", (access, ref, storage_ref)))
 
     async def get_many(self, *, access: object, attachment_ids: object) -> tuple[object, ...]:
-        from fleet_rlm.attachments import AttachmentNotFoundError
+        from fleet_rlm.workspace.attachments import AttachmentNotFoundError
 
         ids = tuple(attachment_ids)  # type: ignore[arg-type]
         self.calls.append(("metadata", (access, ids)))
@@ -99,7 +99,7 @@ class _PartiallyFailingSink:
 
 @pytest.mark.asyncio
 async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
-    from fleet_rlm.attachments import AttachmentAccess, AttachmentLifecycleService, AttachmentUpload
+    from fleet_rlm.workspace.attachments import AttachmentAccess, AttachmentLifecycleService, AttachmentUpload
 
     calls: list[tuple[str, object]] = []
     source = _Source([b"abc", b"def", b""])
@@ -127,7 +127,7 @@ async def test_upload_streams_bounded_bytes_before_creating_metadata() -> None:
 
 @pytest.mark.asyncio
 async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentStorageError,
@@ -153,7 +153,7 @@ async def test_upload_rolls_back_blob_when_catalog_create_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRef,
@@ -190,7 +190,7 @@ async def test_metadata_authorizes_one_batch_and_returns_request_order() -> None
 
 @pytest.mark.asyncio
 async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRef,
@@ -238,7 +238,7 @@ async def test_prepare_run_reauthorizes_verifies_and_stages_in_request_order() -
 
 @pytest.mark.asyncio
 async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRef,
@@ -282,7 +282,7 @@ async def test_prepare_run_rolls_back_staged_paths_when_a_later_write_fails() ->
 
 @pytest.mark.asyncio
 async def test_prepare_run_rolls_back_a_path_when_write_reports_after_persisting() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRef,
@@ -357,7 +357,7 @@ class _UploadHybridPaths:
 
 
 def test_sanitize_filename_rejects_paths() -> None:
-    from fleet_rlm.attachments import AttachmentValidationError, sanitize_filename
+    from fleet_rlm.workspace.attachments import AttachmentValidationError, sanitize_filename
 
     assert sanitize_filename("note.txt") == "note.txt"
     with pytest.raises(AttachmentValidationError):
@@ -369,7 +369,7 @@ def test_sanitize_filename_rejects_paths() -> None:
 
 
 def test_validate_upload_size() -> None:
-    from fleet_rlm.attachments import AttachmentValidationError, validate_upload_size
+    from fleet_rlm.workspace.attachments import AttachmentValidationError, validate_upload_size
 
     validate_upload_size(1, max_bytes=10)
     with pytest.raises(AttachmentValidationError):
@@ -381,7 +381,7 @@ def test_validate_upload_size() -> None:
 def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
     import asyncio
 
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentNotFoundError,
@@ -419,7 +419,8 @@ def test_local_store_upload_and_reauth(tmp_path: Path) -> None:
 def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
     import asyncio
 
-    from fleet_rlm.attachments import (
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRun,
@@ -427,7 +428,6 @@ def test_stage_returns_fleet_sandbox_path_only(tmp_path: Path) -> None:
         LocalAttachmentBlobGateway,
         LocalAttachmentCatalog,
     )
-    from fleet_rlm.paths import VolumePaths
     from tests.support.workspace_storage import HostVolumeMirror
 
     mirror = HostVolumeMirror(tmp_path / "volume")

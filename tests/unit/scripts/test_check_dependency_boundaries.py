@@ -35,7 +35,7 @@ def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> No
     _write(tmp_path, "chat/preparation.py", "import fastapi\n")
     _write(tmp_path, "persistence/repositories/turns.py", "from fleet_rlm.api import dependencies\n")
     _write(tmp_path, "sessions/models.py", "from fleet_rlm.persistence import database\n")
-    _write(tmp_path, "artifacts/tools.py", "from fleet_rlm.daytona import broker\n")
+    _write(tmp_path, "skills/tools.py", "from fleet_rlm.daytona import broker\n")
 
     violations = check_dependency_boundaries(tmp_path)
     rendered = "\n".join(item.render() for item in violations)
@@ -54,8 +54,8 @@ def test_checker_reports_local_imports_and_new_scope_edges(tmp_path: Path) -> No
     assert "persistence must not import api" in rendered
     assert "sessions/models.py:1" in rendered
     assert "sessions must not import persistence" in rendered
-    assert "artifacts/tools.py:1" in rendered
-    assert "artifacts must not import Daytona provider modules" in rendered
+    assert "skills/tools.py:1" in rendered
+    assert "skills must not import Daytona provider modules" in rendered
 
 
 def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:

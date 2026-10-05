@@ -31,8 +31,7 @@ class _Blobs:
 
 @pytest.mark.asyncio
 async def test_artifact_reader_returns_only_integrity_checked_committed_content() -> None:
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+    from fleet_rlm.workspace.artifacts import ArtifactAccess, ArtifactReader, ArtifactRef, StoredArtifact
 
     access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
     ref = ArtifactRef(
@@ -59,9 +58,13 @@ async def test_artifact_reader_returns_only_integrity_checked_committed_content(
 
 @pytest.mark.asyncio
 async def test_artifact_byte_allowance_rejects_before_blob_fetch_and_accepts_exact_limit() -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactReader,
+        ArtifactRef,
+        ArtifactValidationError,
+        StoredArtifact,
+    )
 
     ref = ArtifactRef(
         uuid4(),
@@ -86,9 +89,7 @@ async def test_artifact_byte_allowance_rejects_before_blob_fetch_and_accepts_exa
 @pytest.mark.asyncio
 @pytest.mark.parametrize("limit", [True])
 async def test_artifact_byte_allowance_rejects_invalid_limits(limit: object) -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess
-    from fleet_rlm.artifacts.reader import ArtifactReader
+    from fleet_rlm.workspace.artifacts import ArtifactAccess, ArtifactReader, ArtifactValidationError
 
     blobs = _Blobs(b"unused")
     reader = ArtifactReader(catalog=_Catalog(None), blobs=blobs)
@@ -99,9 +100,13 @@ async def test_artifact_byte_allowance_rejects_invalid_limits(limit: object) -> 
 
 @pytest.mark.asyncio
 async def test_artifact_reader_collapses_corrupt_or_missing_bytes_to_not_found() -> None:
-    from fleet_rlm.artifacts.errors import ArtifactNotFoundError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactNotFoundError,
+        ArtifactReader,
+        ArtifactRef,
+        StoredArtifact,
+    )
 
     ref = ArtifactRef(uuid4(), uuid4(), uuid4(), "text", None, "text/plain", 3, "a" * 64)
     reader = ArtifactReader(
@@ -115,9 +120,13 @@ async def test_artifact_reader_collapses_corrupt_or_missing_bytes_to_not_found()
 
 @pytest.mark.asyncio
 async def test_artifact_reader_rejects_metadata_declared_as_non_text_before_blob_fetch() -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-    from fleet_rlm.artifacts.reader import ArtifactReader, StoredArtifact
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactReader,
+        ArtifactRef,
+        ArtifactValidationError,
+        StoredArtifact,
+    )
 
     ref = ArtifactRef(uuid4(), uuid4(), uuid4(), "text", None, "application/octet-stream", 3, "a" * 64)
     blobs = _Blobs(b"abc")
@@ -129,9 +138,12 @@ async def test_artifact_reader_rejects_metadata_declared_as_non_text_before_blob
 
 
 def test_artifact_promotion_validates_the_complete_owned_candidate_batch() -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
-    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactCandidate,
+        ArtifactPromotion,
+        ArtifactValidationError,
+    )
 
     access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
     session_id, run_id = uuid4(), uuid4()
@@ -158,9 +170,12 @@ def test_artifact_promotion_validates_the_complete_owned_candidate_batch() -> No
 
 @pytest.mark.parametrize("field", ["user_id", "workspace_id", "session_id", "run_id"])
 def test_artifact_promotion_rejects_candidate_owned_by_another_identity(field: str) -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
-    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactCandidate,
+        ArtifactPromotion,
+        ArtifactValidationError,
+    )
 
     access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
     session_id, run_id = uuid4(), uuid4()
@@ -193,9 +208,12 @@ def test_artifact_promotion_rejects_candidate_owned_by_another_identity(field: s
 )
 @pytest.mark.parametrize("location", ["staging_path", "durable_path"])
 def test_artifact_promotion_rejects_traversal_in_candidate_locations(path: str, location: str) -> None:
-    from fleet_rlm.artifacts.errors import ArtifactValidationError
-    from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactCandidate
-    from fleet_rlm.artifacts.promotion import ArtifactPromotion
+    from fleet_rlm.workspace.artifacts import (
+        ArtifactAccess,
+        ArtifactCandidate,
+        ArtifactPromotion,
+        ArtifactValidationError,
+    )
 
     access = ArtifactAccess(user_id=uuid4(), workspace_id=uuid4())
     session_id, run_id = uuid4(), uuid4()
@@ -226,7 +244,7 @@ def test_store_create_kinds_checksum_and_reauth(tmp_path: Path) -> None:
     import hashlib
 
     from fleet_rlm.api.local_scope import LocalScope
-    from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
+    from fleet_rlm.workspace.artifacts import ArtifactNotFoundError, ArtifactValidationError
     from tests.support.local_catalog import LocalArtifactCatalog
 
     store = LocalArtifactCatalog(tmp_path, max_bytes=1024)
@@ -386,12 +404,12 @@ def test_volume_paths_durable_attachment_and_artifact_layout() -> None:
 
 
 def test_daytona_run_attachment_paths_keep_blobs_durable_and_stage_in_scratch() -> None:
-    from fleet_rlm.attachments import (
+    from fleet_rlm.paths import VolumePaths, as_posix
+    from fleet_rlm.workspace.attachments import (
         AttachmentRun,
         AttachmentValidationError,
         DaytonaRunAttachmentPathPolicy,
     )
-    from fleet_rlm.paths import VolumePaths, as_posix
 
     paths = VolumePaths.from_mount()
     policy = DaytonaRunAttachmentPathPolicy(paths)
@@ -410,7 +428,7 @@ def test_daytona_run_attachment_paths_keep_blobs_durable_and_stage_in_scratch() 
 def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path) -> None:
     import asyncio
 
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentUpload,
@@ -439,7 +457,7 @@ def test_upload_promotes_durable_blob_into_workspace_volume_scope(tmp_path: Path
 def test_stager_requires_volume_write_and_materializes_run_path(tmp_path: Path) -> None:
     import asyncio
 
-    from fleet_rlm.attachments import (
+    from fleet_rlm.workspace.attachments import (
         AttachmentAccess,
         AttachmentLifecycleService,
         AttachmentRun,

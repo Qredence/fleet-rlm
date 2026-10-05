@@ -639,7 +639,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
 async def test_cancellation_during_artifact_write_waits_then_removes_written_path() -> None:
     from hashlib import sha256
 
-    from fleet_rlm.artifacts.models import ArtifactCandidate
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
     from tests.support.turn_lifecycle import claimed_run, completed_outcome
 
     turn = claimed_run()

@@ -14,7 +14,6 @@ from tests.support.turn_settlement import TestingRunSettlement
 
 @pytest.mark.asyncio
 async def test_success_validates_and_publishes_before_atomic_commit() -> None:
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -22,6 +21,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
         CommittedTurnReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     data = b"{}"
     access = TurnAccess(uuid4(), uuid4())
@@ -114,7 +114,6 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_authority_revocation_after_artifact_publish_rolls_back_before_commit() -> None:
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -122,6 +121,7 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     data = b"artifact"
     access = TurnAccess(uuid4(), uuid4())
@@ -230,7 +230,6 @@ async def test_authority_revocation_after_artifact_publish_rolls_back_before_com
 
 @pytest.mark.asyncio
 async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None:
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -238,6 +237,7 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -398,7 +398,6 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 
 @pytest.mark.asyncio
 async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failure_opaque(caplog) -> None:
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -406,6 +405,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
 
@@ -596,7 +596,6 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["failed", "cancelled", "timeout"])
 async def test_non_success_removes_run_local_artifact_candidate_bytes(status: str) -> None:
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -604,6 +603,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
         FailedRunReceipt,
         _RunClaimToken,
     )
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
 
     access, run_id, session_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
     data = b"uncommitted"

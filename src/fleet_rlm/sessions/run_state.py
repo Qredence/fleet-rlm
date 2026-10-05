@@ -8,10 +8,10 @@ from dataclasses import dataclass, field
 from typing import Literal, TypeAlias, assert_never
 from uuid import UUID
 
-from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.sessions.committed_turn import CommittedTurn
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.usage import RLMUsage
+from fleet_rlm.workspace.artifacts import ArtifactRef
 
 ClaimStatus = Literal["running", "settling", "completed", "failed", "cancelled", "timeout"]
 ClaimTerminalStatus = Literal["failed", "cancelled", "timeout"]

@@ -1709,10 +1709,10 @@ def _make_prep_turn() -> Any:
 
 
 def _make_preparer(*, environments: Any = None) -> Any:
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     class Sink:
         async def remove_private(self, location: str) -> None:

@@ -19,7 +19,6 @@ from fleet_rlm.api.dependencies import get_turn_runtime
 from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.paths import volume_paths_from_settings
 from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
@@ -33,6 +32,7 @@ from fleet_rlm.skills.catalog import SkillCatalog, build_bundled_skill_catalog, 
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.skills.models import SkillSelectionRef
 from fleet_rlm.turns import OpenTurnCommand
+from fleet_rlm.workspace.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
 
 

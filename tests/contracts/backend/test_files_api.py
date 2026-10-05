@@ -9,8 +9,8 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from fleet_rlm.attachments import AttachmentStorageError
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.workspace.attachments import AttachmentStorageError
 from tests.support.testing_app import create_testing_app
 
 
@@ -60,7 +60,7 @@ def test_api_rejects_oversize(tmp_path: Path) -> None:
 
 def test_api_storage_failure_is_unavailable_not_invalid(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A transient blob-write failure is a server fault (503), not client input (400)."""
-    from fleet_rlm.attachments import LocalAttachmentBlobGateway
+    from fleet_rlm.workspace.attachments import LocalAttachmentBlobGateway
 
     async def failing_write(*_args: object, **_kwargs: object) -> None:
         raise AttachmentStorageError("Attachment storage is unavailable")

@@ -322,7 +322,6 @@ def _manifest():
 # --- from test_session_context.py -------------------------------------
 @pytest.mark.asyncio
 async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() -> None:
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage, TurnAccess
@@ -331,6 +330,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         _RunClaimToken,
     )
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     session_id = uuid4()
     messages = tuple(

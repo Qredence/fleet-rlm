@@ -758,7 +758,6 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 ) -> None:
     from hashlib import sha256
 
-    from fleet_rlm.artifacts.models import ArtifactCandidate
     from fleet_rlm.rlm.events import (
         TERMINAL_DETAIL_TYPES,
         EventRecorder,
@@ -771,6 +770,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+    from fleet_rlm.workspace.artifacts import ArtifactCandidate
     from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     expected_terminal = {"RunCancelled": RunCancelled, "RunTimedOut": RunTimedOut}[terminal_type]

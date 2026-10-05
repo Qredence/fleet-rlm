@@ -15,8 +15,8 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.attachments import PreparedAttachments
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.workspace.attachments import PreparedAttachments
 from fleet_rlm.workspace.memory import (
     MemoryCandidate,
     WorkspaceMemory,

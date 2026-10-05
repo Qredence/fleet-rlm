@@ -17,9 +17,6 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from fleet_rlm.artifacts.models import ArtifactRef
-from fleet_rlm.artifacts.promotion import PromotedArtifact
-from fleet_rlm.artifacts.safety import parse_kind
 from fleet_rlm.persistence.database import DatabaseConnectionError, observe_database_operation
 from fleet_rlm.persistence.models import (
     ArtifactRow,
@@ -75,6 +72,7 @@ from fleet_rlm.sessions.run_state import (
     _RunClaimToken,
 )
 from fleet_rlm.sessions.usage import RLMUsage, empty_rlm_usage
+from fleet_rlm.workspace.artifacts import ArtifactRef, PromotedArtifact, parse_kind
 from fleet_rlm.workspace.memory import MemoryPromotionIntent
 
 # ---------------------------------------------------------------------------

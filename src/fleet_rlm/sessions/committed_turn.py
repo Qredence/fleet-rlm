@@ -6,7 +6,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, assert_never, cast
 
-from fleet_rlm.artifacts.models import ArtifactRef
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.observability.tracing import current_turn_trace_id
@@ -55,6 +54,7 @@ from fleet_rlm.sessions.assistant_parts import (
     assistant_part_payload,
 )
 from fleet_rlm.sessions.usage import RLMUsage
+from fleet_rlm.workspace.artifacts import ArtifactRef
 
 _EXECUTION_PARTS = (
     StepPart,

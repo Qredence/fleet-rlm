@@ -12,17 +12,21 @@ from threading import Lock
 from typing import Any
 from uuid import UUID, uuid4
 
-from fleet_rlm.artifacts.errors import ArtifactNotFoundError, ArtifactValidationError
-from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactAccess, ArtifactKind, ArtifactRef
-from fleet_rlm.artifacts.reader import StoredArtifact
-from fleet_rlm.artifacts.safety import (
+from fleet_rlm.paths import VolumePaths, as_posix
+from fleet_rlm.workspace.artifacts import (
+    KIND_EXTENSIONS,
+    ArtifactAccess,
+    ArtifactKind,
+    ArtifactNotFoundError,
+    ArtifactRef,
+    ArtifactValidationError,
+    StoredArtifact,
     encode_content,
     media_type_for,
     parse_kind,
     sanitize_title,
     validate_content_size,
 )
-from fleet_rlm.paths import VolumePaths, as_posix
 from fleet_rlm.workspace.storage import VolumeBlobFs
 
 

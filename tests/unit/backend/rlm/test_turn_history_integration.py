@@ -50,11 +50,11 @@ def _make_claim(*, history_messages: tuple[HistoryMessage, ...] = ()):
 async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm() -> None:
     """The in-process Turn preparation path passes the same ``dspy.History`` instance."""
 
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     history_messages = (
         HistoryMessage("user", "earlier user request"),
@@ -174,10 +174,10 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
 async def test_in_process_turn_preparation_passes_empty_history_for_fresh_session() -> None:
     """A claim with no committed Turns still carries a valid empty ``dspy.History``."""
 
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     claim = _make_claim(history_messages=())
 
@@ -258,11 +258,11 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
 async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -> None:
     """Turn preparation materializes the Session-owned Sandbox history format."""
 
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.history import committed_history_for_claim
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
 
     claim = _make_claim(
         history_messages=(
@@ -378,7 +378,6 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     No history Tool is installed, so the content dependence is provable.
     """
 
-    from fleet_rlm.attachments import PreparedAttachments
     from fleet_rlm.rlm.execution import RLMExecutionSpec, RLMRunner
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -387,6 +386,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
         RunClaim,
     )
     from fleet_rlm.turns.preparation import RunEnvironment
+    from fleet_rlm.workspace.attachments import PreparedAttachments
     from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
 
     access = TurnAccess(uuid4(), uuid4())

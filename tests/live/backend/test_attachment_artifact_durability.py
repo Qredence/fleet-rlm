@@ -26,14 +26,6 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.attachments import (
-    AttachmentAccess,
-    AttachmentLifecycleService,
-    AttachmentRun,
-    AttachmentUpload,
-    LocalAttachmentCatalog,
-)
-from fleet_rlm.attachments.service import DaytonaRunAttachmentPathPolicy
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import map_provider_error
@@ -47,6 +39,14 @@ from fleet_rlm.daytona.runtime import (
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.sessions.bindings import SandboxBinding
+from fleet_rlm.workspace.attachments import (
+    AttachmentAccess,
+    AttachmentLifecycleService,
+    AttachmentRun,
+    AttachmentUpload,
+    DaytonaRunAttachmentPathPolicy,
+    LocalAttachmentCatalog,
+)
 from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
 from fleet_rlm.workspace.mounted_gateway import DaytonaWorkspaceGateway, DaytonaWorkspaceVolumeGateway
 from tests.live.backend._evidence import candidate_identity, write_receipt

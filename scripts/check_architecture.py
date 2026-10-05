@@ -300,8 +300,8 @@ def deps__forbidden_imports(relative: Path) -> tuple[tuple[str, str], ...]:
             ("rlm must not import chat", "fleet_rlm.chat"),
             ("rlm must not import turn coordination", "fleet_rlm.turns"),
         )
-    if scope in {"artifacts", "attachments", "skills"}:
-        return ((f"{scope} must not import Daytona provider modules", "fleet_rlm.daytona"),)
+    if scope == "skills":
+        return (("skills must not import Daytona provider modules", "fleet_rlm.daytona"),)
     return ()
 
 

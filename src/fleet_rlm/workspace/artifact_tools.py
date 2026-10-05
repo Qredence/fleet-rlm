@@ -11,18 +11,20 @@ from uuid import UUID, uuid4
 
 import dspy
 
-from fleet_rlm.artifacts.errors import ArtifactValidationError
-from fleet_rlm.artifacts.models import KIND_EXTENSIONS, ArtifactCandidate, ArtifactKind
-from fleet_rlm.artifacts.safety import (
+from fleet_rlm.json_types import JsonValue
+from fleet_rlm.paths import VolumePaths, as_posix
+from fleet_rlm.tool_events import ToolEventView, bound_event_text
+from fleet_rlm.workspace.artifacts import (
+    KIND_EXTENSIONS,
+    ArtifactCandidate,
+    ArtifactKind,
+    ArtifactValidationError,
     encode_content,
     media_type_for,
     parse_kind,
     sanitize_title,
     validate_content_size,
 )
-from fleet_rlm.json_types import JsonValue
-from fleet_rlm.paths import VolumePaths, as_posix
-from fleet_rlm.tool_events import ToolEventView, bound_event_text
 from fleet_rlm.workspace.paths import normalize_workspace_path
 from fleet_rlm.workspace.storage import VolumeBlobFs
 

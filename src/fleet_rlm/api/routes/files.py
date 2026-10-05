@@ -31,16 +31,15 @@ from fleet_rlm.api.schemas import (
     WorkspaceFileReadResponse,
     WorkspaceFileWriteRequest,
 )
-from fleet_rlm.artifacts.errors import ArtifactNotFoundError
-from fleet_rlm.artifacts.models import ArtifactAccess, ArtifactRef
-from fleet_rlm.attachments import (
+from fleet_rlm.observability.posthog import capture
+from fleet_rlm.workspace.artifacts import ArtifactAccess, ArtifactNotFoundError, ArtifactRef
+from fleet_rlm.workspace.attachments import (
     AttachmentAccess,
     AttachmentError,
     AttachmentNotFoundError,
     AttachmentStorageError,
     AttachmentUpload,
 )
-from fleet_rlm.observability.posthog import capture
 from fleet_rlm.workspace.errors import WorkspaceConflictError
 from fleet_rlm.workspace.models import WorkspaceEntry
 from fleet_rlm.workspace.workspace import (

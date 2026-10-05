@@ -416,10 +416,10 @@ def test_projector_maps_status_parts_back_to_transient_status_events() -> None:
 
 
 def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() -> None:
-    from fleet_rlm.artifacts.models import ArtifactRef
     from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, ToolCompleted, ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import commit_success
+    from fleet_rlm.workspace.artifacts import ArtifactRef
 
     artifact = ArtifactRef(
         uuid4(),

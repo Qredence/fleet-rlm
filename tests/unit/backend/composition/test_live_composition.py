@@ -192,8 +192,8 @@ async def test_daytona_startup_recovery_stops_after_shared_deadline() -> None:
 @pytest.mark.parametrize("session_factory", [None, object()], ids=["local", "sql"])
 def test_common_storage_adapter_builder_owns_local_and_sql_catalog_branches(tmp_path, session_factory) -> None:
     import tests.support.testing_app as common
-    from fleet_rlm.attachments import LocalAttachmentCatalog
     from fleet_rlm.persistence.repositories import SqlAlchemyArtifactCatalog, SqlAlchemyAttachmentCatalog
+    from fleet_rlm.workspace.attachments import LocalAttachmentCatalog
     from tests.support.local_catalog import LocalArtifactReaderCatalog
 
     builder = getattr(common, "build_local_storage_adapters", None)

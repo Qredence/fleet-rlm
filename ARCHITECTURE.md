@@ -46,7 +46,7 @@ through successful settlement and Turn Commit.
 | `turns/settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
 | `persistence/` | Owns SQL-backed Session and Run state, durable repositories, and commit operations; Alembic owns live schema changes. |
 | `sessions/` | Owns the Session, Run, and Turn domain contracts shared by `persistence/`, `rlm/`, and `turns/` (it shares event and result value types with `rlm/`), projects committed history, and owns the bounded, revisioned task checkpoint. It must not import `turns/` or `persistence/`. |
-| `attachments/`, `artifacts/`, `workspace/` | Own durable content, scoped file access, host I/O, and workspace memory. |
+| `workspace/` | Owns durable content, scoped file access, host I/O, artifacts, attachments, and workspace memory. |
 
 One Daytona Volume holds each Workspace under `workspaces/<workspace_id>`, and
 Fleet mounts it two ways:
