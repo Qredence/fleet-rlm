@@ -2044,6 +2044,8 @@ class _RLMTraceCallback(BaseCallback):
         for key in (
             "response_keys",
             "response_chars",
+            "reasoning_chars",
+            "text_chars",
             "wall_time_ms",
             "has_reasoning_content",
             "reasoning_tokens",
@@ -2174,6 +2176,10 @@ def _lm_output_profile(outputs: Any, *, include_previews: bool = True) -> dict[s
     reasoning = mapping.get("reasoning_content")
     if isinstance(reasoning, str) and reasoning:
         profile["has_reasoning_content"] = True
+        profile["reasoning_chars"] = len(reasoning)
+    text = mapping.get("text")
+    if isinstance(text, str):
+        profile["text_chars"] = len(text)
     if mapping and include_previews:
         profile["response_preview"] = _trace_preview(_trace_payload_text(mapping))
     return profile

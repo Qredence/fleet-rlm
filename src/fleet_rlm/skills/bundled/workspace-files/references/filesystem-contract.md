@@ -73,3 +73,8 @@ locations and raw sandbox paths must not appear in client-facing answers.
 `publish_workspace_artifact` reads an existing Workspace document into a private
 Run candidate without exposing its body or source path; only Turn Commit
 promotes it.
+
+Project tool arguments are slug-relative (`<slug>/<path>`). An optional
+`projects/` prefix is an accepted alias for the same path. Use `path="."`
+for root listings, never `None`. Stat/list only when existing content is
+a prerequisite; not-found on a new file cannot distinguish path syntax.

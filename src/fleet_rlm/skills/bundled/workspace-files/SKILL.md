@@ -3,7 +3,7 @@ name: workspace-files
 description: Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.4.0"
+  version: "1.4.1"
   affordances:
     - workspace.files
     - artifacts.publish
@@ -42,7 +42,11 @@ repo/task-derived value (for example `fleet-rlm`) matching
 slug for you. Reserved Volume roots (`sessions`, `files`, `artifacts`,
 `attachments`, `memory`) cannot be slugs. Project paths are canonical
 POSIX-relative paths whose first segment is the slug; `projects/` itself is
-implicit and nested subdirectories are allowed. Project writes are immediate
+implicit and nested subdirectories are allowed. Tool arguments use `<slug>/<path>`;
+an optional `projects/` prefix is an accepted alias for the same path, not a
+different namespace. List or stat only when existing content is a prerequisite.
+Do not probe a new file to infer path syntax: either alias can return not-found
+before creation. For the Project root, use `path="."`, never `None`. Project writes are immediate
 private state; they survive a failed or cancelled Run and are not published as
 Artifacts.
 

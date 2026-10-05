@@ -1166,3 +1166,13 @@ def test_trajectory_reconciliation_bounds_provider_backfill_steps() -> None:
 
     assert {detail.step for detail in details if isinstance(detail, RLMCode)} == {1, 2}
     assert any("backfill-code" in detail.code for detail in details if isinstance(detail, RLMCode) and detail.step == 2)
+
+
+def test_lm_output_profile_counts_reasoning_without_exporting_it() -> None:
+    from fleet_rlm.rlm.events import _lm_output_profile
+
+    profile = _lm_output_profile([{"text": "action", "reasoning_content": "x" * 120_000}], include_previews=False)
+    assert profile["reasoning_chars"] == 120_000
+    assert profile["text_chars"] == 6
+    assert profile["response_chars"] == 120_006
+    assert "response_preview" not in profile

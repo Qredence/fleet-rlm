@@ -339,3 +339,13 @@ def test_delete_and_edit_project_event_views_expose_metadata_only() -> None:
     }
     assert "private project fragment" not in str(observed)
     assert "rewritten project" not in str(observed)
+
+
+def test_project_prefix_alias_addresses_the_same_file() -> None:
+    _, tools = _tools()
+    saved = tools["write_project_text"](path="projects/fleet-rlm/report.md", content="report", overwrite=False)
+    assert saved["ok"] is True
+    for path in ("fleet-rlm/report.md", "projects/fleet-rlm/report.md"):
+        page = tools["read_project_text"](path=path, cursor=None, max_chars=100)
+        assert page["content"] == "report"
+    assert tools["list_project_files"](path=".", limit=8, after=None)["ok"] is True

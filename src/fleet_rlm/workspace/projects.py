@@ -272,7 +272,8 @@ class ProjectToolHost:
                 list_project_files,
                 name="list_project_files",
                 desc=(
-                    "List immediate entries under projects/<slug>/ (or the projects root) only when existing "
+                    "List immediate entries with a slug-relative path (use path='.' for the projects root; "
+                    "never None). An optional projects/ prefix is an alias. Only list when existing "
                     "durable Project deliverables are relevant; do not explore them for a self-contained request."
                 ),
                 args={
@@ -284,7 +285,11 @@ class ProjectToolHost:
             dspy.Tool(
                 stat_project_file,
                 name="stat_project_file",
-                desc="Read bounded metadata for a relevant durable Project deliverable path under projects/<slug>/.",
+                desc=(
+                    "Read bounded metadata using a <slug>/<path> argument; an optional projects/ prefix "
+                    "is an alias. Stat only when existing content is a prerequisite; a missing new file "
+                    "cannot establish path syntax."
+                ),
                 args={"path": {"type": "string"}},
             ),
             dspy.Tool(
@@ -292,7 +297,8 @@ class ProjectToolHost:
                 name="read_project_text",
                 desc=(
                     "Read one relevant UTF-8 Project deliverable page with max_chars in 1..10000 using a "
-                    "projects/<slug>/<path> target. Continue with next_cursor until eof."
+                    "<slug>/<path> argument, relative to the projects root. An optional projects/ prefix is "
+                    "an accepted alias for the same path. Continue with next_cursor until eof."
                 ),
                 args={
                     "path": {"type": "string"},
@@ -304,7 +310,9 @@ class ProjectToolHost:
                 write_project_text,
                 name="write_project_text",
                 desc=(
-                    "Write UTF-8 text immediately as a durable deliverable under projects/<slug>/ when the "
+                    "Write UTF-8 text immediately using a <slug>/<path> argument relative to the projects root; "
+                    "an optional projects/ prefix is an alias for the same path. Do not stat/list a new file "
+                    "to infer path syntax. Use this when the "
                     "result must stay browsable across Sessions; choose a short repo/task-derived slug and "
                     "keep scratch in the Session Workspace. This durability is independent of Turn Commit."
                 ),
@@ -318,7 +326,8 @@ class ProjectToolHost:
                 delete_project_path,
                 name="delete_project_path",
                 desc=(
-                    "Delete one file or one empty directory immediately under projects/<slug>/; non-empty "
+                    "Delete one file or empty directory with a <slug>/<path> argument (optional projects/ alias); "
+                    "non-empty "
                     "directories are refused, and a supplied expected_sha256 guards against deleting changed "
                     "content. This durability is independent of Turn Commit."
                 ),
@@ -329,7 +338,8 @@ class ProjectToolHost:
                 name="edit_project_text",
                 desc=(
                     "Replace exactly one unique occurrence of old with new in one UTF-8 Project file under "
-                    "projects/<slug>/; the edit fails when old is absent or occurs more than once, and a "
+                    "the projects root using <slug>/<path> (optional projects/ alias); "
+                    "the edit fails when old is absent or occurs more than once, and a "
                     "supplied expected_sha256 guards against editing changed content. Read the file first "
                     "and keep old short and unique. This durability is independent of Turn Commit."
                 ),
