@@ -304,6 +304,64 @@ def _write_all(fd: int, data: bytes) -> None:
             raise
 
 
+def _paginate_data(
+    data: bytes,
+    norm_path: str,
+    cursor: str | None,
+    max_chars: int,
+    max_bytes: int | None,
+    max_file_bytes: int,
+) -> WorkspaceTextPage:
+    if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
+        raise ValueError(f"max_chars must be in 1..{MAX_STORAGE_READ_CHARS}")
+    bound = max_file_bytes if max_bytes is None else min(max_file_bytes, max_bytes)
+    byte_size = len(data)
+    if byte_size > bound:
+        raise ValueError(f"read bound exceeded: size {byte_size} exceeds {bound}")
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"file is not valid UTF-8: {exc}") from exc
+    byte_offset = min(byte_size, _decode_cursor(cursor, norm_path) if cursor is not None else 0)
+    chunk = data[byte_offset:]
+    text = chunk.decode("utf-8")
+    if len(text) > max_chars:
+        text = text[:max_chars]
+        return WorkspaceTextPage(
+            content=text,
+            next_cursor=_encode_cursor(norm_path, byte_offset + len(text.encode("utf-8"))),
+            byte_size=byte_size,
+            eof=False,
+        )
+    return WorkspaceTextPage(content=text, next_cursor=None, byte_size=byte_size, eof=True)
+
+
+def _slice_tail_record(data: bytes | None, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
+    if type(byte_budget) is not int or byte_budget < 1:
+        raise ValueError("byte_budget must be positive")
+    if data is None:
+        return {"missing": True, "content": "", "sha256": "", "byte_size": 0}
+    total = len(data)
+    start = max(0, total - byte_budget)
+    while start < total and (data[start] & 0xC0) == 0x80:
+        start += 1
+    return {
+        "missing": False,
+        "content": data[start:].decode("utf-8", errors="replace"),
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "byte_size": total,
+    }
+
+
+def _patch_text_string(text: str, old: str, new: str, path: str) -> str:
+    count = text.count(old)
+    if count == 0:
+        raise WorkspaceConflictError(f"target text not found in {path}", detail="missing")
+    if count > 1:
+        raise WorkspaceConflictError(f"target text occurs {count} times (must be unique)", detail="ambiguous")
+    return text.replace(old, new, 1)
+
+
 class WorkspaceStorage:
     """Lean, direct Daytona Volume & Filesystem Workspace Storage.
 
@@ -454,43 +512,19 @@ class WorkspaceStorage:
         max_chars: int = MAX_STORAGE_READ_CHARS,
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
-        if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
-            raise ValueError(f"max_chars must be in 1..{MAX_STORAGE_READ_CHARS}")
         target = self._resolve(path)
         if not target.exists():
             raise FileNotFoundError(path)
         if target.is_dir():
             raise IsADirectoryError(path)
-
-        data = target.read_bytes()
-        byte_size = len(data)
-        limit_bytes = self._max_file_bytes if max_bytes is None else min(self._max_file_bytes, max_bytes)
-        if byte_size > limit_bytes:
-            raise ValueError(f"read bound exceeded: size {byte_size} exceeds {limit_bytes}")
-
-        try:
-            data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError(f"file is not valid UTF-8: {exc}") from exc
-
-        byte_offset = 0
-        norm = normalize_workspace_path(path)
-        if cursor is not None:
-            byte_offset = _decode_cursor(cursor, norm)
-        if byte_offset > byte_size:
-            byte_offset = byte_size
-
-        chunk = data[byte_offset:]
-        text = chunk.decode("utf-8")
-        if len(text) > max_chars:
-            text = text[:max_chars]
-            eof = False
-            next_cursor = _encode_cursor(norm, byte_offset + len(text.encode("utf-8")))
-        else:
-            eof = True
-            next_cursor = None
-
-        return WorkspaceTextPage(content=text, next_cursor=next_cursor, byte_size=byte_size, eof=eof)
+        return _paginate_data(
+            target.read_bytes(),
+            normalize_workspace_path(path),
+            cursor,
+            max_chars,
+            max_bytes,
+            self._max_file_bytes,
+        )
 
     def read_text_page(
         self,
@@ -676,14 +710,7 @@ class WorkspaceStorage:
             actual = hashlib.sha256(data.encode("utf-8")).hexdigest()
             if actual != expected_sha256:
                 raise WorkspaceConflictError("checksum mismatch", detail="checksum_mismatch")
-
-        count = data.count(old)
-        if count == 0:
-            raise WorkspaceConflictError(f"target text not found in {path}", detail="missing")
-        if count > 1:
-            raise WorkspaceConflictError(f"target text occurs {count} times (must be unique)", detail="ambiguous")
-
-        patched = data.replace(old, new, 1)
+        patched = _patch_text_string(data, old, new, path)
         encoded = patched.encode("utf-8")
         if len(encoded) > self._max_file_bytes:
             raise WorkspaceStorageError("patched file exceeds maximum size")
@@ -714,27 +741,11 @@ class WorkspaceStorage:
             target.unlink()
 
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
-        if type(byte_budget) is not int or byte_budget < 1:
-            raise ValueError("byte_budget must be positive")
         try:
             target = self._resolve(path)
             if not target.is_file():
                 return {"missing": True, "content": "", "sha256": "", "byte_size": 0}
-            data = target.read_bytes()
-            total_size = len(data)
-            sha = hashlib.sha256(data).hexdigest()
-            start = max(0, total_size - byte_budget)
-            # Never decode a partial UTF-8 code point.  Moving the boundary
-            # forward keeps the returned bytes within the requested budget.
-            while start < total_size and (data[start] & 0xC0) == 0x80:
-                start += 1
-            tail = data[start:]
-            return {
-                "missing": False,
-                "content": tail.decode("utf-8", errors="replace"),
-                "sha256": sha,
-                "byte_size": total_size,
-            }
+            return _slice_tail_record(target.read_bytes(), byte_budget)
         except (FileNotFoundError, OSError):
             return {"missing": True, "content": "", "sha256": "", "byte_size": 0}
 
@@ -1025,24 +1036,11 @@ class DaytonaSandboxWorkspaceStorage:
         max_chars: int = MAX_STORAGE_READ_CHARS,
         max_bytes: int | None = None,
     ) -> WorkspaceTextPage:
-        if max_chars < 1 or max_chars > MAX_STORAGE_READ_CHARS:
-            raise ValueError(f"max_chars must be in 1..{MAX_STORAGE_READ_CHARS}")
         full_path, normalized = self._path(path)
         data = self._read_optional(full_path)
         if data is None:
             raise FileNotFoundError(path)
-        bound = self._max_file_bytes if max_bytes is None else min(self._max_file_bytes, max_bytes)
-        if len(data) > bound:
-            raise ValueError(f"read bound exceeded: size {len(data)} exceeds {bound}")
-        data.decode("utf-8")
-        offset = _decode_cursor(cursor, normalized) if cursor is not None else 0
-        content = data[offset:].decode("utf-8")
-        if len(content) > max_chars:
-            content = content[:max_chars]
-            return WorkspaceTextPage(
-                content, _encode_cursor(normalized, offset + len(content.encode("utf-8"))), len(data), False
-            )
-        return WorkspaceTextPage(content, None, len(data), True)
+        return _paginate_data(data, normalized, cursor, max_chars, max_bytes, self._max_file_bytes)
 
     def read_text_page(
         self,
@@ -1115,32 +1113,13 @@ class DaytonaSandboxWorkspaceStorage:
         existing = self._read_optional(full_path)
         if existing is None:
             raise FileNotFoundError(path)
-        text = existing.decode("utf-8")
         if expected_sha256 is not None and hashlib.sha256(existing).hexdigest() != expected_sha256:
             raise WorkspaceConflictError("checksum mismatch")
-        if text.count(old) == 0:
-            raise WorkspaceConflictError("target text not found", detail="missing")
-        if text.count(old) > 1:
-            raise WorkspaceConflictError("target text occurs more than once", detail="ambiguous")
-        return self.write_text(normalized, text.replace(old, new, 1), overwrite=True)
+        return self.write_text(normalized, _patch_text_string(existing.decode("utf-8"), old, new, path), overwrite=True)
 
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> dict[str, object]:
-        if type(byte_budget) is not int or byte_budget < 1:
-            raise ValueError("byte_budget must be positive")
         full_path, _ = self._path(path)
-        data = self._read_optional(full_path)
-        if data is None:
-            return {"missing": True, "content": "", "sha256": "", "byte_size": 0}
-        start = max(0, len(data) - byte_budget)
-        while start < len(data) and (data[start] & 0xC0) == 0x80:
-            start += 1
-        tail = data[start:]
-        return {
-            "missing": False,
-            "content": tail.decode("utf-8", errors="replace"),
-            "sha256": hashlib.sha256(data).hexdigest(),
-            "byte_size": len(data),
-        }
+        return _slice_tail_record(self._read_optional(full_path), byte_budget)
 
     def delete_path(self, path: str, *, expected_sha256: str | None = None) -> None:
         full_path, _ = self._path(path)
