@@ -1,8 +1,4 @@
-"""Host-authorized, bounded active-task state for a Session.
-
-Task checkpoints live beside the Session workspace on the shared volume.  They
-are deliberately outside the mounted ``sessions/<id>/workspace`` directory.
-"""
+"""Host-authorized, bounded active-task state for a Session."""
 
 from __future__ import annotations
 
@@ -32,29 +28,22 @@ _MAX_SOURCE_REVISIONS = 40
 
 
 class TaskCheckpointError(SessionError):
-    """Base error for active-task checkpoint failures."""
-
     def __init__(self, message: str) -> None:
         self.public_message = message
         super().__init__(message)
 
 
-class TaskCheckpointMissingError(TaskCheckpointError):
-    """The Session has not seeded its task checkpoint yet."""
+class TaskCheckpointMissingError(TaskCheckpointError): ...
 
 
-class TaskCheckpointCorruptError(TaskCheckpointError):
-    """Stored task checkpoint is malformed or unsupported."""
+class TaskCheckpointCorruptError(TaskCheckpointError): ...
 
 
-class TaskCheckpointConflictError(TaskCheckpointError):
-    """The checkpoint changed since the caller last read it."""
+class TaskCheckpointConflictError(TaskCheckpointError): ...
 
 
 @dataclass(frozen=True, slots=True)
 class TaskCheckpoint:
-    """Validated task state returned to an authorized host caller."""
-
     revision: int
     goal: str
     decisions: tuple[str, ...]
@@ -65,7 +54,6 @@ class TaskCheckpoint:
 
 
 def task_checkpoint_summary(checkpoint: TaskCheckpoint) -> str:
-    """Format a bounded reminder for the active Session task."""
     parts = [f"Goal: {checkpoint.goal[:500]}"]
     for label, values in (
         ("Pending", checkpoint.pending_work),
@@ -74,10 +62,11 @@ def task_checkpoint_summary(checkpoint: TaskCheckpoint) -> str:
         ("Paths", checkpoint.relevant_paths),
     ):
         if values:
-            parts.append(f"{label}: " + "; ".join(value[:160] for value in values[-4:]))
+            parts.append(f"{label}: " + "; ".join(v[:160] for v in values[-4:]))
     if checkpoint.source_revisions:
-        pairs = list(checkpoint.source_revisions.items())[:4]
-        parts.append("Source revisions: " + "; ".join(f"{path}: {revision}" for path, revision in pairs))
+        parts.append(
+            "Source revisions: " + "; ".join(f"{p}: {r}" for p, r in list(checkpoint.source_revisions.items())[:4])
+        )
     return "\n".join(parts)[:2048]
 
 
@@ -86,12 +75,6 @@ class _SessionAuthorization(Protocol):
 
 
 class SessionTaskService:
-    """Persist active task state after checking Session and Workspace authority.
-
-    Callers supply authenticated user and workspace identities; the Session
-    catalog verifies the tuple before this service derives a volume path.
-    """
-
     def __init__(
         self,
         sessions: SessionCatalog | _SessionAuthorization,
@@ -111,7 +94,6 @@ class SessionTaskService:
         workspace_id: UUID,
         first_request: str,
     ) -> TaskCheckpoint:
-        """Create the initial pending goal once; preserve an existing checkpoint."""
         if not isinstance(first_request, str) or not first_request.strip():
             raise ValueError("first_request must be a nonempty string")
         goal, pending = _fit_initial_checkpoint_text(first_request)
@@ -121,32 +103,16 @@ class SessionTaskService:
             try:
                 stored = await self._volume.read_bytes(workspace_id, path, max_bytes=TASK_CHECKPOINT_MAX_BYTES)
             except FileNotFoundError:
-                checkpoint = TaskCheckpoint(
-                    revision=1,
-                    goal=goal,
-                    decisions=(),
-                    relevant_paths=(),
-                    source_revisions={},
-                    completed_work=(),
-                    pending_work=(pending,),
-                )
+                checkpoint = TaskCheckpoint(1, goal, (), (), {}, (), (pending,))
                 await self._write(workspace_id, path, checkpoint)
                 return checkpoint
             return _decode(stored)
 
-    async def read(
-        self,
-        session_id: UUID,
-        *,
-        user_id: UUID,
-        workspace_id: UUID,
-    ) -> TaskCheckpoint:
+    async def read(self, session_id: UUID, *, user_id: UUID, workspace_id: UUID) -> TaskCheckpoint:
         await self._authorize(session_id, user_id=user_id, workspace_id=workspace_id)
         try:
             raw = await self._volume.read_bytes(
-                workspace_id,
-                self._logical_path(session_id),
-                max_bytes=TASK_CHECKPOINT_MAX_BYTES,
+                workspace_id, self._logical_path(session_id), max_bytes=TASK_CHECKPOINT_MAX_BYTES
             )
         except FileNotFoundError as exc:
             raise TaskCheckpointMissingError("task checkpoint has not been seeded") from exc
@@ -166,7 +132,6 @@ class SessionTaskService:
         completed_work: Sequence[str] | None = None,
         pending_work: Sequence[str] | None = None,
     ) -> TaskCheckpoint:
-        """Apply a bounded patch only when ``expected_revision`` still matches."""
         if not _valid_revision(expected_revision):
             raise ValueError("expected_revision must be a non-negative integer")
         await self._authorize(session_id, user_id=user_id, workspace_id=workspace_id)
@@ -209,8 +174,7 @@ class SessionTaskService:
             raise TaskCheckpointError("Session authority did not match the requested workspace")
 
     def _logical_path(self, session_id: UUID) -> str:
-        path = self._paths.session_dir(session_id) / "task.json"
-        return str(path)
+        return str(self._paths.session_dir(session_id) / "task.json")
 
     async def _write(self, workspace_id: UUID, path: str, checkpoint: TaskCheckpoint) -> None:
         payload = _encode(checkpoint)
@@ -232,17 +196,17 @@ def _bounded_text(value: object, label: str, limit: int, *, nonempty: bool = Fal
 def _bounded_list(values: Sequence[str], label: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)) or len(values) > _MAX_LIST_ITEMS:
         raise ValueError(f"{label} must contain at most {_MAX_LIST_ITEMS} items")
-    return tuple(_bounded_text(value, label, _MAX_ITEM_CHARS, nonempty=True) for value in values)
+    return tuple(_bounded_text(v, label, _MAX_ITEM_CHARS, nonempty=True) for v in values)
 
 
 def _bounded_revisions(values: Mapping[str, str]) -> dict[str, str]:
     if not isinstance(values, Mapping) or len(values) > _MAX_SOURCE_REVISIONS:
         raise ValueError(f"source_revisions must contain at most {_MAX_SOURCE_REVISIONS} entries")
     return {
-        _bounded_text(path, "source_revisions path", _MAX_ITEM_CHARS, nonempty=True): _bounded_text(
-            revision, "source_revisions revision", _MAX_ITEM_CHARS, nonempty=True
+        _bounded_text(p, "source_revisions path", _MAX_ITEM_CHARS, nonempty=True): _bounded_text(
+            r, "source_revisions revision", _MAX_ITEM_CHARS, nonempty=True
         )
-        for path, revision in values.items()
+        for p, r in values.items()
     }
 
 
@@ -261,54 +225,45 @@ def _encode(checkpoint: TaskCheckpoint) -> bytes:
 
 
 def _fit_initial_checkpoint_text(first_request: str) -> tuple[str, str]:
-    """Bound seed text by both character limits and the encoded checkpoint size."""
     goal = first_request if len(first_request) <= _MAX_GOAL_CHARS else f"{first_request[: _MAX_GOAL_CHARS - 3]}..."
+    pending = goal.strip()
+    if len(pending) > _MAX_ITEM_CHARS:
+        pending = f"{pending[: _MAX_ITEM_CHARS - 3]}..."
 
-    def pending_for(value: str) -> str:
-        pending = value.strip()
-        if len(pending) > _MAX_ITEM_CHARS:
-            pending = f"{pending[: _MAX_ITEM_CHARS - 3]}..."
-        return pending
+    def _size(g: str, p: str) -> int:
+        return len(_encode(TaskCheckpoint(1, g, (), (), {}, (), (p,))))
 
-    pending = pending_for(goal)
-
-    def encoded_size(candidate_goal: str, candidate_pending: str) -> int:
-        return len(
-            _encode(
-                TaskCheckpoint(
-                    revision=1,
-                    goal=candidate_goal,
-                    decisions=(),
-                    relevant_paths=(),
-                    source_revisions={},
-                    completed_work=(),
-                    pending_work=(candidate_pending,),
-                )
-            )
-        )
-
-    if encoded_size(goal, pending) <= TASK_CHECKPOINT_MAX_BYTES:
+    if _size(goal, pending) <= TASK_CHECKPOINT_MAX_BYTES:
         return goal, pending
 
-    # Multibyte characters and JSON escaping can make a character-bounded goal
-    # exceed the checkpoint's byte limit. Find the longest fitting prefix while
-    # accounting for the duplicated pending-work preview as well.
-    low = 0
-    high = min(len(first_request) - 1, _MAX_GOAL_CHARS - 3)
-    best: tuple[str, str] | None = None
+    low, high = 0, min(len(first_request) - 1, _MAX_GOAL_CHARS - 3)
+    best = (goal, pending)
     while low <= high:
-        prefix_chars = (low + high) // 2
-        candidate_goal = f"{first_request[:prefix_chars]}..."
-        candidate_pending = pending_for(candidate_goal)
-        if encoded_size(candidate_goal, candidate_pending) <= TASK_CHECKPOINT_MAX_BYTES:
-            best = candidate_goal, candidate_pending
-            low = prefix_chars + 1
+        mid = (low + high) // 2
+        cand_g = f"{first_request[:mid]}..."
+        cand_p = cand_g.strip()
+        if len(cand_p) > _MAX_ITEM_CHARS:
+            cand_p = f"{cand_p[: _MAX_ITEM_CHARS - 3]}..."
+        if _size(cand_g, cand_p) <= TASK_CHECKPOINT_MAX_BYTES:
+            best = (cand_g, cand_p)
+            low = mid + 1
         else:
-            high = prefix_chars - 1
-
-    if best is None:
-        raise ValueError("task checkpoint exceeds its byte limit")
+            high = mid - 1
     return best
+
+
+_CHECKPOINT_KEYS = frozenset(
+    {
+        "schema_version",
+        "revision",
+        "goal",
+        "decisions",
+        "relevant_paths",
+        "source_revisions",
+        "completed_work",
+        "pending_work",
+    }
+)
 
 
 def _decode(raw: bytes) -> TaskCheckpoint:
@@ -316,29 +271,19 @@ def _decode(raw: bytes) -> TaskCheckpoint:
         if len(raw) > TASK_CHECKPOINT_MAX_BYTES:
             raise ValueError("oversized")
         value = json.loads(raw)
-        if not isinstance(value, dict) or set(value) != {
-            "schema_version",
-            "revision",
-            "goal",
-            "decisions",
-            "relevant_paths",
-            "source_revisions",
-            "completed_work",
-            "pending_work",
-        }:
+        if not isinstance(value, dict) or set(value) != _CHECKPOINT_KEYS:
             raise ValueError("invalid keys")
-        version = value["schema_version"]
-        revision = value["revision"]
+        ver, rev = value["schema_version"], value["revision"]
         if (
-            not isinstance(version, int)
-            or isinstance(version, bool)
-            or version != TASK_CHECKPOINT_VERSION
-            or not _valid_revision(revision)
-            or revision < 1
+            not isinstance(ver, int)
+            or isinstance(ver, bool)
+            or ver != TASK_CHECKPOINT_VERSION
+            or not _valid_revision(rev)
+            or rev < 1
         ):
             raise ValueError("invalid version or revision")
         checkpoint = TaskCheckpoint(
-            revision=value["revision"],
+            revision=rev,
             goal=_bounded_text(value["goal"], "goal", _MAX_GOAL_CHARS, nonempty=True),
             decisions=_bounded_list(value["decisions"], "decisions"),
             relevant_paths=_bounded_list(value["relevant_paths"], "relevant_paths"),
@@ -358,8 +303,6 @@ class _AsyncDispatcher(Protocol):
 
 
 class SessionTaskToolHost:
-    """Bind one authorized Session task service to synchronous DSPy Tools."""
-
     def __init__(
         self,
         service: SessionTaskService,
@@ -377,7 +320,6 @@ class SessionTaskToolHost:
 
     def as_tools(self) -> tuple[dspy.Tool, ...]:
         def read_active_task() -> dict[str, object]:
-            """Read the bounded active task checkpoint for this Session."""
             checkpoint = self._dispatcher.run(
                 self._service.read(self._session_id, user_id=self._user_id, workspace_id=self._workspace_id)
             )
@@ -392,7 +334,6 @@ class SessionTaskToolHost:
             completed_work: list[str] | None = None,
             pending_work: list[str] | None = None,
         ) -> dict[str, object]:
-            """Update active task state using the revision returned by its last read."""
             checkpoint = self._dispatcher.run(
                 self._service.update(
                     self._session_id,
@@ -441,11 +382,11 @@ class SessionTaskToolHost:
                 "completed_work",
                 "pending_work",
             ):
-                value = arguments.get(field_name)
-                if isinstance(value, str):
-                    result[f"{field_name}_chars"] = len(value)
-                elif isinstance(value, (list, dict)):
-                    result[f"{field_name}_count"] = len(value)
+                val = arguments.get(field_name)
+                if isinstance(val, str):
+                    result[f"{field_name}_chars"] = len(val)
+                elif isinstance(val, (list, dict)):
+                    result[f"{field_name}_count"] = len(val)
             return result
 
         def checkpoint_output(result: object) -> JsonValue:
@@ -461,9 +402,9 @@ class SessionTaskToolHost:
                 "completed_work_count",
                 "pending_work_count",
             ):
-                value = result.get(key)
-                if isinstance(value, int) and not isinstance(value, bool):
-                    payload[key] = value
+                val = result.get(key)
+                if isinstance(val, int) and not isinstance(val, bool):
+                    payload[key] = val
             return payload
 
         return MappingProxyType(
