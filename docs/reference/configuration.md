@@ -249,8 +249,7 @@ credential profiles remain separate concepts.
 | `FLEET_DAYTONA_ORG_ID` | `daytona.org_id_env` | Daytona organization routing identifier; required by live Daytona composition |
 | `DATABRICKS_TOKEN` | Root/Sub `api_key_env` | Databricks credential for the pinned managed Chat Completion endpoint |
 | `FLEET_LLM_BASE_URL` | Root/Sub `base_url_env` | Databricks Unity AI Gateway MLflow base (`/chat/completions` is appended) |
-| `DATABRICKS_HOST` | MLflow/evaluation tooling | Databricks workspace root; not the Fleet Root/Sub Chat Completions base |
-| `FLEET_DATABRICKS_AI_GATEWAY_BASE_URL` | Custom/benchmark configuration or latency benchmark only | Optional Databricks AI Gateway base for explicitly custom paths; not used by the committed Root/Sub policy |
+| `DATABRICKS_HOST` | MLflow tooling | Databricks workspace root; not the Fleet Root/Sub Chat Completions base |
 | `FLEET_OPENAI_API_KEY` | A custom Root/Sub `api_key_env` reference | OpenAI-compatible provider credential for custom policy only |
 | `FLEET_MLFLOW_EXPERIMENT_NAME` | `mlflow.experiment_name_env` when the configuration declares it | Databricks MLflow experiment |
 | `FLEET_MLFLOW_TRACE_CATALOG` / `FLEET_MLFLOW_TRACE_SCHEMA` | `mlflow.*_env` when the configuration declares them | Unity Catalog destination |

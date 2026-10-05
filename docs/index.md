@@ -16,7 +16,7 @@ enables bounded child RLMs through `rlm.recursion_enabled`.
 | Use the backend or terminal | [HTTP API](reference/http-api.md), [CLI](reference/cli.md), and [terminal UI](how-to-guides/terminal-tui.md) |
 | Understand DSPy and Daytona execution | [Integration guide](how-to-guides/dspy-integration.md) and [Daytona Snapshot guide](how-to-guides/daytona-snapshot.md) |
 | Validate a change | [Testing strategy](how-to-guides/testing-strategy.md) |
-| Evaluate or optimize behavior | [Evaluation and monitoring](how-to-guides/evaluation-optimization.md) |
+| Understand runtime routing, optimization, and MLflow observation | [Evaluation and optimization](how-to-guides/evaluation-optimization.md) |
 
 Browse the [complete table of contents](SUMMARY.md) or the
 [reference index](reference/index.md) for the remaining guides, decisions, and
@@ -38,5 +38,6 @@ fixtures with `make stream-sync`, and the configuration environment reference wi
 `make config-reference`. The [agent guide](../AGENTS.md) lists the matching
 verification commands.
 
-See the [Daytona cleanup acceptance receipt](testing/daytona-cleanup-acceptance.md)
-for local cleanup regression evidence and pending live acceptance.
+The [Daytona cleanup acceptance receipt](testing/daytona-cleanup-acceptance.md)
+records dated local regression and live acceptance evidence for its candidate
+revisions.

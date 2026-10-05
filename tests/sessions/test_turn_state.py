@@ -240,9 +240,10 @@ async def test_cancelled_in_memory_recovery_releases_recovery_guard() -> None:
 async def test_in_memory_recovery_preserves_settling_intent_after_fence_failure() -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure
     from fleet_rlm.sessions.run_state import (
+        BeginSettlement,
         ClaimedRun,
+        ClaimFailure,
         RunClaim,
         RunFailure,
     )
@@ -313,9 +314,10 @@ async def test_sql_failure_code_is_typed_cause_not_public_message() -> None:
     from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import ClaimFailure, FailClaim
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
+        ClaimFailure,
+        FailClaim,
         RunClaim,
         RunFailure,
     )
@@ -377,9 +379,11 @@ async def test_sql_revoke_completion_uses_policy_terminal_intent() -> None:
     from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
+        ClaimFailure,
+        CompleteSettlement,
+        RevokeClaim,
         RunClaim,
         RunFailure,
     )
@@ -519,10 +523,10 @@ async def test_sql_terminal_replay_and_transition_require_session_scope() -> Non
     from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import CompleteSettlement
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
         CommittedRunReplay,
+        CompleteSettlement,
         RunClaim,
         RunNotFoundError,
     )
@@ -821,9 +825,10 @@ async def test_reconcile_retries_failed_settling_fence_without_losing_intent() -
     from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure
     from fleet_rlm.sessions.run_state import (
+        BeginSettlement,
         ClaimedRun,
+        ClaimFailure,
         RunClaim,
         RunFailure,
     )

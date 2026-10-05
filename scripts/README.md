@@ -1,35 +1,27 @@
-# Maintained scripts
+# Maintained scripts and preserved data
 
-Run commands from the repository root with `uv run python`, unless the row names
-a Make target. Every retained file has an active operator, CI, generation, or
-benchmark use; this inventory identifies that consumer and its validation lane.
+Run commands from the repository root with `uv run python`, unless the row
+names a Make target. This inventory separates executable operator/CI tools
+from preserved benchmark case data. The retired benchmark sources and their
+non-executable contracts are recorded in
+[`docs/internal/history/benchmarks/retained-material.md`](../docs/internal/history/benchmarks/retained-material.md).
 Generated outputs must come from their source commands. Live commands remain
 operator-gated and receipts are evidence for only their stated contract.
 
+## Executable scripts
+
 | Path | Use case and consumer | Validation or invocation |
 | --- | --- | --- |
-| `scripts/check_repo_hygiene.py` | CI and local contributors validate agent guidance, tracked documentation, bootstrap files, active script references, and safe command help. | `make check-docs`; `uv run python scripts/check_repo_hygiene.py --help` |
-| `scripts/check_architecture.py` | CI checks backend ownership/test layout and dependency direction; both rule sets share one AST walker. | `make check-codebase-tree`; `make check-dependency-boundaries` |
+| `scripts/check_repo_hygiene.py` | CI and contributors validate agent guidance, tracked documentation, bootstrap files, active script references, and safe command help. | `make check-docs`; `uv run python scripts/check_repo_hygiene.py --help` |
+| `scripts/check_architecture.py` | CI checks backend ownership/test layout and dependency direction. | `make check-codebase-tree`; `make check-dependency-boundaries` |
 | `scripts/contracts.py` | CI and maintainers generate/check OpenAPI, TUI HTTP types, chunk validation, stream fixtures, and the TOML configuration reference. | `make api-check`; `make stream-check`; `make check-docs`; sync with `make api-sync`, `make stream-sync`, and `make config-reference` |
-| `scripts/database.py` | Operators initialize Alembic, explicitly import SQLite data, run Lakebase preflight, or certify an isolated PostgreSQL test database. Each operation keeps its own safety gates. | `uv run python scripts/database.py --help`; focused tests under `tests/scripts/test_{migrate_sqlite_to_postgres,lakebase_preflight,certify_postgres}.py` |
+| `scripts/database.py` | Operators initialize Alembic, explicitly import SQLite data, run Lakebase preflight, or certify an isolated PostgreSQL test database. | `uv run python scripts/database.py --help`; focused tests under `tests/scripts/test_{migrate_sqlite_to_postgres,lakebase_preflight,certify_postgres}.py` |
 | `scripts/validate_release.py` | CI and release tooling validate metadata, package contents, artifact identities, and reproducible wheel/sdist normalization. | `make check-release`; `make build-release`; `uv run pytest tests/scripts/test_release_tooling.py -q` |
 | `scripts/release_smoke.py` | Packaging tests install a built wheel into an isolated environment and smoke the supported application surface. | `make test-packaging` |
 | `scripts/circleci_trigger_release.py` | Release operators dispatch and correlate the GitHub release workflow from CircleCI. | `uv run pytest tests/scripts/test_release_tooling.py -q` |
 | `scripts/deployment_observability.py` | Release operators inspect bounded deployment observability inputs without changing deployment state. | `uv run python scripts/deployment_observability.py --help` |
 | `scripts/daytona_snapshot.py` | Daytona operators plan, create, check, or verify immutable Session and SemanticChild snapshots. | `make daytona-snapshot-check`; `make daytona-child-snapshot-check` |
 | `scripts/live_daytona_verify.py` | Authorized operators verify native FastAPI semantics, attachment/artifact durability, or recursive-batch behavior on a committed Daytona candidate. | `uv run python scripts/live_daytona_verify.py --help`; offline safety tests in `tests/scripts/test_live_daytona_verify.py` |
-| `scripts/benchmark_daytona_lifecycle.py` | Operators measure the Daytona create-through-first-execution lifecycle when planning resource changes. | `make benchmark-daytona-lifecycle` (explicitly live) |
-| `scripts/benchmarks/certify_mlflow.py` | Operators smoke the selected MLflow tracing destination or certify bounded tracing, sampling, feedback, and lifecycle behavior. | `uv run python scripts/benchmarks/certify_mlflow.py --help`; `uv run pytest tests/scripts/test_certify_mlflow.py tests/observability -q` |
-| `scripts/benchmarks/run_rlm_latency.py` | Evaluation operators run bounded latency/quality campaigns, prepare datasets/judges, score evaluations, compare receipts, and create/analyze Phase 6 plans. | `uv run python scripts/benchmarks/run_rlm_latency.py --help`; focused tests in `tests/scripts/test_run_rlm_latency.py` |
-| `scripts/benchmarks/run_routing_eval.py` | Contributors inspect offline routing plans and authorized operators measure the curated routing matrix. | `uv run python scripts/benchmarks/run_routing_eval.py --help`; `uv run pytest tests/scripts/test_run_routing_eval.py -q` |
-| `scripts/benchmarks/run_oolong_predict.py` | Benchmark operators run the retained Oolong adapter against its fixed offline fixture or explicitly selected live dataset. | `uv run python scripts/benchmarks/run_oolong_predict.py --help`; `uv run pytest tests/scripts/test_run_oolong_predict.py -q` |
-| `scripts/benchmarks/campaign.py` | Retained runners share bounded campaign admission, budget accounting, cost extraction, and exclusive receipt writing. | `uv run pytest tests/scripts/test_run_rlm_latency.py -q` |
-| `scripts/benchmarks/judges.py` | Evaluation preparation and scoring use the canonical judges and deterministic/custom scorers. | `uv run pytest tests/scripts/test_judges.py -q` |
-| `scripts/benchmarks/corpus_chain.py` | The latency benchmark builds and validates the fixed corpus-chain workload used in quality and performance comparisons. | `uv run pytest tests/scripts/test_run_rlm_latency.py -q` |
-| `scripts/benchmarks/oolong/adapter.py` | The Oolong runner builds DSPy requests, executes the native adapter, and records bounded usage. | `uv run pytest tests/scripts/test_run_oolong_predict.py -q` |
-| `scripts/benchmarks/oolong/scoring.py` | Oolong runner scores outputs against the official task-specific scoring rules. | `uv run pytest tests/scripts/test_run_oolong_predict.py -q` |
-| `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed HF-shaped row gives dry-run tests and local planning a reproducible offline Oolong input. | `uv run pytest tests/scripts/test_run_oolong_predict.py -q` |
-| `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen task-family, input, and rubric manifest anchors Phase 6 schedules and receipt analysis. | `uv run pytest tests/scripts/test_run_rlm_latency.py -q` |
 
 The native Daytona lane requires `FLEET_LIVE=1`, recursion disabled in the
 selected TOML configuration, explicit bounded Root/Sub model IDs, configured
@@ -39,6 +31,12 @@ contract. Neither lane by itself certifies provider containment, promotion,
 release readiness, or deployment. Database certification requires an explicit
 exclusive test target and never runs migrations implicitly.
 
-Planning and help modes do not load credentials. Existing benchmark receipts
-are write-once; use a fresh path for each attempt. A successful local check
-establishes only its code or receipt contract, not live provider behavior.
+## Preserved non-executable benchmark data
+
+| Path | Preserved content | Contract record |
+| --- | --- | --- |
+| `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen task-family inputs, rubrics, and content hashes; data only, with no runner. | [`retained-material.md`](../docs/internal/history/benchmarks/retained-material.md#phase-6-case-set) |
+| `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed HF-shaped Oolong row for offline fixture/reference use. | [`retained-material.md`](../docs/internal/history/benchmarks/retained-material.md#oolong-scoring-contract) |
+
+The curated routing scenarios remain owned by `src/fleet_rlm/optimization/routing.py`.
+They are source-level policy cases, not an executable benchmark runner.

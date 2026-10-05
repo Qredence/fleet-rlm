@@ -64,8 +64,7 @@ async def test_success_validates_and_publishes_before_atomic_commit() -> None:
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -271,8 +270,7 @@ async def test_integrity_failure_does_not_publish_and_finalizes_safely() -> None
     class Store:
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -352,8 +350,7 @@ async def test_daytona_success_writes_snapshot_before_commit_and_retains_it() ->
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -446,8 +443,7 @@ async def test_commit_failure_removes_snapshot_logs_stage_and_keeps_public_failu
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -562,8 +558,7 @@ async def test_non_success_never_writes_result_snapshot(status: str) -> None:
     class Store:
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -638,8 +633,7 @@ async def test_non_success_removes_run_local_artifact_candidate_bytes(status: st
     class Store:
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -990,8 +984,10 @@ async def test_cleanup_supervisor_observes_cancelled_cleanup(caplog: pytest.LogC
 async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
     from fleet_rlm.sessions.run_state import (
+        BeginSettlement,
+        ClaimFailure,
+        CompleteSettlement,
         RunClaim,
         RunFailure,
         RunInProgressError,
@@ -1033,9 +1029,11 @@ async def test_settling_revokes_commit_and_blocks_replacement_until_cleanup() ->
 async def test_in_memory_revoke_completion_uses_policy_terminal_intent() -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
-    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,
+        ClaimFailure,
+        CompleteSettlement,
+        RevokeClaim,
         RunClaim,
         RunFailure,
     )

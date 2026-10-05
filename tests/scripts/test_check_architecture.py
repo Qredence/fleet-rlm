@@ -171,7 +171,7 @@ def test_chat_cycle_exceptions_are_shrink_only(tmp_path: Path) -> None:
     _write_src(
         tmp_path,
         "persistence/repositories/turns.py",
-        "from fleet_rlm.sessions.run_claim import decide_claim_transition\n",
+        "from fleet_rlm.sessions.run_state import decide_claim_transition\n",
     )
     _write_src(
         tmp_path,

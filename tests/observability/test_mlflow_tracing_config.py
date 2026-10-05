@@ -6,10 +6,8 @@
 
 from __future__ import annotations
 
-import importlib.util
 import os
 import sys
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
 
@@ -489,92 +487,3 @@ def test_flush_tracing_terminates_async_exporter(monkeypatch: pytest.MonkeyPatch
     tracing.flush_tracing()
 
     assert calls.flush_args == [{"terminate": True}]
-
-
-# --- smoke lane of scripts/benchmarks/certify_mlflow.py ----------------
-@pytest.fixture
-def verifier() -> ModuleType:
-    path = Path(__file__).parents[2] / "scripts" / "benchmarks" / "certify_mlflow.py"
-    spec = importlib.util.spec_from_file_location("certify_mlflow_smoke", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def test_main_emits_and_retrieves_local_trace(
-    verifier: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    settings = SimpleNamespace(
-        mlflow_tracing_enabled=True,
-        mlflow_tracking_uri="http://127.0.0.1:5001",
-        mlflow_experiment_name="fleet-rlm",
-        mlflow_trace_catalog=None,
-        mlflow_trace_schema=None,
-        mlflow_trace_table_prefix=None,
-        mlflow_tracing_sql_warehouse_id=None,
-    )
-    calls = SimpleNamespace(configure=0, flush=0, reset=0)
-    mlflow = ModuleType("mlflow")
-
-    def get_experiment_by_name(experiment_name: str) -> SimpleNamespace:
-        assert experiment_name == "fleet-rlm"
-        return SimpleNamespace(experiment_id="1")
-
-    def trace(*, name: str):
-        assert name == "fleet_mlflow_smoke"
-
-        def decorate(function):
-            return function
-
-        return decorate
-
-    mlflow.get_experiment_by_name = get_experiment_by_name  # type: ignore[attr-defined]
-    mlflow.trace = trace  # type: ignore[attr-defined]
-    mlflow.get_last_active_trace_id = lambda: "trace-1"  # type: ignore[attr-defined]
-
-    def get_trace(trace_id: str, *, flush: bool) -> SimpleNamespace:
-        assert trace_id == "trace-1"
-        assert flush is True
-        return SimpleNamespace(
-            info=SimpleNamespace(
-                state="OK",
-                trace_id="trace-1",
-                execution_duration=12.5,
-                request_preview="request",
-                response_preview="response",
-            ),
-            data=SimpleNamespace(
-                spans=[
-                    SimpleNamespace(
-                        parent_span_id=None,
-                        name="fleet_mlflow_smoke",
-                        status=SimpleNamespace(code="STATUS_CODE_OK"),
-                    )
-                ]
-            ),
-        )
-
-    mlflow.get_trace = get_trace  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "mlflow", mlflow)
-    monkeypatch.setattr(verifier, "_load_tracing_integrations", lambda: None)
-    monkeypatch.setattr(verifier, "smoke__load_repository_env", lambda: None)
-    monkeypatch.setattr(verifier, "load_runtime_settings", lambda: settings, raising=False)
-    monkeypatch.setattr(
-        verifier, "configure_tracing", lambda _settings: setattr(calls, "configure", 1) or True, raising=False
-    )
-    monkeypatch.setattr(verifier, "is_tracing_active", lambda: True, raising=False)
-    monkeypatch.setattr(verifier, "flush_tracing", lambda: setattr(calls, "flush", 1), raising=False)
-    monkeypatch.setattr(verifier, "reset_tracing", lambda: setattr(calls, "reset", 1), raising=False)
-    monkeypatch.setattr(sys, "argv", ["certify_mlflow.py", "smoke"])
-
-    assert verifier.main(["smoke"]) == 0
-    assert calls.configure == 1
-    assert calls.flush == 1
-    assert calls.reset == 1
-    output = capsys.readouterr().out
-    assert "trace_id=trace-1" in output
-    assert "tracking_uri=http://127.0.0.1:5001" in output
-    assert "status=PASS" in output

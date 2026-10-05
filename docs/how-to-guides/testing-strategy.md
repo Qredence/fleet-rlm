@@ -36,7 +36,7 @@ claims remain distinct.
 | --- | --- | --- |
 | Backend domain / modules | `tests/<module>/` | 1:1 mirroring `src/fleet_rlm/` (`sessions/`, `api/`, `rlm/`, `daytona/`, `persistence/`, `workspace/`, `observability/`, `skills/`, `config/`, `cli/`) |
 | Script unit | `tests/scripts/` | supported helper behavior |
-| Optimization unit | `tests/optimization/` | GEPA orchestration, curated datasets, routing evaluation, sanitized proof receipts |
+| Optimization unit | `tests/optimization/` | GEPA orchestration, isolated dataset splits, and runtime routing contracts |
 | Packaging/release | `tests/packaging/` | artifact metadata, clean installs, CLI guards, and VCS-free builds |
 | End to end | `tests/e2e/` | canonical local process and request flows |
 | TUI | `tools/fleet-tui/src/tests/`, `tools/fleet-tui/src/tui/tests/` | transport, projection, store, commands, rendering, terminal lifecycle |
@@ -185,9 +185,10 @@ Private deterministic tests may create ephemeral schemas explicitly.
 
 Run only lanes affected by a change, including changes to their shared support
 modules. Every row proves a provider-specific fact; deterministic scenario replay
-does not substitute for its live evidence. Keep one matched quality/performance
-campaign through the existing benchmark helpers, rather than repeating campaign
-accounting in individual pytest modules.
+does not substitute for its live evidence. Use deterministic tests for local
+contracts and the bounded live lanes below for claims that cross provider
+boundaries. Fleet no longer provides a benchmark campaign runner for matched
+quality, latency, or spend comparisons.
 
 | Contract | Operator entry point / evidence | Why live evidence is necessary |
 | --- | --- | --- |
@@ -198,8 +199,6 @@ accounting in individual pytest modules.
 | Recursive batch, cancellation, deadline cleanup | Corresponding `tests/live/test_daytona_*.py` canaries with `FLEET_LIVE_EVIDENCE_PATH` | Concurrent provider leases and in-flight remote cleanup cross the process boundary. |
 | Workspace, attachment, artifact and memory durability | Existing MVP and durability/memory canaries; per-case JSON receipts | Mounted bytes, child isolation and replacement-Sandbox continuity depend on the provider. These are separate contracts from snapshot imports. |
 | PostgreSQL contention and migration rehearsal | `scripts/database.py certify-postgres --query-plans`; JSON receipt after Alembic rehearsal on an owned test database | Real PostgreSQL locking, compare-and-swap and planner behavior differ from SQLite. Record disposable versus configured/deployed provenance. |
-| Configured MLflow export | `scripts/benchmarks/certify_mlflow.py certify --backend configured`; JSON receipt | Backend authentication, export and retrieval cannot be proved by fail-soft unit mocks. |
-| Matched quality/performance | Existing benchmark campaign helpers and fixed dataset; comparison receipt | Real model quality, latency and cost require matched provider runs. Fixture-only Phase 6 cases are not a completed campaign. |
 
 The live pytest opt-out contract is exercised in an isolated subprocess: all
 live cases must skip without operator opt-in. Script paths are internal and
@@ -212,22 +211,10 @@ environment setup. The operator wrappers require both `FLEET_LIVE=1` and
 `false` to fail closed), plus their contract-specific credentials and policy:
 
 ```bash
-FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py \
-  --output .scratch/daytona-lifecycle-benchmark.json
 FLEET_LIVE=1 uv run pytest -q -n 0 --timeout=900 \
   tests/live/test_fleet_rlm_daytona_mvp.py::test_native_semantic_calls_through_fastapi
 FLEET_LIVE=1 uv run pytest tests/live/test_attachment_artifact_durability.py -q -n 0
 ```
-
-The lifecycle benchmark always runs three warmups and twenty measured cycles
-against the configured immutable Snapshot and Workspace-scoped Volume mount.
-Only a create-through-first-execution p95 at or below ten seconds with all
-twenty measured Sandboxes confirmed absent selects per-Turn lifecycle. A
-Sandbox counts as deleted only once `confirm_absence` over the provider probe
-reports it absent, so delete-request acceptance is not a deletion: this
-criterion is stricter than a delete call that did not raise, and a run that
-previously reported `per_turn` may now report `retained_session`. A missing,
-partial, slower, or cleanup-failing receipt retains Session Sandboxes.
 
 The native verifier loads `.env` with `override=False`, so existing process
 exports win. It requires the `rlm.recursion_enabled = false` setting and explicit model IDs:
@@ -242,7 +229,7 @@ uv run python scripts/live_daytona_verify.py native \
 
 This verifier records the native semantic-call contract and attachment/artifact
 durability contract at the exact candidate SHA. It does not establish
-recursive execution, containment, release readiness, or deployment. Run the
+recursive execution, containment, quality, release readiness, or deployment. Run the
 recursive canary separately when its evidence is authorized and needed; the
 [configuration environment reference](../reference/configuration-environment.md) lists configuration environment
 requirements. Historical receipts do not prove a later tip.

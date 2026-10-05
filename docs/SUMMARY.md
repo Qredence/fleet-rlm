@@ -10,13 +10,17 @@ current production certification.
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
 * [Testing Strategy](how-to-guides/testing-strategy.md)
-* [Book-scale RLM implementation](testing/book-scale-rlm-implementation.md)
 * [DSPy RLM and Daytona Integration](how-to-guides/dspy-integration.md)
 * [Daytona Snapshot](how-to-guides/daytona-snapshot.md)
-* [Evaluation and monitoring](how-to-guides/evaluation-optimization.md)
-* [Oolong benchmark adapter](how-to-guides/oolong-benchmark.md)
+* [Evaluation and optimization](how-to-guides/evaluation-optimization.md)
+* Historical benchmark runner guides
+  * [Evaluation and optimization runners](internal/history/benchmarks/evaluation-optimization-runners.md)
+  * [Oolong runner](internal/history/benchmarks/oolong-runner.md)
+  * [Retained benchmark material](internal/history/benchmarks/retained-material.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
+* Proposals
+  * [Book-scale RLM implementation (proposed, unimplemented)](testing/book-scale-rlm-implementation.md)
 * Historical baselines
   * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
   * [P41 behavior freeze](reference/behavior-freeze.md)

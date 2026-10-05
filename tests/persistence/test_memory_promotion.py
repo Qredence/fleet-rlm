@@ -241,8 +241,8 @@ async def test_completed_commit_replay_cannot_duplicate_intents() -> None:
 @pytest.mark.asyncio
 async def test_failed_transition_never_touches_the_outbox() -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
-    from fleet_rlm.sessions.run_claim import FailClaim
     from fleet_rlm.sessions.run_state import (
+        FailClaim,
         RunFailure,
         _claim_failure,
     )

@@ -69,7 +69,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise RunStateError("Turn claim is invalid")
@@ -135,7 +135,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if not isinstance(command, HeartbeatClaim):
                 return await authoritative.transition_claim(turn, command)
@@ -232,7 +232,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise ConnectionError("database unavailable")
@@ -388,7 +388,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise RunStateError("Turn claim is invalid")
@@ -492,7 +492,7 @@ async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> 
         request_cancel = authoritative.request_cancel
 
         async def transition_claim(self, turn, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if not isinstance(command, HeartbeatClaim):
                 return await authoritative.transition_claim(turn, command)
@@ -919,7 +919,7 @@ async def test_driver_claim_loss_cleanup_skips_settlement_release_after_commit(c
 
 
 def test_decide_claim_transition_applies_one_policy() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         BeginSettlement,
         ClaimFailure,
         ClaimState,
@@ -945,7 +945,7 @@ def test_decide_claim_transition_applies_one_policy() -> None:
 
 
 def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         ClaimFailure,
         ClaimState,
         RevokeClaim,
@@ -966,7 +966,7 @@ def test_revoke_policy_owns_stale_claim_terminal_intent() -> None:
 
 
 def test_completed_claim_rejects_failure_transitions() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         BeginSettlement,
         ClaimFailure,
         ClaimState,
@@ -983,7 +983,7 @@ def test_completed_claim_rejects_failure_transitions() -> None:
 
 
 def test_terminal_transition_is_idempotent() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         ClaimFailure,
         ClaimState,
         FailClaim,
@@ -999,7 +999,7 @@ def test_terminal_transition_is_idempotent() -> None:
 
 
 def test_heartbeat_policy_only_accepts_owned_work_states() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         ClaimState,
         HeartbeatClaim,
         decide_claim_transition,
@@ -1011,7 +1011,7 @@ def test_heartbeat_policy_only_accepts_owned_work_states() -> None:
 
 
 def test_decide_claim_transition_legal_matrix() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         BeginSettlement,
         ClaimFailure,
         ClaimState,
@@ -1044,7 +1044,7 @@ def test_decide_claim_transition_legal_matrix() -> None:
 
 
 def test_decide_claim_transition_illegal_matrix() -> None:
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         BeginSettlement,
         ClaimFailure,
         ClaimState,

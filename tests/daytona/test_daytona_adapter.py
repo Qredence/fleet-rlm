@@ -1124,8 +1124,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(

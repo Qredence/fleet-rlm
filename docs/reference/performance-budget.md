@@ -1,5 +1,10 @@
 # P7 performance budget decision
 
+> Dated decision and measurements from the candidate and environment below.
+> The benchmark runners that produced these measurements have been retired;
+> this page preserves their original evidence and thresholds, which do not
+> certify current provider latency or establish a current performance gate.
+
 Candidate: `9b1067ca` on `dev-0.7`, measured 2026-08-09/10 with
 `fleet-rlm-python313-v5`, DSPy 3.3.1, and Daytona 0.202.0. The receipts below
 are local ignored evidence; this page records the decision and bounded numbers.
@@ -17,9 +22,10 @@ The Root selects `rlm_query_batched`; Fleet atomically reserves the shared
 recursive call budget, preserves input ordering, and settles each slot to its
 own ordered outcome, returning partial outcomes before the calling action's
 deadline. The P7 lifecycle measurements below were collected with the
-then-current two-worker benchmark setting, so they remain a per-child cost
-basis rather than a current four-sibling latency claim. The routing benchmark records
-observed peak sibling concurrency and latency for batch workloads.
+then-current two-worker setting, so they remain a per-child cost basis rather
+than a current four-sibling latency claim. Current concurrency policy is owned
+by TOML and runtime behavior; no maintained routing benchmark currently records
+batch latency.
 
 ## Measurements
 
@@ -90,7 +96,8 @@ The distinction between requested and observed wait is intentional: it makes
 preview-proxy/network delay visible in poll latency without attributing it to
 the broker's condition wait. The co-located test exercises streaming output,
 callback fulfillment, executor reuse, and the long-poll contract. A new live
-p95 is not claimed until the explicit Daytona latency benchmark is rerun.
+p95 is not claimed; the Daytona latency benchmark used for the original
+measurement has been retired.
 
 The live latency workload did not issue a recursive LLM call in this run
 (`recursive_calls = 0`), so it cannot provide child-model p95. The decision
@@ -108,36 +115,19 @@ Local ignored receipts:
 - `.scratch/p7/run-phase-breakdown-9b1067ca.json`
 - `.scratch/p7/phase7-targeted-lifecycle-9b1067ca.json`
 
-Re-run with committed commands when credentials and `FLEET_LIVE=1` are
-explicitly available:
-
-```bash
-uv run python scripts/benchmark_daytona_lifecycle.py --output <receipt.json>
-FLEET_LIVE=1 uv run python scripts/benchmarks/run_rlm_latency.py benchmark \
-  --api-url http://127.0.0.1:8000 --mlflow-url http://127.0.0.1:5001 \
-  --experiment-id 1 --variant p7-refactor --runs 20 --warmups 3 \
-  --campaign p7-refactor-20260910 --target daytona-disposable \
-  --max-elapsed-seconds 1800 --max-admissions 23 \
-  --max-sandbox-concurrency 4 --spend-cap 25 --output <receipt.json>
-```
-
-Provider-backed campaigns fail closed unless the operator supplies the
-bounded campaign and target references plus elapsed-time, admission,
-sandbox-concurrency, and total-spend limits. The target is a non-secret label;
-URLs and credentials remain outside receipts.
-
-The phase breakdown command is a local ignored helper because it joins MLflow
-trace timings to `fleet_runs` timestamps without retaining private payloads.
-The benchmarks keep typed-submit and trace identity evidence; they do not print
-credentials, provider error bodies, or model payloads.
+These ignored receipts remain local evidence only. Their measurement tools and
+campaign helpers have been retired; no current command reproduces the table.
+The recorded runs retained typed-submit and trace identity evidence without
+printing credentials, provider error bodies, or model payloads.
 
 ## Follow-up trigger
 
-Reconsider bootstrap/snapshot optimization before any isolation change only if
-a future refactored-capacity benchmark puts recursive create + cleanup at or
-above 15% of total Run p95, or if workspace I/O lifecycle violates an explicit
-product SLO. Do not change recursive isolation or share child interpreters as
-the default optimization.
+The original decision used 15% of total Run p95 as a reconsideration threshold
+for recursive create plus cleanup, or an explicit product SLO for Workspace
+I/O. Because the measurement runners are retired, this is historical decision
+rationale rather than an active operator gate. Any future isolation change
+needs a separately reviewed measurement method and explicit product SLO; keep
+one dedicated interpreter and Sandbox per recursive child under current policy.
 
 ## Phase 8 architecture freeze certification
 

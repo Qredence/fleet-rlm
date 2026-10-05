@@ -737,10 +737,6 @@ HARNESS_SAFE_SCRIPT_HELP = frozenset(
         "database.py",
         "validate_release.py",
         "live_daytona_verify.py",
-        "run_rlm_latency.py",
-        "run_routing_eval.py",
-        "run_oolong_predict.py",
-        "certify_mlflow.py",
     }
 )
 
@@ -1078,6 +1074,17 @@ _REMOVED_COMMANDS = (
     "scripts/validate_mlflow_tracing.py",
     "scripts/benchmarks/usage_cost.py",
     "scripts/benchmarks/scorers.py",
+    "scripts/benchmark_daytona_lifecycle.py",
+    "scripts/benchmarks/run_rlm_latency.py",
+    "scripts/benchmarks/run_routing_eval.py",
+    "scripts/benchmarks/run_oolong_predict.py",
+    "scripts/benchmarks/campaign.py",
+    "scripts/benchmarks/judges.py",
+    "scripts/benchmarks/corpus_chain.py",
+    "scripts/benchmarks/oolong/adapter.py",
+    "scripts/benchmarks/oolong/scoring.py",
+    "make benchmark-daytona-lifecycle",
+    "FLEET_DATABRICKS_AI_GATEWAY_BASE_URL",
 )
 _ACTIVE_DOC_EXCLUSIONS = (
     Path("internal/history"),

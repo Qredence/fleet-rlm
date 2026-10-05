@@ -88,8 +88,7 @@ async def _build_harness(adapter_kind: str) -> _Harness:
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
-    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement
-    from fleet_rlm.sessions.run_state import RunFailure
+    from fleet_rlm.sessions.run_state import BeginSettlement, ClaimFailure, CompleteSettlement, RunFailure
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -116,8 +115,7 @@ async def test_settlement_retains_claim_until_cleanup(adapter_kind: str) -> None
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_kind: str) -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
-    from fleet_rlm.sessions.run_claim import ClaimFailure, CompleteSettlement, RevokeClaim
-    from fleet_rlm.sessions.run_state import RunFailure
+    from fleet_rlm.sessions.run_state import ClaimFailure, CompleteSettlement, RevokeClaim, RunFailure
 
     harness = await _build_harness(adapter_kind)
     try:
@@ -144,8 +142,11 @@ async def test_stale_revocation_and_completion_have_equivalent_receipts(adapter_
 @pytest.mark.parametrize("adapter_kind", ["memory", "sql"])
 async def test_heartbeat_is_valid_only_while_claim_is_live(adapter_kind: str) -> None:
     from fleet_rlm.rlm.result import empty_rlm_usage
-    from fleet_rlm.sessions.run_claim import BeginSettlement, ClaimFailure, CompleteSettlement, HeartbeatClaim
     from fleet_rlm.sessions.run_state import (
+        BeginSettlement,
+        ClaimFailure,
+        CompleteSettlement,
+        HeartbeatClaim,
         RunFailure,
         RunStateError,
     )
@@ -179,13 +180,11 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
         empty_rlm_usage,
     )
     from fleet_rlm.sessions.committed_turn import commit_success
-    from fleet_rlm.sessions.run_claim import (
+    from fleet_rlm.sessions.run_state import (
         ClaimFailure,
         CompleteSettlement,
         HeartbeatClaim,
         RevokeClaim,
-    )
-    from fleet_rlm.sessions.run_state import (
         RunAlreadyCompletedError,
         RunStateError,
     )
