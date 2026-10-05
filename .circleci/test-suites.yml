@@ -1,11 +1,15 @@
 ---
 name: pytest-unit
 discover: bash -c 'find tests -type f -name "*.py" ! -path "tests/live/*" ! -path "tests/packaging/*" ! -path "tests/support/*" ! -name "__init__.py" ! -name "fakes.py" ! -name "_*.py" -print | sort'
-run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX-$$.data .venv/bin/pytest -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
+run: bash -c 'set -f; mkdir -p test-results .scratch/coverage; FLEET_DAYTONA_API_KEY= FLEET_OPENAI_API_KEY= FLEET_LLM_BASE_URL= FLEET_DATABASE_URL= COVERAGE_FILE=$PWD/.scratch/coverage/.coverage.$CIRCLE_NODE_INDEX-$$.data .venv/bin/pytest -q -n 0 -p no:warnings -m "not live_llm and not live_daytona and not benchmark and not db and not packaging" --cov --cov-config=pyproject.toml --cov-fail-under=0 --cov-report= --junit-xml=<< outputs.junit >> << test.atoms >>'
 outputs:
   junit: test-results/pytest-unit.xml
 options:
   dynamic-test-splitting: true
+  # Force -n 0 so pytest addopts (-n auto) cannot nest xdist workers inside
+  # CircleCI smarter-testing shards (parallelism already splits atoms). Nested
+  # -n auto + --cov was canceling all four test-unit nodes mid-batch with no
+  # junit failures stored.
   # Auto-rerun failed tests in the same shard step (up to 2 reruns) so
   # CI-timing-sensitive tests (e.g. recursion-flow deadline races) do not
   # fail whole workflows on their first flake. A test failing every

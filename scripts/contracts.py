@@ -533,12 +533,16 @@ def config_render() -> str:
         f"| Snapshot environment names | {config__names(contract.daytona_snapshot_environment_names)} |",
         f"| Optional MLflow environment names | {config__names(contract.mlflow_environment_names)} |",
         "",
-        "Startup requires a configured database URL at Alembic head. Local SQLite and PostgreSQL are supported; "
-        "the explicit Lakebase preflight additionally enforces its TLS and role requirements.",
+        (
+            "Startup requires a configured database URL at Alembic head. Local SQLite and PostgreSQL are supported; "
+            + "the explicit Lakebase preflight additionally enforces its TLS and role requirements."
+        ),
         "",
-        "Live verification requires operator authorization and the configured provider credentials. "
-        "Native-only checks require `rlm.recursion_enabled = false`; recursive checks require it enabled. "
-        "Checks never select another configuration. Isolated proofs use temporary database URLs as documented.",
+        (
+            "Live verification requires operator authorization and the configured provider credentials. "
+            + "Native-only checks require `rlm.recursion_enabled = false`; recursive checks require it enabled. "
+            + "Checks never select another configuration. Isolated proofs use temporary database URLs as documented."
+        ),
         "",
     ]
     return "\n".join(rows)

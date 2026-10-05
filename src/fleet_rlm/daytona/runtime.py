@@ -123,17 +123,6 @@ _CHILD_RESULT_MAX_ENTRIES = 1024
 _CLEANUP_EXCEPTIONS = (Exception, asyncio.CancelledError, KeyboardInterrupt, SystemExit)
 _PROVIDER_CHILD_STAGE_MAX_BYTES = 64 * 1024 * 1024
 
-_sandbox_filesystem = sandbox_filesystem
-_is_not_found = is_not_found
-_assert_directory = assert_directory
-_file_info = file_info
-_require_directory = require_directory
-_ensure_directories = ensure_directories
-_DIRECTORY_MODE = DIRECTORY_MODE
-_ZERO_UUID = ZERO_UUID
-_VOLUME_FAILED_STATES = VOLUME_FAILED_STATES
-_VOLUME_READY_RETRY_DELAYS = VOLUME_READY_RETRY_DELAYS
-
 
 def _invoke_interpreter_shutdown(interpreter: Any, *, strict_broker_cleanup: bool) -> None:
     """Call an interpreter's shutdown using its declared call signature.

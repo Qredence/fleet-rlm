@@ -428,7 +428,7 @@ def test_preflight_rejects_obsolete_usd_reflection_cost_cap(tmp_path: Path) -> N
     export_path = _write_export(tmp_path)
 
     with pytest.raises(TypeError):
-        preflight(export_path=export_path, split_seed=0, max_total_cost_usd=1.0)  # type: ignore[call-arg]
+        preflight(export_path=export_path, split_seed=0, **{"max_total_cost_usd": 1.0})
 
     for entrypoint in (preflight, run_development_smoke):
         parameters = inspect.signature(entrypoint).parameters
@@ -438,13 +438,13 @@ def test_preflight_rejects_obsolete_usd_reflection_cost_cap(tmp_path: Path) -> N
 
 def test_run_development_smoke_rejects_obsolete_usd_reflection_cost_cap(tmp_path: Path) -> None:
     with pytest.raises(TypeError):
-        run_development_smoke(  # type: ignore[call-arg]
+        run_development_smoke(
             export_path=_write_export(tmp_path),
             split_seed=0,
             max_metric_calls=1,
             evidence_root=tmp_path / "evidence",
             run_id="run-1",
-            max_total_cost_usd=1.0,
+            **{"max_total_cost_usd": 1.0},
         )
 
 
