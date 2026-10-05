@@ -1065,3 +1065,519 @@ async def test_waiter_cancellation_does_not_cancel_owned_effect() -> None:
     settled = await waiter
     assert settled.result() == "settled"
     assert effect.done() is True
+
+
+# --- Runtime Cancellation & Drain Contracts ---
+
+
+@pytest.mark.asyncio
+async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup() -> None:
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    entered = threading.Event()
+    release = threading.Event()
+    cancel_requested = False
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def cancellation_probe() -> bool:
+        return cancel_requested
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=cancellation_probe,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+
+    async def consume_all() -> None:
+        async for _event in stream:
+            pass
+
+    consume = asyncio.create_task(consume_all())
+    assert await asyncio.to_thread(entered.wait, 2)
+
+    cancel_requested = True
+    deadline = asyncio.get_running_loop().time() + 2
+    while not consume.done() and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    assert consume.done(), "caller delivery must not wait for the non-cancellable worker"
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+
+    release.set()
+    await asyncio.wait_for(stream.wait_owned(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> None:
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    entered.set()
+                    while not release.is_set():
+                        await asyncio.sleep(0.01)
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+
+    async def consume_all() -> None:
+        async for _event in stream:
+            pass
+
+    consume = asyncio.create_task(consume_all())
+    assert await asyncio.to_thread(entered.wait, 2)
+    consume.cancel()
+    await asyncio.sleep(0.05)
+    consume.cancel()
+    await asyncio.sleep(0.05)
+    with pytest.raises(asyncio.CancelledError):
+        await consume
+
+    release.set()
+    await asyncio.wait_for(stream.wait_owned(), timeout=2)
+
+
+@pytest.mark.asyncio
+async def test_runner_close_drains_active_owners_and_rejects_new_streams() -> None:
+    from fleet_rlm.rlm.execution import RLMRunner, RunTerminalError
+
+    runner = RLMRunner()
+    runner.stream(object())
+    owner = next(iter(runner._active_ownerships))
+    release = asyncio.Event()
+
+    async def wait_owned() -> None:
+        await release.wait()
+
+    owner.wait_owned = wait_owned  # type: ignore[method-assign]
+    with pytest.raises(TimeoutError, match="did not settle"):
+        await runner.aclose(drain_seconds=0.01)
+    with pytest.raises(RunTerminalError, match="closed"):
+        runner.stream(object())
+    release.set()
+    await runner.aclose(drain_seconds=1)
+    assert not runner._active_ownerships
+
+
+# --- Runtime Outcomes & Usage Contracts ---
+
+
+@pytest.mark.asyncio
+async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() -> None:
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    prediction = dspy.Prediction(
+                        answer="",
+                        trajectory=[
+                            {"reasoning": "step one", "code": "x=1", "output": "1"},
+                            {"reasoning": "step two", "code": "SUBMIT()", "output": "FINAL submitted"},
+                        ],
+                    )
+                    prediction.set_lm_usage({"root": {"prompt_tokens": 9, "completion_tokens": 3}})
+                    return prediction
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+    _ = [event async for event in stream]
+
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
+    assert stream.outcome is not None
+    assert stream.outcome.succeeded
+    projected = project_outcome_prediction(stream.outcome)
+    assert not projected.succeeded
+    assert projected.public_error_message == "Turn output is invalid"
+    assert stream.outcome.usage["iterations"] == 2
+    assert stream.outcome.usage["observed_lm_usage"] == {
+        "root": {"prompt_tokens": 9, "completion_tokens": 3},
+    }
+
+
+@pytest.mark.asyncio
+async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> None:
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    prediction = dspy.Prediction(
+                        answer="x" * 200,
+                        trajectory=[
+                            {
+                                "reasoning": "submit long",
+                                "code": "SUBMIT(answer=answer)",
+                                "output": "FINAL submitted",
+                            },
+                        ],
+                    )
+                    prediction.set_lm_usage({"root": {"prompt_tokens": 2, "completion_tokens": 1}})
+                    return prediction
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(max_output_chars=32, max_final_output_chars=32),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+    _ = [event async for event in stream]
+
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
+    assert stream.outcome is not None
+    assert stream.outcome.succeeded
+    projected = project_outcome_prediction(stream.outcome)
+    assert not projected.succeeded
+    assert projected.public_error_message == "Turn output is too large"
+
+
+@pytest.mark.asyncio
+async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
+    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class Capabilities(EmptyCapabilities):
+        def __init__(self) -> None:
+            super().__init__()
+            self.details = [
+                SkillActivated("skill-id", "long-context", "2.0.0", "system", ("load",)),
+                SkillLoaded("skill-id", "long-context", "2.0.0"),
+            ]
+
+        def drain_public_details(self):
+            values = tuple(self.details)
+            self.details.clear()
+            return values
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    return dspy.Prediction(answer="", trajectory=[])
+
+            return Program()
+
+    async def not_cancelled() -> bool:
+        return False
+
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=asyncio.get_running_loop().time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=Capabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+    events = [event async for event in stream]
+
+    assert [event.kind for event in events] == [
+        "run.started",
+        "status",
+        "skill.activated",
+        "skill.loaded",
+    ]
+    assert stream.outcome is not None
+    from fleet_rlm.rlm.result import project_outcome_prediction
+
+    assert project_outcome_prediction(stream.outcome).terminal_status == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
+async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
+    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class Capabilities(EmptyCapabilities):
+        def __init__(self) -> None:
+            super().__init__()
+            self.details = [
+                SkillActivated("skill-id", "long-context", "2.0.0", "system", ("load",)),
+                SkillLoaded("skill-id", "long-context", "2.0.0"),
+            ]
+
+        def drain_public_details(self):
+            values = tuple(self.details)
+            self.details.clear()
+            return values
+
+    class Factory:
+        def create(self, **_kwargs):
+            class Program:
+                async def acall(self, **_call_kwargs):
+                    return dspy.Prediction(answer="late", trajectory=[])
+
+            return Program()
+
+    async def cancellation_probe() -> bool:
+        return terminal_status == "cancelled"
+
+    loop = asyncio.get_running_loop()
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=loop.time() - 1 if terminal_status == "timeout" else loop.time() + 10,
+            interpreter=None,
+            cancellation_requested=cancellation_probe,
+        ),
+        capabilities=Capabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+    events = [event async for event in stream]
+
+    assert [event.kind for event in events][:4] == [
+        "run.started",
+        "status",
+        "skill.activated",
+        "skill.loaded",
+    ]
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == terminal_status
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() -> None:
+    from fleet_rlm.rlm.execution import (
+        ExecutionRuntime,
+        RLMExecutionContext,
+        RLMRunner,
+        RunIdentity,
+        SessionView,
+    )
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.context import SessionContextManifest
+    from fleet_rlm.sessions.models import TurnAccess
+    from tests.unit.backend.rlm.fakes import EmptyCapabilities
+
+    class Factory:
+        def create(self, **_kwargs):
+            raise AssertionError("worker factory must not run when the stream is closed early")
+
+    async def not_cancelled() -> bool:
+        return False
+
+    loop = asyncio.get_running_loop()
+    context = RLMExecutionContext(
+        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
+        session=SessionView(
+            request="answer",
+            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
+            attachments=(),
+            preparation_notices=(),
+        ),
+        execution=ExecutionRuntime(
+            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            options=RLMOptions(),
+            deadline=loop.time() + 10,
+            interpreter=None,
+            cancellation_requested=not_cancelled,
+        ),
+        capabilities=EmptyCapabilities(),
+    )
+    stream = RLMRunner(program_builder=Factory().create).stream(context)
+    await stream.aclose()
+
+    # Closing before any iteration must not raise IndexError: synthesize a
+    # cancelled outcome matching the GeneratorExit path in ``_generate``.
+    assert stream.outcome is not None
+    assert stream.outcome.terminal_status == "cancelled"
+    assert stream.outcome.public_error_message == "Turn cancelled"
+    assert stream.outcome.usage == {"iterations": 0, "observed_lm_usage": {}, "duration_ms": 0}
+
+
+def test_outcome_usage_with_delegation_commits_to_usage_part() -> None:
+    from types import SimpleNamespace
+
+    from fleet_rlm.rlm.recursion import DelegationMetrics
+    from fleet_rlm.rlm.result import observed_usage
+    from fleet_rlm.sessions.committed_turn import UsagePart
+
+    metrics = DelegationMetrics()
+    metrics.record_lm_call("root", 0)
+    metrics.record_delegated_input_bytes(64)
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+    usage = observed_usage(
+        prediction,
+        duration_ms=7,
+        lms=(SimpleNamespace(model="m", history=[{"usage": {"prompt_tokens": 8, "completion_tokens": 2}}]),),
+        delegation={"recursive_call_count": 1, "delegation_metrics": metrics.snapshot().as_dict()},
+    )
+
+    part = UsagePart(value=usage)
+
+    assert part.value["observed_lm_usage"]["m"]["input_tokens"] == 8
+    assert part.value["delegation_metrics"]["delegated_input_bytes"] == 64
+    assert tuple(part.value["delegation_metrics"]["lm_call_counts"]) == (
+        {"role": "root", "recursive_depth": 0, "count": 1},
+    )
+    assert part.value["recursive_call_count"] == 1
