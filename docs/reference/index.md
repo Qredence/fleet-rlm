@@ -8,7 +8,6 @@
 - [Database](database.md) — canonical tables and Alembic ownership.
 - [Source layout](source-layout.md) — package and client ownership.
 - [P7 performance decision](performance-budget.md) — historical Sandbox, Volume, broker, and Run measurements; current policy is owned by TOML.
-- [P41 behavior freeze](behavior-freeze.md) — frozen public behaviors, their owners, and the behavior-over-structure guarantee.
 
 `openapi.yaml` is authoritative for HTTP shapes; generated TUI HTTP types are
 checked alongside it by `make api-check`.

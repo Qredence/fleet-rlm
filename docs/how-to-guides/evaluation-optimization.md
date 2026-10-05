@@ -3,8 +3,8 @@
 Fleet's routing and prompt optimization code lives in
 `src/fleet_rlm/optimization/`; the maintained Turn path and its policy remain
 the sources of truth. Benchmark, campaign, dataset, judge, and certification
-runners have been retired. The archived [runner guide](../internal/history/benchmarks/evaluation-optimization-runners.md)
-preserves their former commands and evidence rules for historical reference.
+runners and their archived guides have been retired; current supported behavior
+is documented below.
 
 ## Runtime routing and optimization
 

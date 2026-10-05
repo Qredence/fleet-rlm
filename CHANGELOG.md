@@ -50,6 +50,14 @@ new sandbox queue-timeout and spot-eviction errors explicitly.
   parse repair and wrap-up correction are separate, mutually exclusive attempt
   ceilings rather than one shared ceiling.
 
+### Fixed
+
+- Marked the dedicated `tests/packaging` suite so the release package gate
+  selects and runs its installed-artifact contracts instead of deselecting all
+  tests.
+- Removed documentation links to the retired benchmark guides and behavior
+  freeze so the repository's documentation checks reflect the retained files.
+
 ## [0.7.10] - 2026-09-27
 
 Fleet RLM 0.7.10 updates its execution stack to native DSPy 3.4 and Daytona's

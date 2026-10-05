@@ -119,8 +119,7 @@ already-running API.
 
 Fleet no longer ships benchmark, campaign, or Phase 6 planning commands. See
 the [current evaluation and optimization guide](../how-to-guides/evaluation-optimization.md)
-for runtime routing and MLflow ownership. Former runner instructions are
-preserved in the [historical benchmark guide](../internal/history/benchmarks/evaluation-optimization-runners.md).
+for runtime routing and MLflow ownership.
 
 ## Daytona doctor
 

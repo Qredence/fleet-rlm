@@ -34,7 +34,7 @@ def _suite_from_path(path: Path) -> str | None:
     if idx + 1 >= len(parts):
         return None
     suite = parts[idx + 1]
-    if suite in {"unit", "integration", "contracts", "e2e"}:
+    if suite in {"unit", "integration", "contracts", "e2e", "packaging"}:
         return suite
     return None
 

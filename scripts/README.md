@@ -2,11 +2,10 @@
 
 Run commands from the repository root with `uv run python`, unless the row
 names a Make target. This inventory separates executable operator/CI tools
-from preserved benchmark case data. The retired benchmark sources and their
-non-executable contracts are recorded in
-[`docs/internal/history/benchmarks/retained-material.md`](../docs/internal/history/benchmarks/retained-material.md).
-Generated outputs must come from their source commands. Live commands remain
-operator-gated and receipts are evidence for only their stated contract.
+from preserved benchmark case data. The retired benchmark runner guides have
+been removed; the files listed below are retained data only. Generated outputs
+must come from their source commands. Live commands remain operator-gated and
+receipts are evidence for only their stated contract.
 
 ## Executable scripts
 
@@ -33,10 +32,10 @@ exclusive test target and never runs migrations implicitly.
 
 ## Preserved non-executable benchmark data
 
-| Path | Preserved content | Contract record |
+| Path | Preserved content | Status |
 | --- | --- | --- |
-| `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen task-family inputs, rubrics, and content hashes; data only, with no runner. | [`retained-material.md`](../docs/internal/history/benchmarks/retained-material.md#phase-6-case-set) |
-| `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed HF-shaped Oolong row for offline fixture/reference use. | [`retained-material.md`](../docs/internal/history/benchmarks/retained-material.md#oolong-scoring-contract) |
+| `scripts/benchmarks/phase6_evaluation_cases.json` | Frozen task-family inputs, rubrics, and content hashes; data only, with no runner. | Retained, not an executable benchmark |
+| `scripts/benchmarks/oolong/fixture_validation_row.json` | Fixed HF-shaped Oolong row for offline fixture/reference use. | Retained, not an executable benchmark |
 
 The curated routing scenarios remain owned by `src/fleet_rlm/optimization/routing.py`.
 They are source-level policy cases, not an executable benchmark runner.
