@@ -836,3 +836,6 @@ def test_history_materializes_before_nested_provider_404_failure() -> None:
         raise RuntimeError("LMUnsupportedModelError: Error code: 404") from _ProviderNotFoundError()
     except RuntimeError as raised:
         assert normalize_turn_failure(raised).cause_type == "provider_not_found"
+
+
+# --- Canonical AssistantPart Vocabulary Contracts ---
