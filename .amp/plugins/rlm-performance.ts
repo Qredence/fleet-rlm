@@ -10,7 +10,6 @@ const FOCUSED_TEST_PATHS = [
 	'tests/rlm/test_program_inputs.py',
 	'tests/config/test_config.py',
 	'tests/config/test_config_policy.py',
-	'tests/scripts/test_run_rlm_latency.py',
 ].join(' ')
 
 const FOCUSED_SOURCE_PATHS = [

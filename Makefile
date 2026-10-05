@@ -4,8 +4,8 @@ RELEASE_SOURCE_DATE_EPOCH ?= $(shell git -C "$(CURDIR)" show -s --format=%ct HEA
 PIP_AUDIT_ARGS ?=
 # Release/install matrix tests are intentionally opt-in: they create multiple
 # virtual environments and are covered by the dedicated package gate.
-PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not benchmark and not db and not packaging
-PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not benchmark and not db
+PYTEST_FAST_MARKERS = not live_llm and not live_daytona and not db and not packaging
+PYTEST_PACKAGING_MARKERS = packaging and not live_llm and not live_daytona and not db
 PYTEST_FAST_PATHS = tests/api tests/cli tests/config tests/daytona tests/e2e tests/freeze tests/observability tests/optimization tests/persistence tests/rlm tests/scripts tests/sessions tests/skills tests/workspace
 PYTEST_UNIT_PATHS = $(PYTEST_FAST_PATHS)
 PYTEST := uv run --no-sync pytest
@@ -38,8 +38,7 @@ TUI_PNPM := cd $(TUI_DIR) && pnpm
 	cloud-preflight \
 	daytona-snapshot-create daytona-snapshot-check daytona-snapshot-plan daytona-snapshot-verify-runtime \
 	daytona-child-snapshot-create daytona-child-snapshot-check daytona-child-snapshot-plan daytona-child-snapshot-verify-runtime \
-	config-reference \
-	benchmark-daytona-lifecycle
+	config-reference
 
 help:
 	@echo "Setup:"
@@ -57,13 +56,12 @@ help:
 	@echo "Testing:"
 	@echo "  make test             - Run default fast non-live tests (packaging is separate)"
 	@echo "  make test-fast        - Alias for the default fast non-live tests"
-	@echo "  make test-unit        - Run unit tests (non-live/non-benchmark; packaging separate)"
+	@echo "  make test-unit        - Run unit tests (non-live; packaging separate)"
 	@echo "  make test-contract    - Run backend contracts and CLI smoke tests"
 	@echo "  make test-packaging   - Run serial artifact/install/release tests"
 	@echo "  make test-db          - Run explicit configured-database tests (db marker)"
 	@echo "  make test-coverage    - Run canonical non-live tests with project coverage"
 	@echo "  make test-daytona-cov - Alias for make test-coverage"
-	@echo "  make benchmark-daytona-lifecycle - Measure full Daytona create-through-first-execution lifecycle"
 	@echo "  (Credentialed live Daytona lanes run via FLEET_LIVE=1; see docs/how-to-guides/testing-strategy.md)"
 	@echo ""
 	@echo "Quality:"
@@ -152,9 +150,6 @@ test-coverage:
 	$(PYTEST_ISOLATED) $(PYTEST_FAST_ARGS) --cov --cov-config=pyproject.toml --cov-report=term-missing --cov-report=xml:.scratch/coverage/daytona.xml
 
 test-daytona-cov: test-coverage
-
-benchmark-daytona-lifecycle:
-	FLEET_LIVE=1 uv run python scripts/benchmark_daytona_lifecycle.py --output .scratch/daytona-lifecycle-benchmark.json
 
 DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v7
 DAYTONA_SNAPSHOT_PROFILE ?= session

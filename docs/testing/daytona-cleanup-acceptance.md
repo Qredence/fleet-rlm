@@ -113,9 +113,10 @@ is `/tmp/fleet-cleanup-review-final-check.log`.
 
 ## 2026-10-01 follow-up: attachment parity and broker results
 
-Scope: Follow-ups A and B of the active
-[implementation plan](../../codex-cloud/IMPLEMENTATION-PLAN.md), plus the defects
-the live gates then exposed. Branch: `fix/daytona-attachment-parity-and-broker`.
+Scope: Follow-ups A and B of the completed implementation plan formerly stored
+at `codex-cloud/IMPLEMENTATION-PLAN.md` (its full text remains available in Git
+history), plus the defects the live gates then exposed. Branch:
+`fix/daytona-attachment-parity-and-broker`.
 Candidate: `e7b1e6e72b5bdaa6e558f1cf7765b2960ce59303`. Environment: Python 3.13.13, DSPy 3.4.0, Daytona SDK 0.218.0,
 MLflow 3.16.1 (local server via `uv run fleet cli`), Fleet 0.7.10, policy models
 `deepseek-v4.1-flash`.

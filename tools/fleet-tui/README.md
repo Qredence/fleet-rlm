@@ -78,11 +78,13 @@ Skill/Attachment pins and the `/redo` prompt; those session-scoped pending input
 clear when switching to another Session. `/skills` and `/skill`
 manage up to four exact Skill selections for the next accepted Turn; `/settings`
 opens a local TOML policy editor for defaults and named profiles that stays open
-for successive field edits, using the freshly saved policy revision each time
-(environment-pinned and single-valued fields are read-only). Saving a setting
-validates it and requires a Fleet restart to apply. One-shot successes — a saved
-setting, a profile selected for restart, an applied theme, updated Skill
-selections — surface as transient flash notices above the viewport instead of
+for successive field edits (environment-pinned and single-valued fields are
+read-only). Edits remain a draft until Apply saves them as one atomic batch;
+Discard clears the draft. A revision conflict reloads the latest policy and
+retains the draft for review and reapplication. The editor stays open after
+Apply. Saving settings requires a Fleet restart to take effect. One-shot
+successes—a saved setting, selected profile, applied theme, or updated Skill
+selections—surface as transient flash notices above the viewport instead of
 permanent transcript messages; failures still land in the transcript. `/cancel` requests
 durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;

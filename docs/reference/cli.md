@@ -115,21 +115,12 @@ The standalone
 `pnpm --dir tools/fleet-tui start -- [options]` command connects pi-tui to an
 already-running API.
 
-### Phase 6 evaluation planning
+### Evaluation and optimization
 
-Use the maintained Phase 6 runner for current evaluation workflows. These
-commands create provider-free planning artifacts; they do not execute models,
-Daytona, or MLflow and do not establish campaign results:
-
-```bash
-uv run python scripts/benchmarks/run_rlm_latency.py phase6-plan \
-  --output .scratch/evals/phase6-plan.json
-uv run python scripts/benchmarks/run_rlm_latency.py phase6-dry-run \
-  --output .scratch/evals/phase6-dry-run.json
-```
-
-See the [evaluation and optimization guide](../how-to-guides/evaluation-optimization.md)
-for current operator workflows and their authorization requirements.
+Fleet no longer ships benchmark, campaign, or Phase 6 planning commands. See
+the [current evaluation and optimization guide](../how-to-guides/evaluation-optimization.md)
+for runtime routing and MLflow ownership. Former runner instructions are
+preserved in the [historical benchmark guide](../internal/history/benchmarks/evaluation-optimization-runners.md).
 
 ## Daytona doctor
 

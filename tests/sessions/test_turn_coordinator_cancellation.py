@@ -48,8 +48,7 @@ async def test_turn_capture_finalizes_as_client_disconnect_on_stream_close(tmp_p
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -187,8 +186,7 @@ async def test_coordinator_settles_commit_after_cancellation(commit_succeeds: bo
 
         async def transition_claim(self, claimed, command):
             from fleet_rlm.rlm.result import empty_rlm_usage
-            from fleet_rlm.sessions.run_claim import FailClaim
-            from fleet_rlm.sessions.run_state import RunFailure
+            from fleet_rlm.sessions.run_state import FailClaim, RunFailure
 
             assert isinstance(command, FailClaim)
             failure = RunFailure(
@@ -582,7 +580,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
             return turn
 
         async def transition_claim(self, claimed, command):
-            from fleet_rlm.sessions.run_claim import HeartbeatClaim
+            from fleet_rlm.sessions.run_state import HeartbeatClaim
 
             if isinstance(command, HeartbeatClaim):
                 raise RunLifecycleUnavailableError("Turn claim is no longer available")
@@ -625,7 +623,7 @@ async def test_inline_preparation_close_failure_fails_closed_on_claim_loss(
             await asyncio.sleep(0.01)
         await asyncio.sleep(0.05)
 
-    from fleet_rlm.sessions.run_claim import CompleteSettlement, RevokeClaim
+    from fleet_rlm.sessions.run_state import CompleteSettlement, RevokeClaim
 
     assert closed.is_set()
     # Claim loss revokes authority, but the failed inline PreparedTurn close

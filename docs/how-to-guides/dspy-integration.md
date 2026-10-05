@@ -306,8 +306,9 @@ enforcement; the Phase 5 waiver remains, and no child network restriction is
 claimed as verified.
 Cross-sandbox child runtimes are a Fleet feature, not something DSPy 3.3
 provides, so their cost is sandbox provisioning, broker/interpreter startup,
-and the child's own iteration budget — see `scripts/benchmark_daytona_lifecycle.py`
-for measured spin-up numbers.
+and the child's own iteration budget. The dated lifecycle measurements are
+preserved in the [historical performance decision](../reference/performance-budget.md);
+they are evidence for their recorded revisions, not current provider guarantees.
 
 Choose the sub-LM lane for prompt-only extraction, counting, classification,
 and judgment. Use native batching for independent semantic judgments. Reserve
@@ -330,11 +331,11 @@ time. The output path exits as soon as the broker marks a cell complete and
 performs one final release read instead of a fixed post-completion drain.
 
 These measurements are local instrumentation and do not imply a live Daytona
-SLO. Run the co-located broker tests for deterministic protocol coverage, then
-run the explicit credentialed lifecycle/latency benchmarks before changing
-snapshot or warm-pool policy. The current architecture already pre-warms and
-reuses the resident Root Sandbox; recursive children remain isolated until
-live measurements show their lifecycle exceeds the documented decision gate.
+SLO. Run the co-located broker tests for deterministic protocol coverage.
+Provider lifecycle claims require a bounded live Daytona verification; the
+retired lifecycle benchmark is not available to establish a new latency gate.
+The current architecture already pre-warms and reuses the resident Root
+Sandbox; recursive children remain isolated under the shipped policy.
 
 ## Typed startup inputs
 
@@ -431,8 +432,8 @@ refactor's local validation.
 
 ## Routing evaluation
 
-`src/fleet_rlm/optimization/routing.py` owns a bounded routes benchmark that measures
-cost rather than inspecting private model reasoning. The curated classes are:
+Fleet's routing guidance uses public execution behavior rather than private
+model reasoning. The runtime route classes are:
 
 1. `python_native` for deterministic Python/REPL work.
 2. `semantic_single` for one bounded `llm_query` judgment.
@@ -445,30 +446,11 @@ cost rather than inspecting private model reasoning. The curated classes are:
 Children receive no Fleet recursion tools; further semantic work inside a
 child uses native `llm_query` calls under the child budget.
 
-The deterministic lane uses dummy models and in-process interpreters; public
-Tool observations, recursive summaries, answer text, child-runtime creation
-counts, and latency are the only evidence. The same `run_routing_scenario` lane
-may be invoked with provider-backed caller-owned interpreters and child
-runtime factories for optional live comparisons. Live runs are isolated from
-normal Session persistence by construction: they do not create durable Turn
-rows, and optional engineering tracing remains fail-soft/operator-owned.
-`RoutingScore.routing_efficiency` is intentionally independent from final
-answer correctness so an expensive recursive child cannot hide behind a
-correct answer.
-
-
-### Running the routing matrix
-
-Use the offline reducer and plan receipts in normal validation, and invoke the opt-in
-live lane only when the Fleet configuration and Daytona credentials are available:
-
-```bash
-uv run python scripts/benchmarks/run_routing_eval.py   --output .scratch/p12/routing-plan.json
-
-uv run python scripts/benchmarks/run_routing_eval.py --live --repeat 3   --timeout-seconds 1800   --output .scratch/p12/routing-live.json
-```
-
-The live runner boots a temporary SQLite database and unique Daytona Volume per
-run, uses public SSE facts only, and writes answer hashes rather than model or
-provider payloads. A repeated recursive-child route miss is evidence, while an
-unnecessary child for a simple deterministic calculation remains a routing miss.
+The Root selects deterministic Python for parsing and calculation, native
+semantic calls for bounded judgments, and isolated children for work that
+needs iterative Python exploration. Recursive batching is reserved for
+independent subproblems that each justify a child. The configured
+`rlm.recursion_enabled` setting controls whether child tools are available.
+See [Evaluation and Optimization](evaluation-optimization.md) for ownership
+and [Testing Strategy](testing-strategy.md) for the scope of deterministic and
+live evidence.

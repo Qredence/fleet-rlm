@@ -173,7 +173,7 @@ generated artifacts:
 | TUI stream fixtures and validators | `make stream-sync` / `make stream-check` |
 | `docs/reference/configuration-environment.md` | `make config-reference` / `make check-docs` |
 
-Use [AGENTS.md](AGENTS.md#work-and-validate-safely) for validation selection
+Use [AGENTS.md](AGENTS.md#validate-and-deliver-safely) for validation selection
 and the [testing strategy](docs/how-to-guides/testing-strategy.md) for test
 lanes. `make check-codebase-tree` and `make check-dependency-boundaries` guard
 ownership. Local checks do not certify provider behavior, containment,

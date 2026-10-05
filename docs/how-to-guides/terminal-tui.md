@@ -121,8 +121,10 @@ Use `/help` for the current slash-command list. Important commands include
 `/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`, `/feedback`,
 and `/exit`. `/settings`
 is a local-only editor for the single TOML configuration, grouped by field
-category. Changes remain drafts until Apply saves one atomic batch; Discard
-restores server values. Conflicts refresh the snapshot and retain the draft.
+category. Field edits stay in a draft until Apply saves them as one atomic
+batch; Discard clears the pending draft. The editor remains open after Apply.
+On a revision conflict, the TUI reloads the latest policy and retains the
+draft for review and reapplication.
 `/volume [root]` shows the read-only Workspace Volume tree; `/theme [name]`
 lists and switches the builtin or custom color themes with a filter-as-you-type
 picker that marks the current theme. Saved policy

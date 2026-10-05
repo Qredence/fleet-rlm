@@ -19,7 +19,7 @@ make check
 ```
 
 For a focused change, run its relevant `uv run pytest -q` tests and the
-matching validation lane from [AGENTS.md](AGENTS.md#work-and-validate-safely).
+matching validation lane from [AGENTS.md](AGENTS.md#validate-and-deliver-safely).
 `make check-docs` covers authored documentation, repository guidance, and the
 generated configuration-environment check. The [testing strategy](docs/how-to-guides/testing-strategy.md)
 explains suite selection and what the non-live gate proves.
