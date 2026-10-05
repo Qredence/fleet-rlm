@@ -1638,13 +1638,7 @@ async def _claim_session_lease(
         await asyncio.sleep(min(0.2, remaining))
 
 
-class ChildRuntimeLeaseState(StrEnum):
-    """States observed by callers of a child runtime lease."""
-
-    OPEN = "OPEN"
-    CLOSING = "CLOSING"
-    CLOSED = "CLOSED"
-    FAILED = "FAILED"
+ChildRuntimeLeaseState = LeaseState
 
 
 @dataclass(slots=True, eq=False)
@@ -2108,8 +2102,6 @@ def _validate_child_file_mapping(files: Mapping[str, bytes], *, max_bytes: int) 
     if not isinstance(files, Mapping):
         raise TypeError("child files must be a mapping of relative paths to bytes")
     paths = _validate_child_relative_paths(tuple(files))
-    if len(paths) > _CHILD_STAGE_MAX_FILES:
-        raise ValueError("too many child files")
     validated: dict[str, bytes] = {}
     total = 0
     for path in paths:
@@ -2253,13 +2245,7 @@ async def create_folder(sandbox: Any, path: str, mode: str = "755") -> None:
     await _maybe_await(_sandbox_fs(sandbox).create_folder(path, mode=mode))
 
 
-class DaytonaRuntimeState(StrEnum):
-    """Lifecycle of the process-scoped runtime facade."""
-
-    OPEN = "OPEN"
-    CLOSING = "CLOSING"
-    CLOSED = "CLOSED"
-    FAILED = "FAILED"
+DaytonaRuntimeState = LeaseState
 
 
 def _identity_text(value: UUID | str | None, name: str) -> str:
