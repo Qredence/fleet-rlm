@@ -3100,6 +3100,7 @@ class DaytonaRuntime:
             raise RuntimeError("Daytona runtime is not accepting Workspace I/O")
 
         if reuse_warm:
+            reusable: Any = None
             async with self._warm_workspace_io_lock:
                 warm_entry = self._warm_workspace_io_sandboxes.get(workspace_id)
                 if warm_entry is not None:
@@ -3113,10 +3114,13 @@ class DaytonaRuntime:
                             st = sandbox_state(warm_sb)
                         if st == "running":
                             self._warm_workspace_io_sandboxes[workspace_id] = (warm_sb, warm_lease, time.monotonic())
-                            yield warm_sb
-                            return
+                            reusable = warm_sb
                     except Exception:
                         self._warm_workspace_io_sandboxes.pop(workspace_id, None)
+            if reusable is not None:
+                # Yield outside the lock and try/except so body exceptions propagate unchanged.
+                yield reusable
+                return
 
         platform = self._platform
         volume_config = self._volume_config
