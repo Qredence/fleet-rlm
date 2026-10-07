@@ -154,6 +154,9 @@ async def _wait_stream_owned(stream: RunEventStream) -> None:
 async def _close_stream_owned(
     stream: RunEventStream | None,
     remember: Callable[[BaseException], None],
+    *,
+    wait_timeout: float | None = None,
+    retain_waiter: Callable[[asyncio.Task[None]], None] | None = None,
 ) -> None:
     """Close and wait for one provider stream while retaining the first failure."""
     if stream is None:
@@ -162,8 +165,22 @@ async def _close_stream_owned(
         await stream.aclose()
     except BaseException as exc:
         remember(exc)
+    if wait_timeout is None:
+        try:
+            await _wait_stream_owned(stream)
+        except BaseException as exc:
+            remember(exc)
+        return
+
+    waiter = asyncio.create_task(_wait_stream_owned(stream), name="fleet-stream-owned-wait")
+    done, _ = await asyncio.wait((waiter,), timeout=max(0.0, wait_timeout))
+    if not done:
+        if retain_waiter is not None:
+            retain_waiter(waiter)
+        remember(TimeoutError("owned execution did not drain before the cleanup deadline"))
+        return
     try:
-        await _wait_stream_owned(stream)
+        waiter.result()
     except BaseException as exc:
         remember(exc)
 

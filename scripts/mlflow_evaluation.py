@@ -1634,7 +1634,6 @@ def monitoring_setup(apply=False):
         "endpoint_name": GATEWAY_NAME,
         "endpoint_id": owned["endpoint_id"],
         "model_definition_id": definition["model_definition_id"],
-        "secret_id": secret["secret_id"],
         "model": model,
         "model_uri": GATEWAY_JUDGE,
         "route_hash": route_hash,
