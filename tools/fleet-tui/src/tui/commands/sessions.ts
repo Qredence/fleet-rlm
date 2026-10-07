@@ -8,7 +8,7 @@ import { appendSystem, errorMessage } from "./shared.js";
 
 export const sessionsCommand: CommandSpec = {
   name: "sessions",
-  description: "Find and switch to an active Fleet Session",
+  description: "Find, manage, and switch Fleet Sessions",
   usage: "/sessions [title search]",
   handler: async (args, ctx) => {
     const phase = ctx.store.getState().run.phase;
@@ -23,19 +23,24 @@ export const sessionsCommand: CommandSpec = {
       const search = args.join(" ").trim();
       const response = await ctx.client.listSessions({
         limit: 100,
-        status: "active",
         ...(search ? { search } : {}),
       });
-      const items = response.items;
+      const items = [...response.items];
+      let page = response;
+      while (page.has_more && page.items.length > 0) {
+        page = await ctx.client.listSessions({
+          limit: 100,
+          offset: page.offset + page.items.length,
+          ...(search ? { search } : {}),
+        });
+        items.push(...page.items);
+      }
       if (items.length === 0) {
-        appendSystem(
-          ctx.store,
-          search ? `No active Sessions match “${search}”.` : "No active Sessions yet.",
-        );
+        appendSystem(ctx.store, search ? `No Sessions match “${search}”.` : "No Sessions yet.");
         return;
       }
       if (ctx.presenter) {
-        const id = await ctx.presenter.chooseSession(items);
+        const id = await ctx.presenter.openSessionBrowser(items, response.total);
         if (id) await resumeSession(id, ctx);
         return;
       }
@@ -47,7 +52,7 @@ export const sessionsCommand: CommandSpec = {
         .join("\n");
       appendSystem(
         ctx.store,
-        `Active Sessions (${response.total} total)\n\n${lines}\n\nUse /resume <id> to switch.`,
+        `Sessions (${response.total} total)\n\n${lines}\n\nUse /resume <id> to switch.`,
       );
     } catch (error) {
       appendSystem(ctx.store, `Failed to list sessions: ${errorMessage(error)}`);

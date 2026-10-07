@@ -3,6 +3,7 @@ import {
   type MarkdownTheme,
   type SelectListTheme,
   type SettingsListTheme,
+  styleTextWithAnsi,
 } from "@earendil-works/pi-tui";
 
 import { highlightCode } from "./syntax-highlight.js";
@@ -11,8 +12,8 @@ import {
   darkPalette,
   loadCustomTheme,
   loadCustomThemeNames,
-  readThemeSelection,
   type Palette,
+  readThemeSelection,
   type ThemeBackground,
   type ThemeColor,
   watchCustomThemes,
@@ -22,7 +23,7 @@ import {
 export type TerminalColorScheme = "dark" | "light";
 export type ColorMode = "truecolor" | "256color";
 
-export type { ThemeColor, ThemeBackground, Palette };
+export type { Palette, ThemeBackground, ThemeColor };
 
 type Rgb = { r: number; g: number; b: number };
 
@@ -51,8 +52,17 @@ function rgbToHex(rgb: Rgb): string {
   return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
 }
 
-function luminance(rgb: Rgb): number {
+/** Relative luminance (ITU-R BT.601) used for contrast and light/dark decisions. */
+export function luminance(rgb: Rgb): number {
   return 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+}
+
+/** Luminance at or above this reads as a light terminal background. */
+export const LIGHT_LUMINANCE_THRESHOLD = 128;
+
+/** Whether an RGB background should be treated as light. */
+export function isLightRgb(rgb: Rgb): boolean {
+  return luminance(rgb) >= LIGHT_LUMINANCE_THRESHOLD;
 }
 
 function blendColor(base: Rgb, top: Rgb, alpha: number): Rgb {
@@ -112,6 +122,34 @@ export class FleetTheme {
 
   bg(color: ThemeBackground, text: string): string {
     return `${bgAnsi(this.palette[color], this.mode)}${text}\x1b[49m`;
+  }
+
+  /**
+   * Apply any combination of fg color and text attributes in one call.
+   * Equivalent to chaining fg() + bold() + italic() etc., but avoids
+   * nested ANSI sequences for compound styling.
+   */
+  style(
+    text: string,
+    options: {
+      color?: ThemeColor;
+      bg?: ThemeBackground;
+      bold?: boolean;
+      italic?: boolean;
+      dim?: boolean;
+      underline?: boolean;
+      strikethrough?: boolean;
+    },
+  ): string {
+    const fgSeq = options.color ? fgAnsi(this.palette[options.color], this.mode) : undefined;
+    const bgSeq = options.bg ? bgAnsi(this.palette[options.bg], this.mode) : undefined;
+    return styleTextWithAnsi(text, fgSeq, bgSeq, {
+      bold: options.bold,
+      italic: options.italic,
+      dim: options.dim,
+      underline: options.underline,
+      strikethrough: options.strikethrough,
+    });
   }
 
   bold(text: string): string {
@@ -229,7 +267,8 @@ export class FleetTheme {
 }
 
 let terminalColorScheme: TerminalColorScheme = "dark";
-let themeName = "dark";
+let detectedTerminalColorScheme: TerminalColorScheme = "dark";
+let themeName = "system";
 let activeTheme = createFleetTheme(terminalColorScheme, detectedColorMode());
 let terminalBackground: Rgb | null = null;
 let onThemeChangeCallback: (() => void) | undefined;
@@ -262,12 +301,21 @@ export function getTerminalColorScheme(): TerminalColorScheme {
 export function setTerminalColorScheme(scheme: TerminalColorScheme): boolean {
   if (terminalColorScheme === scheme) return false;
   terminalColorScheme = scheme;
-  // Custom themes win over the auto scheme; builtins follow the terminal.
-  if (themeName === "dark" || themeName === "light") {
-    themeName = scheme;
+  // "system" theme and builtin dark/light follow the terminal scheme.
+  // Custom themes win and are not updated here.
+  if (themeName === "system" || themeName === "dark" || themeName === "light") {
+    if (themeName !== "system") themeName = scheme;
     activeTheme = createFleetTheme(scheme, detectedColorMode());
   }
   return true;
+}
+
+/** Cache the scheme reported by the terminal separately from a manual theme selection. */
+export function setDetectedTerminalColorScheme(scheme: TerminalColorScheme): boolean {
+  const changed = detectedTerminalColorScheme !== scheme;
+  detectedTerminalColorScheme = scheme;
+  if (explicitThemeOverride) return changed;
+  return setTerminalColorScheme(scheme) || changed;
 }
 
 export function getThemeName(): string {
@@ -282,15 +330,30 @@ export function hasExplicitThemeOverride(): boolean {
 /** Names of all selectable themes: builtins first, then custom JSON themes. */
 export async function getAvailableThemes(): Promise<string[]> {
   const custom = await loadCustomThemeNames();
-  return [...Object.keys(builtinPalettes), ...custom.filter((name) => !builtinPalettes[name])];
+  return [
+    "system",
+    ...Object.keys(builtinPalettes),
+    ...custom.filter((name) => !builtinPalettes[name] && name !== "system"),
+  ];
 }
 
 /**
  * Apply a theme by name (builtin or custom). Persists the selection and
  * notifies listeners. A custom theme that fails to load is ignored and the
- * previous theme stays active.
+ * previous theme stays active. The special name "system" clears any explicit
+ * override and returns to terminal-palette auto-detection.
  */
 export async function setTheme(name: string): Promise<{ success: boolean; error?: string }> {
+  if (name === "system") {
+    explicitThemeOverride = false;
+    themeName = "system";
+    terminalColorScheme = detectedTerminalColorScheme;
+    activeTheme = createFleetTheme(detectedTerminalColorScheme, detectedColorMode());
+    void writeThemeSelection("system");
+    stopThemeMonitoring();
+    onThemeChangeCallback?.();
+    return { success: true };
+  }
   const palette = builtinPalettes[name] ?? (await loadCustomTheme(name));
   if (!palette) {
     return { success: false, error: `Theme not found: ${name}` };
@@ -309,13 +372,24 @@ export async function setTheme(name: string): Promise<{ success: boolean; error?
 
 /**
  * Initialize the theme from an explicit env override, a persisted selection,
- * or the terminal scheme (dark by default).
+ * or auto-detection (system by default — follows terminal background query).
  */
 export async function initTheme(override?: string): Promise<void> {
   const persisted = await readThemeSelection();
-  const name = override ?? persisted;
+  const name = override ?? persisted ?? "system";
   explicitThemeOverride = false;
   let changed = false;
+  if (name === "system") {
+    if (themeName !== "system") {
+      changed = true;
+      themeName = "system";
+    }
+    terminalColorScheme = detectedTerminalColorScheme;
+    activeTheme = createFleetTheme(detectedTerminalColorScheme, detectedColorMode());
+    watchActiveCustomTheme();
+    if (changed) onThemeChangeCallback?.();
+    return;
+  }
   if (name) {
     const palette = builtinPalettes[name] ?? (await loadCustomTheme(name));
     if (palette) {
@@ -355,6 +429,12 @@ export function stopThemeMonitoring(): void {
 export const theme = {
   fg: (color: ThemeColor, text: string) => activeTheme.fg(color, text),
   bg: (color: ThemeBackground, text: string) => activeTheme.bg(color, text),
+  /**
+   * Compound text styling: fg color + optional text attributes in one call.
+   * Avoids nested ANSI sequences for common compound patterns.
+   */
+  style: (text: string, options: Parameters<FleetTheme["style"]>[1]) =>
+    activeTheme.style(text, options),
   bold: (text: string) => activeTheme.bold(text),
   italic: (text: string) => activeTheme.italic(text),
   underline: (text: string) => activeTheme.underline(text),

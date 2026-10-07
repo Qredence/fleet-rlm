@@ -37,7 +37,7 @@ export function overlayTitle(text: string): string {
 }
 
 /** Applies Fleet's dim styling to overlay hint text.
-
+ *
  * @param text - The hint text to style
  * @returns The dim-styled hint text
  */
@@ -48,6 +48,18 @@ export function overlayHint(text: string): string {
 /** A light structural rule that separates modal metadata from active content. */
 export function overlayRule(width: number): string {
   return theme.fg("borderMuted", "─".repeat(Math.max(1, width)));
+}
+
+/** The shared modal key footer: `KEY action · KEY action`. */
+export function overlayFooter(parts: ReadonlyArray<readonly [string, string]>): string {
+  return parts
+    .map(([key, action]) => `${theme.fg("accent", key)} ${overlayHint(action)}`)
+    .join(overlayHint("  ·  "));
+}
+
+/** The shared filter line: a label plus the live query or its placeholder. */
+export function overlayFilter(query: string, placeholder = "(type to filter)"): string {
+  return `${theme.fg("muted", "Filter:")} ${query || overlayHint(placeholder)}`;
 }
 
 /**
@@ -94,16 +106,14 @@ export class SelectOverlay implements Component {
     if (this.options.context) lines.push(overlayHint(this.options.context));
     lines.push(overlayRule(safeWidth));
     if (this.options.filterable) {
-      lines.push(
-        `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to filter)")}`,
-      );
+      lines.push(overlayFilter(this.query));
     }
     lines.push("");
     lines.push(...this.list.render(safeWidth));
     if (this.options.hint) {
       lines.push("");
       lines.push(overlayRule(safeWidth));
-      lines.push(`${theme.fg("accent", "ESC")} ${overlayHint(`close  ·  ${this.options.hint}`)}`);
+      lines.push(overlayFooter([["ESC", `close  ·  ${this.options.hint}`]]));
     }
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }

@@ -1,7 +1,7 @@
 # Fleet RLM Terminal UI
 
 This is Fleet's maintained local Node 22.19+ client. It uses
-`@earendil-works/pi-tui@0.87.1` to render the backend's AI SDK UI v1 HTTP/SSE
+`@earendil-works/pi-tui@1.0.3` to render the backend's AI SDK UI v1 HTTP/SSE
 contract; it does not run a model, Harness agent, or Sandbox.
 
 ## Run
@@ -37,7 +37,8 @@ documented in [`../../docs/reference/configuration.md`](../../docs/reference/con
 
 ## Operator timeline
 
-pi-tui renders one dense trajectory console in an alternate-screen viewport:
+pi-tui renders one dense trajectory console in an alternate-screen viewport,
+under a one-line header showing the Session title, current model, and status:
 teal-on-graphite dark styling or ink-on-cool-paper light styling, with color
 reserved for identity, keyboard focus, and semantic state. Compact trajectory
 markers separate independent runtime Turns without exposing internal Run IDs. Text,
@@ -47,8 +48,9 @@ folds them. Live and reloaded Turns share one projection and renderer-neutral
 store.
 
 The transcript viewport follows the newest output: PgUp/PgDn scroll a page,
-Home/End jump to the top/bottom, the mouse wheel scrolls, drag selects text
-for copy, and new output re-follows the end. Ctrl+Shift+F opens transcript
+Home/End move the editor cursor, Ctrl+Home/Ctrl+End jump the transcript to the
+top/bottom, the mouse wheel scrolls, drag selects text for copy, and new output
+re-follows the end. Ctrl+Shift+F opens transcript
 search over the scroll view (Enter/Ctrl+G steps to the next match,
 Shift+Enter/Ctrl+Shift+G to the previous, Escape closes); matches are styled
 from the active Fleet theme. Tool, code, and output cards fold with Ctrl+O
@@ -69,23 +71,24 @@ preparation, RLM step, Tool, replay, or cancellation action. The footer reports
 observed committed input/output tokens, Turn steps, Tools, and outcome; absent
 provider telemetry displays as `—` rather than an estimated zero.
 
-Use `/help` for commands. `/theme [name]` lists and switches the builtin
-(`dark`/`light`) or custom JSON themes with a filter-as-you-type picker (see below).
+Use `/help` for commands. `/theme [name]` lists and switches the themes —
+`system` (the default, following the terminal palette), builtin `dark`/`light`,
+or custom JSON themes — with a filter-as-you-type picker (see below).
 `/rename <title>` names the current Session;
 `/sessions [title search]` opens the active Session selector. Switching Sessions
 keeps the unsent editor text, while a same-Session `/reload` restores pending
 Skill/Attachment pins and the `/redo` prompt; those session-scoped pending inputs
 clear when switching to another Session. `/skills` and `/skill`
 manage up to four exact Skill selections for the next accepted Turn; `/settings`
-opens a local TOML policy editor for defaults and named profiles that stays open
-for successive field edits (environment-pinned and single-valued fields are
-read-only). Edits remain a draft until Apply saves them as one atomic batch;
-Discard clears the draft. A revision conflict reloads the latest policy and
-retains the draft for review and reapplication. The editor stays open after
-Apply. Saving settings requires a Fleet restart to take effect. One-shot
-successes—a saved setting, selected profile, applied theme, or updated Skill
-selections—surface as transient flash notices above the viewport instead of
-permanent transcript messages; failures still land in the transcript. `/cancel` requests
+opens a fullscreen, keyboard-navigable policy editor for the single TOML
+configuration (environment-pinned, secret, and single-valued fields are excluded
+or read-only). Fields that require a Fleet restart are marked. Edits remain a
+draft until Apply saves them as one atomic batch; Discard clears the draft. A
+revision conflict reloads the latest policy and retains the draft for review and
+reapplication. Saving settings requires a Fleet restart to take effect. One-shot
+successes—a saved setting, applied theme, or updated Skill selections—surface as
+transient flash notices above the viewport instead of permanent transcript
+messages; failures still land in the transcript. `/cancel` requests
 durable Run cancellation. Escape cancels an active Run while preserving the unsent editor
 draft. Ctrl+C clears the editor and exits when pressed twice while empty;
 Ctrl+D keeps its forward-delete behavior and exits only from an empty editor.
@@ -121,8 +124,10 @@ blocks the TUI.
 
 ## Themes
 
-Builtin `dark` and `light` themes are compiled in; custom themes are JSON files
-in `$FLEET_TUI_STATE_DIR/themes/*.json` that may override any token by name and
+The default `system` theme derives colors from the terminal's reported palette
+and rebuilds them when the terminal switches light/dark; builtin `dark` and
+`light` themes are compiled in. Custom themes are JSON files in
+`$FLEET_TUI_STATE_DIR/themes/*.json` that may override any token by name and
 reference `vars`:
 
 ```json

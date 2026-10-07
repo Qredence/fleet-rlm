@@ -117,7 +117,7 @@ class DaytonaEnvironmentManifest:
             "dependency_sha256": self.dependency_sha256,
             "dependencies": list(self.dependencies),
             "helper_protocol": self.helper_protocol,
-            "capabilities": ["python", "git", "ca-certificates"],
+            "capabilities": ["python", "git", "ca-certificates", "procps"],
             "resources": {"cpu": self.resources[0], "memory_gib": self.resources[1], "disk_gib": self.resources[2]},
             "user": self.user,
             "workdir": self.workdir,
@@ -221,7 +221,7 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     image_profile = manifest.profile
     image = Image.base(spec.base_image).run_commands(
         "apt-get update && apt-get install -y --no-install-recommends "
-        "git ca-certificates && rm -rf /var/lib/apt/lists/*",
+        "git ca-certificates procps && rm -rf /var/lib/apt/lists/*",
         "groupadd --gid 1000 daytona",
         "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
         "chown -R daytona:daytona /home/daytona",

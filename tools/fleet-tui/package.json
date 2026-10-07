@@ -16,7 +16,7 @@
     "lint": "biome lint src"
   },
   "dependencies": {
-    "@earendil-works/pi-tui": "0.87.1",
+    "@earendil-works/pi-tui": "1.0.3",
     "highlight.js": "11.12.0"
   },
   "devDependencies": {

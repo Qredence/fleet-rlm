@@ -9,11 +9,18 @@ import {
 } from "@earendil-works/pi-tui";
 
 import type { FleetSettingsPolicy } from "../../fleet-api-client.js";
+import { MARKS } from "../marks.js";
 import type { SettingsUpdate } from "../commands/registry.js";
 import { dropLastGrapheme } from "../terminal-text.js";
 import { selectTheme, theme } from "../theme.js";
 
-import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
+import {
+  isPrintableInput,
+  overlayFooter,
+  overlayHint,
+  overlayRule,
+  overlayTitle,
+} from "./overlay.js";
 
 export type SettingsField = FleetSettingsPolicy["fields"][number];
 
@@ -172,12 +179,15 @@ export class TextSettingEditor implements Component {
       `${theme.fg("muted", "New value:")} ${this.value || theme.fg("dim", "(type a value)")}`,
     ];
     if (this.error) {
-      lines.push(theme.fg("error", this.error));
+      lines.push(theme.fg("error", `${MARKS.error} ${this.error}`));
     }
     lines.push(
       "",
       overlayRule(safeWidth),
-      `${theme.fg("accent", "ENTER")} ${overlayHint("save  ·  Esc back")}`,
+      overlayFooter([
+        ["ENTER", "save"],
+        ["ESC", "back"],
+      ]),
     );
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }
@@ -234,14 +244,22 @@ export class MultiChoiceEditor implements Component {
       overlayRule(safeWidth),
       "",
       ...(choices.length > 0 ? choices : ["(no choices)"]).map((choice, index) => {
-        const checked = this.selected.includes(choice) ? "x" : " ";
-        const label = `[${checked}] ${choice}`;
+        // Filled/empty squares carry selection by shape, not color alone.
+        const selectedForSave = this.selected.includes(choice);
+        const marker = selectedForSave
+          ? theme.fg("success", MARKS.checked)
+          : theme.fg("dim", MARKS.unchecked);
+        const label = `${marker} ${choice}`;
         const selected = index === this.index;
-        return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}`;
+        return `${selected ? selectTheme.selectedPrefix(MARKS.submit) : " "} ${selected ? selectTheme.selectedText(label) : label}`;
       }),
       "",
       overlayRule(safeWidth),
-      `${theme.fg("accent", "SPACE")} ${overlayHint("toggle  ·  Enter confirm  ·  Esc back")}`,
+      overlayFooter([
+        ["SPACE", "toggle"],
+        ["ENTER", "confirm"],
+        ["ESC", "back"],
+      ]),
     ];
     return lines.map((line) => truncateToWidth(line, safeWidth, "…"));
   }
@@ -273,7 +291,11 @@ function choicesOf(field: SettingsField): string[] {
 
 /**
  * Composes the settings-row description: the path context plus read-only
- * markers for environment-pinned or fixed-value fields.
+ * markers for environment-pinned or fixed-value fields, and restart notices.
+ *
+ * Saved policy changes take effect only after a Fleet restart (see
+ * `tools/fleet-tui/AGENTS.md`); the backend does not re-apply runtime logging
+ * from a settings PATCH, so every editable field is marked as restart-scoped.
  *
  * @param field - The settings field to describe
  * @returns A contextual description for the field row
@@ -284,6 +306,8 @@ function describeField(field: SettingsField): string {
     parts.push("set by environment variable; read-only");
   } else if (isFixedChoice(field)) {
     parts.push("fixed; only one value is supported");
+  } else {
+    parts.push("⚑ requires restart");
   }
   return parts.join(" · ");
 }

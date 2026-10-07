@@ -9,4 +9,4 @@ peerDependencyRules:
     # TypeScript 7 is separately installed as the native compiler.
     'openapi-typescript>typescript': 6.0.2
 minimumReleaseAgeExclude:
-  - '@earendil-works/pi-tui@0.87.1'
+  - '@earendil-works/pi-tui@1.0.3'

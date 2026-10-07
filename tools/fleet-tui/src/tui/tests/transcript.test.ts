@@ -3,13 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { ConversationStore, type Message } from "../store.js";
 import { setTerminalColorScheme } from "../theme.js";
 import { TranscriptComponent } from "../transcript.js";
+import { stripAnsi } from "./support/ansi.js";
 
 function message(id: string, text: string): Message {
   return { id, kind: "text", role: "assistant", text, streaming: false, ts: 1 };
 }
 
 describe("TranscriptComponent", () => {
-  it("keeps Fleet identity while applying the pi accent hierarchy", () => {
+  it("keeps the Fleet identity mark while applying the pi accent hierarchy", () => {
     setTerminalColorScheme("dark");
     const store = new ConversationStore();
     store.dispatch({
@@ -18,11 +19,13 @@ describe("TranscriptComponent", () => {
     });
 
     const header = new TranscriptComponent(store).render(80);
+    const first = header[0] ?? "";
 
-    expect(header[0]).toContain("FLEET");
-    expect(header[0]).toContain("\x1b[38;");
-    expect(header[0]).toContain("RLM OPERATOR");
-    expect(stripAnsi(header[1] ?? "")).toContain("SESSION  Session  ·  new  ·  active");
+    expect(first).toContain("FLEET");
+    expect(first).not.toBe(stripAnsi(first));
+    expect(first).toContain("RLM OPERATOR");
+    // Session identity lives in the header bar now, not the transcript.
+    expect(stripAnsi(header.join("\n"))).not.toContain("SESSION");
   });
 
   it("guides a new Session toward Fleet's first-class inputs and commands", () => {
@@ -58,7 +61,7 @@ describe("TranscriptComponent", () => {
     expect(output).not.toContain("run-1");
   });
 
-  it("renders a caller-controlled Session title as one terminal-safe line", () => {
+  it("does not repeat caller-controlled Session metadata in the transcript body", () => {
     const store = new ConversationStore();
     store.dispatch({
       type: "session/init",
@@ -70,13 +73,13 @@ describe("TranscriptComponent", () => {
       },
     });
 
-    const header = new TranscriptComponent(store).render(100)[1];
+    const output = new TranscriptComponent(store).render(100);
 
-    expect(stripAnsi(header ?? "")).toContain("Unsafe Title  ·  resumed  ·  active");
-    expect(header).not.toContain("secret");
-    expect(header).not.toContain("\n");
-    expect(header).not.toContain("\x1b]52");
-    expect(header).not.toContain("\x07");
+    // The header bar owns session identity; the transcript must not echo it.
+    expect(output.join("\n")).not.toContain("secret");
+    expect(output.join("\n")).not.toContain("Unsafe");
+    expect(output.join("\n")).not.toContain("\x1b]52");
+    expect(output.join("\n")).not.toContain("\x07");
   });
 
   it("reuses unchanged historical rendering and invalidates changed messages by width", () => {
@@ -204,10 +207,6 @@ describe("TranscriptComponent", () => {
     expect(render).toHaveBeenCalledTimes(5);
   });
 });
-
-function stripAnsi(value: string): string {
-  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
-}
 
 describe("TranscriptComponent render fast path", () => {
   it("returns the previous line array while no message changed", () => {

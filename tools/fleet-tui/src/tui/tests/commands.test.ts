@@ -86,8 +86,8 @@ describe("command handlers", () => {
       expect(sys.text).toContain("/help");
       expect(sys.text).toContain("/cancel");
       expect(sys.text).toContain("/exit");
-      expect(sys.text).toContain("Ctrl+Shift+F  search the transcript");
-      expect(sys.text).toContain("Ctrl+O        fold the latest");
+      expect(sys.text).toContain("Ctrl+Shift+F     search the transcript");
+      expect(sys.text).toContain("Ctrl+O           fold the latest");
     }
   });
 
@@ -239,7 +239,7 @@ describe("command handlers", () => {
     });
   });
 
-  it("/sessions searches active Session titles", async () => {
+  it("/sessions searches Session titles across both statuses", async () => {
     const { ctx } = makeContext();
     ctx.client.listSessions = vi.fn().mockResolvedValue({
       items: [],
@@ -254,9 +254,25 @@ describe("command handlers", () => {
 
     expect(ctx.client.listSessions).toHaveBeenCalledWith({
       limit: 100,
-      status: "active",
       search: "research notes",
     });
+  });
+
+  it("/sessions includes archived rows from subsequent pages", async () => {
+    const { ctx } = makeContext();
+    const active = { id: "active", title: "One", status: "active" };
+    const archived = { id: "archived", title: "Two", status: "archived" };
+    ctx.client.listSessions = vi
+      .fn()
+      .mockResolvedValueOnce({ items: [active], total: 2, offset: 0, has_more: true })
+      .mockResolvedValueOnce({ items: [archived], total: 2, offset: 1, has_more: false });
+    const openSessionBrowser = vi.fn().mockResolvedValue(null);
+    ctx.presenter = { openSessionBrowser } as unknown as CommandContext["presenter"];
+    await listCommands()
+      .find((command) => command.name === "sessions")
+      ?.handler([], ctx);
+    expect(ctx.client.listSessions).toHaveBeenNthCalledWith(2, { limit: 100, offset: 1 });
+    expect(openSessionBrowser).toHaveBeenCalledWith([active, archived], 2);
   });
 
   it("/settings formats an unset value without a literal undefined", async () => {

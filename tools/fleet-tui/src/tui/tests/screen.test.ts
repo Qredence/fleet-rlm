@@ -1,8 +1,16 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
 
-import { EditorDockComponent, NextTurnContextComponent } from "../screen.js";
+import type { ExecutionSummary } from "../execution-summary.js";
+import {
+  EditorDockComponent,
+  footerHints,
+  footerMetrics,
+  formatFooterZones,
+  NextTurnContextComponent,
+} from "../screen.js";
 import { ConversationStore } from "../store.js";
+import { hasBackground, stripAnsi } from "./support/ansi.js";
 
 describe("NextTurnContextComponent", () => {
   it("stays hidden until the operator pins next-Turn inputs", () => {
@@ -53,7 +61,7 @@ describe("NextTurnContextComponent", () => {
     const plain = stripAnsi(component.render(160).join("\n"));
 
     expect(visibleWidth(line)).toBe(42);
-    expect(line).toContain("\x1b[48;");
+    expect(hasBackground(line)).toBe(true);
     expect(stripAnsi(line)).toContain("1 Attachment");
     expect(plain).not.toContain("secret");
     expect(plain).not.toContain("\n");
@@ -72,12 +80,56 @@ describe("EditorDockComponent", () => {
 
     const lines = new EditorDockComponent(editor).render(32);
 
-    expect(lines).toHaveLength(3);
+    // A labeled cue line precedes the editor's own three surfaces.
+    expect(lines).toHaveLength(4);
     expect(lines.every((line) => visibleWidth(line) === 32)).toBe(true);
-    expect(lines.every((line) => line.includes("\x1b[48;"))).toBe(true);
+    expect(lines.every((line) => hasBackground(line))).toBe(true);
+    expect(stripAnsi(lines[0] ?? "")).toContain("Ask Fleet");
   });
 });
 
-function stripAnsi(value: string): string {
-  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
-}
+describe("footer layout", () => {
+  const summary: ExecutionSummary = {
+    iterations: 3,
+    subLmCalls: 0,
+    hostCapabilityCalls: 0,
+    interpreterErrors: 2,
+    durationMs: 35_000,
+  };
+  const leftZone = `TOKENS  ↑ 19k  ↓ 2.5k${footerMetrics(summary)}`;
+
+  it("omits zero-valued optional metric cells", () => {
+    expect(footerMetrics(summary)).toBe("  ·  3 iter · 2 errors · 0:35");
+  });
+
+  it("does not render a misleading partial token at 80 columns", () => {
+    const line = stripAnsi(formatFooterZones(leftZone, footerHints("idle"), 80)[0] ?? "");
+
+    // Regression: a fixed 40-col hint reservation cut "0 sub-LM" down to "0 s".
+    expect(line).not.toMatch(/\b0 s\b/);
+    expect(line).toContain("3 iter · 2 errors · 0:35");
+    expect(line).toContain("Enter send · / commands");
+  });
+
+  it("marks a truncated metrics zone with an ellipsis and preserves width", () => {
+    const long = `TOKENS  ↑ 19k  ↓ 2.5k  ·  3 iter · 8 sub-LM · 12 host · 9 errors · 12:34`;
+    const line = formatFooterZones(long, footerHints("idle"), 80)[0] ?? "";
+
+    expect(stripAnsi(line)).toContain("…");
+    expect(visibleWidth(line)).toBe(80);
+  });
+
+  it("keeps the running hint short so metrics still fit", () => {
+    const line = stripAnsi(formatFooterZones(leftZone, footerHints("running"), 80)[0] ?? "");
+
+    expect(line).toContain("Esc cancel");
+    expect(line).toContain("3 iter · 2 errors · 0:35");
+  });
+
+  it("never exceeds the viewport at degenerate widths", () => {
+    for (const width of [1, 2, 3]) {
+      const line = formatFooterZones(leftZone, footerHints("idle"), width)[0] ?? "";
+      expect(visibleWidth(line)).toBeLessThanOrEqual(width);
+    }
+  });
+});

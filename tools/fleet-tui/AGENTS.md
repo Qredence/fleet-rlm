@@ -21,13 +21,14 @@ execution or runtime policy.
 
 ## Turn stream contract
 
-- A normal stream has one `start`, ordered intermediate chunks, one terminal
-  outcome, and `[DONE]` last. Transient preparation status may precede `start`.
-- A claim or preparation failure can end before `start` as `error`,
-  `finish:error`, `[DONE]`. Pre-stream cancellation uses `abort`, `[DONE]`.
-- Cancellation after `start` emits `abort` then `[DONE]`, without `finish` or
-  post-terminal usage. Do not accept chunks after the terminal outcome or
-  `[DONE]`.
+- A normal stream has one `turn_start`, ordered intermediate chunks, one
+  terminal `turn_finish`, and `[DONE]` last. Transient `turn_status` chunks
+  (phase/detail/message heartbeats) may precede `turn_start`.
+- A claim or preparation failure can end as `turn_error` then `turn_finish`
+  (status `error`), followed by `[DONE]`.
+- Cancellation emits `turn_cancelled` then `turn_finish`, followed by `[DONE]`,
+  without post-terminal usage. Do not accept chunks after the terminal outcome
+  or `[DONE]`.
 - Preserve backend chunk types and ordering through parsing and projection.
   Update generated validation or fixtures through the root guide's owning
   commands; never hand-edit `src/generated/`.

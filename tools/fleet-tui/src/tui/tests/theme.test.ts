@@ -14,6 +14,7 @@ import {
   getThemeName,
   initTheme,
   selectTheme,
+  setDetectedTerminalColorScheme,
   setTerminalBackground,
   setTerminalColorScheme,
   setTheme,
@@ -112,6 +113,55 @@ describe("Fleet pi theme", () => {
 });
 
 describe("theme selection", () => {
+  it("restores the detected system scheme after a manual builtin selection", async () => {
+    const dir = await withStateDir();
+    vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
+    await setTheme("system");
+    setDetectedTerminalColorScheme("light");
+
+    await setTheme("dark");
+    expect(getTerminalColorScheme()).toBe("dark");
+    await setTheme("system");
+
+    expect(getThemeName()).toBe("system");
+    expect(getTerminalColorScheme()).toBe("light");
+    expect(theme.fg("error", "failed")).toContain("38;2;170;79;91");
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the dark fallback until terminal detection reports a scheme", async () => {
+    const dir = await withStateDir();
+    vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
+    setDetectedTerminalColorScheme("dark");
+    await setTheme("system");
+    expect(getTerminalColorScheme()).toBe("dark");
+
+    setDetectedTerminalColorScheme("light");
+
+    expect(getTerminalColorScheme()).toBe("light");
+    expect(theme.fg("error", "failed")).toContain("38;2;170;79;91");
+    vi.unstubAllEnvs();
+  });
+
+  it("caches terminal detection while an explicit theme override is active", async () => {
+    const dir = await withStateDir();
+    vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
+    await initTheme("dark");
+    expect(getThemeName()).toBe("dark");
+
+    setDetectedTerminalColorScheme("light");
+    expect(getTerminalColorScheme()).toBe("dark");
+    expect(theme.fg("error", "failed")).toBe(
+      createFleetTheme("dark", "truecolor").fg("error", "failed"),
+    );
+
+    await setTheme("system");
+
+    expect(getTerminalColorScheme()).toBe("light");
+    expect(theme.fg("error", "failed")).toContain("38;2;170;79;91");
+    vi.unstubAllEnvs();
+  });
+
   it("lists builtins plus custom JSON themes and switches between them", async () => {
     const dir = await withStateDir();
     await mkdir(join(dir, "themes"), { recursive: true });
@@ -125,7 +175,7 @@ describe("theme selection", () => {
     );
     vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
 
-    expect(await getAvailableThemes()).toEqual(["dark", "light", "solar"]);
+    expect(await getAvailableThemes()).toEqual(["system", "dark", "light", "solar"]);
     const result = await setTheme("solar");
     expect(result.success).toBe(true);
     expect(getThemeName()).toBe("solar");
@@ -142,9 +192,12 @@ describe("theme selection", () => {
     await writeFile(join(dir, "themes", "broken.json"), "{not json");
     vi.stubEnv("FLEET_TUI_STATE_DIR", dir);
 
+    const prevThemeName = getThemeName();
     const result = await setTheme("broken");
     expect(result.success).toBe(false);
-    expect(getThemeName()).toBe("dark");
+    // A failed setTheme leaves the current theme unchanged.
+    expect(getThemeName()).toBe(prevThemeName);
+    expect(getThemeName()).not.toBe("broken");
     vi.unstubAllEnvs();
   });
 

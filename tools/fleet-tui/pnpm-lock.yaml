@@ -171,8 +171,8 @@ importers:
   .:
     dependencies:
       '@earendil-works/pi-tui':
-        specifier: 0.87.1
-        version: 0.87.1
+        specifier: 1.0.3
+        version: 1.0.3
       highlight.js:
         specifier: 11.12.0
         version: 11.12.0
@@ -266,8 +266,8 @@ packages:
     cpu: [x64]
     os: [win32]
 
-  '@earendil-works/pi-tui@0.87.1':
-    resolution: {integrity: sha512-YEH2vRyOeiO7hhN6j6AE6YwKSq2Kz2f3XR8bj1TbR+aGE/JsnY1hLPMI2pvaZfRM1n9Y00tejxFQ4zbzvF7nkQ==}
+  '@earendil-works/pi-tui@1.0.3':
+    resolution: {integrity: sha512-C7b8Y+7iz+/oPEZUJubv6NPm3M/4ziq0hjQ2jhqMNpBwcXeqDMYKL2FYP90t2b5S1IoGc2io47dj5ZlIC1IZWg==}
     engines: {node: '>=22.19.0'}
 
   '@esbuild/aix-ppc64@0.28.1':
@@ -1087,7 +1087,7 @@ snapshots:
   '@biomejs/cli-win32-x64@2.5.14':
     optional: true
 
-  '@earendil-works/pi-tui@0.87.1':
+  '@earendil-works/pi-tui@1.0.3':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.11

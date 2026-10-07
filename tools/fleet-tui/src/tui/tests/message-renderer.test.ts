@@ -5,6 +5,7 @@ import { renderMessage } from "../message-renderer.js";
 import type { Message } from "../store.js";
 import { setTerminalColorScheme } from "../theme.js";
 import { terminalSafeText } from "../terminal-text.js";
+import { hasBackground, stripAnsi } from "./support/ansi.js";
 
 describe("renderMessage", () => {
   beforeEach(() => setTerminalColorScheme("dark"));
@@ -61,9 +62,9 @@ describe("renderMessage", () => {
     const assistantLines = renderMessage(assistant, 32);
 
     expect(userLines.every((line) => visibleWidth(line) === 32)).toBe(true);
-    expect(userLines.join("\n")).toContain("\x1b[48;");
+    expect(userLines.every((line) => hasBackground(line))).toBe(true);
     expect(userLines.join("\n")).toContain("Inspect this");
-    expect(assistantLines.join("\n")).not.toContain("\x1b[48;");
+    expect(assistantLines.some((line) => hasBackground(line))).toBe(false);
     expect(assistantLines.join("\n")).not.toContain("FLEET");
     expect(assistantLines.join("\n")).toContain("Working on it");
   });
@@ -532,6 +533,67 @@ describe("renderMessage", () => {
   });
 });
 
+describe("marker vocabulary and card weight", () => {
+  it("renders every runtime card on the shared panel surface with consistent weight", () => {
+    const messages: Message[] = [
+      { id: "r", kind: "reasoning", runId: "run", step: 1, text: "think", ts: 1 },
+      { id: "c", kind: "code", runId: "run", step: 1, code: "print(1)", ts: 2 },
+      { id: "o", kind: "output", runId: "run", step: 1, output: "1", ts: 3 },
+      {
+        id: "t",
+        kind: "tool",
+        runId: "run",
+        toolCallId: "call",
+        name: "inspect",
+        input: {},
+        output: {},
+        startedAt: 0,
+        endedAt: 1,
+        status: "success",
+        ts: 4,
+      },
+    ];
+
+    for (const message of messages) {
+      const rendered = renderMessage(message, 60);
+      expect(rendered.length).toBeGreaterThan(0);
+      // Every card line carries the same toolPanelBg surface, not a bare gutter.
+      expect(rendered.every((line) => hasBackground(line))).toBe(true);
+      expect(rendered.every((line) => visibleWidth(line) === 60)).toBe(true);
+    }
+  });
+
+  it("uses the geometric marker vocabulary and no emoji", () => {
+    const reasoning = renderMessage(
+      { id: "r", kind: "reasoning", runId: "run", step: 1, text: "think", ts: 1 },
+      60,
+    ).join("\n");
+    const artifact = renderMessage(
+      {
+        id: "a",
+        kind: "artifact",
+        runId: "run",
+        artifactId: "artifact-1",
+        name: "report.pdf",
+        artifactKind: "document",
+        bytes: 2048,
+        ts: 1,
+      },
+      80,
+    ).join("\n");
+    const warning = renderMessage(
+      { id: "w", kind: "warning", runId: "run", code: "retry", message: "Try again", ts: 1 },
+      60,
+    ).join("\n");
+
+    expect(stripAnsi(reasoning)).toContain("◦ REASONING");
+    expect(stripAnsi(artifact)).toContain("▤ ARTIFACT");
+    expect(stripAnsi(warning)).toContain("! WARNING");
+    // No emoji anywhere in the trajectory vocabulary.
+    expect(stripAnsi(`${reasoning}${artifact}${warning}`)).not.toMatch(/[\u{1F300}-\u{1FAFF}]/u);
+  });
+});
+
 describe("bounded tool payloads", () => {
   it("caps large tool JSON previews with a remaining-bytes marker", () => {
     const tool: Message = {
@@ -574,10 +636,6 @@ describe("bounded tool payloads", () => {
     expect(rendered).not.toContain("more");
   });
 });
-
-function stripAnsi(value: string): string {
-  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
-}
 
 function firstAnsi(value: string, layer: "38" | "48"): string | undefined {
   return value.match(new RegExp(`${String.fromCharCode(27)}\\[${layer};[^m]+m`))?.[0];
