@@ -84,21 +84,21 @@ outputs/
 .agents/skills/running-the-fleet-tui/*
 !.agents/skills/running-the-fleet-tui/SKILL.md
 !.agents/skills/running-the-fleet-tui/references/
-# Project-installed MLflow Skills from https://github.com/mlflow/skills.
-!.agents/skills/agent-evaluation/
-!.agents/skills/analyze-mlflow-chat-session/
-!.agents/skills/analyze-mlflow-trace/
-!.agents/skills/build-a-scorer/
-!.agents/skills/debug-agent/
-!.agents/skills/fix-agent-issue/
-!.agents/skills/instrumenting-with-mlflow-tracing/
-!.agents/skills/mlflow-agent/
-!.agents/skills/mlflow-skills/
-!.agents/skills/mlflow-onboarding/
-!.agents/skills/querying-mlflow-metrics/
-!.agents/skills/retrieving-mlflow-traces/
-!.agents/skills/sagemaker-mlflow/
-!.agents/skills/searching-mlflow-docs/
+# Imported MLflow skill trees are kept local and ignored by Git.
+.agents/skills/agent-evaluation/
+.agents/skills/analyze-mlflow-chat-session/
+.agents/skills/analyze-mlflow-trace/
+.agents/skills/build-a-scorer/
+.agents/skills/debug-agent/
+.agents/skills/fix-agent-issue/
+.agents/skills/instrumenting-with-mlflow-tracing/
+.agents/skills/mlflow-agent/
+.agents/skills/mlflow-onboarding/
+.agents/skills/mlflow-skills/
+.agents/skills/querying-mlflow-metrics/
+.agents/skills/retrieving-mlflow-traces/
+.agents/skills/sagemaker-mlflow/
+.agents/skills/searching-mlflow-docs/
 .worktrees/
 .codex/*
 !.codex/environments/

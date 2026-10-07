@@ -1,6 +1,0 @@
-interface:
-  display_name: "MLflow Agent"
-  short_description: "Routes MLflow requests to focused skills."
-  default_prompt: "Use $mlflow-agent to route this MLflow request."
-policy:
-  allow_implicit_invocation: false
