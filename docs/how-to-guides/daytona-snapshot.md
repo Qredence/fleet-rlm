@@ -24,6 +24,12 @@ non-root user, `/home/daytona` as the working directory, the pinned DSPy
 SemanticChild cannot mount a Workspace Volume. WorkspaceChild remains
 Volume-scoped and uses the Session image contract.
 
+New images built from this checkout apt-install `procps` alongside `git` and
+`ca-certificates`, so generated Python can use `ps`. Daytona snapshots are
+immutable, so an existing snapshot name does not gain `procps`: create a new
+immutable name and update the configured `FLEET_DAYTONA_SNAPSHOT` reference to
+pick it up.
+
 The P2.7 source definition now omits remote DSPy: orchestration stays on the
 host, Session/WorkspaceChild retain the four analysis packages, and
 SemanticChild uses the standard library. Immutable Session

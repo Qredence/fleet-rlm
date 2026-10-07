@@ -466,7 +466,7 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
     install_line = "pip install beautifulsoup4==4.15.0 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
     assert install_line in dockerfile
     assert dockerfile.index(install_line) < dockerfile.index("USER daytona")
-    assert "apt-get install -y --no-install-recommends git ca-certificates" in dockerfile
+    assert "apt-get install -y --no-install-recommends git ca-certificates procps" in dockerfile
     assert dockerfile.index("apt-get install") < dockerfile.index("USER daytona")
     assert "dspy" not in dockerfile
 
