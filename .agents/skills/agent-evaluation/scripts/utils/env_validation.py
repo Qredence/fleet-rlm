@@ -118,6 +118,7 @@ def check_databricks_config() -> tuple[bool, str | None]:
             profiles = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
             return True, profiles[0] if profiles else None
     except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
+        # Databricks CLI is unavailable or timed out; fall back to "no profile found".
         pass
 
     return False, None

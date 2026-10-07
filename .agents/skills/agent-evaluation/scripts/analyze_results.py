@@ -123,6 +123,7 @@ def _extract_query_from_cell(cell_value: str) -> str:
         if isinstance(obj, dict):
             return obj.get("query", obj.get("question", cell_str[:120]))
     except (json.JSONDecodeError, ValueError):
+        # Not JSON — fall through to treating the cell as a plain string.
         pass
     return cell_str[:120]
 

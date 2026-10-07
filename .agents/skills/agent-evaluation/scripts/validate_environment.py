@@ -11,7 +11,6 @@ Usage:
     python scripts/validate_environment.py
 """
 
-import importlib.util
 import subprocess
 import sys
 
@@ -47,7 +46,6 @@ def check_environment_variables():
     errors = validate_env_vars()
 
     if not errors:
-        env_vars = {}
         import os
 
         tracking_uri = os.getenv("MLFLOW_TRACKING_URI")

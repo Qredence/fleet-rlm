@@ -281,10 +281,11 @@ def main():
 
     # Make executable
     try:
-        os.chmod(output_file, 0o755)
+        # Owner-only permissions: generated scripts may embed tracking URIs or credentials.
+        os.chmod(output_file, 0o700)
         print(f"✓ Made executable: chmod +x {output_file}")
-    except Exception:
-        pass
+    except OSError as exc:
+        print(f"⚠ Could not set executable permissions on {output_file}: {exc}")
 
     print()
     print("=" * 60)
