@@ -83,7 +83,7 @@ def test_settings_policy_is_loopback_only_atomic_and_revision_checked(monkeypatc
                 "updates": [
                     {"path": "rlm.max_iters", "value": 22},
                     {"path": "rlm.recursion_enabled", "value": False},
-                    {"path": "rlm.child_execution_timeout_s", "value": 0},
+                    {"path": "llm.root.num_retries", "value": 0},
                 ],
             },
         )
@@ -93,7 +93,7 @@ def test_settings_policy_is_loopback_only_atomic_and_revision_checked(monkeypatc
         fields = {field["path"]: field["value"] for field in saved["fields"]}
         assert fields["rlm.max_iters"] == 22
         assert fields["rlm.recursion_enabled"] is False
-        assert fields["rlm.child_execution_timeout_s"] == 0
+        assert fields["llm.root.num_retries"] == 0
         # Policy edits do not alter the application's composed runtime settings.
         assert app.state.settings.rlm_max_iters != 22
         content = policy.read_text(encoding="utf-8")

@@ -92,12 +92,12 @@ def test_policy_accepts_zero_and_false(tmp_path: Path) -> None:
     service, _ = _service(tmp_path)
     after = service.apply(
         updates=(
-            PolicyMutation(path="rlm.child_execution_timeout_s", value=0),
+            PolicyMutation(path="llm.root.num_retries", value=0),
             PolicyMutation(path="rlm.recursion_enabled", value=False),
         ),
         revision=service.read().revision,
     )
-    assert _field(after, "rlm.child_execution_timeout_s")["value"] == 0
+    assert _field(after, "llm.root.num_retries")["value"] == 0
     assert _field(after, "rlm.recursion_enabled")["value"] is False
 
 

@@ -17,6 +17,7 @@ enables bounded child RLMs through `rlm.recursion_enabled`.
 | Understand DSPy and Daytona execution | [Integration guide](how-to-guides/dspy-integration.md) and [Daytona Snapshot guide](how-to-guides/daytona-snapshot.md) |
 | Validate a change | [Testing strategy](how-to-guides/testing-strategy.md) |
 | Understand runtime routing, optimization, and MLflow observation | [Evaluation and optimization](how-to-guides/evaluation-optimization.md) |
+| Run MLflow evaluation and monitoring workflows | [MLflow evaluation pilot](how-to-guides/mlflow-evaluation.md) |
 
 Browse the [complete table of contents](SUMMARY.md) or the
 [reference index](reference/index.md) for the remaining guides, decisions, and

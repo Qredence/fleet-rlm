@@ -542,14 +542,17 @@ TOOL_RLM_INSTRUCTIONS = """1. Use the Python standard library for deterministic 
    statements in that order with those strings unchanged; do not omit listed accumulator updates or rewrite the
    prompts. Never repeat an identical interpreter action: use its output, choose a different action, or
    call ``SUBMIT`` when sufficient. Store large values in variables or Session Workspace. If the request contains a
-   relevant public HTTPS URL, retrieve it with Python in the Sandbox and save large content under
-   ``/workspace/sources``; inspect bounded excerpts instead of printing or returning the body. Record URL,
-   retrieval time, path, and SHA-256 in a small sidecar file. When available, use
+   relevant public HTTPS URL, retrieve it with Python in the Daytona Sandbox. Use ``FLEET_RUN_SCRATCH``
+   (a predefined Python variable and environment variable) on the Sandbox's temporary local filesystem
+   for clones, downloads awaiting extraction, extracted trees, and builds. ``/workspace`` is a mounted
+   durable Daytona Volume, not the temporary working filesystem. Inspect bounded excerpts instead of
+   printing or returning the body. Persist only selected findings and evidence in Session Workspace;
+   record URL, exact inspected revision, retrieval time, path, and SHA-256 in a small sidecar file. When available, use
    ``read_active_task`` / ``update_active_task`` to record the file path and checksum in source revisions.
    For search discovery, load the long-context Skill when relevant and use an installed Python search package
    in the Sandbox; keep only selected titles and URLs in the REPL output.
    For Git, tests, and package installation, run bounded ``subprocess.run`` calls with a timeout and bounded
-   captured output. Install with ``sys.executable -m pip`` so the active interpreter receives the package;
+   captured output; check the return code before inspecting output directories. Install with ``sys.executable -m pip`` so the active interpreter receives the package;
    verify the import and save a ``pip freeze`` manifest under ``/workspace``; after Sandbox replacement,
    reinstall from that manifest into the new active interpreter before claiming the dependency is recovered.
    Assume the declared minimal environment;

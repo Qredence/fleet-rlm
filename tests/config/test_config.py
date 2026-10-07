@@ -224,7 +224,6 @@ max_output_chars = 500
 max_final_output_chars = 500
 max_execution_output_chars = 250
 max_execution_output_bytes = 10000
-execution_timeout_s = 90
 wrap_up_seconds = 30
 finalization_attempts = 2
 verbose = true
@@ -443,34 +442,14 @@ def test_deadline_reserve_must_leave_time_inside_the_turn() -> None:
     assert valid.rlm_wrap_up_seconds < valid.turn_timeout_seconds
 
 
-def test_child_execution_timeout_defaults_to_derive_sentinel() -> None:
-    assert Settings().rlm_child_execution_timeout_s == 0
-
-
-def test_child_execution_timeout_must_not_exceed_the_parent_deadline() -> None:
-    with pytest.raises(ValidationError, match="rlm_child_execution_timeout_s"):
-        Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=301)
-
-    valid = Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=300)
-    assert valid.rlm_child_execution_timeout_s == 300
-
-
-def test_child_execution_timeout_resolves_from_the_committed_toml(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+@pytest.mark.parametrize("key", ["execution_timeout_s", "child_execution_timeout_s"])
+def test_removed_action_timeout_keys_are_rejected(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, key: str) -> None:
     policy = tmp_path / "fleet.toml"
     _policy(policy)
-    policy.write_text(
-        policy.read_text(encoding="utf-8").replace(
-            "execution_timeout_s = 90",
-            "execution_timeout_s = 90\nchild_execution_timeout_s = 45",
-        ),
-        encoding="utf-8",
-    )
+    policy.write_text(policy.read_text().replace("[rlm]", f"[rlm]\n{key} = 300"))
     monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
-
-    settings = load_runtime_settings()
-    assert settings.rlm_child_execution_timeout_s == 45
+    with pytest.raises(FleetConfigurationError, match=key):
+        load_runtime_settings()
 
 
 def test_live_execution_is_enabled_by_default_and_can_be_disabled() -> None:

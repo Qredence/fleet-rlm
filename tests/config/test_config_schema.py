@@ -75,7 +75,6 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         (),
         "rlm_max_execution_output_chars",
     ),
-    ("rlm.execution_timeout_s", "RLM", "Sandbox execution timeout (seconds)", "number", (), "rlm_execution_timeout_s"),
     ("rlm.recursion_enabled", "RLM", "Enable recursive child RLMs", "boolean", (), "rlm_recursion_enabled"),
     ("rlm.recursion_max_calls", "RLM", "Recursive maximum calls", "number", (), "rlm_recursion_max_calls"),
     (

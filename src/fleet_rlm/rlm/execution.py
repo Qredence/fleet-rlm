@@ -1575,6 +1575,7 @@ class RLMRunner:
                         tool_failed=guards.integrity.failed if broker_acknowledges_tools else None,
                         context_capsule=state_context.session.attachment_context,
                         output_contract=output_contract,
+                        deadline_monotonic=state_context.execution.deadline,
                     )
                     created_invocations.append(invocation)
                     return invocation

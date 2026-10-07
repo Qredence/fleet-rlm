@@ -14,9 +14,6 @@ from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, map_provider_error
-from fleet_rlm.daytona.interpreter import (
-    DEFAULT_EXECUTION_TIMEOUT_S,
-)
 from fleet_rlm.paths import (
     DEFAULT_VOLUME_MOUNT_PATH,
     SESSION_WORKSPACE_MOUNT_PATH,
@@ -198,13 +195,6 @@ def sandbox_spec_from_settings(
 
 def volume_config_from_settings(settings: Any) -> VolumeConfig:
     return VolumeConfig.from_settings(settings)
-
-
-def execution_timeout_s_from_settings(settings: Any) -> int:
-    configured = getattr(settings, "rlm_execution_timeout_s", DEFAULT_EXECUTION_TIMEOUT_S)
-    if isinstance(configured, int) and not isinstance(configured, bool) and configured > 0:
-        return configured
-    return DEFAULT_EXECUTION_TIMEOUT_S
 
 
 def recursive_child_volume_subpath(workspace_id: UUID, run_id: UUID, call_index: int) -> str:

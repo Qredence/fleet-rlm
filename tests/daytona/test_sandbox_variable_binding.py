@@ -51,8 +51,8 @@ class _LocalBroker:
     def setup_source(self, source: str) -> str:
         return source
 
-    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
-        assert timeout_s > 0
+    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: float | None) -> dict[str, Any]:
+        assert timeout_s is None or timeout_s > 0
         self.calls.append(code)
         self.namespace.update(json.loads(json.dumps(variables, ensure_ascii=False, allow_nan=False)))
         stdout = io.StringIO()

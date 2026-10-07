@@ -121,7 +121,6 @@ def _live_resources(settings: Settings, cleanup: RunCleanupSupervisor) -> Simple
         max_active_leases=settings.max_active_daytona_leases,
         idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
         execution_output_cap=settings.rlm_max_execution_output_chars,
-        execution_timeout_s=settings.rlm_execution_timeout_s,
         dispatcher=dispatcher,
     )
     volume_paths = runtime.volume_config.paths()

@@ -227,6 +227,59 @@ async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_rac
 
 
 @pytest.mark.asyncio
+async def test_failed_claim_loss_fence_bounds_stream_ownership_wait(monkeypatch) -> None:
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.result import RLMOutcome
+
+    wait_started = asyncio.Event()
+    finish_worker = asyncio.Event()
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed", public_error_message="Turn failed"))
+
+    class Stream(_Stream):
+        async def wait_owned(self) -> None:
+            wait_started.set()
+            await finish_worker.wait()
+
+    stream = Stream(outcome=lifecycle.outcome, blocking=False)
+
+    class Runner:
+        def stream(self, _execution):
+            return stream
+
+    async def failed_fence(_session_id):
+        raise RuntimeError("provider stop failed")
+
+    cleanup = RunCleanupSupervisor()
+    coordinator = _driver(lifecycle, Runner(), cleanup)
+    coordinator._claim_loss_fence = failed_fence
+    monkeypatch.setattr("fleet_rlm.turns.coordinator._FAILED_FENCE_OWNED_WAIT_SECONDS", 0.01)
+    run = _turn()
+    run.authority.revoke()
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+
+    error = await coordinator._drain_owned_execution(
+        run,
+        prepared,
+        stream,
+        None,
+        None,
+        claim_lost=False,
+        claim_loss_usage=None,
+        late_claim_loss_window=False,
+    )
+
+    assert isinstance(error, RuntimeError)
+    assert wait_started.is_set()
+    assert prepared.closed.is_set()
+    assert len(coordinator._pending_stream_waits) == 1
+    pending_wait = next(iter(coordinator._pending_stream_waits))
+    finish_worker.set()
+    await pending_wait
+    await asyncio.sleep(0)
+    assert not coordinator._pending_stream_waits
+
+
+@pytest.mark.asyncio
 async def test_disconnect_cancels_provider_wait_and_orders_detached_cleanup() -> None:
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
@@ -798,6 +851,11 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     )
     sink_operations: list[str] = []
     closes = 0
+    fenced = asyncio.Event()
+
+    async def fence(session_id):
+        assert session_id == session.id
+        fenced.set()
 
     class Sink:
         async def read(self, location, *, max_bytes):
@@ -853,7 +911,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
             return None
 
         async def wait_owned(self):
-            return None
+            assert fenced.is_set(), "remote stop must precede blocked-worker draining"
 
     class Runner:
         def stream(self, _execution):
@@ -865,6 +923,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
+        claim_loss_fence=fence,
     )
     events = [
         event
@@ -874,6 +933,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     ]
     await cleanup.shutdown(drain_seconds=1)
 
+    assert fenced.is_set()
     assert isinstance(events[0].detail, RunStarted)
     assert all(not isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events[:-1])
     assert sum(isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events) == 1

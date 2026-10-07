@@ -39,3 +39,15 @@ exclusive test target and never runs migrations implicitly.
 
 The curated routing scenarios remain owned by `src/fleet_rlm/optimization/routing.py`.
 They are source-level policy cases, not an executable benchmark runner.
+
+## MLflow evaluation workflow
+
+`scripts/mlflow_evaluation.py` provides verified inventory/export and reset, dataset and
+scorer setup, saved-trace evaluation, a bounded public-API Fleet pilot, and native
+human-review queues. See [the operator guide](../docs/how-to-guides/mlflow-evaluation.md)
+for commands, restoration, denominators, and local MLflow registration limits.
+
+`scripts/mlflow_monitoring.py` validates native trace-aware judge candidates against
+the provisionally authorized AI reviews and activates only passing candidates at
+50% sampling. It also provides read-only status, idempotent stop, and guarded
+future-trace eligibility reconciliation. Calibration failures keep sampling off.

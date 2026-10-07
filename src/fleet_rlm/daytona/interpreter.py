@@ -71,7 +71,6 @@ def is_final_output(value: Any) -> bool:
 
 
 DEFAULT_EXECUTION_OUTPUT_CHARS = 4_000
-DEFAULT_EXECUTION_TIMEOUT_S = 120
 DEFAULT_INTERMEDIATE_CODE_CHARS = 12_000
 DEFAULT_BROKER_PORT = 8765
 DAYTONA_EXECUTION_INSTRUCTIONS = (
@@ -674,18 +673,22 @@ class _SandboxProcessBackend:
             # later model actions cannot re-run it.
             loader_source = context_loader_source(trusted_mount_root=mount_root, expected_manifest_sha256=manifest_sha)
             setup_manifest_ids = _bound_manifest_ids(variables, manifest_sha)
-        timeout = self._action_timeout()
+        self._action_timeout()
         for name, value in (variables or {}).items():
             try:
                 validate_json_value(value, path=f"binding {name!r}")
             except TypeError as exc:
                 raise DaytonaAdapterError(message=str(exc), cause_type="InterpreterBindingError") from exc
         broker = self._ensure_broker()
+        start = getattr(broker, "start", None)
+        if callable(start):
+            start()
+        self._action_timeout()
         if not self._setup_installed:
-            self._install_setup(broker, timeout)
+            self._install_setup(broker, self._action_timeout())
         if loader_source:
             code = f"{loader_source}\n\n{code}"
-        execute_kwargs: dict[str, Any] = {"timeout_s": timeout}
+        execute_kwargs: dict[str, Any] = {"timeout_s": self._action_timeout()}
         with contextlib.suppress(ValueError, TypeError):
             if "on_stdout" in inspect.signature(broker.execute).parameters:
                 execute_kwargs["on_stdout"] = on_stdout
@@ -735,14 +738,16 @@ class _SandboxProcessBackend:
             self._broker.bind_tools(self._bound_tools)
         return self._broker
 
-    def _action_timeout(self) -> int:
-        """Return this action's timeout, clamped to the invocation deadline."""
-        timeout = self._timeout_s or DEFAULT_EXECUTION_TIMEOUT_S
+    def _action_timeout(self) -> float | None:
+        """Use remaining invocation time; an unbound template has no action cap."""
         if self._deadline_monotonic is None:
-            return timeout
-        return max(1, min(timeout, int(self._deadline_monotonic - time.monotonic())))
+            return self._timeout_s
+        remaining = self._deadline_monotonic - time.monotonic()
+        if remaining <= 0:
+            raise DaytonaAdapterError(message="execution deadline exceeded", cause_type="BrokerExecutionTimeout")
+        return remaining
 
-    def _install_setup(self, broker: DaytonaHttpToolBroker, timeout: int) -> None:
+    def _install_setup(self, broker: DaytonaHttpToolBroker, timeout: float | None) -> None:
         """Install the sealed invocation's tools, SUBMIT and defaults once.
 
         Bindings cannot change after the broker starts, so later actions carry
@@ -859,10 +864,9 @@ class DaytonaCodeInterpreter:
         callers pass them through the zero-argument factory supplied to DSPy;
         the retained template never receives per-Run observer, budget,
         request, bridge, tool-settlement, context, or output-contract state.
-        ``timeout_s`` overrides the fresh backend's per-action execution
-        deadline; ``None`` inherits the retained backend's timeout.
-        ``deadline_monotonic`` additionally clamps every action to end by that
-        absolute time, and ``admission`` runs before each action and may raise
+        ``deadline_monotonic`` bounds every action by remaining invocation
+        time. ``timeout_s`` is an explicit standalone backend bound when no
+        invocation deadline exists. ``admission`` runs before each action and may raise
         to refuse it (a recursive child past its call deadline).
         """
         backend = self._backend
@@ -1436,10 +1440,17 @@ class DaytonaCodeInterpreter:
             category = raw.error_category or _repair_category(error)
             if category in {"CodeInterpreterError", "InterpreterLifecycleError"}:
                 raise _terminal_error(error, category=category)
-            feedback = error
-            stderr = truncate_head_tail(raw.stderr, max_chars=self._execution_output_cap).strip()
-            if stderr:
-                feedback = f"{feedback}\nstderr: {stderr}"
+            parts = [error]
+            for label, output in (("stdout", raw.stdout), ("stderr", raw.stderr)):
+                output = sanitize_repair_text(output, max_len=max(1, len(output))).strip()
+                if output:
+                    parts.append(f"{label}: {output}")
+            feedback = "\n".join(parts)
+            if len(feedback) > self._execution_output_cap:
+                feedback = truncate_public_text(
+                    truncate_head_tail(feedback, max_chars=max(1, self._execution_output_cap - 64)),
+                    max_len=self._execution_output_cap,
+                )
             return _RepairFeedback(feedback=feedback, category=category)
         if raw.final is not None:
             return wrap_final_output(raw.final)
@@ -1477,13 +1488,16 @@ def sandbox_backend(
     *,
     loop: asyncio.AbstractEventLoop | None = None,
     dispatcher: SyncBridgeDispatcher | None = None,
-    timeout_s: int | None = DEFAULT_EXECUTION_TIMEOUT_S,
+    timeout_s: int | None = None,
     broker_port: int = DEFAULT_BROKER_PORT,
+    deadline_monotonic: float | None = None,
 ) -> InterpreterBackend:
     """Build a stateful backend owning one broker on a positive, configured port."""
     if loop is not None:
         sandbox = sync_sandbox(sandbox, loop, dispatcher)
-    return _SandboxProcessBackend(sandbox, timeout_s=timeout_s, broker_port=broker_port)
+    return _SandboxProcessBackend(
+        sandbox, timeout_s=timeout_s, broker_port=broker_port, deadline_monotonic=deadline_monotonic
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -102,6 +102,11 @@ async def test_daytona_interpreter_context_process_containment() -> None:
     context: Any | None = None
     ordinary_marker = f"/tmp/fleet-p1-ordinary-{uuid4().hex}.txt"
     detached_marker = f"/tmp/fleet-p1-detached-{uuid4().hex}.txt"
+    force_stop_started = f"/tmp/fleet-p1-force-stop-started-{uuid4().hex}.txt"
+    force_stop_child_done = f"/tmp/fleet-p1-force-stop-child-{uuid4().hex}.txt"
+    force_stop_action_done = f"/tmp/fleet-p1-force-stop-action-{uuid4().hex}.txt"
+    force_stop_confirmed = False
+    force_stop_contained = False
     context_deleted = False
     sandbox_absent = False
     ordinary_child_completed = False
@@ -133,6 +138,48 @@ async def test_daytona_interpreter_context_process_containment() -> None:
         await asyncio.sleep(4)
         detached = await sandbox.process.code_run(f"import os; print(os.path.exists({detached_marker!r}))", timeout=20)
         detached_child_contained = str(getattr(detached, "result", "")).strip() == "False"
+
+        child_code = f"import time; time.sleep(12); open({force_stop_child_done!r}, 'w').write('completed')"
+        action_code = (
+            "import subprocess, sys, time\n"
+            f"open({force_stop_started!r}, 'w').write('started')\n"
+            f"subprocess.Popen([sys.executable, '-c', {child_code!r}], start_new_session=True)\n"
+            "time.sleep(30)\n"
+            f"open({force_stop_action_done!r}, 'w').write('completed')\n"
+        )
+        running_action = asyncio.create_task(sandbox.process.code_run(action_code, timeout=60))
+        start_deadline = time.monotonic() + 30
+        while time.monotonic() < start_deadline:
+            try:
+                await sandbox.fs.get_file_info(force_stop_started)
+                break
+            except Exception:
+                await asyncio.sleep(0.25)
+        else:
+            pytest.fail("foreground sandbox action did not start")
+
+        sandbox_id = sandbox.id
+        await platform.stop(sandbox_id, timeout=60, force=True)
+        force_stop_confirmed = True
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.shield(running_action), timeout=10)
+        sandbox = await platform.get(sandbox_id)
+        if sandbox is None:
+            # Daytona may retire an ephemeral sandbox as part of stopping it.
+            # Confirmed provider absence proves the whole process boundary ended.
+            sandbox_absent = True
+            force_stop_contained = True
+        else:
+            await platform.start(sandbox_id)
+            sandbox = await platform.get(sandbox_id)
+            assert sandbox is not None
+            await asyncio.sleep(15)
+            marker_check = (
+                f"import os; print(str(os.path.exists({force_stop_child_done!r})) + ',' "
+                f"+ str(os.path.exists({force_stop_action_done!r})))"
+            )
+            markers = await sandbox.process.code_run(marker_check, timeout=20)
+            force_stop_contained = str(getattr(markers, "result", "")).strip() == "False,False"
     finally:
         if sandbox is not None:
             sandbox_absent = await _delete_sandbox(platform, sandbox)
@@ -150,9 +197,13 @@ async def test_daytona_interpreter_context_process_containment() -> None:
             "ordinary_child_completed": ordinary_child_completed,
             "context_deleted": context_deleted,
             "detached_child_contained": detached_child_contained,
+            "native_force_stop_confirmed": force_stop_confirmed,
+            "native_force_stop_contained_action_and_subprocess": force_stop_contained,
             "sandbox_absent_confirmed": sandbox_absent,
             "elapsed_ms": max(0, int((time.perf_counter() - started) * 1000)),
         }
     )
     assert context_deleted
+    assert force_stop_confirmed
+    assert force_stop_contained, "native force-stop must prevent running action and subprocess writes"
     assert sandbox_absent, "disposable sandbox deletion must be confirmed"

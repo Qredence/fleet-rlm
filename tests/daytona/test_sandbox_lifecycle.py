@@ -300,7 +300,7 @@ async def test_live_platform_start_and_stop_use_async_client_methods() -> None:
     sandbox = MagicMock()
     client.get = AsyncMock(return_value=sandbox)
     client.start = AsyncMock()
-    client.stop = AsyncMock()
+    sandbox.stop = AsyncMock()
     platform = LiveDaytonaPlatform(client, _SPEC)
 
     await platform.start("sb-1")
@@ -308,7 +308,7 @@ async def test_live_platform_start_and_stop_use_async_client_methods() -> None:
 
     assert client.get.await_args_list == [(("sb-1",), {}), (("sb-1",), {})]
     client.start.assert_awaited_once_with(sandbox)
-    client.stop.assert_awaited_once_with(sandbox, timeout=12)
+    sandbox.stop.assert_awaited_once_with(timeout=12, force=True)
 
 
 @pytest.mark.asyncio
@@ -332,16 +332,18 @@ async def test_live_platform_create_start_and_stop_normalize_provider_failures(m
 
 
 @pytest.mark.asyncio
-async def test_live_platform_force_stop_deletes_sandbox_when_stop_fails() -> None:
+async def test_live_platform_force_stop_failure_does_not_accept_deletion_as_termination() -> None:
     client = MagicMock()
     sandbox = MagicMock()
     client.get = AsyncMock(return_value=sandbox)
-    client.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
+    sandbox.stop = AsyncMock(side_effect=RuntimeError("stop failed"))
     client.delete = AsyncMock()
 
-    await LiveDaytonaPlatform(client, _SPEC).stop("sb-1", force=True)
+    with pytest.raises(ProviderRequestError, match="stop failed"):
+        await LiveDaytonaPlatform(client, _SPEC).stop("sb-1", force=True)
 
-    client.delete.assert_awaited_once_with(sandbox)
+    sandbox.stop.assert_awaited_once_with(timeout=60, force=True)
+    client.delete.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -56,6 +56,7 @@ _secret = __SECRET__
 _pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
 _lock, _execution_lock = threading.RLock(), threading.Lock()
 _active_deadline = None
+_active_execution = False
 _event_subscribers = set()
 if os.path.isdir("/workspace"):
     os.chdir("/workspace")
@@ -159,18 +160,19 @@ class Handler(BaseHTTPRequestHandler):
         except Exception: _send(self, {"error": "invalid request"}, 400); return
         if self.path == "/execute":
             code, variables = data.get("code"), data.get("variables") or {}
-            timeout_s = data.get("timeout_s", __DEFAULT_TOOL_TIMEOUT_S__)
+            timeout_s = data.get("timeout_s")
             if (not isinstance(code, str) or not isinstance(variables, dict) or isinstance(timeout_s, bool)
-                    or not isinstance(timeout_s, (int, float)) or timeout_s <= 0):
+                    or (timeout_s is not None and (not isinstance(timeout_s, (int, float)) or timeout_s <= 0))):
                 _send(self, {"error": "invalid execution"}, 400); return
             stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__, "stdout"), _BoundedWriter(__MAX_OUTPUT_CHARS__, "stderr")
             result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
             try:
                 with _execution_lock:
                     with _lock:
-                        global _active_deadline
-                        _active_deadline = time.monotonic() + float(timeout_s)
-                        _namespace["_fleet_tool_timeout_s"] = float(timeout_s)
+                        global _active_deadline, _active_execution
+                        _active_execution = True
+                        _active_deadline = time.monotonic() + float(timeout_s) if timeout_s is not None else None
+                        _namespace["_fleet_tool_timeout_s"] = float(timeout_s) if timeout_s is not None else None
                     try:
                         _namespace.update(variables)
                         try:
@@ -189,6 +191,7 @@ class Handler(BaseHTTPRequestHandler):
                     finally:
                         with _lock:
                             _active_deadline = None
+                            _active_execution = False
                         _emit_event({"type": "execution_done"})
             finally:
                 result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
@@ -198,7 +201,7 @@ class Handler(BaseHTTPRequestHandler):
             with _lock:
                 if call_id in _pending or call_id in _results or call_id in _completed:
                     _send(self, {"error": "duplicate call"}, 409); return
-                if _active_deadline is None or time.monotonic() >= _active_deadline:
+                if not _active_execution or (_active_deadline is not None and time.monotonic() >= _active_deadline):
                     _send(self, {"error": "invocation is not executing"}, 409); return
                 _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": None, "event": event}
                 deadline = _active_deadline
@@ -288,12 +291,16 @@ class DaytonaHttpToolBroker:
             + submit_source
         )
 
+    def start(self) -> None:
+        """Complete bounded broker startup before computing execution time."""
+        self._ensure_started()
+
     def execute(
         self,
         code: str,
         variables: Mapping[str, Any],
         *,
-        timeout_s: int,
+        timeout_s: float | None,
         on_stdout: Callable[[str], None] | None = None,
     ) -> Any:
         self._ensure_started()
@@ -312,7 +319,7 @@ class DaytonaHttpToolBroker:
                     client.post(
                         "/execute",
                         json={"code": code, "variables": dict(variables), "timeout_s": timeout_s},
-                        timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S,
+                        timeout=(timeout_s + _EXECUTE_RESPONSE_GRACE_S if timeout_s is not None else None),
                     )
                 )
             except BaseException as exc:
@@ -324,7 +331,9 @@ class DaytonaHttpToolBroker:
                 sse_ready.set()
                 return
             try:
-                with client.stream("GET", "/events", timeout=timeout_s + _EXECUTE_RESPONSE_GRACE_S) as stream:
+                with client.stream(
+                    "GET", "/events", timeout=(timeout_s + _EXECUTE_RESPONSE_GRACE_S if timeout_s is not None else None)
+                ) as stream:
                     if stream.status_code != 200:
                         sse_ready.set()
                         return
@@ -359,7 +368,7 @@ class DaytonaHttpToolBroker:
         if hasattr(client, "stream") and type(client).__name__ != "MagicMock":
             sse_thread = threading.Thread(target=listen_events, daemon=True)
 
-        with host_action_deadline(time.monotonic() + timeout_s):
+        with host_action_deadline(time.monotonic() + timeout_s) if timeout_s is not None else contextlib.nullcontext():
             if sse_thread is not None:
                 sse_thread.start()
                 sse_ready.wait(timeout=0.2)
@@ -599,7 +608,7 @@ class DaytonaHttpToolBroker:
     import json as _json, urllib.request as _request, uuid as _uuid
     _payload = _json.dumps({{"id": _uuid.uuid4().hex, "tool_name": {name!r}, "args": [], "kwargs": {{{", ".join(kwargs)}}}}}).encode()
     _req = _request.Request("http://127.0.0.1:{self._port}/tool_call", data=_payload, headers={{"Content-Type": "application/json", "X-Broker-Secret": {self._secret!r}}}, method="POST")
-    with _request.urlopen(_req, timeout=float(globals().get('_fleet_tool_timeout_s', 120))) as _response: _reply = _json.loads(_response.read())
+    with _request.urlopen(_req, timeout=globals().get('_fleet_tool_timeout_s')) as _response: _reply = _json.loads(_response.read())
     if "tool_error" in _reply:
         _failure = _reply["tool_error"]
         raise _FleetToolCallError(_failure)

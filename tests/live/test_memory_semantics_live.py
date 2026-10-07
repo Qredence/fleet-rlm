@@ -575,7 +575,6 @@ def test_live_failed_run_discards_memory_candidates(tmp_path: Path) -> None:
         rlm_max_iters=8,
         rlm_max_llm_calls=8,
         turn_timeout_seconds=180,
-        rlm_execution_timeout_s=280,
         rlm_wrap_up_seconds=0,
     )
     ledger = _CaptureLedger()

@@ -81,6 +81,7 @@ from fleet_rlm.turns.settlement import RunLifecycle
 from fleet_rlm.turns.stream import OpenedTurnStream, terminal
 
 logger = logging.getLogger(__name__)
+_FAILED_FENCE_OWNED_WAIT_SECONDS = 30.0
 
 
 class TurnRuntime:
@@ -125,6 +126,25 @@ class TurnRuntime:
         self._mlflow_tracing_enabled = mlflow_tracing_enabled
         self._mlflow_expose_trace_id = mlflow_expose_trace_id
         self._event_capture = event_capture
+        self._pending_stream_waits: set[asyncio.Task[None]] = set()
+
+    def _retain_stream_wait(self, task: asyncio.Task[None]) -> None:
+        """Keep a timed-out stream waiter owned until its worker eventually drains."""
+        self._pending_stream_waits.add(task)
+
+        def finished(waiter: asyncio.Task[None]) -> None:
+            self._pending_stream_waits.discard(waiter)
+            if waiter.cancelled():
+                return
+            with contextlib.suppress(BaseException):
+                error = waiter.exception()
+            if error is not None:
+                logger.warning(
+                    "deferred stream ownership wait failed",
+                    extra={"error_type": type(error).__name__},
+                )
+
+        task.add_done_callback(finished)
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult:
         """Apply a cancellation request through the coordinator's settlement boundary."""
@@ -1050,6 +1070,7 @@ class TurnRuntime:
         committed = False
         claim_cleanup_attempted = False
         effective_claim_lost = claim_lost
+        fence_failed = False
 
         def remember(exc: BaseException) -> None:
             nonlocal cleanup_error
@@ -1057,7 +1078,7 @@ class TurnRuntime:
                 cleanup_error = exc
 
         async def apply_claim_loss() -> None:
-            nonlocal committed, claim_cleanup_attempted, effective_claim_lost
+            nonlocal committed, claim_cleanup_attempted, effective_claim_lost, fence_failed
             if claim_cleanup_attempted:
                 return
             claim_cleanup_attempted = True
@@ -1079,6 +1100,7 @@ class TurnRuntime:
                 try:
                     await self._claim_loss_fence(run.session_id)
                 except BaseException as exc:
+                    fence_failed = True
                     remember(exc)
 
         try:
@@ -1087,7 +1109,20 @@ class TurnRuntime:
             if effective_claim_lost:
                 await apply_claim_loss()
                 await stop_heartbeat(heartbeat)
-            await _close_stream_owned(stream, remember)
+            # Stop the remote Sandbox before draining a worker blocked in its REPL.
+            # Provider fencing remains owned by this cleanup task on failure.
+            if run.authority.revoked and not effective_claim_lost and self._claim_loss_fence is not None:
+                try:
+                    await self._claim_loss_fence(run.session_id)
+                except BaseException as exc:
+                    fence_failed = True
+                    remember(exc)
+            await _close_stream_owned(
+                stream,
+                remember,
+                wait_timeout=_FAILED_FENCE_OWNED_WAIT_SECONDS if fence_failed else None,
+                retain_waiter=self._retain_stream_wait if fence_failed else None,
+            )
             if finalization_task is not None:
                 with contextlib.suppress(BaseException):
                     await shield_cleanup(finalization_task)

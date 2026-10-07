@@ -128,7 +128,6 @@ def _live_qre140_settings(tmp_path: Path) -> Settings:
             "rlm_autonomous_memory_categories": ("operator preference",),
             "rlm_max_iters": 4,
             "rlm_max_llm_calls": 8,
-            "rlm_execution_timeout_s": 560,
             "turn_timeout_seconds": 560,
             "run_heartbeat_seconds": 10,
             "run_stale_after_seconds": 600,

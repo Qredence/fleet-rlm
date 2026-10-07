@@ -295,7 +295,6 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
         session_id=session_id,
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -314,6 +313,7 @@ async def test_child_runtime_uses_sibling_volume_scope_and_strictly_cleans_only_
             "labels": {"fleet.runtime": "recursive-child"},
             "with_volume": True,
             "ephemeral": True,
+            "auto_stop_interval": 0,
         }
     ]
 
@@ -357,7 +357,6 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
         session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -375,6 +374,7 @@ async def test_semantic_child_lease_omits_workspace_volume_metadata_and_cleanup_
             "labels": {"fleet.runtime": "recursive-child", "fleet.profile": "semantic-child"},
             "with_volume": False,
             "ephemeral": True,
+            "auto_stop_interval": 0,
             "network_block_all": True,
         }
     ]
@@ -403,7 +403,6 @@ async def test_child_capacity_refusal_is_bounded_and_does_not_create_a_sandbox(
         workspace_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 5,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
     )
@@ -431,7 +430,6 @@ async def test_child_lease_stages_and_harvests_files_in_its_private_directory() 
         session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -476,7 +474,6 @@ async def _semantic_child_lease(child_fs: _Fs) -> ChildRuntimeLease:
         session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
@@ -531,7 +528,6 @@ async def test_child_lease_rejects_symlinked_private_stage_root_before_writing()
         workspace_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
     )
@@ -556,7 +552,6 @@ async def test_child_lease_rejects_oversized_or_invalid_staging_before_filesyste
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1, profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD)
@@ -582,7 +577,6 @@ async def test_semantic_child_requires_a_configured_snapshot_before_provider_acq
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         semantic_child_available=False,
     )
@@ -608,7 +602,6 @@ async def test_semantic_child_never_falls_back_to_parent_volume() -> None:
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         semantic_child_available=False,
     )
@@ -658,7 +651,6 @@ async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)
@@ -708,7 +700,6 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)
@@ -771,7 +762,6 @@ async def test_ordered_cleanup_never_starts_a_quarantine_thread(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)
@@ -829,7 +819,6 @@ async def test_child_runtime_attempts_scope_and_sandbox_cleanup_after_interprete
         session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -856,7 +845,6 @@ async def test_child_factory_times_out_when_real_admission_is_saturated() -> Non
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -883,7 +871,6 @@ async def test_revocation_before_admission_performs_no_allocation() -> None:
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         is_authorized=lambda: False,
     )
@@ -909,7 +896,6 @@ async def test_invalid_workspace_child_binding_does_not_consume_admission_permit
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -946,7 +932,6 @@ async def test_revocation_after_admission_releases_permit_without_sandbox_creati
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         is_authorized=is_authorized,
     )
@@ -983,7 +968,6 @@ async def test_revocation_after_sandbox_creation_deletes_sandbox_and_releases_pe
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         is_authorized=is_authorized,
     )
@@ -1044,7 +1028,6 @@ async def test_failed_child_creation_with_failed_cleanup_is_marked_fatal(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -1097,7 +1080,6 @@ async def test_child_factory_adopts_provider_acquisition_that_finishes_after_dea
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -1199,7 +1181,6 @@ async def test_factory_wait_owned_bounds_never_completing_provider_acquisition(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 0.05,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 

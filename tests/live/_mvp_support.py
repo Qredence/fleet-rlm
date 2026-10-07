@@ -272,7 +272,7 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
             state = str(getattr(getattr(sandbox, "state", None), "value", getattr(sandbox, "state", None)) or "")
             if state.strip().lower() in {"destroyed", "deleted", "archived"}:
                 return
-            await resources._platform.delete(sandbox)
+            await resources._platform.delete(sandbox, wait=True, timeout=30)
 
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")

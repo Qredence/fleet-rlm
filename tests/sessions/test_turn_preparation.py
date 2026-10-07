@@ -1084,7 +1084,10 @@ def _build_preparation(resources, **kwargs):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("with_skill_catalog", [False, True])
-async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_skill_catalog: bool) -> None:
+@pytest.mark.parametrize("root_fenced_before_release", [False, True])
+async def test_live_preparation_stages_attachment_and_cleans_it(
+    tmp_path, with_skill_catalog: bool, root_fenced_before_release: bool
+) -> None:
     """
     Verify that live turn preparation stages attachments, configures workspace capabilities,
     persists memory and result snapshots, and cleans up the staged attachment when the prepared
@@ -1396,8 +1399,10 @@ async def test_live_preparation_stages_attachment_and_cleans_it(tmp_path, with_s
     memory_path = str(paths.memory_file)
     assert {attachment_path, project_path, memory_path, result_path} <= set(volume)
 
+    if root_fenced_before_release:
+        resources.runtime.mark_root_tainted(turn.access.workspace_id, turn.session_id)
     await prepared.aclose()
-    assert first_interpreter.cleaned_runs == [turn.run_id]
+    assert first_interpreter.cleaned_runs == ([] if root_fenced_before_release else [turn.run_id])
     # Staged attachments are released; remote workspace and project data remain durable.
     assert attachment_path not in volume
     assert {project_path, memory_path, result_path} <= set(volume)
