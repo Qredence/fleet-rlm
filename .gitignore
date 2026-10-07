@@ -93,6 +93,7 @@ outputs/
 !.agents/skills/fix-agent-issue/
 !.agents/skills/instrumenting-with-mlflow-tracing/
 !.agents/skills/mlflow-agent/
+!.agents/skills/mlflow-skills/
 !.agents/skills/mlflow-onboarding/
 !.agents/skills/querying-mlflow-metrics/
 !.agents/skills/retrieving-mlflow-traces/
