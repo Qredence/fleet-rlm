@@ -210,3 +210,11 @@ notebooks/
 
 # chunk review context artifacts
 .chunk/context/
+# Generated review artifacts (PRDs) — reproduced by the review tooling, not authored sources.
+docs/reviews/2026-10-05/PRD-01-architecture-boundaries-and-module-decomposition.md
+docs/reviews/2026-10-05/PRD-02-rlm-dspy-execution-engine.md
+docs/reviews/2026-10-05/PRD-03-daytona-runtime-and-sandbox-lifecycle.md
+docs/reviews/2026-10-05/PRD-04-domain-contracts-and-persistence.md
+docs/reviews/2026-10-05/PRD-05-api-streaming-and-generated-contracts.md
+docs/reviews/2026-10-05/PRD-06-observability-and-tracing.md
+docs/reviews/2026-10-05/README.md
