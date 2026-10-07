@@ -1,107 +1,109 @@
 /** Interactive multi-select picker for Skill pinning on the next Turn. */
 
-import {
-  type Component,
-  decodeKittyPrintable,
-  fuzzyFilter,
-  matchesKey,
-  truncateToWidth,
-} from "@earendil-works/pi-tui";
+import { fuzzyFilter, matchesKey } from "@earendil-works/pi-tui";
 
 import type { FleetSkillCard } from "../../fleet-api-client.js";
+import { MARKS } from "../marks.js";
 import { MAX_PENDING_SKILLS, type PendingSkillSelection } from "../store.js";
-import { dropLastGrapheme } from "../terminal-text.js";
 import { selectTheme, theme } from "../theme.js";
 
-import { isPrintableInput, overlayHint, overlayRule, overlayTitle } from "./overlay.js";
+import { FilterableListOverlay } from "./list-overlay.js";
+import { overlayHint, overlayRule, overlayTitle } from "./overlay.js";
 
 const SKILL_SELECTOR_PAGE_SIZE = 8;
 
-export class SkillSelector implements Component {
-  private index = 0;
-  private query = "";
+export class SkillSelector extends FilterableListOverlay<FleetSkillCard> {
   private selected: PendingSkillSelection[];
+
   constructor(
     private readonly skills: FleetSkillCard[],
     current: PendingSkillSelection[],
     private readonly finish: (value: PendingSkillSelection[] | null) => void,
   ) {
+    super();
     this.selected = [...current];
   }
-  invalidate(): void {}
+
+  protected allItems(): readonly FleetSkillCard[] {
+    return this.skills;
+  }
+
+  protected pageSize(): number {
+    return SKILL_SELECTOR_PAGE_SIZE;
+  }
+
+  protected filterItems(items: readonly FleetSkillCard[], query: string): FleetSkillCard[] {
+    const trimmed = query.trim();
+    if (!trimmed) return [...items];
+    return fuzzyFilter([...items], trimmed, (skill) => `${skill.name} ${skill.description}`);
+  }
+
+  protected row(skill: FleetSkillCard): string {
+    const pinned = this.selected.some((item) => item.id === skill.id);
+    // Filled/empty squares carry state by shape, independent of the theme's colors.
+    const marker = pinned ? theme.fg("success", MARKS.checked) : theme.fg("dim", MARKS.unchecked);
+    const version = skill.version ? `@${skill.version}` : "";
+    const description = skill.name === "No matching Skills" ? "" : skill.description;
+    return `${marker} ${skill.name}${version}  ${selectTheme.description(description)}`;
+  }
+
+  protected footer(): ReadonlyArray<readonly [string, string]> {
+    return [
+      ["CTRL+SPACE", "toggle"],
+      ["ENTER", "apply"],
+      ["ESC", "cancel"],
+    ];
+  }
+
+  protected filterPlaceholder(): string {
+    return "(type to search)";
+  }
+
+  protected emptyLabel(): string {
+    return "No matching Skills.";
+  }
+
+  protected handleKey(data: string, skill: FleetSkillCard | undefined): boolean {
+    // Ctrl+Space (not bare Space) so multi-word queries can be typed.
+    if (!matchesKey(data, "ctrl+space") || !skill) return false;
+    const exists = this.selected.some((item) => item.id === skill.id);
+    if (exists) this.selected = this.selected.filter((item) => item.id !== skill.id);
+    else if (this.selected.length < MAX_PENDING_SKILLS)
+      this.selected.push({
+        id: skill.id,
+        expectedVersion: skill.version,
+        displayName: skill.name,
+      });
+    return true;
+  }
+
+  protected confirm(): void {
+    this.finish(this.selected);
+  }
+
+  protected cancel(): void {
+    this.finish(null);
+  }
+
+  /** The pending count leads the shared page status. */
+  protected renderStatus(): string {
+    return `${this.selected.length}/${MAX_PENDING_SKILLS} selected · ${super.renderStatus()}`;
+  }
+
   render(width: number): string[] {
     const safeWidth = Math.max(1, width);
-    const filtered = this.filteredSkills();
-    this.index = Math.min(this.index, Math.max(0, filtered.length - 1));
-    const start = Math.max(
-      0,
-      Math.min(
-        this.index - SKILL_SELECTOR_PAGE_SIZE + 1,
-        filtered.length - SKILL_SELECTOR_PAGE_SIZE,
-      ),
-    );
-    const visible = filtered.slice(start, start + SKILL_SELECTOR_PAGE_SIZE);
-    return [
+    const lines = [
       overlayTitle("Skills for the next Turn"),
       overlayHint("Pin exact Skill versions for the next accepted Turn"),
       overlayRule(safeWidth),
-      `${theme.fg("muted", "Filter:")} ${this.query || theme.fg("dim", "(type to search)")}`,
+      this.renderFilter(),
       "",
-      ...(visible.length > 0
-        ? visible
-        : [{ id: "", name: "No matching Skills", version: "", description: "" }]
-      ).map((skill, offset) => {
-        const index = start + offset;
-        const checked = this.selected.some((item) => item.id === skill.id) ? "x" : " ";
-        const version = skill.version ? `@${skill.version}` : "";
-        const label = `[${checked}] ${skill.name}${version}`;
-        const selected = index === this.index;
-        return `${selected ? selectTheme.selectedPrefix(">") : " "} ${selected ? selectTheme.selectedText(label) : label}  ${selectTheme.description(skill.description)}`;
-      }),
+      ...this.renderRows(),
       "",
-      selectTheme.scrollInfo(
-        `${this.selected.length}/${MAX_PENDING_SKILLS} selected · ${filtered.length} shown${filtered.length > SKILL_SELECTOR_PAGE_SIZE ? ` · rows ${start + 1}-${Math.min(start + SKILL_SELECTOR_PAGE_SIZE, filtered.length)}` : ""}`,
-      ),
+      selectTheme.scrollInfo(this.renderStatus()),
       overlayRule(safeWidth),
-      `${theme.fg("accent", "SPACE")} ${overlayHint("toggle  ·  Enter apply  ·  Esc cancel")}`,
-    ].map((line) => truncateToWidth(line, safeWidth, "…"));
-  }
-  handleInput(data: string): void {
-    const filtered = this.filteredSkills();
-    if (matchesKey(data, "up")) this.index = Math.max(0, this.index - 1);
-    else if (matchesKey(data, "down")) this.index = Math.min(filtered.length - 1, this.index + 1);
-    else if (matchesKey(data, "pageUp"))
-      this.index = Math.max(0, this.index - SKILL_SELECTOR_PAGE_SIZE);
-    else if (matchesKey(data, "pageDown"))
-      this.index = Math.min(filtered.length - 1, this.index + SKILL_SELECTOR_PAGE_SIZE);
-    else if (data === " ") {
-      const skill = filtered[this.index];
-      if (!skill) return;
-      const exists = this.selected.some((item) => item.id === skill.id);
-      if (exists) this.selected = this.selected.filter((item) => item.id !== skill.id);
-      else if (this.selected.length < MAX_PENDING_SKILLS)
-        this.selected.push({
-          id: skill.id,
-          expectedVersion: skill.version,
-          displayName: skill.name,
-        });
-    } else if (matchesKey(data, "backspace")) {
-      this.query = dropLastGrapheme(this.query);
-      this.index = 0;
-    } else if (matchesKey(data, "enter")) this.finish(this.selected);
-    else if (matchesKey(data, "escape")) this.finish(null);
-    else {
-      const printable = decodeKittyPrintable(data) ?? (isPrintableInput(data) ? data : undefined);
-      if (printable) {
-        this.query += printable;
-        this.index = 0;
-      }
-    }
-  }
-
-  private filteredSkills(): FleetSkillCard[] {
-    const query = this.query.trim();
-    if (!query) return this.skills;
-    return fuzzyFilter(this.skills, query, (skill) => `${skill.name} ${skill.description}`);
+      this.renderFooter(),
+    ];
+    return this.clip(lines, safeWidth);
   }
 }

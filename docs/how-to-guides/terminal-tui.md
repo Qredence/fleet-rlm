@@ -1,7 +1,7 @@
 # Use the Fleet terminal UI
 
 `tools/fleet-tui/` is the maintained Node 22.19+ development client for Fleet's
-FastAPI HTTP/SSE API. It uses pi-tui 0.87.1 and owns no model, provider key,
+FastAPI HTTP/SSE API. It uses pi-tui 1.0.3 and owns no model, provider key,
 Sandbox, or execution runtime.
 
 ## Start a supervised session
@@ -58,8 +58,9 @@ stay chronological, complete, static, and expanded. Live text, generated code,
 and interpreter output are accumulated by stream identity and finalized without
 leaving a stale streaming cursor. Daytona forwards ordinary interpreter stdout
 as bounded deltas; private `SUBMIT` protocol markers never enter the timeline.
-Builtin dark/light palettes follow the terminal preference; `/theme` lists and
-switches those builtins or custom JSON themes persisted under
+The default `system` theme derives colors from the terminal's reported palette
+and rebuilds them on light/dark changes; `/theme` lists and switches `system`,
+the builtin dark/light palettes, or custom JSON themes persisted under
 `$FLEET_TUI_STATE_DIR`.
 
 RLM reasoning, generated code, and interpreter output come from Fleet callback
@@ -74,15 +75,16 @@ paths and full scratch contents are not projected. Committed child cards reload
 under their original Run without starting another child.
 
 The transcript is a follow-end `ScrollView` inside `TuiAltScreen`. PgUp/PgDn
-scroll a page, Home/End jump top/bottom, the mouse wheel scrolls, drag selects
-text for copy, and new output re-follows the end. Ctrl+Shift+F opens pi-tui
+scroll a page, Home/End move the editor cursor, Ctrl+Home/Ctrl+End jump the
+transcript top/bottom, the mouse wheel scrolls, drag selects text for copy, and
+new output re-follows the end. Ctrl+Shift+F opens pi-tui
 transcript search over the scroll view; Enter/Ctrl+G moves to the next match,
 Shift+Enter/Ctrl+Shift+G to the previous, and Escape closes the search overlay.
 Search matches are styled from the active Fleet theme (underline for matches,
 the adaptive selection background for the current match). Tool, code, and
 output cards fold with Ctrl+O. `/help` opens a searchable command palette; type
 to filter, use the arrow keys to navigate, and press Enter to insert the
-selected command. Command, Session, theme, profile, Skill, and settings dialogs
+selected command. Command, Session, theme, Skill, and settings dialogs
 use the same centered pi-tui modal shell: padded adaptive surface, menu title,
 contextual divider, high-contrast focused selection, and key footer. Resize,
 hydration, and clear may replay the screen and return
@@ -119,7 +121,13 @@ Use `/help` for the current slash-command list. Important commands include
 `/sessions`, `/rename`, `/resume`, `/reload`, `/status`, `/settings`,
 `/theme`, `/volume`, `/files`, `/file`, `/attach`, `/artifact`,
 `/artifacts`, `/redo`, `/cancel`, `/clear`, `/skills`, `/skill`, `/trace`, `/feedback`,
-and `/exit`. `/settings`
+and `/exit`. `/sessions` includes active and archived Sessions; type to search,
+press Ctrl+R to rename, or Ctrl+A to archive/unarchive the selected row.
+Archiving the current Session keeps its transcript and pending inputs visible.
+It becomes read-only: submitted prompts remain in the editor until the Session
+is unarchived, and no Turn request is sent.
+
+`/settings`
 is a local-only editor for the single TOML configuration, grouped by field
 category. Field edits stay in a draft until Apply saves them as one atomic
 batch; Discard clears the pending draft. The editor remains open after Apply.

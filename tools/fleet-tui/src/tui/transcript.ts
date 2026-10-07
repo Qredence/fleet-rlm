@@ -1,7 +1,7 @@
 import { truncateToWidth, type Component } from "@earendil-works/pi-tui";
 
+import { MARKS } from "./marks.js";
 import { MessageRenderCache, renderMessage } from "./message-renderer.js";
-import { terminalSafeLine } from "./terminal-text.js";
 import type { ConversationStore, Message, State } from "./store.js";
 import { theme } from "./theme.js";
 
@@ -55,7 +55,6 @@ export class TranscriptComponent implements Component {
   }
 
   private buildLines(state: State, safeWidth: number): string[] {
-    const session = state.session;
     const lines = [
       truncateToWidth(
         `${theme.fg("accent", theme.bold("FLEET"))}${dim("  /  RLM OPERATOR")}`,
@@ -63,19 +62,16 @@ export class TranscriptComponent implements Component {
         "",
       ),
     ];
-    lines.push(
-      truncateToWidth(
-        session
-          ? `${theme.fg("dim", "SESSION")}  ${theme.fg("text", terminalSafeLine(session.title))}${dim(`  ·  ${session.resumed ? "resumed" : "new"}  ·  ${session.status}`)}`
-          : `${theme.fg("dim", "SESSION")}  ${dim("unavailable")}`,
-        safeWidth,
-        "",
-      ),
-    );
-    lines.push("");
     if (state.messages.length === 0) {
+      // The session identity lives in the header bar; the transcript only
+      // carries the vendor mark and a quiet first-Turn guide.
+      lines.push("");
       lines.push(
-        truncateToWidth(`${theme.fg("accent", "›")} ${theme.bold("Start a Turn")}`, safeWidth, "…"),
+        truncateToWidth(
+          `  ${theme.fg("accent", "›")} ${theme.bold("Start a Turn")}`,
+          safeWidth,
+          "…",
+        ),
       );
       lines.push(
         truncateToWidth(
@@ -96,6 +92,7 @@ export class TranscriptComponent implements Component {
       return lines;
     }
 
+    lines.push("");
     const retained = new Set<string>();
     let previousRunId: string | undefined;
     let trajectoryIndex = 0;
@@ -137,7 +134,7 @@ function dim(value: string): string {
 /**
  * Gets the internal execution identifier associated with a message.
  *
- * @returns The message's execution identifier, or `undefined` when none is present.
+ * @returns The message's execution identifier, or `undefined` when none is present
  */
 function messageRunId(message: Message): string | undefined {
   return "runId" in message ? message.runId : undefined;
@@ -151,6 +148,6 @@ function messageRunId(message: Message): string | undefined {
  * @returns The width-truncated trajectory divider
  */
 function trajectoryDivider(index: number, width: number): string {
-  const label = `${theme.fg("accent", theme.bold("◇ TRAJECTORY"))}${dim(`  turn ${index}`)}`;
+  const label = `${theme.fg("accent", theme.bold(`${MARKS.trajectory} TRAJECTORY`))}${dim(`  turn ${index}`)}`;
   return truncateToWidth(label, width, "");
 }

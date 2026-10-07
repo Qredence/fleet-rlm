@@ -7,7 +7,11 @@ import {
 } from "@earendil-works/pi-tui";
 import { describe, expect, it, vi } from "vitest";
 
-import type { FleetSettingsPolicy, FleetSkillCard } from "../../fleet-api-client.js";
+import type {
+  FleetApiClient,
+  FleetSettingsPolicy,
+  FleetSkillCard,
+} from "../../fleet-api-client.js";
 import {
   fieldItem,
   MultiChoiceEditor,
@@ -20,6 +24,7 @@ import {
 } from "../command-presenter.js";
 import type { SettingsSaveCallback } from "../commands.js";
 import { ConversationStore } from "../store.js";
+import { hasBackground, stripAnsi } from "./support/ansi.js";
 
 const skills = Array.from({ length: 14 }, (_, index) => ({
   id: `skill-${index}`,
@@ -155,11 +160,12 @@ describe("MultiChoiceEditor", () => {
     const editor = new MultiChoiceEditor(field, finish);
 
     editor.handleInput(" ");
-    expect(stripAnsi(editor.render(40).join("\n"))).toContain("[ ] a");
+    // Selection is carried by the square shape, not color alone.
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("▢ a");
 
     editor.handleInput("\x1b[B");
     editor.handleInput(" ");
-    expect(stripAnsi(editor.render(40).join("\n"))).toContain("[x] b");
+    expect(stripAnsi(editor.render(40).join("\n"))).toContain("▣ b");
 
     editor.handleInput("\r");
     expect(finish).toHaveBeenCalledWith("b");
@@ -181,6 +187,19 @@ describe("SkillSelector", () => {
     const filtered = selector.render(48).join("\n");
     expect(filtered).toContain("long-context");
     expect(filtered).not.toContain("skill-0@");
+  });
+
+  it("types spaces into the filter and toggles pinned Skills only on Ctrl+Space", () => {
+    const selector = new SkillSelector(skills, [], vi.fn());
+
+    // A bare space must reach the query, so multi-word searches work.
+    selector.handleInput(" ");
+    expect(stripAnsi(selector.render(48).join("\n"))).toContain("0/4 selected");
+
+    selector.handleInput("\x00"); // ctrl+space toggles the highlighted Skill
+    const output = stripAnsi(selector.render(48).join("\n"));
+    expect(output).toContain("1/4 selected");
+    expect(output).toContain("▣");
   });
 
   it("removes a complete Unicode grapheme when filtering", () => {
@@ -211,10 +230,6 @@ describe("SkillSelector", () => {
     expect(selector.render(20).every((line) => visibleWidth(line) <= 20)).toBe(true);
   });
 });
-
-function stripAnsi(value: string): string {
-  return value.replaceAll(new RegExp(`${String.fromCharCode(27)}\\[[\\d;]*m`, "g"), "");
-}
 
 describe("TextSettingEditor numeric fields", () => {
   it("rejects non-numeric input with an inline error and stays open", () => {
@@ -277,6 +292,18 @@ describe("fieldItem", () => {
     const item = fieldItem(makeField({ path: "llm.api_key_env", value: "GEMINI_API_KEY" }));
     expect(item.description).toContain("variable name only; value never shown");
     expect(item.currentValue).toBe("GEMINI_API_KEY");
+  });
+
+  it("marks logging level as requiring restart", () => {
+    const item = fieldItem(
+      makeField({
+        path: "logging.level",
+        editor: "single_choice",
+        value: "INFO",
+        choices: ["DEBUG", "INFO"],
+      }),
+    );
+    expect(item.description).toContain("restart");
   });
 
   it("renders undefined and null values as (unset)", () => {
@@ -347,7 +374,7 @@ describe("SelectOverlay", () => {
 
     const lines = surface.render(44);
     expect(lines.every((line) => visibleWidth(line) === 44)).toBe(true);
-    expect(lines.every((line) => line.includes("\x1b[48;"))).toBe(true);
+    expect(lines.every((line) => hasBackground(line))).toBe(true);
     expect(stripAnsi(lines.join("\n"))).toContain("ESC close");
 
     surface.handleInput("\r");
@@ -427,6 +454,10 @@ describe("PiCommandPresenter", () => {
 
   type InteractiveComponent = Component & { handleInput: (data: string) => void };
 
+  function fakeClient(): FleetApiClient {
+    return { updateSession: vi.fn() } as unknown as FleetApiClient;
+  }
+
   function fakeUi(): {
     ui: TUI;
     overlay: () => InteractiveComponent;
@@ -440,6 +471,7 @@ describe("PiCommandPresenter", () => {
         return { hide } as unknown as OverlayHandle;
       },
       setFocus: vi.fn(),
+      requestRender: vi.fn(),
     } as unknown as TUI;
     return {
       ui,
@@ -451,6 +483,92 @@ describe("PiCommandPresenter", () => {
     };
   }
 
+  it("updates the current Session without clearing transcript or pending inputs", async () => {
+    const { ui, overlay } = fakeUi();
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "a", title: "One", status: "active", resumed: true },
+    });
+    store.dispatch({
+      type: "message/upsert",
+      message: {
+        id: "history",
+        kind: "text",
+        role: "assistant",
+        text: "saved answer",
+        ts: 1,
+        streaming: false,
+      },
+    });
+    store.dispatch({
+      type: "attachment/pin",
+      attachment: { id: "attachment", filename: "receipt.txt", bytes: 12 },
+    });
+    store.dispatch({
+      type: "skill-selection/pin",
+      selection: { id: "skill", expectedVersion: "1", displayName: "Test Skill" },
+    });
+    const before = store.getState();
+    const row = {
+      id: "a",
+      title: "One",
+      status: "active" as const,
+      checkpoint_version: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const client = fakeClient();
+    client.updateSession = vi.fn().mockResolvedValue({ ...row, status: "archived" });
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      store,
+      client,
+    );
+    const closed = presenter.openSessionBrowser([row], 1);
+    overlay().handleInput("\x01");
+    await vi.waitFor(() => expect(store.getState().session?.status).toBe("archived"));
+    expect(store.getState().session?.resumed).toBe(true);
+    expect(store.getState().messages).toBe(before.messages);
+    expect(store.getState().pendingAttachments).toBe(before.pendingAttachments);
+    expect(store.getState().pendingSkillSelections).toBe(before.pendingSkillSelections);
+    overlay().handleInput(ESCAPE);
+    await closed;
+  });
+
+  it("does not overwrite a different current Session after an update resolves", async () => {
+    const { ui, overlay } = fakeUi();
+    const store = new ConversationStore();
+    store.dispatch({
+      type: "session/init",
+      session: { id: "other", title: "Other", status: "active", resumed: false },
+    });
+    const row = {
+      id: "a",
+      title: "One",
+      status: "active" as const,
+      checkpoint_version: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+    const client = fakeClient();
+    client.updateSession = vi.fn().mockResolvedValue({ ...row, status: "archived" });
+    const presenter = new PiCommandPresenter(
+      ui,
+      { setText: vi.fn() } as unknown as Editor,
+      store,
+      client,
+    );
+    const closed = presenter.openSessionBrowser([row], 1);
+    overlay().handleInput("\x01");
+    await vi.waitFor(() => expect(client.updateSession).toHaveBeenCalled());
+    expect(store.getState().session?.id).toBe("other");
+    expect(store.getState().session?.status).toBe("active");
+    overlay().handleInput(ESCAPE);
+    await closed;
+  });
+
   it("shows a filterable help palette and inserts the selected command", () => {
     const { ui, overlay, hide } = fakeUi();
     const setText = vi.fn();
@@ -458,6 +576,7 @@ describe("PiCommandPresenter", () => {
       ui,
       { setText } as unknown as Editor,
       new ConversationStore(),
+      fakeClient(),
     );
 
     presenter.showHelp([
@@ -487,6 +606,7 @@ describe("PiCommandPresenter", () => {
       ui,
       { setText: vi.fn() } as unknown as Editor,
       new ConversationStore(),
+      fakeClient(),
       notify,
     );
     const settings = editableSettings();
@@ -549,6 +669,7 @@ describe("PiCommandPresenter", () => {
       ui,
       { setText: vi.fn() } as unknown as Editor,
       new ConversationStore(),
+      fakeClient(),
     );
     const settings = editableSettings();
     const [maxItersField, verboseField] = settings.fields;
@@ -607,6 +728,7 @@ describe("PiCommandPresenter", () => {
       ui,
       { setText: vi.fn() } as unknown as Editor,
       new ConversationStore(),
+      fakeClient(),
       notify,
     );
     const save = vi.fn<SettingsSaveCallback>();
@@ -632,6 +754,7 @@ describe("PiCommandPresenter", () => {
       ui,
       { setText: vi.fn() } as unknown as Editor,
       new ConversationStore(),
+      fakeClient(),
       vi.fn(),
     );
     const save = vi.fn<SettingsSaveCallback>().mockResolvedValue(null);

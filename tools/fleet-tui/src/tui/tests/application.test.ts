@@ -16,8 +16,30 @@ const session = {
 };
 
 describe("FleetTuiApplication", () => {
-  it("starts dark and rerenders when the terminal reports the light scheme", async () => {
-    setTerminalColorScheme("light");
+  it("retains an archived Session prompt and blocks the Turn request", async () => {
+    const terminal = new FakeTerminal();
+    const client = new FleetApiClient({ baseUrl: "http://fleet.test" });
+    const streamTurn = vi.spyOn(client, "streamTurn");
+    const app = createFleetTui({
+      terminal,
+      client,
+      session: { ...session, status: "archived" },
+      resumed: true,
+      initialEvents: [],
+      queryColorScheme: false,
+    });
+    const finished = app.start();
+    for (const key of "keep this draft") terminal.send(key);
+    terminal.send("\r");
+    await vi.waitFor(() => expect(terminal.writes.join("")).toContain("archived and read-only"));
+    expect(streamTurn).not.toHaveBeenCalled();
+    expect(terminal.writes.join("")).toContain("keep this draft");
+    await app.stop();
+    await finished;
+  });
+
+  it("starts dark and rerenders when the terminal reports a light background", async () => {
+    setTerminalColorScheme("dark");
     const terminal = new FakeTerminal();
     const app = createFleetTui({
       terminal,
@@ -29,10 +51,13 @@ describe("FleetTuiApplication", () => {
 
     const finished = app.start();
     expect(getTerminalColorScheme()).toBe("dark");
-    await vi.waitFor(() => expect(terminal.writes).toContain("\x1b[?996n"));
+    // Wait for the TUI to send the color query (ends with DA1 \x1b[c).
+    await vi.waitFor(() => expect(terminal.writes.join("")).toContain("\x1b[c"));
     const writesBeforeSchemeChange = terminal.writes.length;
 
-    terminal.send("\x1b[?997;2n");
+    // Reply with a light background (near-white) then DA1 response to end the query.
+    terminal.send("\x1b]11;rgb:f0f0/f0f0/f0f0\x07");
+    terminal.send("\x1b[?62c");
 
     await vi.waitFor(() => expect(getTerminalColorScheme()).toBe("light"));
     await vi.waitFor(() =>
@@ -42,7 +67,7 @@ describe("FleetTuiApplication", () => {
     await finished;
   });
 
-  it("keeps an explicit light theme when the terminal reports dark", async () => {
+  it("keeps an explicit light theme when the terminal reports a dark background", async () => {
     vi.stubEnv("FLEET_TUI_THEME", "light");
     setTerminalColorScheme("dark");
     const terminal = new FakeTerminal();
@@ -56,10 +81,17 @@ describe("FleetTuiApplication", () => {
 
     const finished = app.start();
     try {
-      await vi.waitFor(() => expect(terminal.writes).toContain("\x1b[?996n"));
-      terminal.send("\x1b[?997;1n");
-      await vi.waitFor(() => expect(getTerminalColorScheme()).toBe("light"));
-      expect(theme.fg("accent", "x")).toContain("38;2;47;118;111");
+      // Wait for the TUI to send the color query.
+      await vi.waitFor(() => expect(terminal.writes.join("")).toContain("\x1b[c"));
+      const explicitAccent = theme.fg("accent", "x");
+      // Reply with a dark background then DA1 response.
+      terminal.send("\x1b]11;rgb:1717/1e1e/1e1e\x07");
+      terminal.send("\x1b[?62c");
+      // The explicit FLEET_TUI_THEME=light must survive; scheme stays light.
+      await vi.waitFor(() => expect(theme.fg("accent", "x")).toBe(explicitAccent), {
+        timeout: 2_000,
+      });
+      expect(getTerminalColorScheme()).toBe("light");
     } finally {
       await app.stop();
       await finished;
@@ -156,7 +188,7 @@ describe("FleetTuiApplication", () => {
 
     const finished = app.start();
     try {
-      await vi.waitFor(() => expect(terminal.writes.join("")).toContain("CHILD"));
+      await vi.waitFor(() => expect(terminal.writes.join("")).toContain("Inspect source"));
       expect(terminal.writes.join("")).not.toContain("source excerpt");
 
       terminal.send("\x0f");

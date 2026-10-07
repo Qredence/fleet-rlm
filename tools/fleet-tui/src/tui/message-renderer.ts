@@ -17,10 +17,17 @@ import {
 } from "./format.js";
 import { formatExecutionMetric } from "./execution-summary.js";
 import { keyText } from "./keybinding-hints.js";
+import { MARKS } from "./marks.js";
 import type { Message, Role } from "./store.js";
 import { highlightCode } from "./syntax-highlight.js";
 import { hasMultipleLines, terminalSafeText } from "./terminal-text.js";
-import { markdownTheme, statusGlyph, theme, type ThemeBackground } from "./theme.js";
+import {
+  markdownTheme,
+  statusGlyph,
+  theme,
+  type ThemeBackground,
+  type ThemeColor,
+} from "./theme.js";
 
 export class MessageRenderCache {
   private readonly markdownComponents = new Map<
@@ -81,11 +88,14 @@ export function renderMessage(
         cache,
       );
     case "error":
-      return wrapStyled(`Error: ${terminalSafeText(message.text)}`, safeWidth, (text) =>
-        theme.fg("error", text),
+      return wrapStyled(
+        `${MARKS.error} Error: ${terminalSafeText(message.text)}`,
+        safeWidth,
+        (text) => theme.fg("error", text),
       );
     case "reasoning":
       return card(
+        MARKS.reasoning,
         "REASONING",
         `step ${message.step}`,
         markdown(
@@ -101,7 +111,7 @@ export function renderMessage(
           message.id,
         ),
         safeWidth,
-        "muted",
+        "borderMuted",
       );
     case "tool":
       return renderTool(message, safeWidth);
@@ -109,7 +119,7 @@ export function renderMessage(
       let stateColor: "success" | "error" | "accent" = "accent";
       if (message.state === "completed") stateColor = "success";
       else if (message.state === "failed" || message.state === "timed_out") stateColor = "error";
-      const heading = `${theme.fg("accent", theme.bold("◆ CHILD"))} ${theme.bold(terminalSafeText(message.taskLabel))}  ${theme.fg(stateColor, message.state.replaceAll("_", " "))} · ${formatDuration(message.elapsedMs)}`;
+      const heading = `${cardMark(MARKS.child, "accent")} ${theme.fg("text", theme.bold(terminalSafeText(message.taskLabel)))}  ${theme.fg(stateColor, message.state.replaceAll("_", " "))} · ${formatDuration(message.elapsedMs)}`;
       if (message.collapsed !== false) {
         const outcome = message.outcome ? `  ${terminalSafeText(message.outcome)}` : "";
         return panel(
@@ -146,7 +156,7 @@ export function renderMessage(
       return renderResult(message, safeWidth, cache);
     case "skill":
       return wrappedLine(
-        `  ${theme.fg("accent", theme.bold(`· SKILL ${message.phase.toUpperCase()}`))}  ${theme.bold(terminalSafeText(message.name))}  ${muted(
+        `  ${cardMark(MARKS.skill, "accent")} ${theme.fg("text", theme.bold(`SKILL ${message.phase.toUpperCase()}`))}  ${theme.fg("text", theme.bold(terminalSafeText(message.name)))}  ${muted(
           [
             `v${message.version}`,
             message.trust ? terminalSafeText(message.trust) : null,
@@ -161,12 +171,12 @@ export function renderMessage(
       );
     case "attachment":
       return wrappedLine(
-        `  ${theme.fg("accent", theme.bold("· FILE"))}  ${terminalSafeText(message.filename)}  ${muted(`${formatBytes(message.bytes)} · ${shortId(message.attachmentId)}`)}`,
+        `  ${cardMark(MARKS.attachment, "accent")} ${theme.fg("text", theme.bold("FILE"))}  ${terminalSafeText(message.filename)}  ${muted(`${formatBytes(message.bytes)} · ${shortId(message.attachmentId)}`)}`,
         safeWidth,
       );
     case "artifact":
       return wrappedLine(
-        `  ${theme.fg("success", theme.bold("✓ ARTIFACT"))}  ${theme.bold(terminalSafeText(message.name))}  ${muted(`${terminalSafeText(message.artifactKind)} · ${formatBytes(message.bytes)} · ${shortId(message.artifactId)}`)}`,
+        `  ${cardMark(MARKS.artifact, "success")} ${theme.fg("text", theme.bold("ARTIFACT"))}  ${theme.fg("text", theme.bold(terminalSafeText(message.name)))}  ${muted(`${terminalSafeText(message.artifactKind)} · ${formatBytes(message.bytes)} · ${shortId(message.artifactId)}`)}`,
         safeWidth,
       );
     case "usage": {
@@ -178,13 +188,13 @@ export function renderMessage(
         durationMs: message.durationMs,
       };
       return wrappedLine(
-        `  ${theme.fg("accent", theme.bold("USAGE"))}  ${muted(`${formatExecutionMetric(summary.iterations)} iterations · ${formatExecutionMetric(summary.subLmCalls)} sub-LM · ${formatExecutionMetric(summary.hostCapabilityCalls)} host · ${formatExecutionMetric(summary.interpreterErrors)} errors · ↑ input ${formatObservedTokens(message.inputTokens)} · ↓ output ${formatObservedTokens(message.outputTokens)} · ${summary.durationMs === null ? "—" : formatDuration(summary.durationMs)}`)}`,
+        `  ${cardMark(MARKS.result, "accent")} ${theme.fg("text", theme.bold("USAGE"))}  ${muted(`${formatExecutionMetric(summary.iterations)} iterations · ${formatExecutionMetric(summary.subLmCalls)} sub-LM · ${formatExecutionMetric(summary.hostCapabilityCalls)} host · ${formatExecutionMetric(summary.interpreterErrors)} errors · ↑ input ${formatObservedTokens(message.inputTokens)} · ↓ output ${formatObservedTokens(message.outputTokens)} · ${summary.durationMs === null ? "—" : formatDuration(summary.durationMs)}`)}`,
         safeWidth,
       );
     }
     case "warning":
       return wrapStyled(
-        `! WARNING  ${terminalSafeText(message.code)}: ${terminalSafeText(message.message)}`,
+        `${MARKS.warning} WARNING  ${terminalSafeText(message.code)}: ${terminalSafeText(message.message)}`,
         safeWidth,
         (text) => theme.fg("warning", text),
         2,
@@ -241,7 +251,7 @@ function renderText(
     `text:${id}:system`,
     id,
   );
-  return card("SYSTEM", "", body, width, "accent");
+  return card(MARKS.trajectory, "SYSTEM", "", body, width, "accent");
 }
 
 const TOOL_STATUS = {
@@ -267,8 +277,10 @@ function renderTool(message: Extract<Message, { kind: "tool" }>, width: number):
   const elapsed = message.endedAt
     ? formatDuration(message.endedAt - message.startedAt)
     : formatDuration(Math.floor((Date.now() - message.startedAt) / 5000) * 5000);
-  const statusText = theme.fg(status.color, `${status.glyph} ${status.label} · ${elapsed}`);
-  const header = `${theme.fg("accent", theme.bold("◆"))} ${theme.fg("toolTitle", theme.bold(terminalSafeText(message.name)))}  ${muted(statusText)}`;
+  const statusText = theme.style(`${status.glyph} ${status.label} · ${elapsed}`, {
+    color: status.color,
+  });
+  const header = `${cardMark(MARKS.tool, "accent")} ${theme.fg("toolTitle", theme.bold(terminalSafeText(message.name)))}  ${statusText}`;
 
   const errorDetails = message.status === "error" ? (message.error ?? "Tool failed") : null;
   // Multi-line tool errors collapse to their summary by default; everything
@@ -311,6 +323,7 @@ function renderCode(message: Extract<Message, { kind: "code" }>, width: number):
   if (message.collapsed) {
     const count = message.code.split("\n").length;
     return card(
+      MARKS.code,
       "CODE",
       detail,
       [dim(`${count} line${count === 1 ? "" : "s"} · ${keyText("fleet.toggleFold")} to expand`)],
@@ -323,7 +336,13 @@ function renderCode(message: Extract<Message, { kind: "code" }>, width: number):
     message.language ?? "python",
     message.streaming === true,
   );
-  return card("CODE", detail, message.collapsed === false ? lines : capLinesHead(lines), width);
+  return card(
+    MARKS.code,
+    "CODE",
+    detail,
+    message.collapsed === false ? lines : capLinesHead(lines),
+    width,
+  );
 }
 
 function renderOutput(message: Extract<Message, { kind: "output" }>, width: number): string[] {
@@ -331,6 +350,7 @@ function renderOutput(message: Extract<Message, { kind: "output" }>, width: numb
   if (message.collapsed) {
     const count = message.output.split("\n").length;
     return card(
+      MARKS.output,
       "OUTPUT",
       detail,
       [dim(`${count} line${count === 1 ? "" : "s"} · ${keyText("fleet.toggleFold")} to expand`)],
@@ -340,7 +360,13 @@ function renderOutput(message: Extract<Message, { kind: "output" }>, width: numb
   const lines = codeLines(terminalSafeText(message.output), width - 4).map((line) =>
     theme.fg("toolOutput", line),
   );
-  return card("OUTPUT", detail, message.collapsed === false ? lines : capLinesTail(lines), width);
+  return card(
+    MARKS.output,
+    "OUTPUT",
+    detail,
+    message.collapsed === false ? lines : capLinesTail(lines),
+    width,
+  );
 }
 
 function renderResult(
@@ -377,6 +403,7 @@ function renderResult(
     );
   }
   return card(
+    MARKS.result,
     "RESULT",
     [terminalSafeText(message.schemaId), terminalSafeText(message.schemaVersion)]
       .filter(Boolean)
@@ -387,19 +414,30 @@ function renderResult(
   );
 }
 
+/** A styled marker glyph: the shared `MARKS` vocabulary rendered in context. */
+function cardMark(mark: string, color: ThemeColor): string {
+  return theme.style(mark, { color, bold: true });
+}
+
+/**
+ * One full-width card block: a marked header line followed by body lines, all
+ * on the shared panel surface so every runtime card reads with equal weight.
+ */
 function card(
+  mark: string,
   label: string,
   detail: string,
   body: string[],
   width: number,
-  color: "border" | "muted" | "accent" | "success" = "border",
+  color: ThemeColor = "borderMuted",
 ): string[] {
-  const borderColor = color === "muted" ? "borderMuted" : color;
-  const header = `${theme.fg(color, theme.bold(label))}${detail ? `  ${muted(detail)}` : ""}`;
-  return [
-    truncateToWidth(`${theme.fg(borderColor, "│")} ${header}`, width, ""),
-    ...body.map((line) => truncateToWidth(`${theme.fg(borderColor, "│")}   ${line}`, width, "")),
-  ];
+  const header = `${cardMark(mark, color)} ${theme.fg("text", theme.bold(label))}${detail ? `  ${muted(detail)}` : ""}`;
+  return panel([` ${header}`, ...body.map((line) => `  ${line}`)], width);
+}
+
+/** The shared runtime card surface. */
+function panel(lines: string[], width: number): string[] {
+  return fill(lines, width, { bg: theme.surface("toolPanelBg"), gutter: 1, ellipsis: "…" });
 }
 
 function markdown(
@@ -459,21 +497,26 @@ function surface(
 ): string[] {
   const bg =
     typeof background === "function" ? background : (text: string) => theme.bg(background, text);
-  return lines.map((line) => {
-    const clipped = truncateToWidth(line, width, "");
-    const padded = `${clipped}${" ".repeat(Math.max(0, width - visibleWidth(clipped)))}`;
-    return bg(padded);
-  });
+  return fill(lines, width, { bg });
 }
 
-/** One full-width tool panel block: every line on the panel background. */
-function panel(lines: string[], width: number): string[] {
+/**
+ * One full-width block: truncate, pad, and paint every line on one background.
+ * `gutter` adds a symmetric space either side (block panels); without it the
+ * line fills the full width (message surfaces).
+ */
+function fill(
+  lines: string[],
+  width: number,
+  options: { bg: (text: string) => string; gutter?: 0 | 1; ellipsis?: string },
+): string[] {
   const safeWidth = Math.max(1, width);
-  const bg = theme.surface("toolPanelBg");
+  const { bg, gutter = 0, ellipsis = "" } = options;
+  const contentWidth = Math.max(1, safeWidth - gutter * 2);
   return lines.map((line) => {
-    const clipped = truncateToWidth(line, safeWidth - 2, "");
-    const padded = `${clipped}${" ".repeat(Math.max(0, safeWidth - 2 - visibleWidth(clipped)))}`;
-    return bg(` ${padded} `);
+    const clipped = truncateToWidth(line, contentWidth, ellipsis);
+    const padded = `${clipped}${" ".repeat(Math.max(0, contentWidth - visibleWidth(clipped)))}`;
+    return bg(gutter === 1 ? ` ${padded} ` : padded);
   });
 }
 

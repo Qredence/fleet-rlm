@@ -1,24 +1,27 @@
-import { Editor, ProcessTerminal, TuiAltScreen, type Terminal } from "@earendil-works/pi-tui";
+import { Editor, ProcessTerminal, type Terminal, TuiAltScreen } from "@earendil-works/pi-tui";
 
 import type { FleetApiClient, FleetSession } from "../fleet-api-client.js";
 import { FleetAutocompleteProvider } from "./autocomplete.js";
 import { PiCommandPresenter } from "./command-presenter.js";
-import { parseInput, type CommandContext } from "./commands.js";
-import type { DraftStore, DraftState } from "./draft-store.js";
+import { type CommandContext, parseInput } from "./commands.js";
+import type { DraftState, DraftStore } from "./draft-store.js";
+import { fleetKeybindings } from "./keybindings.js";
 import { RunController } from "./runner.js";
-import { FleetScreen, isBusy } from "./screen.js";
-import { ConversationStore, type StoreEvent } from "./store.js";
+import { FleetScreen } from "./screen.js";
+import { ConversationStore, isBusy, type StoreEvent } from "./store.js";
 import {
   editorTheme,
-  hasExplicitThemeOverride,
   initTheme,
+  isLightRgb,
   onThemeChange,
+  setDetectedTerminalColorScheme,
   setTerminalBackground,
-  setTerminalColorScheme,
   stopThemeMonitoring,
   theme,
 } from "./theme.js";
-import { fleetKeybindings } from "./keybindings.js";
+
+/** Settings policy path that holds the active model id shown in the header. */
+const MODEL_SETTINGS_PATH = "llm.root.model";
 
 export type FleetTuiApplication = {
   start(): Promise<void>;
@@ -62,7 +65,6 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.finished = new Promise((resolve) => {
       this.resolveFinished = resolve;
     });
-    setTerminalColorScheme("dark");
     this.themeReady = initTheme(process.env.FLEET_TUI_THEME);
     this.terminal = options.terminal ?? new ProcessTerminal();
     // Alternate-screen viewport: the transcript is app-owned, so the wheel
@@ -100,6 +102,17 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     if (this.started) return this.finished;
     this.started = true;
     this.unsubscribe = this.store.subscribe(() => this.onStateChange());
+    // Load the model name for the header bar — best-effort, never blocks startup.
+    void this.options.client
+      .getSettings()
+      .then((settings) => {
+        const model = settings.fields.find((field) => field.path === MODEL_SETTINGS_PATH)?.value;
+        this.store.dispatch({
+          type: "settings/model",
+          model: typeof model === "string" ? model : null,
+        });
+      })
+      .catch(() => undefined);
     this.ui.addInputListener((data) => {
       if (fleetKeybindings.matches(data, "fleet.suspend")) {
         this.lastCtrlCAt = 0;
@@ -151,21 +164,22 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
     this.onStateChange();
     if (this.options.queryColorScheme !== false) {
       void this.themeReady.then(() =>
-        this.ui.queryTerminalColorScheme({ timeoutMs: 150 }).then((scheme) => {
-          if (scheme) {
-            if (!hasExplicitThemeOverride() && setTerminalColorScheme(scheme)) {
-              this.ui.invalidate();
-              this.ui.requestRender(true);
-            }
+        this.ui.queryTerminalColors({ timeoutMs: 300 }).then((colors) => {
+          let changed = false;
+          if (colors.background) {
+            setTerminalBackground(colors.background);
+            changed = true;
           }
-          // Deferred: the OSC 11 consumer swallows any input while a background
-          // query is pending, so the scheme reply must settle first.
-          void this.ui.queryTerminalBackgroundColor({ timeoutMs: 150 }).then((rgb) => {
-            if (!rgb) return;
-            setTerminalBackground({ r: rgb.r, g: rgb.g, b: rgb.b });
+          // Cache the detected scheme even when an explicit theme is active;
+          // switching back to "system" should restore this terminal palette.
+          if (colors.background) {
+            const scheme = isLightRgb(colors.background) ? "light" : "dark";
+            if (setDetectedTerminalColorScheme(scheme)) changed = true;
+          }
+          if (changed) {
             this.ui.invalidate();
             this.ui.requestRender(true);
-          });
+          }
         }),
       );
     }
@@ -240,6 +254,21 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
 
   private submitText(text: string): void {
     const state = this.store.getState();
+    if (state.session?.status === "archived") {
+      this.editor.setText(text);
+      this.store.dispatch({
+        type: "message/upsert",
+        message: {
+          id: `archived-session-${Date.now()}`,
+          kind: "text",
+          role: "system",
+          text: "This Session is archived and read-only. Open /sessions and press Ctrl+A on it to unarchive before sending a Turn.",
+          ts: Date.now(),
+          streaming: false,
+        },
+      });
+      return;
+    }
     const pending = state.pendingSkillSelections;
     const pendingAttachments = state.pendingAttachments;
     this.controller.start(text, {
@@ -277,8 +306,12 @@ class FleetTuiApplicationImpl implements FleetTuiApplication {
       },
       submit: (text) => this.submitText(text),
       notify: (message) => this.ui.flash(message),
-      presenter: new PiCommandPresenter(this.ui, this.editor, this.store, (message) =>
-        this.ui.flash(message),
+      presenter: new PiCommandPresenter(
+        this.ui,
+        this.editor,
+        this.store,
+        this.options.client,
+        (message) => this.ui.flash(message),
       ),
     };
   }

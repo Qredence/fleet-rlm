@@ -81,6 +81,24 @@ export function redact(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Formats a timestamp as a compact relative age.
+ *
+ * @param value - The ISO timestamp, or `null`/`undefined`
+ * @returns `now`, `5m ago`, `3h ago`, `2d ago`, or `—` for a missing/invalid value
+ */
+export function relativeAge(value: string | null | undefined): string {
+  if (!value) return "—";
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return "—";
+  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
+  if (elapsedMinutes < 1) return "now";
+  if (elapsedMinutes < 60) return `${elapsedMinutes}m ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `${elapsedHours}h ago`;
+  return `${Math.floor(elapsedHours / 24)}d ago`;
+}
+
 export type StructuredResultDisplay = {
   prominent: string | null;
   rows: Array<[label: string, value: string]>;

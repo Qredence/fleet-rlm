@@ -1,8 +1,9 @@
 /**
  * Interactive presenter for slash commands and the narrow compatibility
  * facade for the presenter modules: overlay scaffolding lives in
- * `presenter/overlay.ts`, settings editors in `presenter/settings.ts`, and
- * the Skill picker in `presenter/skill-selector.ts`.
+ * `presenter/overlay.ts`, shared list mechanics in `presenter/list-overlay.ts`,
+ * settings editors in `presenter/settings.ts`, and the list pickers in
+ * `presenter/{skill-selector,session-browser}.ts`.
  */
 
 import {
@@ -13,7 +14,12 @@ import {
   type TUI,
 } from "@earendil-works/pi-tui";
 
-import type { FleetSession, FleetSettingsPolicy, FleetSkillCard } from "../fleet-api-client.js";
+import type {
+  FleetApiClient,
+  FleetSession,
+  FleetSettingsPolicy,
+  FleetSkillCard,
+} from "../fleet-api-client.js";
 import type {
   CommandPresenter,
   CommandSpec,
@@ -21,7 +27,6 @@ import type {
   SettingsSaveCallback,
   SettingsUpdate,
 } from "./commands/registry.js";
-import { shortId } from "./format.js";
 import {
   ModalSurface,
   OVERLAY_OPTIONS,
@@ -35,8 +40,9 @@ import {
   parseFieldValue,
   type SettingsField,
 } from "./presenter/settings.js";
+import { SessionBrowserOverlay } from "./presenter/session-browser.js";
 import { SkillSelector } from "./presenter/skill-selector.js";
-import type { ConversationStore, PendingSkillSelection } from "./store.js";
+import { isBusy, type ConversationStore, type PendingSkillSelection } from "./store.js";
 import { settingsListTheme } from "./theme.js";
 
 export { SelectOverlay } from "./presenter/overlay.js";
@@ -47,6 +53,7 @@ export {
   parseFieldValue,
   TextSettingEditor,
 } from "./presenter/settings.js";
+export { SessionBrowserOverlay } from "./presenter/session-browser.js";
 export { SkillSelector } from "./presenter/skill-selector.js";
 
 export class PiCommandPresenter implements CommandPresenter {
@@ -54,6 +61,7 @@ export class PiCommandPresenter implements CommandPresenter {
     private readonly ui: TUI,
     private readonly editor: Editor,
     private readonly store: ConversationStore,
+    private readonly client: FleetApiClient,
     /** Transient one-shot notice (alt-screen flash); a no-op outside the TUI. */
     private readonly notify: (message: string) => void = () => undefined,
   ) {}
@@ -87,21 +95,37 @@ export class PiCommandPresenter implements CommandPresenter {
     overlay.onCancel = () => finish();
   }
 
-  async chooseSession(sessions: FleetSession[]): Promise<string | null> {
-    const state = this.store.getState();
-    if (["submitting", "running", "cancelling"].includes(state.run.phase)) return null;
-    return this.choose(
-      sessions.map((session) => ({
-        value: session.id,
-        label: session.title,
-        description: `${relativeUpdatedAt(session.updated_at)} · ${shortId(session.id)}`,
-      })),
-      {
-        title: "Switch Fleet Session",
-        hint: "Enter resume",
-        selectedValue: state.session?.id,
-      },
-    );
+  async openSessionBrowser(sessions: FleetSession[], total?: number): Promise<string | null> {
+    if (isBusy(this.store.getState().run)) return null;
+    return new Promise((resolve) => {
+      const browser = new SessionBrowserOverlay(
+        sessions,
+        this.client,
+        (result) => {
+          handle.hide();
+          this.restoreFocus();
+          resolve(result.action === "resume" ? result.id : null);
+        },
+        () => {
+          this.ui.requestRender();
+        },
+        total,
+        (updated) => {
+          const current = this.store.getState().session;
+          if (current?.id !== updated.id) return;
+          this.store.dispatch({
+            type: "session/init",
+            session: {
+              id: updated.id,
+              title: updated.title,
+              status: updated.status,
+              resumed: current.resumed,
+            },
+          });
+        },
+      );
+      const handle = this.showModal(browser);
+    });
   }
 
   async chooseSkills(
@@ -383,24 +407,6 @@ export class PiCommandPresenter implements CommandPresenter {
   private showModal(component: import("@earendil-works/pi-tui").Component) {
     return this.ui.showOverlay(new ModalSurface(component), OVERLAY_OPTIONS);
   }
-}
-
-/**
- * Formats a timestamp as a relative update label.
- *
- * @param value - The timestamp to format, or `null` or `undefined`
- * @returns A relative update label, or `updated —` for a missing or invalid timestamp
- */
-function relativeUpdatedAt(value: string | null | undefined): string {
-  if (!value) return "updated —";
-  const timestamp = Date.parse(value);
-  if (!Number.isFinite(timestamp)) return "updated —";
-  const elapsedMinutes = Math.max(0, Math.floor((Date.now() - timestamp) / 60_000));
-  if (elapsedMinutes < 1) return "updated now";
-  if (elapsedMinutes < 60) return `updated ${elapsedMinutes}m ago`;
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 24) return `updated ${elapsedHours}h ago`;
-  return `updated ${Math.floor(elapsedHours / 24)}d ago`;
 }
 
 /** Group the single policy's fields by their existing editor categories. */

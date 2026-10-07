@@ -50,7 +50,7 @@ export type SettingsSaveCallback = (
 
 export interface CommandPresenter {
   showHelp(commands: CommandSpec[]): void;
-  chooseSession(sessions: FleetSession[]): Promise<string | null>;
+  openSessionBrowser(sessions: FleetSession[], total?: number): Promise<string | null>;
   chooseSkills(
     skills: FleetSkillCard[],
     current: PendingSkillSelection[],

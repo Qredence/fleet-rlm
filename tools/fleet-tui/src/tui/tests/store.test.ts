@@ -596,6 +596,26 @@ describe("pending attachments and lastPrompt", () => {
 });
 
 describe("session hydration pending-state continuity", () => {
+  it.each(["session-1", "session-2"])(
+    "preserves the configured model when hydrating %s",
+    (sessionId) => {
+      const store = makeStore();
+      store.dispatch({
+        type: "session/init",
+        session: { id: "session-1", title: "Session", status: "active", resumed: false },
+      });
+      store.dispatch({ type: "settings/model", model: "deepseek/deepseek-chat" });
+      store.dispatch({
+        type: "session/hydrate",
+        session: { id: sessionId, title: "Reloaded", status: "active", resumed: true },
+        events: [],
+      });
+
+      expect(store.getState().model).toBe("deepseek/deepseek-chat");
+      expect(store.getState().session?.id).toBe(sessionId);
+    },
+  );
+
   const seedPending = (store: ConversationStore) => {
     store.dispatch({
       type: "skill-selection/pin",

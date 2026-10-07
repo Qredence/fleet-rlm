@@ -163,6 +163,14 @@ export type Session = {
   resumed: boolean;
 };
 
+/**
+ * A Run is active while it is being submitted, executing, or cancelling.
+ * This is the single predicate for "the operator must wait / cancel first".
+ */
+export function isBusy(run: Run): boolean {
+  return run.phase === "submitting" || run.phase === "running" || run.phase === "cancelling";
+}
+
 export type PendingSkillSelection = {
   id: string;
   expectedVersion: string;
@@ -190,6 +198,8 @@ export type State = {
   pendingAttachments: PendingAttachment[];
   /** Last locally submitted prompt, retained for /redo across view resets. */
   lastPrompt: string | null;
+  /** LLM model name from settings, shown in the header bar. */
+  model: string | null;
 };
 
 let messageCounter = 0;
@@ -227,6 +237,7 @@ function initialState(): State {
     pendingSkillSelections: [],
     pendingAttachments: [],
     lastPrompt: null,
+    model: null,
   };
 }
 
@@ -271,6 +282,7 @@ type Event =
   | { type: "attachment/clear" }
   | { type: "attachment/replace"; attachments: PendingAttachment[] }
   | { type: "attachment/consume"; attachments: PendingAttachment[] }
+  | { type: "settings/model"; model: string | null }
   | { type: "clear" };
 
 type Listener = () => void;
@@ -340,6 +352,7 @@ function reduce(state: State, event: Event): State {
       const hydrated = event.events.reduce<State>(reduce, {
         ...initialState(),
         session: event.session,
+        model: state.model,
         lastTraceId: event.latestTraceId ?? null,
         lastTraceRunId: event.latestTraceRunId ?? null,
         ...(sameSession
@@ -580,6 +593,8 @@ function reduce(state: State, event: Event): State {
         ? state
         : { ...state, pendingAttachments };
     }
+    case "settings/model":
+      return state.model === event.model ? state : { ...state, model: event.model };
     case "clear":
       return {
         ...state,
