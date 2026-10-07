@@ -32,9 +32,11 @@ Two kinds of request trigger this skill, and both get the same test-first discip
 If a trace-grounded diagnosis is not already available, invoke `debug-agent`
 first. Continue from its trace ID and findings without repeating its work.
 
+For **new requirements or behavior changes** there may be no failure trace: use an existing representative trace (a worked example of the current behavior) or a documented baseline as the starting evidence, and state that baseline in the diagnosis. Trace-grounded diagnosis still applies to reported failures.
+
 ### Read the trace, the full trace
 
-Fetch the trace and inspect it span by span. The reference for trace anatomy lives in the `analyzing-mlflow-trace` skill — use it.
+Fetch the trace and inspect it span by span. The reference for trace anatomy lives in the `analyze-mlflow-trace` skill — use it.
 
 ```bash
 mlflow traces get --trace-id <ID> > /tmp/trace.json
@@ -307,7 +309,7 @@ If you've iterated 3+ times on the same test without converging, that's a signal
 
 ## Related skills
 
-- `analyzing-mlflow-trace` — use for the EXPLORE phase trace anatomy.
-- `analyzing-mlflow-session` — when the issue spans a multi-turn conversation.
+- `analyze-mlflow-trace` — use for the EXPLORE phase trace anatomy.
+- `analyze-mlflow-chat-session` — when the issue spans a multi-turn conversation.
 - `instrumenting-with-mlflow-tracing` — if the agent isn't traced yet, run this first; you can't EXPLORE without traces.
 - `agent-evaluation` — for dataset-scale eval workflows alongside individual assertion tests.

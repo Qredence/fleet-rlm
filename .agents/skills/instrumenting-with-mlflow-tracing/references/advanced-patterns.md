@@ -56,9 +56,10 @@ def process_items(items: list) -> list:
             return result
 
     with ThreadPoolExecutor(max_workers=4) as executor:
-        # Copy context to each thread
-        ctx = contextvars.copy_context()
-        futures = [executor.submit(ctx.run, process_one, item) for item in items]
+        # Copy context separately for each task: a single Context cannot be
+        # entered by two threads at once, and concurrent reuse raises
+        # "cannot enter context: ... is already entered".
+        futures = [executor.submit(contextvars.copy_context().run, process_one, item) for item in items]
         results = [f.result() for f in futures]
 
     return results

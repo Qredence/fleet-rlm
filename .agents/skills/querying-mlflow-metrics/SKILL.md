@@ -53,15 +53,20 @@ python scripts/fetch_metrics.py -s http://localhost:5000 -x 1 -v ASSESSMENTS \
 |-----|----------|-------------|
 | `-s, --server` | Yes | MLflow server URL |
 | `-x, --experiment-ids` | Yes | Experiment IDs (comma-separated) |
-| `-m, --metric` | Yes | `trace_count`, `latency`, `input_tokens`, `output_tokens`, `total_tokens` |
+| `-m, --metric` | Yes | `trace_count`, `latency`, `input_tokens`, `output_tokens`, `total_tokens` (TRACES); `span_count`, `latency`, `input_cost`, `output_cost`, `total_cost` (SPANS) |
 | `-a, --aggregations` | Yes | `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `P50`, `P95`, `P99` |
 | `-d, --dimensions` | No | Group by: `trace_name`, `trace_status` |
 | `-t, --time-interval` | No | Bucket size in seconds (3600=hourly, 86400=daily) |
 | `--start-time` | No | `-24h`, `-7d`, `now`, ISO 8601, or epoch ms |
 | `--end-time` | No | Same formats as start-time |
+| `--page-token` | No | Pagination token from a prior response's `next_page_token` |
 | `-o, --output` | No | `table` (default) or `json` |
 
-For SPANS metrics (`span_count`, `latency`), add `-v SPANS`.
+For SPANS metrics (`span_count`, `latency`, `input_cost`, `output_cost`, `total_cost`), add `-v SPANS`.
 For ASSESSMENTS metrics, add `-v ASSESSMENTS`.
+
+**Span costs** (`-v SPANS`): query `total_cost`, `input_cost`, or `output_cost` with `-a SUM,AVG` to report LLM spend.
+
+Large grouped or time-bucketed reports may span multiple pages: pass the `next_page_token` printed by one invocation back in via `--page-token` to retrieve the next page.
 
 See [references/api_reference.md](references/api_reference.md) for filter syntax and full API details.

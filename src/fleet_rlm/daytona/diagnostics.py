@@ -117,7 +117,7 @@ class DaytonaEnvironmentManifest:
             "dependency_sha256": self.dependency_sha256,
             "dependencies": list(self.dependencies),
             "helper_protocol": self.helper_protocol,
-            "capabilities": ["python", "git", "ca-certificates"],
+            "capabilities": ["python", "git", "ca-certificates", "procps"],
             "resources": {"cpu": self.resources[0], "memory_gib": self.resources[1], "disk_gib": self.resources[2]},
             "user": self.user,
             "workdir": self.workdir,

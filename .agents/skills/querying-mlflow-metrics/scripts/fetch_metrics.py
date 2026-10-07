@@ -26,7 +26,7 @@ VIEW_TYPES = {"TRACES": 1, "SPANS": 2, "ASSESSMENTS": 3}
 # Valid metrics per view type
 VALID_METRICS = {
     "TRACES": ["trace_count", "latency", "input_tokens", "output_tokens", "total_tokens"],
-    "SPANS": ["span_count", "latency"],
+    "SPANS": ["span_count", "latency", "input_cost", "output_cost", "total_cost"],
     "ASSESSMENTS": ["assessment_count", "assessment_value"],
 }
 
@@ -117,6 +117,7 @@ def fetch_metrics(
     start_time_ms: int | None = None,
     end_time_ms: int | None = None,
     max_results: int = DEFAULT_MAX_RESULTS,
+    page_token: str | None = None,
 ) -> dict:
     """Fetch metrics from MLflow tracking server."""
     url = f"{server.rstrip('/')}{API_PATH}"
@@ -139,6 +140,8 @@ def fetch_metrics(
         payload["start_time_ms"] = start_time_ms
     if end_time_ms:
         payload["end_time_ms"] = end_time_ms
+    if page_token:
+        payload["page_token"] = page_token
 
     data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
@@ -203,6 +206,10 @@ def main():
     parser.add_argument("--start-time", help="Start time: -24h, -7d, now, ISO 8601, or epoch ms")
     parser.add_argument("--end-time", help="End time: same formats as start-time")
     parser.add_argument("--max-results", type=int, default=DEFAULT_MAX_RESULTS, help="Max results")
+    parser.add_argument(
+        "--page-token",
+        help="Pagination token from a previous response's next_page_token (fetch the next page)",
+    )
     parser.add_argument("-o", "--output", choices=["table", "json"], default="table", help="Output format")
 
     args = parser.parse_args()
@@ -235,6 +242,7 @@ def main():
             start_time_ms=start_time_ms,
             end_time_ms=end_time_ms,
             max_results=args.max_results,
+            page_token=args.page_token,
         )
 
         if args.output == "json":

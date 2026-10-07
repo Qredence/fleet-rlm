@@ -23,7 +23,7 @@ Use when the user wants to do anything with MLflow but hasn't specified which sk
    - Tracing / instrumentation → `instrumenting-with-mlflow-tracing`
    - Debug or explain an agent failure → `debug-agent`
    - Fix or change an agent's behavior → `fix-agent-issue`
-   - Evaluation / scoring → `agent-evaluation`
+   - Evaluation / running an evaluation → `agent-evaluation` (scorer or judge *design* → `build-a-scorer`)
    - Debug a trace → `analyze-mlflow-trace`
    - Debug a chat session → `analyze-mlflow-chat-session`
    - Search traces → `retrieving-mlflow-traces`

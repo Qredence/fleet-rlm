@@ -91,6 +91,8 @@ mlflow traces search \
   --max-results 100 > /tmp/session_traces.json
 ```
 
+If the response includes a page token, re-run the same search with `--page-token <token>` and append the results; repeat until no token is returned so no turns are dropped.
+
 Then use bash commands (e.g., `jq`, `wc`, `head`) on the file to analyze it.
 
 The `--extract-fields` example above uses `mlflow.traceInputs`/`mlflow.traceOutputs` from trace metadata — adjust the field paths based on what you discovered in step 1.
@@ -115,7 +117,7 @@ jq '.traces[] | {
 - **`--experiment-id` is required** for all `mlflow traces search` commands. The command will fail without it.
 - Metadata keys containing dots **must** be escaped with backticks in filter strings and extract-fields: `` metadata.`mlflow.trace.session` ``
 - **Shell quoting**: Backticks inside **double quotes** are interpreted by bash as command substitution (e.g., bash will try to run `` `mlflow.trace.session` `` as a command). Always use **single quotes** for the outer string when the value contains backticks. For example: `--filter-string 'metadata.\`mlflow.trace.session\` = "value"'`
-- `--max-results` defaults to 100, which is sufficient for most sessions. Increase up to 500 (the maximum) for longer conversations. If 500 results are returned, use pagination to retrieve the rest.
+- `--max-results` defaults to 100. A session with more traces than one page returns silently truncated turns, so **page until exhausted**: re-run the same search adding `--page-token <token from the previous response>` and append the results, stopping when no page token is returned. Raise `--max-results` (up to 500) to reduce the number of round trips for long conversations.
 
 ## Handling CLI Output
 

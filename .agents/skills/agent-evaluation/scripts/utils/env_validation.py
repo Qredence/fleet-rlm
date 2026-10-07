@@ -115,8 +115,14 @@ def check_databricks_config() -> tuple[bool, str | None]:
             timeout=5,
         )
         if result.returncode == 0:
-            profiles = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
-            return True, profiles[0] if profiles else None
+            # `databricks auth profiles` prints a header row and a Valid (YES/NO) column;
+            # only a profile whose Valid column is YES is usable.
+            lines = [line for line in result.stdout.strip().split("\n") if line.strip()]
+            for line in lines[1:]:
+                parts = line.split()
+                if len(parts) >= 3 and parts[-1].upper() == "YES":
+                    return True, parts[0]
+            return False, None
     except (subprocess.TimeoutExpired, FileNotFoundError, subprocess.CalledProcessError):
         # Databricks CLI is unavailable or timed out; fall back to "no profile found".
         pass

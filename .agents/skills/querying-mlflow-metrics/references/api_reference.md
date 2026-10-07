@@ -19,6 +19,9 @@
 |--------|-------------|--------------|
 | `span_count` | Number of spans | COUNT |
 | `latency` | Span duration (ms) | AVG, PERCENTILE |
+| `input_cost` | Input token cost | SUM, AVG, PERCENTILE |
+| `output_cost` | Output token cost | SUM, AVG, PERCENTILE |
+| `total_cost` | Total token cost | SUM, AVG, PERCENTILE |
 
 ### ASSESSMENTS view (view_type=3)
 | Metric | Description | Aggregations |

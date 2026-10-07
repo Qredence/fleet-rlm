@@ -22,11 +22,11 @@ WebFetch(
 
 ## Step 2: Fetch Target Documentation
 
-Use the path from Step 1, always with `.md` extension:
+Use the URL exactly as returned by Step 1 — the index already supplies the `.md` path (for example `/docs/latest/genai.md`), so do not append another extension:
 
 ```
 WebFetch(
-  url: "https://mlflow.org/docs/latest/[path].md",
+  url: "https://mlflow.org/docs/latest/[path]",
   prompt: "Return all code blocks verbatim. Do not summarize."
 )
 ```

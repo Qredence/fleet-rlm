@@ -19,8 +19,8 @@ For how to **construct traces** (instrumentation methods, what to trace, decorat
 Configure MLflow Tracing via environment variables for production deployments:
 
 ```bash
-# Required: Tracking server URI
-export MLFLOW_TRACKING_URI="http://mlflow-server:5000"
+# Required: Tracking server URI (use https:// for any non-localhost server)
+export MLFLOW_TRACKING_URI="https://mlflow-server:5000"
 
 # Optional: Default experiment
 export MLFLOW_EXPERIMENT_NAME="production-agent"
