@@ -798,6 +798,11 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     )
     sink_operations: list[str] = []
     closes = 0
+    fenced = asyncio.Event()
+
+    async def fence(session_id):
+        assert session_id == session.id
+        fenced.set()
 
     class Sink:
         async def read(self, location, *, max_bytes):
@@ -853,7 +858,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
             return None
 
         async def wait_owned(self):
-            return None
+            assert fenced.is_set(), "remote stop must precede blocked-worker draining"
 
     class Runner:
         def stream(self, _execution):
@@ -865,6 +870,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
         preparation=Preparation(),
         runner=Runner(),
         cleanup=cleanup,
+        claim_loss_fence=fence,
     )
     events = [
         event
@@ -874,6 +880,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
     ]
     await cleanup.shutdown(drain_seconds=1)
 
+    assert fenced.is_set()
     assert isinstance(events[0].detail, RunStarted)
     assert all(not isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events[:-1])
     assert sum(isinstance(event.detail, TERMINAL_DETAIL_TYPES) for event in events) == 1

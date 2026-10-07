@@ -122,7 +122,6 @@ def _factory(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=deadline if deadline is not None else loop.time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     return factory, interpreter
@@ -225,7 +224,6 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)
@@ -312,7 +310,6 @@ async def test_admission_restored_exactly_once_on_every_path(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + (0.05 if path == "admission_timeout" else 30),
-        execution_timeout_s=30,
         execution_output_cap=1000,
         is_authorized=is_authorized,
     )
@@ -614,7 +611,6 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)

@@ -312,7 +312,6 @@ async def build_daytona_composition(
             max_active_leases=resolved.max_active_daytona_leases,
             idle_stop_seconds=DEFAULT_IDLE_STOP_SECONDS,
             execution_output_cap=resolved.rlm_max_execution_output_chars,
-            execution_timeout_s=resolved.rlm_execution_timeout_s,
             dispatcher=dispatcher,
         )
         mounted_workspace_gateway = DaytonaWorkspaceGateway(runtime=runtime, map_error=map_provider_error)
@@ -742,6 +741,8 @@ def build_run_preparation(
             if sandbox is None:
                 raise RuntimeError("acquired Sandbox is unavailable")
 
+            await runtime.suspend_root_autostop(owner, deadline=deadline)
+
             host_io = DaytonaHostIO(
                 run.access.workspace_id,
                 volume_gateway=volume_gateway,
@@ -767,11 +768,22 @@ def build_run_preparation(
             project_workspace = host_io.workspace_storage(str(volume_paths.projects_root()))
 
             async def release_preparation() -> None:
-                cleanup_run_scratch = getattr(owner.interpreter, "cleanup_run_scratch", None)
-                await _cleanup_scratch_before_releasing_invocation(
-                    cleanup_run_scratch if callable(cleanup_run_scratch) else None,
-                    release_invocation,
-                )
+                try:
+                    cleanup_run_scratch = getattr(owner.interpreter, "cleanup_run_scratch", None)
+                    await _cleanup_scratch_before_releasing_invocation(
+                        cleanup_run_scratch
+                        if callable(cleanup_run_scratch) and not runtime.root_is_tainted(*key)
+                        else None,
+                        None,
+                    )
+                    await runtime.restore_root_autostop(owner)
+                except BaseException:
+                    runtime.mark_root_tainted(*key)
+                    await runtime.restore_root_autostop(owner)
+                    raise
+                finally:
+                    if release_invocation is not None:
+                        release_invocation()
 
             child_runtime_factory = runtime.build_child_factory(
                 volume_id=owner.volume_id,
@@ -779,7 +791,6 @@ def build_run_preparation(
                 session_id=run.session_id,
                 run_id=run.run_id,
                 deadline=deadline,
-                execution_timeout_s=settings.rlm_execution_timeout_s,
                 execution_output_cap=settings.rlm_max_execution_output_chars,
                 is_authorized=lambda: not run.authority.revoked,
                 semantic_child_available=bool(settings.daytona_child_snapshot),

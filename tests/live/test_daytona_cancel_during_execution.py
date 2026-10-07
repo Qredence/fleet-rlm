@@ -144,7 +144,9 @@ def test_daytona_cancel_during_execution_through_fastapi(
             assert ledger.get("calls", 0) >= 1, "interpreter never reached host-forced cancel"
             assert ledger.get("cancel_state") in {"requested", "already_requested"}
             assert elapsed < 180
-            assert any(chunk.get("type") == "abort" and chunk.get("reason") == "Turn cancelled" for chunk in chunks)
+            assert any(
+                chunk.get("type") == "turn_cancelled" and chunk.get("reason") == "Turn cancelled" for chunk in chunks
+            )
             finish = chunks[-1]
             assert finish.get("type") != "finish" or finish.get("finishReason") != "stop"
             runtime = getattr(resources, "runtime", resources)
@@ -154,13 +156,9 @@ def test_daytona_cancel_during_execution_through_fastapi(
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
             release_deadline = time.perf_counter() + 45
             while time.perf_counter() < release_deadline:
-                if (
-                    resources._admission._semaphore._value == settings.max_active_daytona_leases
-                    and resources.active_leases.holder(session_id) is None
-                ):
+                if resources.active_leases.holder(session_id) is None:
                     break
                 time.sleep(0.25)
-            assert resources._admission._semaphore._value == settings.max_active_daytona_leases
             assert resources.active_leases.holder(session_id) is None
             sandbox_ids.update(resources._tracked_sandbox_ids)
         finally:
@@ -173,10 +171,9 @@ def test_daytona_cancel_during_execution_through_fastapi(
             "candidate": candidate_identity(),
             "assertions": {
                 "cancellation_observed": True,
-                "admission_restored": True,
                 "lease_released": True,
             },
-            "cleanup": {"confirmed_absent": True, "admission_restored": True},
+            "cleanup": {"sandbox_cleanup_confirmed": True},
             "passed": True,
         }
     )

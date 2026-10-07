@@ -387,25 +387,50 @@ def test_new_invocation_rejects_non_positive_timeout_override() -> None:
     assert caught.value.cause_type == "InterpreterConfigurationError"
 
 
-def test_new_invocation_deadline_clamps_each_action_timeout() -> None:
-    import time
-
+def test_new_invocation_deadline_uses_remaining_turn_time(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
 
-    retained = DaytonaCodeInterpreter(
-        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
-    )
-
-    near = retained.new_invocation(deadline_monotonic=time.monotonic() + 30)
-    assert 28 <= near._backend._action_timeout() <= 30
-    far = retained.new_invocation(deadline_monotonic=time.monotonic() + 10_000)
-    assert far._backend._action_timeout() == 300
-    past = retained.new_invocation(deadline_monotonic=time.monotonic() - 5)
-    assert past._backend._action_timeout() == 1
-    assert retained._backend._action_timeout() == 300
+    clock = {"now": 100.0}
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: clock["now"])
+    retained = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace())))
+    fresh = retained.new_invocation(deadline_monotonic=1900.0)
+    assert fresh._backend._action_timeout() == 1800.0
+    clock["now"] = 1900.0
+    with pytest.raises(DaytonaAdapterError, match="deadline exceeded"):
+        fresh._backend.run("print('must not dispatch')")
+    assert fresh._backend.broker is None
     with pytest.raises(DaytonaAdapterError, match="deadline must be finite"):
         retained.new_invocation(deadline_monotonic=float("nan"))
+
+
+def test_execution_error_preserves_bounded_sanitized_stdout_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    from dspy import CodeExecutionError
+
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
+
+    backend = _FakeBackend()
+    monkeypatch.setattr(
+        backend,
+        "run",
+        Mock(
+            return_value=BackendExecutionResult(
+                stdout="git: unable to write symref for HEAD\napi_key=sk-secret",
+                stderr="command failed",
+                error="missing repository",
+                error_category="FileNotFoundError",
+            )
+        ),
+    )
+    interpreter = DaytonaCodeInterpreter(backend=backend, execution_output_cap=300)
+    with pytest.raises(CodeExecutionError) as caught:
+        interpreter.execute("pass")
+    feedback = str(caught.value)
+    assert "unable to write symref" in feedback
+    assert "command failed" in feedback
+    assert "sk-secret" not in feedback
+    assert len(feedback) <= 300
+    interpreter.shutdown()
 
 
 def test_new_invocation_admission_refuses_the_next_action() -> None:
@@ -1175,3 +1200,32 @@ def test_daytona_is_the_default_public_runtime_profile(monkeypatch: pytest.Monke
 
     monkeypatch.delenv("FLEET_RUN_ENVIRONMENT", raising=False)
     assert Settings().run_environment == "daytona"
+
+
+@pytest.mark.parametrize("expire_during", ["startup", "setup"])
+def test_backend_rechecks_deadline_after_startup_and_setup(monkeypatch: pytest.MonkeyPatch, expire_during: str) -> None:
+    from fleet_rlm.daytona.errors import DaytonaAdapterError
+    from fleet_rlm.daytona.interpreter import _SandboxProcessBackend
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: clock["now"])
+    calls = []
+
+    class Broker:
+        def start(self):
+            clock["now"] = 111.0 if expire_during == "startup" else 104.0
+
+        def setup_source(self, code):
+            return code
+
+        def execute(self, code, variables, *, timeout_s):
+            del code, variables
+            calls.append(timeout_s)
+            clock["now"] = 111.0
+            return {}
+
+    backend = _SandboxProcessBackend(object(), deadline_monotonic=110.0)
+    backend._broker = Broker()
+    with pytest.raises(DaytonaAdapterError, match="deadline exceeded"):
+        backend.run("print('must not dispatch')")
+    assert calls == ([] if expire_during == "startup" else [6.0])

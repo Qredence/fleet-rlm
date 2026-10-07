@@ -45,9 +45,7 @@ from fleet_rlm.rlm.recursion import (
     RecursiveBatchError,
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
-    RLMConfigError,
     _child_progress_outcome,
-    recursive_rlm_options,
 )
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor as ProductionRecursiveRLMExecutor
 from fleet_rlm.sessions.context import SessionContextManifest
@@ -2220,24 +2218,15 @@ def test_public_settings_surface_exposes_no_recursion_depth() -> None:
     assert not any("depth" in name for name in recursion_settings)
 
 
-def test_invocation_factory_scopes_the_child_action_deadline_from_options() -> None:
-    root_actions = [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"}]
-
+def test_invocation_factory_uses_the_child_call_deadline() -> None:
+    actions = [{"reasoning": "submit", "code": "SUBMIT(answer='child-ok', evidence=[], gaps=[], result_files=[])"}]
     spy = _SpyInvocationFactory()
-    executor = _executor(
-        root_actions, child_runtime_factory=spy, options=RecursiveRLMOptions(child_execution_timeout_s=45)
-    )
+    executor = _executor(actions, child_runtime_factory=spy, options=RecursiveRLMOptions())
     assert executor.tool(task="bounded child", inputs=[])["answer"] == "child-ok"
     assert spy.invocation_kwargs
-    assert all(kwargs.get("timeout_s") == 45 for kwargs in spy.invocation_kwargs)
+    assert all("timeout_s" not in kwargs for kwargs in spy.invocation_kwargs)
     assert all(isinstance(kwargs.get("deadline_monotonic"), float) for kwargs in spy.invocation_kwargs)
     assert all(callable(kwargs.get("admission")) for kwargs in spy.invocation_kwargs)
-
-    inherited = _SpyInvocationFactory()
-    executor = _executor(root_actions, child_runtime_factory=inherited, options=RecursiveRLMOptions())
-    assert executor.tool(task="inheriting child", inputs=[])["answer"] == "child-ok"
-    assert inherited.invocation_kwargs
-    assert all("timeout_s" not in kwargs for kwargs in inherited.invocation_kwargs)
 
 
 def test_recursive_subtask_instructions_state_the_scratch_relative_contract() -> None:
@@ -2249,20 +2238,6 @@ def test_recursive_subtask_instructions_state_the_scratch_relative_contract() ->
     assert "Never put absolute sandbox paths" in instructions
     result_files = RecursiveSubtaskSignature.output_fields["result_files"].json_schema_extra["desc"]
     assert "relative to it" in result_files
-
-
-def test_recursive_options_reject_non_positive_child_timeouts() -> None:
-    for value in (0, -5):
-        with pytest.raises(RLMConfigError, match="child_execution_timeout_s"):
-            RecursiveRLMOptions(child_execution_timeout_s=value)
-
-
-def test_settings_resolved_child_deadline_derives_from_and_never_exceeds_the_parent() -> None:
-    derived = recursive_rlm_options(Settings(rlm_execution_timeout_s=300))
-    assert derived.child_execution_timeout_s == 270
-
-    explicit = recursive_rlm_options(Settings(rlm_execution_timeout_s=300, rlm_child_execution_timeout_s=120))
-    assert explicit.child_execution_timeout_s == 120
 
 
 def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:

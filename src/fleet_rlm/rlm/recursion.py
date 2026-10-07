@@ -714,7 +714,6 @@ class RecursiveRLMOptions:
     child_max_llm_calls: int = 12
     child_max_output_chars: int = 4_000
     max_parallel_children: int = 1
-    child_execution_timeout_s: int | None = None
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -731,20 +730,9 @@ class RecursiveRLMOptions:
             raise RLMConfigError("max_parallel_children must not exceed 8")
         if self.max_parallel_children > self.max_calls:
             raise RLMConfigError("max_parallel_children must not exceed max_calls")
-        if self.child_execution_timeout_s is not None:
-            value = self.child_execution_timeout_s
-            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-                raise RLMConfigError(f"child_execution_timeout_s must be a positive integer or None, got {value!r}")
 
 
 def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
-    parent_timeout = settings.rlm_execution_timeout_s
-    child_timeout = settings.rlm_child_execution_timeout_s
-    if child_timeout == 0:
-        # 0 = derive from the parent so a recursion batch's in-sandbox wait
-        # always outlives its slowest child's own action deadline.
-        child_timeout = max(1, int(parent_timeout * 0.9))
-    child_timeout = min(child_timeout, parent_timeout)
     return RecursiveRLMOptions(
         enabled=settings.rlm_recursion_enabled,
         max_calls=settings.rlm_recursion_max_calls,
@@ -753,7 +741,6 @@ def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
         child_max_llm_calls=settings.rlm_recursion_child_max_llm_calls,
         child_max_output_chars=settings.rlm_recursion_child_max_output_chars,
         max_parallel_children=settings.rlm_recursion_max_parallel_children,
-        child_execution_timeout_s=child_timeout,
     )
 
 
@@ -1594,9 +1581,6 @@ class RecursiveRLMExecutor:
                 raise RLMConfigError("recursive child requires an invocation-scoped interpreter factory")
             accepted = inspect.signature(new_invocation).parameters
             invocation_kwargs: dict[str, Any] = {"turn_budget": child_models.budget, "turn_request": None}
-            child_timeout = self._options.child_execution_timeout_s
-            if child_timeout is not None and "timeout_s" in accepted:
-                invocation_kwargs["timeout_s"] = child_timeout
             # Every child action must end by the call deadline, and the next
             # action is refused once it passes or the batch is cancelled.
             if "deadline_monotonic" in accepted:

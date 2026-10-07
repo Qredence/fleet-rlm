@@ -36,7 +36,6 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.daytona.interpreter import (
     DEFAULT_EXECUTION_OUTPUT_CHARS,
-    DEFAULT_EXECUTION_TIMEOUT_S,
     DaytonaCodeInterpreter,
     SyncBridgeDispatcher,
     sandbox_backend,
@@ -69,7 +68,6 @@ from fleet_rlm.daytona.specs import (
     ensure_execution_layout,
     ensure_shared_volume_layout,
     ensure_volume_layout,
-    execution_timeout_s_from_settings,
     file_info,
     get_or_create_volume_id,
     is_not_found,
@@ -177,7 +175,6 @@ __all__ = [
     "SandboxPlatform",
     "VolumeClient",
     "VolumeConfig",
-    "execution_timeout_s_from_settings",
     "normalize_state",
     "recursive_child_volume_subpath",
     "require_recursive_child_volume_subpath",
@@ -391,17 +388,11 @@ class LiveDaytonaPlatform:
                 return
             raise map_provider_error(exc) from exc
         try:
-            await self._client.stop(sandbox, timeout=timeout)
+            await sandbox.stop(timeout=timeout, force=force)
         except Exception as exc:
-            if force:
-                try:
-                    await self._client.delete(sandbox)
-                except Exception as delete_exc:
-                    if is_sandbox_not_found(delete_exc):
-                        return
-                    raise map_provider_error(delete_exc) from delete_exc
-            else:
-                raise map_provider_error(exc) from exc
+            if is_sandbox_not_found(exc):
+                return
+            raise map_provider_error(exc) from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,7 +475,6 @@ async def acquire_ephemeral_interpreter(
             backend=sandbox_backend(
                 sandbox,
                 loop=loop,
-                timeout_s=execution_timeout_s_from_settings(settings),
             )
         )
     except BaseException:
@@ -1106,6 +1096,22 @@ class SandboxLease:
         except TimeoutError:
             raise
 
+    async def _confirm_stopped(self, sandbox_id: str, *, timeout_s: float) -> tuple[bool, tuple[str, ...]]:
+        """Confirm native stop completion after a concurrent provider stop request."""
+        started = time.monotonic()
+        observations: list[str] = []
+        interval = min(max(self._policy.confirm_poll_interval_s, 0.05), 0.25)
+        while True:
+            target = await self._bounded_probe(sandbox_id)
+            state = "missing" if target is None else sandbox_state(target)
+            if not observations or observations[-1] != state:
+                observations.append(state)
+            if state in {"stopped", "paused", "archived", "missing"}:
+                return True, tuple(observations)
+            if time.monotonic() - started >= timeout_s:
+                return False, tuple(observations)
+            await asyncio.sleep(interval)
+
     async def _provider_close(self) -> ProviderCleanupOutcome:
         policy = self._policy
         platform = self._platform
@@ -1182,13 +1188,10 @@ class SandboxLease:
                     duration_s=time.monotonic() - started,
                     error=stop_error or "absence probe unavailable: platform lacks get",
                 )
-            confirm_fn = policy.confirm_fn or confirm_absence
             try:
-                absence = await confirm_fn(
-                    probe=self._bounded_probe,
-                    sandbox_id=self._sandbox_id,
-                    timeout_s=min(policy.confirm_timeout_s, 1.0),
-                    poll_interval_s=min(policy.confirm_poll_interval_s, 0.1),
+                stopped, observations = await self._confirm_stopped(
+                    self._sandbox_id,
+                    timeout_s=min(policy.confirm_timeout_s, 5.0),
                 )
             except BaseException as exc:
                 if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
@@ -1200,14 +1203,13 @@ class SandboxLease:
                     duration_s=time.monotonic() - started,
                     error=stop_error or sanitize_failure_text(exc),
                 )
-            absent = isinstance(absence, AbsenceConfirmation)
             return ProviderCleanupOutcome(
                 action="stop",
                 requested=True,
-                confirmed_absent=absent,
-                plateau=absence.observations,
+                confirmed_absent=False,
+                plateau=observations,
                 duration_s=time.monotonic() - started,
-                error=stop_error or (None if absent else f"absence unconfirmed: {absence!r}"[:240]),
+                error=None if stopped else stop_error or "sandbox stop could not be confirmed",
             )
         return ProviderCleanupOutcome(
             action="stop",
@@ -2429,11 +2431,10 @@ def _build_interpreter(
     loop: asyncio.AbstractEventLoop,
     dispatcher: SyncBridgeDispatcher | None = None,
     execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
-    execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
 ) -> DaytonaCodeInterpreter:
     if hasattr(sandbox, "code_interpreter"):
         return DaytonaCodeInterpreter(
-            backend=sandbox_backend(sandbox, loop=loop, dispatcher=dispatcher, timeout_s=execution_timeout_s),
+            backend=sandbox_backend(sandbox, loop=loop, dispatcher=dispatcher),
             execution_output_cap=execution_output_cap,
         )
     existing = getattr(sandbox, "interpreter", None)
@@ -2489,6 +2490,7 @@ class _ChildCleanupRecord:
     permit: DaytonaAdmissionPermit
     lease: ChildRuntimeLease | None = None
     close_task: asyncio.Task[Any] | None = None
+    session_id: UUID | None = None
 
 
 class _ProviderCallDeadlineError(TimeoutError):
@@ -2526,12 +2528,12 @@ class DaytonaRuntime:
         cleanup: RunCleanupSupervisor | None = None,
         idle_stop_seconds: float | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
-        execution_timeout_s: int = DEFAULT_EXECUTION_TIMEOUT_S,
         workspace_io_idle_seconds: float = 300.0,
         workspace_io_acquisition_timeout_seconds: float = 30.0,
         dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         self._tainted: set[tuple[str, str]] = set()
+        self._active_idle_policies: dict[str, int] = {}
         self._child_cleanup_records: dict[str, _ChildCleanupRecord] = {}
         self._unidentified_child_sandboxes: list[tuple[SandboxPlatform, Any, DaytonaAdmissionPermit]] = []
         self._child_factories: set[Any] = set()
@@ -2569,7 +2571,6 @@ class DaytonaRuntime:
         self._sandbox_spec = sandbox_spec
         self._cleanup = cleanup or RunCleanupSupervisor()
         self._execution_output_cap = execution_output_cap
-        self._execution_timeout_s = execution_timeout_s
         if workspace_io_idle_seconds <= 0 or workspace_io_acquisition_timeout_seconds <= 0:
             raise ValueError("Workspace I/O timeouts must be positive")
         self._workspace_io_idle_seconds = workspace_io_idle_seconds
@@ -2601,7 +2602,6 @@ class DaytonaRuntime:
         max_active_leases: int,
         idle_stop_seconds: float | None,
         execution_output_cap: int,
-        execution_timeout_s: int,
         dispatcher: SyncBridgeDispatcher | None,
     ) -> DaytonaRuntime:
         """Construct one process-owned SDK graph within the runtime boundary."""
@@ -2631,7 +2631,6 @@ class DaytonaRuntime:
             cleanup=cleanup,
             idle_stop_seconds=idle_stop_seconds,
             execution_output_cap=execution_output_cap,
-            execution_timeout_s=execution_timeout_s,
             workspace_io_idle_seconds=settings.workspace_io_idle_seconds,
             workspace_io_acquisition_timeout_seconds=settings.workspace_io_acquisition_timeout_seconds,
             dispatcher=dispatcher,
@@ -2824,10 +2823,52 @@ class DaytonaRuntime:
                 record.root = None
             self._mark_record(key, SessionCleanupState.RETIRED)
 
+    async def suspend_root_autostop(self, lease: InterpreterLease, *, deadline: float) -> None:
+        """Preview traffic does not refresh Daytona's provider idle timer."""
+        sandbox = lease.sandbox
+        setter = getattr(sandbox, "set_autostop_interval", None)
+        if not callable(setter):
+            return  # Explicit fixture backends have no provider idle policy.
+        previous = getattr(sandbox, "auto_stop_interval", None)
+        if not isinstance(previous, int):
+            await _provider_call(
+                sandbox.refresh_data(),
+                deadline=deadline,
+                operation="Sandbox idle policy refresh",
+                owner=self._provider_tasks,
+            )
+            previous = sandbox.auto_stop_interval
+        if not isinstance(previous, int) or previous < 0:
+            raise DaytonaAdapterError(message="Sandbox idle policy unavailable", cause_type="SandboxLifecycleError")
+        self._active_idle_policies[lease.sandbox_id] = previous
+        await _provider_call(
+            setter(0), deadline=deadline, operation="Sandbox active idle policy", owner=self._provider_tasks
+        )
+
+    async def restore_root_autostop(self, lease: InterpreterLease) -> None:
+        """Restore idle policy only on a healthy, released invocation."""
+        previous = self._active_idle_policies.get(lease.sandbox_id)
+        if previous is None:
+            return
+        key = (lease.workspace_id, lease.session_id)
+        if key not in self._tainted:
+            await _provider_call(
+                lease.sandbox.set_autostop_interval(previous),
+                deadline=time.monotonic() + 30.0,
+                operation="Sandbox idle policy restoration",
+                owner=self._provider_tasks,
+            )
+        self._active_idle_policies.pop(lease.sandbox_id, None)
+
     def mark_root_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> None:
         """Fence a root so the next acquisition rotates its generation."""
         key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
         self._tainted.add(key)
+
+    def root_is_tainted(self, workspace_id: UUID | str, session_id: UUID | str) -> bool:
+        """Return whether the retained root Sandbox has been fenced."""
+        key = (_identity_text(workspace_id, "workspace_id"), _identity_text(session_id, "session_id"))
+        return key in self._tainted
 
     def session_record(self, workspace_id: UUID | str, session_id: UUID | str) -> DaytonaSessionRecord | None:
         """Return the runtime-owned resource record for one session, if any."""
@@ -3498,7 +3539,6 @@ class DaytonaRuntime:
         session_id: UUID | None = None,
         call_index: int,
         deadline: float,
-        execution_timeout_s: int,
         execution_output_cap: int,
         retain_pending_cleanup: Callable[[Future[Any]], None],
         is_authorized: Callable[[], bool] | None = None,
@@ -3542,6 +3582,7 @@ class DaytonaRuntime:
                 "labels": labels,
                 "with_volume": not semantic,
                 "ephemeral": True,
+                "auto_stop_interval": 0,
             }
             if semantic:
                 create_kwargs["network_block_all"] = True
@@ -3562,7 +3603,7 @@ class DaytonaRuntime:
             sandbox_id = sandbox_id_for(sandbox)
             child_sandbox_id = sandbox_id
             self._child_cleanup_records[child_sandbox_id] = _ChildCleanupRecord(
-                platform, sandbox, child_sandbox_id, None if semantic else scratch_path, permit
+                platform, sandbox, child_sandbox_id, None if semantic else scratch_path, permit, session_id=session_id
             )
             require_authorized(is_authorized)
             if not semantic:
@@ -3581,7 +3622,7 @@ class DaytonaRuntime:
                     sandbox,
                     loop=loop,
                     dispatcher=dispatcher,
-                    timeout_s=execution_timeout_s,
+                    deadline_monotonic=deadline,
                 ),
                 execution_output_cap=execution_output_cap,
             )
@@ -3719,7 +3760,7 @@ class DaytonaRuntime:
                     self._unidentified_child_sandboxes.append((platform, sandbox, permit))
             if sandbox is not None and sandbox_id is not None and sandbox_id not in self._child_cleanup_records:
                 self._child_cleanup_records[sandbox_id] = _ChildCleanupRecord(
-                    platform, sandbox, sandbox_id, None if semantic else scratch_path, permit
+                    platform, sandbox, sandbox_id, None if semantic else scratch_path, permit, session_id=session_id
                 )
             try:
                 cleanup = OwnedEffect.start(cleanup_after_failed_acquire(platform, sandbox, sandbox_id, permit))
@@ -3738,7 +3779,6 @@ class DaytonaRuntime:
         workspace_id: UUID,
         run_id: UUID,
         deadline: float,
-        execution_timeout_s: int,
         execution_output_cap: int,
         session_id: UUID | None = None,
         is_authorized: Callable[[], bool] | None = None,
@@ -3773,7 +3813,6 @@ class DaytonaRuntime:
                     run_id=run_id,
                     call_index=call_index,
                     deadline=deadline,
-                    execution_timeout_s=execution_timeout_s,
                     execution_output_cap=execution_output_cap,
                     is_authorized=is_authorized,
                     retain_pending_cleanup=late_owner.retain,
@@ -4377,9 +4416,18 @@ class DaytonaRuntime:
                 operation="Sandbox binding lookup",
                 owner=self._provider_tasks,
             )
-        if binding is None or not binding.sandbox_id:
-            return
-        await self._fence_binding(binding, deadline=deadline)
+        stops = [
+            self._fence_execution_sandbox(record.sandbox_id, deadline=deadline)
+            for record in tuple(self._child_cleanup_records.values())
+            if record.session_id == session_id
+        ]
+        if binding is not None and binding.sandbox_id:
+            self.mark_root_tainted(binding.workspace_id, session_id)
+            stops.append(self._fence_binding(binding, deadline=deadline))
+        results = await asyncio.gather(*stops, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
 
     async def _fence_binding(self, binding: SandboxBinding, *, deadline: float | None = None) -> None:
         fenced = await _provider_call(
@@ -4391,19 +4439,31 @@ class DaytonaRuntime:
         self._observe_binding(fenced)
         if binding.sandbox_id is None:
             return
+        await self._fence_execution_sandbox(binding.sandbox_id, deadline=deadline)
+        quarantined = await _provider_call(
+            self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=datetime.now(UTC))),
+            deadline=deadline,
+            operation="Sandbox quarantine persistence",
+            owner=self._provider_tasks,
+        )
+        self._observe_binding(quarantined)
+
+    async def _fence_execution_sandbox(self, sandbox_id: str, *, deadline: float | None = None) -> None:
+        """Force-stop without waiting for the interpreter; keep existing lease ownership."""
         timeout_s = 30.0
         if deadline is not None:
             timeout_s = max(0.1, min(timeout_s, deadline - asyncio.get_running_loop().time()))
         fence_lease = SandboxLease(
             owner=self,
             sandbox=None,
-            sandbox_id=binding.sandbox_id,
+            sandbox_id=sandbox_id,
             platform=self._platform,
             policy=SandboxLeasePolicy(
                 kind="recovery_fence",
                 interpreter_shutdown=False,
                 provider_action="stop",
                 stop_force=True,
+                confirm_absence=True,
                 confirm_timeout_s=timeout_s,
                 provider_request_timeout_s=timeout_s,
             ),
@@ -4420,13 +4480,6 @@ class DaytonaRuntime:
             operation="Sandbox fencing",
             owner=self._provider_tasks,
         )
-        quarantined = await _provider_call(
-            self._bindings.upsert(replace(binding, provider_state="quarantined", last_verified_at=datetime.now(UTC))),
-            deadline=deadline,
-            operation="Sandbox quarantine persistence",
-            owner=self._provider_tasks,
-        )
-        self._observe_binding(quarantined)
 
     def _bind_lease_ownership(
         self,
@@ -4748,7 +4801,6 @@ class DaytonaRuntime:
                 loop=asyncio.get_running_loop(),
                 dispatcher=self._dispatcher,
                 execution_output_cap=self._execution_output_cap,
-                execution_timeout_s=self._execution_timeout_s,
             )
 
         cleanup = SandboxLease(
@@ -4837,7 +4889,6 @@ class DaytonaRuntime:
             loop=asyncio.get_running_loop(),
             dispatcher=self._dispatcher,
             execution_output_cap=self._execution_output_cap,
-            execution_timeout_s=self._execution_timeout_s,
         )
         return InterpreterLease(
             sandbox_id=sid,

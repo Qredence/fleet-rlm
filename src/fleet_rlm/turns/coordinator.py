@@ -1087,6 +1087,13 @@ class TurnRuntime:
             if effective_claim_lost:
                 await apply_claim_loss()
                 await stop_heartbeat(heartbeat)
+            # Stop the remote Sandbox before draining a worker blocked in its REPL.
+            # Provider fencing remains owned by this cleanup task on failure.
+            if run.authority.revoked and not effective_claim_lost and self._claim_loss_fence is not None:
+                try:
+                    await self._claim_loss_fence(run.session_id)
+                except BaseException as exc:
+                    remember(exc)
             await _close_stream_owned(stream, remember)
             if finalization_task is not None:
                 with contextlib.suppress(BaseException):

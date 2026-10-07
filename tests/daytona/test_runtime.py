@@ -686,6 +686,36 @@ def test_sandbox_lease_shutdown_preserves_body_type_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recovery_fence_confirms_concurrent_native_stop_from_provider_state() -> None:
+    class Platform:
+        async def stop(self, _sandbox_id: str, **_kwargs: object) -> None:
+            raise RuntimeError("Sandbox was modified by another operation")
+
+        async def get(self, _sandbox_id: str) -> SimpleNamespace:
+            return SimpleNamespace(state="stopped")
+
+    runtime = make_daytona_runtime(platform=Platform())
+    lease = SandboxLease(
+        owner=runtime,
+        sandbox=None,
+        sandbox_id="sandbox-1",
+        platform=runtime._platform,
+        policy=SandboxLeasePolicy(
+            kind="recovery_fence",
+            stop_force=True,
+            confirm_absence=True,
+            confirm_timeout_s=1,
+        ),
+    )
+
+    outcome = await lease._provider_close()
+
+    assert outcome.action == "stop"
+    assert outcome.error is None
+    assert outcome.plateau == ("stopped",)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
 async def test_root_retains_admission_when_real_broker_delete_fails_until_quarantined(
     error_type: type[Exception],
@@ -836,7 +866,6 @@ async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdow
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 5,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
 
@@ -1223,7 +1252,6 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
         session_id=uuid4(),
         run_id=uuid4(),
         deadline=loop.time() + 5,
-        execution_timeout_s=30,
         execution_output_cap=1000,
     )
     lease = await asyncio.to_thread(factory, 1)
@@ -1666,7 +1694,7 @@ class _LivePlatformDouble:
         self.get_calls.append(sandbox_id)
         return SimpleNamespace(id=sandbox_id)
 
-    async def delete(self, sandbox: SimpleNamespace) -> None:
+    async def delete(self, sandbox: SimpleNamespace, **_kwargs: object) -> None:
         self.delete_calls.append(str(sandbox.id))
 
 
@@ -1768,3 +1796,49 @@ def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
     assert volume.get_calls == [(name, False)]
     assert len(volume.delete_calls) == 1
     assert resources._tracked_sandbox_ids == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tainted", [False, True])
+async def test_active_root_suppresses_provider_autostop_and_restores_only_healthy_policy(tainted: bool) -> None:
+    runtime = make_daytona_runtime()
+    workspace_id, session_id = uuid4(), uuid4()
+    sandbox = SimpleNamespace(id="active-root", auto_stop_interval=15, set_autostop_interval=AsyncMock())
+    lease = runtime_module.InterpreterLease(
+        sandbox_id=sandbox.id,
+        interpreter_id="interp",
+        volume_id="volume",
+        mount_path="/workspace",
+        interpreter=None,
+        sandbox=sandbox,
+        workspace_id=str(workspace_id),
+        session_id=str(session_id),
+    )
+    await runtime.suspend_root_autostop(lease, deadline=asyncio.get_running_loop().time() + 10)
+    sandbox.set_autostop_interval.assert_awaited_once_with(0)
+    if tainted:
+        runtime.mark_root_tainted(workspace_id, session_id)
+    await runtime.restore_root_autostop(lease)
+    assert [call.args for call in sandbox.set_autostop_interval.await_args_list] == (
+        [(0,)] if tainted else [(0,), (15,)]
+    )
+    assert not runtime._active_idle_policies
+
+
+@pytest.mark.asyncio
+async def test_session_fence_stops_only_its_children_and_retains_cleanup_ownership() -> None:
+    platform = SimpleNamespace(stop=AsyncMock())
+    runtime = make_daytona_runtime(platform=platform)
+    session_id = uuid4()
+    admission = DaytonaAdmission(max_active_leases=3)
+    for sandbox_id, owner_session in (("child-active", session_id), ("child-other", uuid4())):
+        permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+        runtime._child_cleanup_records[sandbox_id] = runtime_module._ChildCleanupRecord(
+            platform, SimpleNamespace(id=sandbox_id), sandbox_id, None, permit, session_id=owner_session
+        )
+    await runtime.fence_session(session_id)
+    platform.stop.assert_awaited_once_with("child-active", timeout=60, force=True)
+    assert set(runtime._child_cleanup_records) == {"child-active", "child-other"}
+    assert admission._semaphore._value == 1
+    for record in runtime._child_cleanup_records.values():
+        record.permit.release()

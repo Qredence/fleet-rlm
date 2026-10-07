@@ -760,7 +760,6 @@ def _preserved_factory(
         session_id=uuid4(),
         run_id=run_id,
         deadline=asyncio.get_running_loop().time() + 30,
-        execution_timeout_s=30,
         execution_output_cap=1000,
         is_authorized=is_authorized,
     )

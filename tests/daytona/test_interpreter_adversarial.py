@@ -82,6 +82,7 @@ class TestInterpreterTimeoutsAndLimits:
         def timeout(*_args: Any, **_kwargs: Any) -> Any:
             raise TimeoutError("Daytona execution timed out")
 
+        monkeypatch.setattr(DaytonaHttpToolBroker, "start", lambda _broker: None)
         monkeypatch.setattr(DaytonaHttpToolBroker, "execute", timeout)
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=10))
         with pytest.raises(ProviderRequestError) as error:
@@ -101,6 +102,7 @@ class TestInterpreterTimeoutsAndLimits:
             observed.append(timeout_s)
             return {"stdout": "done\n"}
 
+        monkeypatch.setattr(DaytonaHttpToolBroker, "start", lambda _broker: None)
         monkeypatch.setattr(DaytonaHttpToolBroker, "execute", execute)
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=42))
         assert interpreter.execute("print('done')") == "done\n"
@@ -442,7 +444,6 @@ class TestSandboxIsolationInvariants:
             run_id=uuid4(),
             call_index=1,
             deadline=loop.time() + 10.0,
-            execution_timeout_s=30,
             execution_output_cap=1000,
             retain_pending_cleanup=lambda _future: None,
         )

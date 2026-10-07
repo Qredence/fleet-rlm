@@ -139,16 +139,17 @@ the shipped configuration) and bound the Fleet
 `recursion_max_parallel_children` bounds the number of independent child RLMs
 that Fleet may run concurrently; the committed default is `4` and it is not a
 model-facing concurrency control.
-`child_execution_timeout_s` is the upper bound for each child *action* (one
-sandbox execution), independent of the parent `execution_timeout_s`. The
-committed default `0` derives `max(1, int(execution_timeout_s × 0.9))`, clamped
-to the parent; an explicit value must not exceed `execution_timeout_s`. A child
-runs several actions, so this bound alone does not keep a batch inside its
-caller. Every recursive call is also bounded by the deadline of the sandbox
-action that made it, minus a 10-second delivery margin: each child action is
-clamped to end by then, the next child action is refused once it passes, and
-the call returns ordered partial outcomes (`timed_out` for running and
-`not_started` for queued children, with `error_category: action_deadline`).
+Root and child sandbox actions use the remaining `runtime.turn_timeout_seconds`
+budget. The former `rlm.execution_timeout_s` and `rlm.child_execution_timeout_s`
+keys have been removed: delete them from custom TOML files, otherwise startup
+rejects them as unknown configuration keys. Provider-call, startup, and cleanup
+limits remain separate. Recursive calls retain the existing 10-second delivery
+margin so results and cleanup can return within their caller's deadline.
+At turn expiry or cancellation, Fleet force-stops the affected Daytona sandbox
+through its runtime owner. The mounted Volume persists; temporary Python state
+is lost and partial file writes are not rolled back. Provider idle auto-stop is
+disabled during an active execution lease because preview traffic does not
+refresh Daytona's idle timer; healthy root release restores the previous policy.
 The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CHILD_DEPTH = 1`),
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
