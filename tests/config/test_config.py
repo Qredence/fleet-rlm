@@ -250,16 +250,14 @@ level = "DEBUG"
 
 
 def test_retired_provider_attempt_key_has_actionable_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    import fleet_rlm.config.loader as config
-
     policy = tmp_path / "fleet.toml"
     _policy(policy)
     text = policy.read_text(encoding="utf-8").replace("max_iters = 3", "max_provider_attempts = 32\nmax_iters = 3")
     policy.write_text(text, encoding="utf-8")
-    monkeypatch.setattr(config, "_CONFIG_PATH", policy)
+    monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
 
     with pytest.raises(FleetConfigurationError, match="did not enforce it") as error:
-        config.load_runtime_settings()
+        load_runtime_settings()
 
     assert "remove this key" in str(error.value)
     assert "does not enforce an aggregate provider-attempt or spend cap" in str(error.value)
