@@ -467,7 +467,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert followup.status_code == 200
             followup_chunks, followup_done = _sse_chunks(followup)
             assert followup_done == 1
-            assert followup_chunks[-1].get("type") == "turn_finish"
+            assert followup_chunks[-1].get("type") in {"finish", "turn_finish"}
             assert followup_chunks[-1].get("finishReason") == "stop"
             assert tuple(runtime.roots) == retained_roots
             followup_code = "\n".join(
@@ -619,7 +619,7 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
             assert response.status_code == 200
             chunks, done = _sse_chunks(response)
             assert done == 1
-            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("type") in {"finish", "turn_finish"}
             assert chunks[-1].get("finishReason") == "stop"
             assert ledger.batch_calls == ledger.calls == 1
             assert ledger.verified
@@ -632,14 +632,28 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
             assert len(set(child_evidence.sandbox_ids)) == 2
             assert child_evidence.cleanups == 2
             assert child_evidence._active == 0
-            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            structured = [
+                chunk for chunk in chunks if chunk.get("type") in {"data-structured-result", "structured_result"}
+            ]
             assert len(structured) == 1
-            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
-            code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
+            assert (
+                structured[0].get("data", {}).get("schema_id")
+                if structured[0].get("type") == "data-structured-result"
+                else structured[0].get("schemaId")
+            ) == _CONTRACT_ID
+            code_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-rlm-code", "code"}]
             submit_calls = [
                 node
                 for chunk in code_chunks
-                for node in ast.walk(ast.parse(str(chunk.get("data", {}).get("code", ""))))
+                for node in ast.walk(
+                    ast.parse(
+                        str(
+                            chunk.get("data", {}).get("code", "")
+                            if chunk.get("type") == "data-rlm-code"
+                            else chunk.get("code", "")
+                        )
+                    )
+                )
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "SUBMIT"
             ]
             assert len(submit_calls) == 1

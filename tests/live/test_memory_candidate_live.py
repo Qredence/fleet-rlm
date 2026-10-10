@@ -36,6 +36,7 @@ from tests.live._mvp_support import (
     live_runtime,
 )
 from tests.live._tool_chunks import _paired_tool_chunks
+from tests.live.test_fleet_rlm_daytona_mvp import _run_id_from_sse
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 
@@ -204,11 +205,11 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 )
                 assert first.status_code == 200
                 first_chunks, first_done = _sse_chunks(first)
-                run_ids.append(str(next(chunk["messageId"] for chunk in first_chunks if chunk["type"] == "start")))
+                run_ids.append(str(_run_id_from_sse(first_chunks, label="qre140_propose_turn", resources=resources)))
                 trace_ids.append(trace_id_from(first_chunks))
                 assert first_done == 1
                 _assert_sse_stop(first_chunks, label="qre140_propose_turn")
-                usage_gathered.extend(chunk for chunk in first_chunks if chunk.get("type") == "data-usage")
+                usage_gathered.extend(chunk for chunk in first_chunks if chunk.get("type") in {"data-usage", "usage"})
 
                 proposal_inputs, proposal_outputs, proposal_errors = _paired_tool_chunks(first_chunks, "propose_memory")
                 assert proposal_errors == []
@@ -300,11 +301,11 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 )
                 assert second.status_code == 200
                 second_chunks, second_done = _sse_chunks(second)
-                run_ids.append(str(next(chunk["messageId"] for chunk in second_chunks if chunk["type"] == "start")))
+                run_ids.append(str(_run_id_from_sse(second_chunks, label="qre140_verify_turn", resources=resources)))
                 trace_ids.append(trace_id_from(second_chunks))
                 assert second_done == 1
                 _assert_sse_stop(second_chunks, label="qre140_verify_turn")
-                usage_gathered.extend(chunk for chunk in second_chunks if chunk.get("type") == "data-usage")
+                usage_gathered.extend(chunk for chunk in second_chunks if chunk.get("type") in {"data-usage", "usage"})
 
                 search_inputs, search_outputs, search_errors = _paired_tool_chunks(second_chunks, "search_memories")
                 assert search_errors == []
@@ -315,7 +316,9 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 # store readback and the injection digest below.
                 assert memory_id in search_output.get("top_memory_ids", ())
                 final_text = "".join(
-                    str(chunk.get("delta", "")) for chunk in second_chunks if chunk.get("type") == "text-delta"
+                    str(chunk.get("delta", ""))
+                    for chunk in second_chunks
+                    if chunk.get("type") in {"text-delta", "text"}
                 )
                 assert memory_id in final_text
 
@@ -383,12 +386,12 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
             "propose_memory_calls": sum(
                 chunk.get("toolName") == "propose_memory"
                 for chunk in first_chunks
-                if chunk["type"] == "tool-input-available"
+                if chunk.get("type") in {"tool-input-available", "tool_call"}
             ),
             "search_memory_calls": sum(
                 chunk.get("toolName") == "search_memories"
                 for chunk in second_chunks
-                if chunk["type"] == "tool-input-available"
+                if chunk.get("type") in {"tool-input-available", "tool_call"}
             ),
             "usage_events": len(usage_gathered),
             "memory_id_chars": len(memory_id),

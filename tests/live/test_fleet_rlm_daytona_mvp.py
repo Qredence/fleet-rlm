@@ -564,30 +564,44 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             assert done == 1
             _assert_sse_stop(chunks, label="direct_pi_digit")
 
-            code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
-            output_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-output"]
-            usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
-            structured = [chunk for chunk in chunks if chunk.get("type") == "structured_result"]
+            code_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-rlm-code", "code"}]
+            output_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-rlm-output", "output"}]
+            usage_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-usage", "usage"}]
+            structured = [
+                chunk for chunk in chunks if chunk.get("type") in {"data-structured-result", "structured_result"}
+            ]
             assert len(usage_chunks) == 1
             # The default one-output Signature is projected as text; multi-output
-            # Signatures use data-structured-result.
+            # Signatures use structured-result events.
             assert structured == []
-            text = "".join(str(chunk.get("delta", "")) for chunk in chunks if chunk.get("type") == "text-delta")
+            text = "".join(
+                str(chunk.get("delta", "")) for chunk in chunks if chunk.get("type") in {"text-delta", "text"}
+            )
             assert text == "1"
 
-            usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
+            usage_chunk = usage_chunks[0]
+            usage = (
+                usage_chunk["data"].get("usage", usage_chunk["data"])
+                if usage_chunk.get("type") == "data-usage"
+                else usage_chunk.get("usage", {})
+            )
             assert 2 <= int(usage["iterations"]) <= 3
             # Raw SSE code-chunk count is not the iteration bound: an iteration that yields no
             # live execution (malformed model code) shifts live/trajectory step alignment, and
             # trajectory reconciliation legitimately re-emits the corrected step plus the
             # canonical backfill under the same stable step IDs (TUI cards upsert). The stable
             # contract is distinct code steps, bounded by max_iters.
-            code_steps = {chunk["data"].get("step") for chunk in code_chunks if isinstance(chunk.get("data"), dict)}
+            code_steps = {
+                chunk.get("data", {}).get("step") if chunk.get("type") == "data-rlm-code" else chunk.get("step")
+                for chunk in code_chunks
+            }
             code_steps.discard(None)
             assert 2 <= len(code_steps) <= 3
 
             tool_names = [
-                str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
+                str(chunk.get("toolName", ""))
+                for chunk in chunks
+                if chunk.get("type") in {"tool-input-available", "tool_call"}
             ]
             assert "llm_query" not in tool_names
             assert "llm_query_batched" not in tool_names
@@ -606,7 +620,14 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             }
             assert forbidden_capabilities.isdisjoint(tool_names)
 
-            outputs = [str(chunk.get("data", {}).get("output", "")) for chunk in output_chunks]
+            outputs = [
+                str(
+                    chunk.get("data", {}).get("output", "")
+                    if chunk.get("type") == "data-rlm-output"
+                    else chunk.get("output", "")
+                )
+                for chunk in output_chunks
+            ]
             assert not any(
                 output.lstrip().startswith(("[Error]", "Execution error", "Execution failed")) for output in outputs
             )
