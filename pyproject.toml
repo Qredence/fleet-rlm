@@ -33,7 +33,7 @@ dependencies = [
     "packaging>=26.3,<27",
     # Exact SDK pin: its resource and cleanup surface is verified by the
     # Daytona contract and live lifecycle lanes.
-    "daytona==0.220.0",
+    "daytona==0.222.0",
     # Persistence and migrations.
     "aiosqlite>=0.22.1",
     "alembic>=1.20.0,<2",
