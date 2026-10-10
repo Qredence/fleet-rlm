@@ -32,7 +32,7 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
 from fleet_rlm.json_types import JsonValue
 from fleet_rlm.observability.tracing import _local_tracking_server_available
-from fleet_rlm.paths import volume_paths_from_settings
+from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, volume_paths_from_settings
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.result import truncate_public_text
 from fleet_rlm.sessions.bindings import SandboxBinding
@@ -92,6 +92,43 @@ class NativeSemanticProofResult(dspy.Signature):
     attachments: list[dict] = dspy.InputField()
     answer: str = dspy.OutputField()
     evidence: str = dspy.OutputField()
+
+
+class LargeContextProofResult(dspy.Signature):
+    """Return the verified aggregate over the seeded synthetic corpus."""
+
+    request: str = dspy.InputField()
+    session_context: dict = dspy.InputField()
+    skill_cards: list[dict] = dspy.InputField()
+    attachments: list[dict] = dspy.InputField()
+    answer: str = dspy.OutputField()
+    evidence: str = dspy.OutputField()
+
+
+@dataclass(slots=True)
+class _LargeContextLedger:
+    calls: int = 0
+    expected: tuple[tuple[str, int], ...] = (
+        ("ledger-01.txt", 14),
+        ("ledger-02.txt", 27),
+        ("ledger-03.txt", 9),
+        ("ledger-04.txt", 31),
+        ("ledger-05.txt", 19),
+    )
+
+    def verify_aggregate(self, entries: list[dict[str, object]], total: int) -> dict[str, object]:
+        self.calls += 1
+        normalized_entries: list[tuple[str, int]] = []
+        for entry in entries:
+            amount = entry.get("amount")
+            if not isinstance(amount, int) or isinstance(amount, bool):
+                raise ValueError("synthetic corpus amount must be an integer")
+            normalized_entries.append((str(entry.get("reference", "")), amount))
+        normalized = tuple(sorted(normalized_entries))
+        expected = tuple(sorted(self.expected))
+        if self.calls != 1 or normalized != expected or total != 100:
+            raise ValueError("synthetic corpus facts or aggregate did not match the seeded files")
+        return {"ok": True, "total": total, "source_count": len(normalized)}
 
 
 @dataclass(slots=True)
@@ -361,20 +398,20 @@ def _stream_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, Any]:
     for chunk in chunks:
         kind = str(chunk.get("type", "?"))
         chunk_types[kind] = chunk_types.get(kind, 0) + 1
-        if kind == "tool-input-available":
+        if kind in {"tool-input-available", "tool_call"}:
             call_id = str(chunk.get("toolCallId", ""))
             name = str(chunk.get("toolName", ""))
             if call_id and name:
                 tool_names_by_call[call_id] = name
-        elif kind == "finish":
+        elif kind in {"finish", "turn_finish"}:
             finish_reasons.append(str(chunk.get("finishReason", "")))
-        elif kind == "error":
+        elif kind in {"error", "turn_error"}:
             error_texts.append(str(chunk.get("errorText", "")))
-        elif kind == "tool-output-error":
+        elif kind == "tool-output-error" or (kind == "tool_result" and chunk.get("error")):
             tool_errors.append(
                 {
                     "toolName": tool_names_by_call.get(str(chunk.get("toolCallId", "")), "unknown"),
-                    "errorText": str(chunk.get("errorText", "")),
+                    "errorText": str(chunk.get("errorText", chunk.get("error", ""))),
                 }
             )
     bounded: dict[str, Any] = _bound_diagnostic(
@@ -480,7 +517,7 @@ async def _replace_binding(resources: Any, binding: SandboxBinding) -> SandboxBi
 
 
 def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any) -> UUID:
-    starts = [chunk for chunk in chunks if chunk.get("type") == "start"]
+    starts = [chunk for chunk in chunks if chunk.get("type") in {"start", "turn_start"}]
     if len(starts) != 1:
         runtime = getattr(resources, "runtime", resources)
         pending_ownership = bool(getattr(runtime, "has_pending_ownership", False))
@@ -492,7 +529,7 @@ def _run_id_from_sse(chunks: list[dict[str, Any]], *, label: str, resources: Any
             f"cleanup_state={{pending_ownership:{pending_ownership}, runtime_roots:{runtime_roots}, "
             f"tracked_sandboxes:{tracked_sandboxes}}}"
         )
-    return UUID(str(starts[0]["messageId"]))
+    return UUID(str(starts[0].get("messageId", starts[0].get("runId"))))
 
 
 @pytest.mark.live_daytona
@@ -530,7 +567,7 @@ def test_direct_pi_digit_uses_deterministic_repl_without_optional_capabilities(t
             code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
             output_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-output"]
             usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
-            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            structured = [chunk for chunk in chunks if chunk.get("type") == "structured_result"]
             assert len(usage_chunks) == 1
             # The default one-output Signature is projected as text; multi-output
             # Signatures use data-structured-result.
@@ -1028,6 +1065,7 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     """Verify single and ordered batch semantic calls through the live Daytona broker."""
     settings = _live_settings(tmp_path).model_copy(
         update={
+            "rlm_recursion_enabled": False,
             "rlm_max_iters": 6,
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
@@ -1144,29 +1182,48 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 turn_chunks["native_semantic_calls"] = chunks
                 assert done == 1
                 _assert_sse_stop(chunks, label="native_semantic_calls")
-                assert sum(chunk.get("type") == "start" for chunk in chunks) == 1
-                assert sum(chunk.get("type") == "finish" for chunk in chunks) == 1
+                assert sum(chunk.get("type") in {"start", "turn_start"} for chunk in chunks) == 1
+                assert sum(chunk.get("type") in {"finish", "turn_finish"} for chunk in chunks) == 1
 
-                code_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-rlm-code"]
-                generated_code = [str(chunk.get("data", {}).get("code", "")) for chunk in code_chunks]
+                code_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-rlm-code", "code"}]
+                generated_code = [
+                    str(
+                        chunk.get("data", {}).get("code", "")
+                        if chunk.get("type") == "data-rlm-code"
+                        else chunk.get("code", "")
+                    )
+                    for chunk in code_chunks
+                ]
                 assert any("issue_iteration_token" in code for code in generated_code)
                 assert len(_call_shapes(chunks, "llm_query")) == 1
                 assert len(_call_shapes(chunks, "llm_query_batched")) == 1
 
                 tool_names = [
-                    str(chunk.get("toolName", "")) for chunk in chunks if chunk.get("type") == "tool-input-available"
+                    str(chunk.get("toolName", ""))
+                    for chunk in chunks
+                    if chunk.get("type") in {"tool-input-available", "tool_call"}
                 ]
                 assert tool_names.count("issue_iteration_token") == 1
                 assert tool_names.count("verify_semantic_work") == 1
                 assert "rlm_query" not in tool_names
                 assert "rlm_query_batched" not in tool_names
-                assert not any(chunk.get("type") in {"error", "tool-output-error"} for chunk in chunks)
+                assert not any(
+                    chunk.get("type") == "error"
+                    or chunk.get("type") == "tool-output-error"
+                    or (chunk.get("type") == "tool_result" and chunk.get("error"))
+                    for chunk in chunks
+                )
                 assert ledger.token_calls == 1
                 assert len(ledger.semantic_calls) == 1
 
-                usage_chunks = [chunk for chunk in chunks if chunk.get("type") == "data-usage"]
+                usage_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-usage", "usage"}]
                 assert len(usage_chunks) == 1
-                usage = usage_chunks[0]["data"].get("usage", usage_chunks[0]["data"])
+                usage_chunk = usage_chunks[0]
+                usage = (
+                    usage_chunk["data"].get("usage", usage_chunk["data"])
+                    if usage_chunk.get("type") == "data-usage"
+                    else usage_chunk.get("usage", {})
+                )
                 assert int(usage["iterations"]) <= settings.rlm_max_iters
                 assert int(usage["recursive_call_count"]) == 0
                 metrics = usage["delegation_metrics"]
@@ -1177,15 +1234,28 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 submit_shapes = _call_shapes(chunks, "SUBMIT")
                 assert len(submit_shapes) == 1
                 assert submit_shapes[0]["keyword_names"] == ["answer", "evidence"]
-                structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+                structured = [
+                    chunk for chunk in chunks if chunk.get("type") in {"data-structured-result", "structured_result"}
+                ]
                 assert len(structured) == 1
-                assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+                assert (
+                    structured[0].get("data", {}).get("schema_id")
+                    if structured[0].get("type") == "data-structured-result"
+                    else structured[0].get("schemaId")
+                ) == _CONTRACT_ID
 
                 trace_ids = {
-                    metadata["traceId"]
+                    trace_id
                     for chunk in chunks
-                    for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
-                    if isinstance(metadata, dict) and isinstance(metadata.get("traceId"), str)
+                    for trace_id in (
+                        chunk.get("traceId"),
+                        *(
+                            metadata.get("traceId")
+                            for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                            if isinstance(metadata, dict)
+                        ),
+                    )
+                    if isinstance(trace_id, str)
                 }
                 assert len(trace_ids) == 1
                 trace_id = trace_ids.pop()
@@ -1252,6 +1322,19 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                     success_receipt["passed"] = True
                     _write_receipt_if_requested(success_receipt)
                     receipt_written = True
+                elif scenario_passed:
+                    # Keep the successful execution evidence even when cleanup
+                    # needs operator follow-up. In particular, retain the exact
+                    # MLflow trace and provider resource identities so cleanup
+                    # can be reconciled against provider state.
+                    assert success_receipt is not None
+                    assertions = success_receipt["assertions"]
+                    assert isinstance(assertions, dict)
+                    success_receipt["cleanup_failures"] = list(cleanup_failures)
+                    success_receipt["failure"] = {"category": "cleanup_failed", "phase": "cleanup"}
+                    success_receipt["passed"] = False
+                    _write_receipt_if_requested(success_receipt)
+                    receipt_written = True
                 else:
                     _write_receipt_if_requested(
                         _failure_receipt(
@@ -1277,6 +1360,263 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
                 )
             )
         raise
+
+
+@pytest.mark.live_daytona
+@pytest.mark.timeout(900)
+def test_large_context_aggregate_across_seeded_workspace_files(tmp_path: Path) -> None:
+    """Prove an exact aggregate from facts split across five persistent files."""
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            "rlm_recursion_enabled": False,
+            "rlm_max_iters": 6,
+            "rlm_max_llm_calls": 12,
+            "turn_timeout_seconds": 840,
+            "mlflow_tracing_enabled": True,
+        }
+    )
+    _assert_tracking_server_reachable(settings.mlflow_tracking_uri)
+    ledger = _LargeContextLedger()
+    tool = dspy.Tool(
+        ledger.verify_aggregate,
+        name="verify_corpus_aggregate",
+        desc="Verify the exact amount and source filename read from each corpus file.",
+        arg_desc={
+            "entries": "One entry per file with reference equal to its basename and amount equal to its fact.",
+            "total": "The sum of all five amounts.",
+        },
+    )
+    event_views = MappingProxyType(
+        {
+            "verify_corpus_aggregate": ToolEventView(
+                input_projection=lambda values: {
+                    "entry_count": len(values.get("entries", ())),
+                    "total": values.get("total"),
+                },
+                output_projection=lambda result: {
+                    "ok": bool(result.get("ok")),
+                    "source_count": result.get("source_count"),
+                },
+            )
+        }
+    )
+    app = create_app(settings=settings)
+    trace_ids: list[str] = []
+
+    def collect_trace_id(chunks: list[dict[str, Any]]) -> str:
+        values = {
+            value
+            for chunk in chunks
+            for value in (
+                chunk.get("traceId"),
+                *(
+                    metadata.get("traceId")
+                    for metadata in (chunk.get("metadata"), chunk.get("messageMetadata"))
+                    if isinstance(metadata, dict)
+                ),
+            )
+            if isinstance(value, str) and value
+        }
+        assert len(values) == 1
+        return values.pop()
+
+    cleanup_failures: tuple[str, ...] = ()
+    with TestClient(app) as client:
+        resources, preparation = live_runtime(app)
+        assert client.portal is not None
+        portal = client.portal
+        portal_loop = portal.call(lambda: asyncio.get_running_loop())
+        sandbox_ids: set[str] = set()
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(
+                preparation.capabilities,
+                (tool,),
+                event_views,
+                signature=LargeContextProofResult,
+            ),
+        )
+        try:
+            created = client.post("/api/sessions", json={"title": "Synthetic distributed corpus proof"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            seeded = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={"text": "Use exactly one iteration to SUBMIT answer='corpus seeded' and evidence='seed turn'."},
+                headers={"Idempotency-Key": f"large-context-seed-{uuid4()}"},
+            )
+            assert seeded.status_code == 200
+            seed_chunks, seed_done = _sse_chunks(seeded)
+            assert seed_done == 1
+            _assert_sse_stop(seed_chunks, label="large_context_seed")
+            trace_ids.append(collect_trace_id(seed_chunks))
+
+            binding = portal.call(resources._bindings.get, session_id)
+            assert binding is not None and binding.sandbox_id is not None
+            sandbox_ids.add(binding.sandbox_id)
+            sandbox = sync_sandbox(portal.call(resources._platform.get, binding.sandbox_id), portal_loop)
+            assert sandbox is not None
+            workspace = Path(SESSION_WORKSPACE_MOUNT_PATH)
+            sandbox.fs.create_folder(str(workspace / "analysis"), mode="755")
+            volume_fs = DaytonaSandboxVolumeFs(sandbox)
+            for filename, amount in ledger.expected:
+                path = str(workspace / "analysis" / filename)
+                volume_fs.write_bytes(
+                    path,
+                    f"source={filename}\namount={amount}\n".encode(),
+                )
+                assert volume_fs.read_bytes(path) == f"source={filename}\namount={amount}\n".encode()
+
+            analysis = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Analyze the supplied synthetic corpus. Call read_workspace_text exactly once for each of "
+                        "analysis/ledger-01.txt, analysis/ledger-02.txt, analysis/ledger-03.txt, "
+                        "analysis/ledger-04.txt, and analysis/ledger-05.txt. Use only the returned file contents. "
+                        "Extract each amount, preserve each basename as its evidence reference, sum the five "
+                        "amounts, then call verify_corpus_aggregate exactly once with entries and total. "
+                        "Only after ok=true, issue typed SUBMIT with answer='100' and evidence containing all five "
+                        "basenames. Do not infer or invent any fact."
+                    )
+                },
+                headers={"Idempotency-Key": f"large-context-analyze-{uuid4()}"},
+            )
+            assert analysis.status_code == 200
+            chunks, done = _sse_chunks(analysis)
+            assert done == 1
+            _assert_sse_stop(chunks, label="large_context_analysis")
+            tool_inputs = [chunk for chunk in chunks if chunk.get("type") in {"tool-input-available", "tool_call"}]
+            reads = [chunk for chunk in tool_inputs if chunk.get("toolName") == "read_workspace_text"]
+            assert len(reads) == 5
+            read_paths = {str(chunk.get("input", {}).get("path", "")) for chunk in reads}
+            assert read_paths == {f"analysis/{filename}" for filename, _ in ledger.expected}
+            assert sum(chunk.get("toolName") == "verify_corpus_aggregate" for chunk in tool_inputs) == 1
+            assert ledger.calls == 1
+            result_chunks = [chunk for chunk in chunks if chunk.get("type") == "structured_result"]
+            assert len(result_chunks) == 1
+            value = result_chunks[0]["value"]
+            assert value["answer"].strip() == "100"
+            assert all(filename in value["evidence"] for filename, _ in ledger.expected)
+            page = client.get(f"/api/sessions/{session_id}/turns")
+            assert page.status_code == 200
+            assert _structured_part(_assistant_messages(page.json())[-1])["data"]["value"] == value
+            trace_ids.append(collect_trace_id(chunks))
+        finally:
+            cleanup_failures = portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+    assert cleanup_failures == ()
+    _write_receipt_if_requested(
+        {
+            "schema": "fleet.live-large-context/v1",
+            "candidate": _candidate_metadata(settings),
+            "trace_ids": trace_ids,
+            "expected_total": 100,
+            "source_count": len(ledger.expected),
+            "cleanup_confirmed": True,
+            "passed": True,
+        }
+    )
+
+
+@pytest.mark.live_daytona
+@pytest.mark.timeout(600)
+def test_constrained_live_final_iteration_submits_typed_result(tmp_path: Path) -> None:
+    """Exercise a real model at the final allowed iteration and require bounded submission."""
+    settings = _live_settings(tmp_path).model_copy(
+        update={
+            "rlm_recursion_enabled": False,
+            "rlm_max_iters": 1,
+            "rlm_max_llm_calls": 4,
+            "rlm_finalization_attempts": 2,
+            "turn_timeout_seconds": 300,
+            "mlflow_tracing_enabled": True,
+        }
+    )
+    _assert_tracking_server_reachable(settings.mlflow_tracking_uri)
+    app = create_app(settings=settings)
+    trace_id: str | None = None
+    cleanup_failures: tuple[str, ...] = ()
+    with TestClient(app) as client:
+        resources, preparation = live_runtime(app)
+        assert client.portal is not None
+        sandbox_ids: set[str] = set()
+        object.__setattr__(
+            preparation,
+            "capabilities",
+            _ProofCapabilityPreparer(
+                preparation.capabilities,
+                (),
+                MappingProxyType({}),
+                signature=NativeSemanticProofResult,
+            ),
+        )
+        try:
+            created = client.post("/api/sessions", json={"title": "Constrained final iteration proof"})
+            assert created.status_code == 201
+            session_id = UUID(created.json()["id"])
+            response = client.post(
+                f"/api/sessions/{session_id}/turns",
+                json={
+                    "text": (
+                        "Complete this one-iteration bounded task: submit answer='bounded-final' "
+                        "with evidence='final-iteration'."
+                    )
+                },
+                headers={"Idempotency-Key": f"live-finalization-{uuid4()}"},
+            )
+            assert response.status_code == 200
+            chunks, done = _sse_chunks(response)
+            assert done == 1
+            _assert_sse_stop(chunks, label="constrained_finalization")
+            usage_chunks = [chunk for chunk in chunks if chunk.get("type") in {"data-usage", "usage"}]
+            assert len(usage_chunks) == 1
+            usage_chunk = usage_chunks[0]
+            usage = (
+                usage_chunk["data"].get("usage", usage_chunk["data"])
+                if usage_chunk.get("type") == "data-usage"
+                else usage_chunk.get("usage", {})
+            )
+            assert int(usage["iterations"]) == 1
+            assert int(usage["iterations"]) <= settings.rlm_max_iters
+            assert len(_call_shapes(chunks, "SUBMIT")) == 1
+            structured = [chunk for chunk in chunks if chunk.get("type") == "structured_result"]
+            assert len(structured) == 1
+            value = structured[0]["value"]
+            assert value["answer"].strip() == "bounded-final"
+            assert value["evidence"] == "final-iteration"
+            trace_ids = {
+                trace_id
+                for chunk in chunks
+                for trace_id in (
+                    chunk.get("traceId"),
+                    *(
+                        metadata.get("traceId")
+                        for metadata in (chunk.get("metadata"), chunk.get("messageMetadata"))
+                        if isinstance(metadata, dict)
+                    ),
+                )
+                if isinstance(trace_id, str) and trace_id
+            }
+            assert len(trace_ids) == 1
+            trace_id = trace_ids.pop()
+            binding = client.portal.call(resources._bindings.get, session_id)
+            assert binding is not None and binding.sandbox_id is not None
+            sandbox_ids.add(binding.sandbox_id)
+        finally:
+            cleanup_failures = client.portal.call(_strict_cleanup, resources, sandbox_ids, settings.volume_name)
+    assert cleanup_failures == ()
+    _write_receipt_if_requested(
+        {
+            "schema": "fleet.live-finalization/v1",
+            "candidate": _candidate_metadata(settings),
+            "trace_id": trace_id,
+            "iterations": 1,
+            "finalization_attempt_limit": settings.rlm_finalization_attempts,
+            "cleanup_confirmed": True,
+            "passed": True,
+        }
+    )
 
 
 def _synthetic_failure_chunks() -> list[dict[str, Any]]:

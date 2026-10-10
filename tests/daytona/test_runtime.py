@@ -146,8 +146,66 @@ async def test_warm_workspace_idle_expiry_and_reuse_timer(workspace_runtime) -> 
         while not platform.deleted:
             await asyncio.sleep(0.01)
     assert not runtime._warm_workspace_io_sandboxes
-    assert runtime._admission._semaphore._value == 2
+    async with asyncio.timeout(1):
+        while runtime._admission._semaphore._value != 2:
+            await asyncio.sleep(0.01)
     assert await runtime.aclose(drain_seconds=1)
+
+
+@pytest.mark.asyncio
+async def test_live_volume_cleanup_treats_daytona_404_as_confirmed_absence() -> None:
+    from daytona.common.errors import DaytonaNotFoundError
+
+    from tests.live._mvp_support import _strict_cleanup
+
+    class VolumeClient:
+        def __init__(self) -> None:
+            self.reads = 0
+            self.delete_requested = False
+
+        async def get(self, name: str, *, create: bool = False) -> object:
+            assert name == "fleet-rlm-live-mvp-cleanup-proof"
+            assert create is False
+            self.reads += 1
+            if self.delete_requested and self.reads >= 3:
+                raise DaytonaNotFoundError("volume is absent", status_code=404)
+            return object()
+
+        async def delete(self, _volume: object) -> None:
+            self.delete_requested = True
+
+    volume_client = VolumeClient()
+    resources = SimpleNamespace(
+        _tracked_sandbox_ids=set(),
+        _platform=SimpleNamespace(get=AsyncMock(return_value=None)),
+        _client=SimpleNamespace(volume=volume_client),
+    )
+
+    failures = await _strict_cleanup(resources, set(), "fleet-rlm-live-mvp-cleanup-proof")
+
+    assert failures == ()
+    assert volume_client.delete_requested
+    assert volume_client.reads == 3
+
+
+def test_live_tool_pair_helper_supports_canonical_and_ai_sdk_chunk_names() -> None:
+    from tests.live._tool_chunks import _paired_tool_chunks
+
+    call = {"type": "tool_call", "toolCallId": "call-1", "toolName": "remember", "input": {"key": "x"}}
+    rejected_call = {"type": "tool_call", "toolCallId": "call-2", "toolName": "remember", "input": {"key": "y"}}
+    result = {"type": "tool_result", "toolCallId": "call-1", "toolName": "remember", "output": {"ok": True}}
+    failed = {
+        "type": "tool_result",
+        "toolCallId": "call-2",
+        "toolName": "remember",
+        "error": "rejected",
+    }
+
+    inputs, outputs, errors = _paired_tool_chunks([call, rejected_call, result, failed], "remember")
+
+    assert inputs == [call, rejected_call]
+    assert outputs == [result]
+    assert errors == [failed]
 
 
 @pytest.mark.asyncio
@@ -1702,13 +1760,19 @@ class _LiveVolumeClientDouble:
     def __init__(self) -> None:
         self.get_calls: list[tuple[str, bool]] = []
         self.delete_calls: list[object] = []
+        self.delete_requested = False
 
     async def get(self, name: str, *, create: bool) -> SimpleNamespace:
         self.get_calls.append((name, create))
+        if self.delete_requested:
+            from daytona.common.errors import DaytonaNotFoundError
+
+            raise DaytonaNotFoundError("volume is absent", status_code=404)
         return SimpleNamespace(name=name)
 
     async def delete(self, volume: SimpleNamespace) -> None:
         self.delete_calls.append(volume)
+        self.delete_requested = True
 
 
 def test_strict_cleanup_awaits_provider_operations_before_returning() -> None:
@@ -1793,7 +1857,7 @@ def test_mvp_cleanup_deletes_ephemeral_proof_volume() -> None:
 
     assert failures == ()
     assert platform.delete_calls == ["sandbox-a"]
-    assert volume.get_calls == [(name, False)]
+    assert volume.get_calls == [(name, False), (name, False)]
     assert len(volume.delete_calls) == 1
     assert resources._tracked_sandbox_ids == []
 

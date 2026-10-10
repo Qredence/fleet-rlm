@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import os
 import queue
@@ -130,6 +131,8 @@ class _ChildEvidence:
 def _trace_id_from_chunks(chunks: list[dict[str, Any]]) -> str:
     """Return the root trace ID emitted in the public Turn metadata."""
     for chunk in chunks:
+        if isinstance(chunk.get("traceId"), str) and chunk["traceId"]:
+            return str(chunk["traceId"])
         for key in ("messageMetadata", "metadata"):
             value = chunk.get(key)
             if isinstance(value, dict) and isinstance(value.get("traceId"), str) and value["traceId"]:
@@ -206,7 +209,9 @@ def _retrieve_trace_hierarchy(trace_id: str) -> dict[str, object]:
     while time.monotonic() < deadline:
         try:
             trace = _bounded_call(
-                lambda: MlflowClient().get_trace(trace_id, display=False, flush=True),
+                lambda: MlflowClient(tracking_uri=os.environ.get("FLEET_LIVE_MLFLOW_TRACKING_URI")).get_trace(
+                    trace_id, display=False, flush=True
+                ),
                 timeout=min(_TRACE_OPERATION_TIMEOUT_SECONDS, max(0.1, deadline - time.monotonic())),
             )
             return _trace_hierarchy(trace, trace_id=trace_id)
@@ -258,8 +263,8 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
             # stale window during preparation; match other live canaries.
             "run_stale_after_seconds": 600,
             "mlflow_tracing_enabled": True,
-            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_URI", "http://127.0.0.1:5001"),
-            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-canary"),
+            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_TRACKING_URI", "http://127.0.0.1:5001"),
+            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-capability"),
         }
     )
 
@@ -311,6 +316,20 @@ def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _Ch
     monkeypatch.setattr(RecursiveRLMExecutor, "_call_children_batched", observed)
 
 
+def _wait_for_admission_restore(resources: Any, expected: int, *, timeout: float = 15.0) -> None:
+    """Wait for bounded owner-release callbacks after the retained root closes."""
+    deadline = time.monotonic() + timeout
+    admission = resources._admission
+    while time.monotonic() < deadline:
+        if admission._semaphore._value == expected:
+            return
+        time.sleep(0.05)
+    raise AssertionError(
+        "Daytona admission permits did not restore after root close "
+        f"within {timeout:.1f}s: expected={expected}, actual={admission._semaphore._value}"
+    )
+
+
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
     chunks: list[dict[str, Any]] = []
     done = 0
@@ -327,9 +346,9 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 
 def _batch_completion(chunks: list[dict[str, Any]]) -> dict[str, object] | None:
     for chunk in chunks:
-        if chunk.get("type") != "tool-output-available":
+        if chunk.get("type") not in {"tool-output-available", "tool_result"}:
             continue
-        output = chunk.get("output")
+        output = chunk.get("output", chunk.get("output"))
         if (
             isinstance(output, dict)
             and output.get("status") == "completed"
@@ -406,7 +425,7 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert response.status_code == 200
             chunks, done = _sse_chunks(response)
             assert done == 1
-            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("type") in {"finish", "turn_finish"}
             assert chunks[-1].get("finishReason") == "stop"
             batch = _batch_completion(chunks)
             assert batch is not None
@@ -448,12 +467,17 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             assert followup.status_code == 200
             followup_chunks, followup_done = _sse_chunks(followup)
             assert followup_done == 1
+            assert followup_chunks[-1].get("type") == "turn_finish"
             assert followup_chunks[-1].get("finishReason") == "stop"
             assert tuple(runtime.roots) == retained_roots
             followup_code = "\n".join(
-                str(chunk.get("data", {}).get("code", ""))
+                str(
+                    chunk.get("data", {}).get("code", "")
+                    if chunk.get("type") == "data-rlm-code"
+                    else chunk.get("code", "")
+                )
                 for chunk in followup_chunks
-                if chunk.get("type") == "data-rlm-code"
+                if chunk.get("type") in {"data-rlm-code", "code"}
             )
             assert "globals()" in followup_code
             assert "fresh invocation confirmed" in str(followup_chunks)
@@ -461,17 +485,40 @@ def test_daytona_recursive_batch_two_children_through_fastapi(
             if callable(close):
                 assert client.portal is not None
                 client.portal.call(lambda: close(LocalScope().workspace_id, session_id))
-            assert resources._admission._semaphore._value == settings.max_active_daytona_leases
+            # Root closure can leave an explicitly retained warm Workspace-I/O
+            # lease. Drain the runtime before asserting admission restoration
+            # or deleting the shared test Volume.
+            assert client.portal is not None
+            assert client.portal.call(lambda: runtime.aclose(deadline=asyncio.get_running_loop().time() + 45.0)), (
+                "recursive canary runtime did not settle owned leases"
+            )
+            _wait_for_admission_restore(resources, settings.max_active_daytona_leases)
             assert resources.active_leases.holder(session_id) is None
-            structured = [chunk for chunk in chunks if chunk.get("type") == "data-structured-result"]
+            structured = [
+                chunk for chunk in chunks if chunk.get("type") in {"data-structured-result", "structured_result"}
+            ]
             assert len(structured) == 1
-            assert structured[0].get("data", {}).get("schema_id") == _CONTRACT_ID
+            assert (
+                structured[0].get("data", {}).get("schema_id")
+                if structured[0].get("type") == "data-structured-result"
+                else structured[0].get("schemaId")
+            ) == _CONTRACT_ID
             generated_code = "\n".join(
-                str(chunk.get("data", {}).get("code", "")) for chunk in chunks if chunk.get("type") == "data-rlm-code"
+                str(
+                    chunk.get("data", {}).get("code", "")
+                    if chunk.get("type") == "data-rlm-code"
+                    else chunk.get("code", "")
+                )
+                for chunk in chunks
+                if chunk.get("type") in {"data-rlm-code", "code"}
             )
             assert "rlm_query_batched" in generated_code
         finally:
             assert client.portal is not None
+            # Child runtimes are independently owned by the recursive executor;
+            # include their observed sandbox IDs so teardown waits for every
+            # volume detach before deleting the isolated validation volume.
+            resources._tracked_sandbox_ids.extend(child_evidence.sandbox_ids)
             cleanup_failures = client.portal.call(_strict_cleanup, resources, settings.volume_name)
             assert cleanup_failures == (), "recursive batch canary cleanup did not settle"
     write_receipt(

@@ -8,8 +8,10 @@ import json
 import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
+from daytona.common.errors import DaytonaNotFoundError
 from dotenv import load_dotenv
 
 from fleet_rlm.config.loader import load_configuration_environment_contract, load_runtime_settings
@@ -39,6 +41,8 @@ _EPHEMERAL_PROOF_VOLUME_PREFIXES = (
 
 _LIVE_ROOT_MODEL_ENV = "FLEET_LIVE_ROOT_MODEL"
 _LIVE_SUB_MODEL_ENV = "FLEET_LIVE_SUB_MODEL"
+_LIVE_MLFLOW_TRACKING_URI_ENV = "FLEET_LIVE_MLFLOW_TRACKING_URI"
+_LIVE_MLFLOW_EXPERIMENT_ENV = "FLEET_LIVE_MLFLOW_EXPERIMENT"
 _MAX_MODEL_ID_CHARS = 256
 
 
@@ -81,6 +85,7 @@ def _live_settings(tmp_path: Path) -> Settings:
     upgrade_to_head(database_url)
     overrides: dict[str, object] = {
         "database_url": database_url,
+        "volume_name": f"fleet-rlm-live-mvp-{uuid4()}",
         "rlm_max_iters": 8,
         "rlm_max_llm_calls": 12,
         "turn_timeout_seconds": 840,
@@ -88,6 +93,8 @@ def _live_settings(tmp_path: Path) -> Settings:
         # MLflow out of the MVP lane so a dead local tracking URI cannot
         # starve claim heartbeats during preparation.
         "mlflow_tracing_enabled": False,
+        "mlflow_tracking_uri": os.environ.get(_LIVE_MLFLOW_TRACKING_URI_ENV, policy.mlflow_tracking_uri),
+        "mlflow_experiment_name": os.environ.get(_LIVE_MLFLOW_EXPERIMENT_ENV, "fleet-rlm-live-capability"),
     }
     if candidate_snapshot := os.environ.get(_P27_SESSION_SNAPSHOT_ENV):
         overrides["daytona_snapshot"] = candidate_snapshot
@@ -111,9 +118,12 @@ def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:
 def _call_shapes(chunks: list[dict[str, Any]], call_name: str) -> list[dict[str, object]]:
     shapes: list[dict[str, object]] = []
     for chunk in chunks:
-        if chunk.get("type") != "data-rlm-code":
+        if chunk.get("type") == "data-rlm-code":
+            code = str(chunk.get("data", {}).get("code", ""))
+        elif chunk.get("type") == "code":
+            code = str(chunk.get("code", ""))
+        else:
             continue
-        code = str(chunk.get("data", {}).get("code", ""))
         if call_name not in code:
             continue
         try:
@@ -142,17 +152,21 @@ def _semantic_tool_diagnostic(chunks: list[dict[str, Any]]) -> dict[str, object]
     inputs = [
         value if isinstance(value := chunk.get("input"), dict) else {}
         for chunk in chunks
-        if chunk.get("type") == "tool-input-available" and chunk.get("toolName") == "verify_semantic_work"
+        if chunk.get("type") in {"tool-input-available", "tool_call"}
+        and chunk.get("toolName") == "verify_semantic_work"
     ]
     call_ids = {
         str(chunk.get("toolCallId", ""))
         for chunk in chunks
-        if chunk.get("type") == "tool-input-available" and chunk.get("toolName") == "verify_semantic_work"
+        if chunk.get("type") in {"tool-input-available", "tool_call"}
+        and chunk.get("toolName") == "verify_semantic_work"
     }
     failures = [
-        str(chunk.get("errorText", ""))
+        str(chunk.get("errorText", chunk.get("error", "")))
         for chunk in chunks
-        if chunk.get("type") == "tool-output-error" and str(chunk.get("toolCallId", "")) in call_ids
+        if chunk.get("type") in {"tool-output-error", "tool_result"}
+        and str(chunk.get("toolCallId", "")) in call_ids
+        and (chunk.get("type") == "tool-output-error" or chunk.get("error"))
     ]
     if not inputs:
         classification = "semantic_tool_not_observed"
@@ -190,20 +204,24 @@ def _sse_finish_diagnostic(chunks: list[dict[str, Any]]) -> str:
     for chunk in chunks:
         kind = str(chunk.get("type", "?"))
         type_counts[kind] = type_counts.get(kind, 0) + 1
-        if kind == "tool-input-available":
+        if kind in {"tool-input-available", "tool_call"}:
             call_id = str(chunk.get("toolCallId", ""))
             name = str(chunk.get("toolName", ""))
             if call_id and name:
                 tool_names_by_call[call_id] = name
-    error_texts = [str(chunk.get("errorText", ""))[:200] for chunk in chunks if chunk.get("type") == "error"]
-    finish_reasons = [str(chunk.get("finishReason", "")) for chunk in chunks if chunk.get("type") == "finish"]
+    error_texts = [
+        str(chunk.get("errorText", ""))[:200] for chunk in chunks if chunk.get("type") in {"error", "turn_error"}
+    ]
+    finish_reasons = [
+        str(chunk.get("finishReason", "")) for chunk in chunks if chunk.get("type") in {"finish", "turn_finish"}
+    ]
     tool_errors = [
         {
             "toolName": tool_names_by_call.get(str(chunk.get("toolCallId", "")), "unknown"),
-            "errorText": str(chunk.get("errorText", ""))[:200],
+            "errorText": str(chunk.get("errorText", chunk.get("error", "")))[:200],
         }
         for chunk in chunks
-        if chunk.get("type") == "tool-output-error"
+        if chunk.get("type") == "tool-output-error" or (chunk.get("type") == "tool_result" and chunk.get("error"))
     ]
     return (
         f"chunk_types={dict(sorted(type_counts.items()))} "
@@ -219,7 +237,7 @@ def _assert_sse_stop(chunks: list[dict[str, Any]], *, label: str) -> None:
     if not chunks:
         pytest.fail(f"{label}: no SSE chunks")
     last = chunks[-1]
-    if last.get("type") != "finish" or last.get("finishReason") != "stop":
+    if last.get("type") not in {"finish", "turn_finish"} or last.get("finishReason") != "stop":
         pytest.fail(
             f"{label}: expected finish/stop, got type={last.get('type')!r} "
             f"finishReason={last.get('finishReason')!r}; {_sse_finish_diagnostic(chunks)}"
@@ -284,10 +302,40 @@ async def _strict_cleanup(resources: Any, sandbox_ids: set[str], volume_name: st
     if not _owns_ephemeral_proof_volume(volume_name):
         return tuple(failures)
 
+    async def get_volume() -> Any | None:
+        """Treat Daytona's 404 as confirmed absence after asynchronous deletion."""
+        try:
+            return await resources._client.volume.get(volume_name, create=False)
+        except DaytonaNotFoundError:
+            return None
+
     async def delete_volume() -> None:
-        volume = await resources._client.volume.get(volume_name, create=False)
-        if volume is not None:
-            await resources._client.volume.delete(volume)
+        """Retry provider detach/delete races and require confirmed Volume absence."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 60.0
+        retry_delays = (0.0, 0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 12.0)
+        attempt = 0
+        while loop.time() < deadline:
+            volume = await get_volume()
+            if volume is None:
+                return
+            state = str(getattr(getattr(volume, "state", None), "value", getattr(volume, "state", None)) or "")
+            if state.strip().lower() not in {"pending_delete", "deleting", "deleted", "destroyed"}:
+                try:
+                    await resources._client.volume.delete(volume)
+                except DaytonaNotFoundError:
+                    return
+                except Exception:
+                    # Daytona may still be detaching a Volume from the sandbox
+                    # that the previous cleanup step just deleted.
+                    pass
+            delay = retry_delays[min(attempt, len(retry_delays) - 1)]
+            attempt += 1
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                break
+            await asyncio.sleep(min(delay or 0.25, remaining))
+        raise TimeoutError("Daytona did not confirm test Volume deletion within 60 seconds")
 
     if not await _retry_cleanup(delete_volume):
         failures.append("volume")
