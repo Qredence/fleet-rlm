@@ -575,7 +575,7 @@ class _RecordingLM:
         return _RecordingLM()
 
 
-def test_forked_child_lms_are_isolated_and_cannot_finalize() -> None:
+def test_forked_child_lms_are_isolated_without_lm_policy_attributes() -> None:
     """Child copies share the Turn's finalization ledger but never its history,
     and may never consume root-only finalization capacity."""
     root = _RecordingLM()
@@ -588,8 +588,6 @@ def test_forked_child_lms_are_isolated_and_cannot_finalize() -> None:
     assert child.sub_lm is not sub
     assert child.root_lm.history is not root.history
     assert child.sub_lm.history is not sub.history
-    assert child.root_lm._fleet_can_finalize is False
-    assert child.sub_lm._fleet_can_finalize is False
     assert child.budget is turn.budget
     # Forking must leave the Turn's own templates pristine.
     assert not hasattr(root, "_fleet_can_finalize")

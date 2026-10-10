@@ -20,6 +20,9 @@ current production certification.
   * [Book-scale RLM implementation (proposed, unimplemented)](testing/book-scale-rlm-implementation.md)
 * Historical baselines
   * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
+* Dated reports
+  * [PRD 1 completion receipt](reports/prd-01-completion-2026-10-10.md)
+  * [Live capability verification](reports/live-capability-verification-2026-10-10.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Configuration Environment Reference](reference/configuration-environment.md)

@@ -38,10 +38,10 @@ def current_host_action_deadline() -> float | None:
 
 class BudgetDimension(StrEnum):
     DEADLINE = "deadline"
-    PROVIDER_ATTEMPTS = "provider_attempts"
     TOOL_CALLS = "tool_calls"
     RECURSIVE_CHILDREN = "recursive_children"
     EXECUTION_OUTPUT_BYTES = "execution_output_bytes"
+    FINALIZATION_ATTEMPTS = "finalization_attempts"
     SETTLED = "settled"
 
 
@@ -67,17 +67,18 @@ class FinalizationExhausted(TimeoutError):  # noqa: N818 - domain exhaustion cat
     happened.
     """
 
+    dimension = BudgetDimension.FINALIZATION_ATTEMPTS
+
 
 @dataclass(frozen=True, slots=True)
 class BudgetLimits:
     """None means observed accounting, not a claimed hard admission limit."""
 
-    provider_attempts: int | None = None
     tool_calls: int | None = None
     recursive_children: int | None = None
     execution_output_bytes: int | None = None
-    # ``None`` leaves finalization admission to the invocation-local
-    # ``AdapterBudget``. A value, including zero, is an explicit global ceiling.
+    # ``None`` leaves shared Turn admission unbounded; each invocation still
+    # applies its own ``AdapterBudget`` allowance.
     finalization_attempts: int | None = None
     finalization_seconds: float = 0.0
 
@@ -86,12 +87,10 @@ class BudgetLimits:
         Validate budget limits and finalization configuration.
 
         Raises:
-            ValueError: If a count limit is not a nonnegative integer, finalization
-                seconds is not finite and nonnegative, or finalization attempts exceed
-                the provider-attempt limit.
+            ValueError: If a count limit is not a nonnegative integer or finalization
+                seconds is not finite and nonnegative.
         """
         for value in (
-            self.provider_attempts,
             self.tool_calls,
             self.recursive_children,
             self.execution_output_bytes,
@@ -106,12 +105,6 @@ class BudgetLimits:
             or self.finalization_seconds < 0
         ):
             raise ValueError("finalization_seconds must be finite and nonnegative")
-        if (
-            self.provider_attempts is not None
-            and self.finalization_attempts is not None
-            and self.finalization_attempts > self.provider_attempts
-        ):
-            raise ValueError("finalization reserve exceeds provider attempt limit")
 
 
 class TurnBudget:
@@ -119,8 +112,7 @@ class TurnBudget:
 
     Finalization is an explicit caller capability, not a global mutable mode:
     concurrent child exploration cannot borrow the root's reserved capacity.
-    Counts describe admitted operations. Provider caching may mean an admitted
-    attempt does not reach the network; token counts are deliberately absent.
+    Counts describe admitted operations. Token counts are deliberately absent.
     """
 
     def __init__(self, *, deadline: float | None, limits: BudgetLimits | None = None) -> None:
@@ -143,13 +135,11 @@ class TurnBudget:
         self._lock = Lock()
         self._settled = False
         self._used = {
-            BudgetDimension.PROVIDER_ATTEMPTS: 0,
             BudgetDimension.TOOL_CALLS: 0,
             BudgetDimension.RECURSIVE_CHILDREN: 0,
             BudgetDimension.EXECUTION_OUTPUT_BYTES: 0,
+            BudgetDimension.FINALIZATION_ATTEMPTS: 0,
         }
-        self._exploration_attempts = 0
-        self._finalization_attempts = 0
 
     def reserve(
         self,
@@ -164,7 +154,7 @@ class TurnBudget:
         Parameters:
             dimension (BudgetDimension): Resource dimension to charge.
             count (int): Amount to charge.
-            finalization (bool): Whether the provider-attempt reservation uses finalization capacity.
+            finalization (bool): Whether this reservation may use the finalization deadline reserve.
 
         Returns:
             float: Time remaining for the admitted operation.
@@ -182,16 +172,6 @@ class TurnBudget:
             limit = getattr(self.limits, dimension.value)
             if limit is not None and self._used[dimension] + count > limit:
                 raise TurnBudgetExhausted(dimension)
-            if dimension == BudgetDimension.PROVIDER_ATTEMPTS and finalization:
-                finalization_limit = self.limits.finalization_attempts
-                if finalization_limit is not None and self._finalization_attempts + count > finalization_limit:
-                    raise TurnBudgetExhausted(dimension)
-                self._finalization_attempts += count
-            elif dimension == BudgetDimension.PROVIDER_ATTEMPTS:
-                finalization_reserve = self.limits.finalization_attempts or 0
-                if limit is not None and (self._exploration_attempts + count > limit - finalization_reserve):
-                    raise TurnBudgetExhausted(dimension)
-                self._exploration_attempts += count
             self._used[dimension] += count
             return remaining
 
@@ -237,12 +217,13 @@ class TurnBudget:
         with self._lock:
             return self._remaining(finalization=finalization)
 
-    def reclassify_finalization(self, count: int = 1) -> None:
+    def reclassify_finalization(self, count: int = 1, *, shared: bool = True) -> None:
         """
-        Consume finalization capacity for an already-admitted response.
+        Check Turn admission and optionally consume shared root finalization capacity.
 
         Parameters:
                 count (int): Number of finalization attempts to consume.
+                shared (bool): Whether to charge the root allowance or only check child admission.
 
         Raises:
                 ValueError: If count is not a nonnegative integer.
@@ -250,28 +231,13 @@ class TurnBudget:
         """
         if type(count) is not int or count < 0:
             raise ValueError("reclassification count must be a nonnegative integer")
-        with self._lock:
-            self._remaining(finalization=True)
-            limit = self.limits.finalization_attempts
-            if limit is not None and self._finalization_attempts + count > limit:
-                raise TurnBudgetExhausted(BudgetDimension.PROVIDER_ATTEMPTS)
-            self._finalization_attempts += count
-
-    def exploration_exhausted(self) -> bool:
-        """
-        Determine whether provider exploration has exhausted its available capacity.
-
-        Returns:
-            bool: `True` if the provider-attempt limit or exploration capacity before the
-                finalization reserve has been reached, `False` otherwise.
-        """
-        with self._lock:
-            limit = self.limits.provider_attempts
-            finalization_reserve = self.limits.finalization_attempts or 0
-            return limit is not None and (
-                self._used[BudgetDimension.PROVIDER_ATTEMPTS] >= limit
-                or self._exploration_attempts >= limit - finalization_reserve
-            )
+        if shared:
+            self.reserve(BudgetDimension.FINALIZATION_ATTEMPTS, count, finalization=True)
+        else:
+            # Child-local capacity never spends the root allowance, but cannot
+            # outlive the shared Turn's admission authority or deadline.
+            with self._lock:
+                self._remaining(finalization=True)
 
     def snapshot(self) -> dict[str, int]:
         """
@@ -352,8 +318,12 @@ class AdapterBudget:
             return self._parse_repairs_used
 
     def note_parse_repair(self) -> None:
-        """Record one corrective parse re-ask against this invocation."""
+        """Admit and record one corrective parse re-ask against this invocation."""
         with self._lock:
+            # A returned malformed response cannot start new Fleet correction
+            # work after settlement. This does not intercept DSPy retries or
+            # impose a deadline on an already-running LM request.
+            self.turn.remaining(finalization=True)
             self._parse_repairs_used += 1
 
     @property
@@ -382,14 +352,13 @@ class AdapterBudget:
     def reclassify_late_response(self, *, can_finalize: bool = True) -> None:
         """Reclassify an already-returned response as a finalization attempt.
 
-        No second provider call is charged; only the local finalization
-        allowance is consumed. Child invocations consume their local allowance
-        without consuming the root-only capacity on the shared Turn ledger.
+        No provider-attempt counter is charged. Root corrections consume both
+        local allowance and shared root capacity; child corrections consume
+        only local allowance after checking shared Turn admission.
         """
         with self._lock:
             self._check_finalization()
-            if can_finalize:
-                self.turn.reclassify_finalization()
+            self.turn.reclassify_finalization(shared=can_finalize)
             self._finalization_used += 1
 
     def enter_wrap_up(self, *, rejection_reason: str | None = None) -> None:

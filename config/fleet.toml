@@ -38,7 +38,6 @@ cache = false
 [rlm]
 max_iters = 12
 max_llm_calls = 32
-max_provider_attempts = 2048
 max_tool_calls = 256
 max_output_chars = 6000
 max_final_output_chars = 6000

@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import sync_sandbox
@@ -35,6 +36,7 @@ from tests.live._mvp_support import (
     live_runtime,
 )
 from tests.live._tool_chunks import _paired_tool_chunks
+from tests.live.test_fleet_rlm_daytona_mvp import _run_id_from_sse
 
 pytestmark = [pytest.mark.live_daytona, pytest.mark.timeout(1200)]
 
@@ -123,7 +125,8 @@ def _write_receipt(payload: dict[str, object]) -> None:
 
 
 def _live_qre140_settings(tmp_path: Path) -> Settings:
-    settings = _live_settings(tmp_path).model_copy(
+    base_settings = _live_settings(tmp_path)
+    settings = base_settings.model_copy(
         update={
             "rlm_autonomous_memory_categories": ("operator preference",),
             "rlm_max_iters": 4,
@@ -131,9 +134,9 @@ def _live_qre140_settings(tmp_path: Path) -> Settings:
             "turn_timeout_seconds": 560,
             "run_heartbeat_seconds": 10,
             "run_stale_after_seconds": 600,
-            # Tracing is outside this proof's certification surface; the local
-            # trace server may be down and its retry storm slows startup.
-            "mlflow_tracing_enabled": False,
+            "mlflow_tracing_enabled": True,
+            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_TRACKING_URI", base_settings.mlflow_tracking_uri),
+            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-capability"),
         }
     )
     database_url = f"sqlite+aiosqlite:///{(tmp_path / 'live-qre140.db').resolve()}"
@@ -156,6 +159,24 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
     final_text = ""
     memory_id = ""
     run_ids: list[str] = []
+    trace_ids: list[str] = []
+
+    def trace_id_from(chunks: list[dict[str, Any]]) -> str:
+        values = {
+            value
+            for chunk in chunks
+            for value in (
+                chunk.get("traceId"),
+                *(
+                    metadata.get("traceId")
+                    for metadata in (chunk.get("messageMetadata"), chunk.get("metadata"))
+                    if isinstance(metadata, dict)
+                ),
+            )
+            if isinstance(value, str) and value
+        }
+        assert len(values) == 1
+        return values.pop()
 
     try:
         with TestClient(app) as client:
@@ -184,10 +205,11 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 )
                 assert first.status_code == 200
                 first_chunks, first_done = _sse_chunks(first)
-                run_ids.append(str(next(chunk["messageId"] for chunk in first_chunks if chunk["type"] == "start")))
+                run_ids.append(str(_run_id_from_sse(first_chunks, label="qre140_propose_turn", resources=resources)))
+                trace_ids.append(trace_id_from(first_chunks))
                 assert first_done == 1
                 _assert_sse_stop(first_chunks, label="qre140_propose_turn")
-                usage_gathered.extend(chunk for chunk in first_chunks if chunk.get("type") == "data-usage")
+                usage_gathered.extend(chunk for chunk in first_chunks if chunk.get("type") in {"data-usage", "usage"})
 
                 proposal_inputs, proposal_outputs, proposal_errors = _paired_tool_chunks(first_chunks, "propose_memory")
                 assert proposal_errors == []
@@ -235,6 +257,34 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 memory_id = memory_record.memory_id
                 assert memory_record.active is True and memory_record.supersedes_id is None
 
+                phase = "sandbox_replacement"
+
+                async def replace_binding() -> Any:
+                    return await resources.replace(
+                        binding,
+                        workspace_id=binding.workspace_id,
+                        user_id=LocalScope().user_id,
+                    )
+
+                replacement = portal.call(replace_binding)
+                assert replacement.sandbox_id is not None and replacement.sandbox_id != binding.sandbox_id
+                assert replacement.volume_id == binding.volume_id
+                sandbox_ids.add(replacement.sandbox_id)
+                sandbox = sync_sandbox(portal.call(resources._platform.get, replacement.sandbox_id), portal_loop)
+                assert sandbox is not None
+                memory_store = WorkspaceMemory.from_storage(
+                    WorkspaceMemoryStorage(
+                        WorkspaceStorage(
+                            sandbox,
+                            volume_root=str(paths.root),
+                            root=str(paths.root),
+                            max_file_bytes=settings.max_upload_bytes,
+                            allow_volume_root=True,
+                        )
+                    ),
+                    max_file_bytes=settings.max_upload_bytes,
+                )
+
                 phase = "second_turn"
                 second = client.post(
                     f"/api/sessions/{session_id}/turns",
@@ -251,10 +301,11 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 )
                 assert second.status_code == 200
                 second_chunks, second_done = _sse_chunks(second)
-                run_ids.append(str(next(chunk["messageId"] for chunk in second_chunks if chunk["type"] == "start")))
+                run_ids.append(str(_run_id_from_sse(second_chunks, label="qre140_verify_turn", resources=resources)))
+                trace_ids.append(trace_id_from(second_chunks))
                 assert second_done == 1
                 _assert_sse_stop(second_chunks, label="qre140_verify_turn")
-                usage_gathered.extend(chunk for chunk in second_chunks if chunk.get("type") == "data-usage")
+                usage_gathered.extend(chunk for chunk in second_chunks if chunk.get("type") in {"data-usage", "usage"})
 
                 search_inputs, search_outputs, search_errors = _paired_tool_chunks(second_chunks, "search_memories")
                 assert search_errors == []
@@ -265,7 +316,9 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 # store readback and the injection digest below.
                 assert memory_id in search_output.get("top_memory_ids", ())
                 final_text = "".join(
-                    str(chunk.get("delta", "")) for chunk in second_chunks if chunk.get("type") == "text-delta"
+                    str(chunk.get("delta", ""))
+                    for chunk in second_chunks
+                    if chunk.get("type") in {"text-delta", "text"}
                 )
                 assert memory_id in final_text
 
@@ -324,6 +377,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
         "resources": {
             "session_id": str(session_id),
             "run_ids": run_ids,
+            "trace_ids": trace_ids,
             "sandbox_ids": sorted(sandbox_ids),
             "volume_name": settings.volume_name,
         },
@@ -332,12 +386,12 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
             "propose_memory_calls": sum(
                 chunk.get("toolName") == "propose_memory"
                 for chunk in first_chunks
-                if chunk["type"] == "tool-input-available"
+                if chunk.get("type") in {"tool-input-available", "tool_call"}
             ),
             "search_memory_calls": sum(
                 chunk.get("toolName") == "search_memories"
                 for chunk in second_chunks
-                if chunk["type"] == "tool-input-available"
+                if chunk.get("type") in {"tool-input-available", "tool_call"}
             ),
             "usage_events": len(usage_gathered),
             "memory_id_chars": len(memory_id),

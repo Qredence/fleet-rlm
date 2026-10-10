@@ -80,6 +80,57 @@ class _Stream:
         self._order.append("worker_stopped")
 
 
+@pytest.mark.asyncio
+async def test_transferred_cleanup_closes_admission_before_blocked_worker_drains() -> None:
+    from fleet_rlm.rlm.budget import AdapterBudget, BudgetDimension, TurnBudget, TurnBudgetExhausted
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.result import RLMOutcome
+
+    waiting = asyncio.Event()
+    release = asyncio.Event()
+    turn_budget = TurnBudget(deadline=None)
+
+    class Stream(_Stream):
+        async def wait_owned(self) -> None:
+            waiting.set()
+            await release.wait()
+
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("cancelled"))
+    stream = Stream(outcome=lifecycle.outcome, blocking=False)
+    cleanup = RunCleanupSupervisor()
+    coordinator = _driver(lifecycle, SimpleNamespace(), cleanup)
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    prepared.execution.execution = SimpleNamespace(models=SimpleNamespace(budget=turn_budget))
+    task = asyncio.create_task(
+        coordinator._drain_owned_execution(
+            _turn(),
+            prepared,
+            stream,
+            None,
+            None,
+            claim_lost=False,
+            claim_loss_usage=None,
+            late_claim_loss_window=False,
+        )
+    )
+    try:
+        await asyncio.wait_for(waiting.wait(), 2)
+        assert not task.done()
+        assert not prepared.closed.is_set()
+        for dimension in (BudgetDimension.TOOL_CALLS, BudgetDimension.RECURSIVE_CHILDREN):
+            with pytest.raises(TurnBudgetExhausted) as failure:
+                turn_budget.reserve(dimension)
+            assert failure.value.dimension == BudgetDimension.SETTLED
+        with pytest.raises(TurnBudgetExhausted):
+            AdapterBudget(turn=turn_budget).reclassify_late_response(can_finalize=False)
+    finally:
+        release.set()
+        assert await task is None
+        await cleanup.shutdown(drain_seconds=1)
+    assert prepared.closed.is_set()
+    assert lifecycle.complete_calls == 1
+
+
 class _CleanupLifecycle:
     heartbeat_seconds = 10
     stale_after_seconds = 60

@@ -280,6 +280,9 @@ def _case_settings(tmp_path: Path, name: str, **updates: Any) -> Settings:
         "volume_name": f"fleet-rlm-qre142-{name}-{uuid4().hex[:8]}",
         "run_heartbeat_seconds": 10,
         "run_stale_after_seconds": 600,
+        "mlflow_tracing_enabled": True,
+        "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_TRACKING_URI", "http://127.0.0.1:5001"),
+        "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-capability"),
     }
     base.update(updates)
     return _live_settings(tmp_path).model_copy(update=base)

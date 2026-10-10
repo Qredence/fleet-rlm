@@ -410,17 +410,6 @@ class Settings(BaseModel):
             required_in_policy=True,
         ),
     ] = Field(default=50, gt=0)
-    rlm_max_provider_attempts: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_provider_attempts",
-            group="RLM",
-            label="Maximum provider attempts",
-            editor="number",
-            rank=73,
-            required_in_policy=True,
-        ),
-    ] = Field(default=2048, gt=0)
     rlm_max_tool_calls: Annotated[
         int,
         FleetFieldPolicy(

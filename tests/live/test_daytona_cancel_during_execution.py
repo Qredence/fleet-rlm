@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -38,14 +39,17 @@ class _CancelRootLM(dspy.utils.DummyLM):
 
 
 def _case_settings(tmp_path: Path) -> Settings:
-    return _live_settings(tmp_path).model_copy(
+    settings = _live_settings(tmp_path)
+    return settings.model_copy(
         update={
             "volume_name": f"fleet-rlm-live-cancel-{uuid4()}",
             "rlm_max_iters": 4,
             "rlm_max_llm_calls": 6,
             "turn_timeout_seconds": 300,
             "run_stale_after_seconds": 600,
-            "mlflow_tracing_enabled": False,
+            "mlflow_tracing_enabled": True,
+            "mlflow_tracking_uri": os.environ.get("FLEET_LIVE_MLFLOW_TRACKING_URI", settings.mlflow_tracking_uri),
+            "mlflow_experiment_name": os.environ.get("FLEET_LIVE_MLFLOW_EXPERIMENT", "fleet-rlm-live-capability"),
         }
     )
 

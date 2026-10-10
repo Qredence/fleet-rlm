@@ -333,6 +333,12 @@ def _policy_document_from_mapping(document: Mapping[str, Any]) -> PolicyDocument
         )
     if not isinstance(config.get("schema_version"), int) or config.get("schema_version") != 2:
         raise FleetConfigurationError("config.schema_version must be 2")
+    rlm = root.get("rlm")
+    if isinstance(rlm, Mapping) and "max_provider_attempts" in rlm:
+        raise FleetConfigurationError(
+            "rlm.max_provider_attempts has been removed because Fleet did not enforce it; "
+            "remove this key. Fleet does not enforce an aggregate provider-attempt or spend cap."
+        )
     unknown_config = set(config).difference({"schema_version"})
     if unknown_config:
         raise FleetConfigurationError(f"unknown configuration key(s) at config: {', '.join(sorted(unknown_config))}")

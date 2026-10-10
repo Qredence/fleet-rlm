@@ -48,7 +48,7 @@ async def _strict_cleanup(resources: Any, volume_name: str) -> tuple[str, ...]:
             """
             sandbox = await resources._platform.get(sandbox_id)
             if sandbox is not None:
-                await resources._platform.delete(sandbox)
+                await resources._platform.delete(sandbox, wait=True, timeout=30)
 
         if not await _retry_cleanup(delete_sandbox):
             failures.append("sandbox")

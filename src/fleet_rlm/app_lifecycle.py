@@ -859,7 +859,6 @@ def build_run_preparation(
         options=rlm_options(settings),
         recursive_options=recursive_rlm_options(settings),
         budget_limits=BudgetLimits(
-            provider_attempts=settings.rlm_max_provider_attempts,
             tool_calls=settings.rlm_max_tool_calls,
             recursive_children=(settings.rlm_recursion_max_calls if settings.rlm_recursion_enabled else 0),
             execution_output_bytes=settings.rlm_max_execution_output_bytes,

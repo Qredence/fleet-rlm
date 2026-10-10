@@ -313,6 +313,58 @@ def test_inprocess_stdout_reaches_adapter_output_projection() -> None:
     interpreter.shutdown()
 
 
+@pytest.mark.parametrize("root_finalization", [True, False])
+@pytest.mark.parametrize("limit", [100, 0])
+def test_validated_root_submit_output_uses_reserve_without_bypassing_byte_limit(
+    monkeypatch, root_finalization, limit
+) -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
+    turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3, execution_output_bytes=limit))
+
+    def broken_observer(_event):
+        raise RuntimeError("observer unavailable")
+
+    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), output_fields=[{"name": "answer"}])
+    interpreter = template.new_invocation(
+        turn_budget=turn, root_finalization=root_finalization, observer=broken_observer
+    )
+    try:
+        if root_finalization and limit:
+            assert interpreter.execute("answer = 'done'\nSUBMIT(answer=answer)").output == {"answer": "done"}
+            assert turn.snapshot()["execution_output_bytes"] > 0
+        else:
+            with pytest.raises(TurnBudgetExhausted) as failure:
+                interpreter.execute("SUBMIT(answer='done')")
+            expected = BudgetDimension.EXECUTION_OUTPUT_BYTES if root_finalization else BudgetDimension.DEADLINE
+            assert failure.value.dimension == expected
+    finally:
+        interpreter.shutdown()
+        template.shutdown()
+
+
+def test_reserve_exemption_requires_validated_finalization_code(monkeypatch) -> None:
+    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+    from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
+
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
+    turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))
+    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), output_fields=[{"name": "answer"}])
+    interpreter.bind_turn_budget(turn)
+    try:
+        with pytest.raises(TurnBudgetExhausted) as failure:
+            interpreter.execute("print('explore')\nSUBMIT(answer='done')")
+        assert failure.value.dimension == BudgetDimension.DEADLINE
+        turn.settle()
+        with pytest.raises(TurnBudgetExhausted) as failure:
+            interpreter.execute("SUBMIT(answer='late')")
+        assert failure.value.dimension == BudgetDimension.SETTLED
+    finally:
+        interpreter.shutdown()
+
+
 def test_public_output_classifies_dspy_execution_errors_before_interpreter_errors() -> None:
     from dspy import CodeExecutionError, CodeInterpreterError
 

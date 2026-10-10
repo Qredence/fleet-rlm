@@ -51,6 +51,7 @@ from fleet_rlm.rlm.result import (
     truncate_head_tail,
     truncate_public_text,
 )
+from fleet_rlm.rlm.submit_validation import is_finalization_action
 
 logger = logging.getLogger(__name__)
 
@@ -828,6 +829,9 @@ class DaytonaCodeInterpreter:
         self._turn_budget: TurnBudget | None = None
         self._turn_request: str | None = None
         self._output_budget_exhausted = False
+        self._output_budget_failure: TurnBudgetExhausted | None = None
+        self._root_finalization = True
+        self._finalization_action = False
         self._execution_output_cap = max(1, int(execution_output_cap))
         self._max_code_chars = max(1, int(max_code_chars))
         self._observation_step = 0
@@ -854,6 +858,7 @@ class DaytonaCodeInterpreter:
         timeout_s: int | None = None,
         deadline_monotonic: float | None = None,
         admission: Callable[[], None] | None = None,
+        root_finalization: bool = True,
     ) -> DaytonaCodeInterpreter:
         """Create an invocation-scoped adapter without retiring its Sandbox.
 
@@ -900,6 +905,7 @@ class DaytonaCodeInterpreter:
         fresh.bind_async_bridge(async_bridge)
         fresh.bind_tool_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
         fresh._action_admission = admission
+        fresh._root_finalization = root_finalization
         if context_capsule is not None:
             fresh.bind_context_capsule(context_capsule)
         if output_contract is not None:
@@ -995,6 +1001,7 @@ class DaytonaCodeInterpreter:
         with self._binding_mutation():
             self._turn_budget = budget
             self._output_budget_exhausted = False
+            self._output_budget_failure = None
 
     def bind_turn_request(self, request: str | None) -> None:
         with self._binding_mutation():
@@ -1064,9 +1071,11 @@ class DaytonaCodeInterpreter:
                 self._turn_budget.reserve(
                     BudgetDimension.EXECUTION_OUTPUT_BYTES,
                     len(detail.output.encode("utf-8")),
+                    finalization=self._finalization_action,
                 )
-            except TurnBudgetExhausted:
+            except TurnBudgetExhausted as exc:
                 self._output_budget_exhausted = True
+                self._output_budget_failure = exc
                 raise
         if self._observer is None:
             return
@@ -1129,13 +1138,21 @@ class DaytonaCodeInterpreter:
     def execute(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         """Execute one action under single-flight concurrency protection."""
         with self._exclusive_access():
+            if self._turn_budget is not None:
+                # Deterministic work may continue in the reserve, but no action
+                # may begin after settlement or the absolute Turn deadline.
+                self._turn_budget.remaining(finalization=True)
             admission = self._action_admission
             if admission is not None:
                 # Outside the provider-error mapping: a refusal (for example
                 # TimeoutError) reaches the owner unchanged and no code runs.
                 admission()
             self._bindings_sealed = True
-            return self._execute_once(code, variables)
+            self._finalization_action = self._root_finalization and is_finalization_action(code)
+            try:
+                return self._execute_once(code, variables)
+            finally:
+                self._finalization_action = False
 
     def _execute_once(self, code: str, variables: dict[str, Any] | None = None) -> Any:
         if self._shutdown:
@@ -1231,6 +1248,10 @@ class DaytonaCodeInterpreter:
                 ensure_bindings_ms = int((time.perf_counter() - bindings_started) * 1_000)
 
                 raw = self._run_backend(code, variables, on_stdout=stdout_projector.feed)
+                # A backend may serialize a stdout callback exception as a
+                # code error. Budget refusal must remain terminal to Fleet.
+                if self._output_budget_failure is not None:
+                    raise self._output_budget_failure
                 self._context_accesses.extend(raw.context_accesses)
                 result = self._finalize(raw)
 
@@ -1367,6 +1388,8 @@ class DaytonaCodeInterpreter:
     @with_callbacks
     def invoke_tool(self, tool_name: str, kwargs: dict[str, Any], *args: Any) -> Any:
         """Invoke one bound host Tool through callback lifecycle."""
+        if self._turn_budget is not None:
+            self._turn_budget.remaining()
         fn = self._bound_tools.get(str(tool_name))
         if fn is None:
             raise CodeInterpreterError(f"Unknown tool: {tool_name}")

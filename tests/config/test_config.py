@@ -218,7 +218,6 @@ temperature = 0.2
 [rlm]
 max_iters = 3
 max_llm_calls = 4
-max_provider_attempts = 32
 max_tool_calls = 16
 max_output_chars = 500
 max_final_output_chars = 500
@@ -248,6 +247,20 @@ level = "DEBUG"
         "FLEET_DAYTONA_SNAPSHOT=fleet-test-v1\nFLEET_DAYTONA_CHILD_SNAPSHOT=fleet-child-v1\nFLEET_DAYTONA_ORG_ID=fleet-test-org\n",
         encoding="utf-8",
     )
+
+
+def test_retired_provider_attempt_key_has_actionable_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    policy = tmp_path / "fleet.toml"
+    _policy(policy)
+    text = policy.read_text(encoding="utf-8").replace("max_iters = 3", "max_provider_attempts = 32\nmax_iters = 3")
+    policy.write_text(text, encoding="utf-8")
+    monkeypatch.setattr("fleet_rlm.config.loader._CONFIG_PATH", policy)
+
+    with pytest.raises(FleetConfigurationError, match="did not enforce it") as error:
+        load_runtime_settings()
+
+    assert "remove this key" in str(error.value)
+    assert "does not enforce an aggregate provider-attempt or spend cap" in str(error.value)
 
 
 def test_omitted_role_cache_and_retry_defaults_resolve_to_settings_defaults(

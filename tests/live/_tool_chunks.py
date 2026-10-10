@@ -17,16 +17,25 @@ def _paired_tool_chunks(
     protocol); outputs pair to their tool strictly through ``toolCallId``.
     """
 
-    inputs = _tool_chunks(chunks, tool_name, "tool-input-available")
+    # The API can expose either AI SDK-compatible chunk names or Fleet's
+    # canonical UI stream names. Both carry the same call id and payload.
+    inputs = [
+        chunk
+        for chunk in chunks
+        if chunk.get("type") in {"tool-input-available", "tool_call"} and chunk.get("toolName") == tool_name
+    ]
     call_ids = {str(chunk.get("toolCallId")) for chunk in inputs}
     outputs = [
         chunk
         for chunk in chunks
-        if chunk.get("type") == "tool-output-available" and str(chunk.get("toolCallId")) in call_ids
+        if chunk.get("type") in {"tool-output-available", "tool_result"}
+        and str(chunk.get("toolCallId")) in call_ids
+        and not chunk.get("error")
     ]
     errors = [
         chunk
         for chunk in chunks
-        if chunk.get("type") == "tool-output-error" and str(chunk.get("toolCallId")) in call_ids
+        if (chunk.get("type") == "tool-output-error" or (chunk.get("type") == "tool_result" and chunk.get("error")))
+        and str(chunk.get("toolCallId")) in call_ids
     ]
     return inputs, outputs, errors

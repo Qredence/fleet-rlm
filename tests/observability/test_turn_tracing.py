@@ -1769,7 +1769,7 @@ def _make_preparer(*, environments: Any = None) -> Any:
 async def test_prepare_emits_decomposed_phase_spans(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = _install_fake_mlflow(monkeypatch)
 
-    prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=float("inf"))
+    prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=asyncio.get_running_loop().time() + 3600)
 
     assert calls.start_span_names == [
         "Turn.acquire_environment",
@@ -1800,7 +1800,9 @@ async def test_acquire_environment_failure_marks_phase_failed(monkeypatch: pytes
             raise RuntimeError("env boom")
 
     with pytest.raises(RunPreparationUnavailableError):
-        await _make_preparer(environments=ExplodingEnvironments()).prepare(_make_prep_turn(), deadline=float("inf"))
+        await _make_preparer(environments=ExplodingEnvironments()).prepare(
+            _make_prep_turn(), deadline=asyncio.get_running_loop().time() + 3600
+        )
 
     assert calls.start_span_names == ["Turn.acquire_environment"]
     assert calls.span_outputs[0]["phase_status"] == "failed"
@@ -1811,7 +1813,7 @@ async def test_prepare_without_active_trace_is_noop() -> None:
     """No active trace gate: preparation succeeds without MLflow."""
     token = turn_tracing._fleet_trace_active.set(False)
     try:
-        prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=float("inf"))
+        prepared = await _make_preparer().prepare(_make_prep_turn(), deadline=asyncio.get_running_loop().time() + 3600)
         assert prepared.execution.session.request == "next"
         await prepared.aclose()
     finally:
