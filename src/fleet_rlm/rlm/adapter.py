@@ -330,7 +330,7 @@ class FleetJSONAdapter(dspy.JSONAdapter):
                 # A repair re-ask is a full provider call. Record it so the Turn
                 # span can report how much of the output budget was spent
                 # recovering an action that could not be parsed.
-                self._budget.note_parse_repair()
+                self._budget.note_parse_repair(can_finalize=self._root_finalization)
                 request_signature, request_inputs = _retry_call_arguments(base_signature, base_inputs, attempt, exc)
                 continue
             if wrap_up and action and not is_finalization_action(_action_code(response)):
