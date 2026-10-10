@@ -661,6 +661,7 @@ class TurnRuntime:
         outcome: RLMOutcome,
         trace_request: str,
     ) -> RunSettlement | _ClaimLost:
+        self._settle_turn_budget(prepared)
         if outcome.terminal_status in {"timeout", "cancelled"}:
             status = "timeout" if outcome.terminal_status == "timeout" else "cancelled"
             failure = RunFailure(
@@ -818,6 +819,7 @@ class TurnRuntime:
         resolution: RLMOutcome | RunFailure,
         prepared: PreparedTurn,
     ) -> RunSettlement:
+        self._settle_turn_budget(prepared)
         terminal_status = resolution.terminal_status
         settlement_inputs: dict[str, object] = {
             "terminal_status": terminal_status,
@@ -858,6 +860,7 @@ class TurnRuntime:
         state: _ExecutionState,
     ) -> None:
         _mark_stream_runtime(state.stream, committed=False)
+        self._settle_turn_budget(prepared)
         if state.settled:
             return
 
@@ -916,6 +919,7 @@ class TurnRuntime:
         claim_loss_usage: RLMUsage | None = None,
         finalization_task: asyncio.Task[RunSettlement] | None = None,
     ) -> None:
+        self._settle_turn_budget(prepared)
         if state.cleanup_handed_off:
             return
         state.cleanup_handed_off = True
@@ -960,6 +964,7 @@ class TurnRuntime:
         Raises:
             BaseException: The first error encountered during owned-resource cleanup.
         """
+        self._settle_turn_budget(prepared)
         with turn_phase_span("Turn.cleanup", inputs={"cleanup_owned": not state.cleanup_handed_off}):
             await self._cancel_pending_event(state)
             await self._stop_claim_waiter(state)
@@ -1066,6 +1071,7 @@ class TurnRuntime:
         Returns:
             BaseException | None: The first cleanup error, or `None` if cleanup succeeds.
         """
+        self._settle_turn_budget(prepared)
         cleanup_error: BaseException | None = None
         committed = False
         claim_cleanup_attempted = False

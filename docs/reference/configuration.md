@@ -121,15 +121,42 @@ configuration deliberately lowers the effective Root values to
 `12`, `32`, and `6000`. Its child values remain `8`, `12`, and `4000`.
 `max_execution_output_chars`, `max_execution_output_bytes`, the Turn deadline,
 Tool-call, finalization, and recursive call/concurrency limits are separate
-Fleet controls. `rlm.max_provider_attempts` is still a validated policy key,
-but it no longer bounds provider spend: Fleet admits no provider attempts, and
-DSPy's native `num_retries` owns retry count. `max_tool_calls` and
+Fleet controls. Fleet does not enforce an aggregate provider-attempt or spend
+cap. DSPy's native `num_retries` owns provider retry count. The removed
+`rlm.max_provider_attempts` setting is rejected with a migration message;
+remove it from older configurations. `max_tool_calls` and
 `max_execution_output_bytes` are Turn-wide ceilings. `rlm.wrap_up_seconds`
-still maps to `BudgetLimits.finalization_seconds`: it holds that much of the
-Turn deadline back from non-finalization reservations. It no longer gates
-wrap-up, which is keyed to the RLM iteration count. There is no configurable
+maps to `BudgetLimits.finalization_seconds`: the shared ledger uses the same
+absolute deadline as execution, including time already spent preparing. The
+reserve refuses new host tools, native semantic tools, and full children. A
+validated root finalization action may account its output through the reserve
+until the Turn deadline; count and byte ceilings still apply. The reserve does
+not trigger wrap-up, which is keyed to the native final iteration. There is no configurable
 recursive depth;
 `RLM_NATIVE_CHILD_DEPTH = 1` is a fixed product invariant.
+
+### Execution budget contract
+
+| Policy / unit | Owner and enforcement point | Scope and limits |
+| --- | --- | --- |
+| `runtime.turn_timeout_seconds` / seconds | TurnRuntime deadline; prepared shared ledger; interpreter action admission and backend wait | One absolute Turn deadline, including preparation. Cancelling a waiter does not prove remote work stopped; owned workers and Sandbox cleanup drain separately. |
+| `rlm.wrap_up_seconds` / seconds | Shared ledger before tool and child admission | Reserve inside the Turn deadline. Validated root SUBMIT output may use it; it is neither an LM timeout nor a wrap-up trigger. |
+| `rlm.max_iters` / actions | Native DSPy RLM loop | Per root invocation; children use `recursion_child_max_iters`. Native extraction remains a separate fallback. |
+| `rlm.max_llm_calls` / semantic prompts | Native DSPy tool counter before sub-LM dispatch | Per invocation; each batched prompt counts. Children use `recursion_child_max_llm_calls`. Not an aggregate provider-attempt limit. |
+| `rlm.max_output_chars` / characters | Native DSPy history rendering | Per REPL output shown to the model; child history uses `recursion_child_max_output_chars`. Does not bound total history or remote output production. |
+| `rlm.max_tool_calls` / admitted host-tool calls | RunToolGuards and recursive request admission | Shared Turn ledger. Full-child request entries count; native semantic calls retain their separate DSPy counter. |
+| `rlm.recursion_max_calls` / full children | Recursive executor before admission and environment acquisition | Turn-wide request bound and shared child ledger. Capacity refusal before start releases the child reservation. |
+| `rlm.recursion_max_prompt_chars` / UTF-8 bytes | Recursive request validation before reservation | Per serialized child request despite the legacy field name; staged-input/manifest bounds are separate. |
+| `rlm.recursion_max_parallel_children` / concurrent children | Child scheduler and admission pool | Per Turn; queueing does not grant permission to start after deadline or settlement. Full-child depth remains one. |
+| `rlm.max_execution_output_chars` / characters | Daytona interpreter result projection | Per rendered execution result/repair feedback. Does not limit all bytes produced remotely. |
+| `rlm.max_execution_output_bytes` / UTF-8 bytes | Interpreter output accounting before observer delivery | Shared root/child Turn ledger over Fleet-accounted public output. Refusals remain terminal even when a backend serializes a callback error. Not a remote stdout/storage quota. |
+| `rlm.max_final_output_chars` / characters | Output contract and prediction validation | Root final output; child declared outputs use `recursion_child_max_output_chars`. Oversized results cannot commit. |
+| `rlm.finalization_attempts` / corrections | AdapterBudget plus shared root ledger before correction | Root shared allowance; each invocation also has a local allowance of two. Initial final-iteration response is uncharged. Child corrections spend only local capacity and still check Turn settlement/deadline. |
+| Parse repair / re-asks | Invocation adapter before retrying malformed output | At most two ordinary corrections per adapter action. Final-iteration malformed responses use the finalization allowance instead. |
+| `llm.*.num_retries`, `timeout_seconds`, `max_tokens` | Stock DSPy LM and provider request configuration | Per role/request settings, outside Fleet aggregate accounting. They do not establish a Turn-wide attempt, token, spend, or physical termination ceiling. |
+
+All execution admissions close before settlement drains owned work. Observer or
+exporter failure cannot grant capacity or permit late result publication.
 
 The `[rlm]` recursion settings include `recursion_enabled` (enabled in
 the shipped configuration) and bound the Fleet

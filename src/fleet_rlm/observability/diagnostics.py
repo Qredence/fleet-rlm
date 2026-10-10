@@ -111,9 +111,12 @@ def _failure_status(exc: BaseException) -> int | None:
 
 def normalize_turn_failure(exc: BaseException) -> FailureDiagnostic:
     """Describe a Turn preparation failure without exposing exception text."""
+    from fleet_rlm.rlm.budget import FinalizationExhausted, TurnBudgetExhausted
     from fleet_rlm.rlm.result import PredictionOutputError, PredictionOutputTooLargeError
 
     cause = _diagnostic_cause(exc)
+    if isinstance(cause, (FinalizationExhausted, TurnBudgetExhausted)):
+        return FailureDiagnostic("budget_exhausted", "none", "Turn budget exhausted", cause.dimension.value)
     if isinstance(cause, AdapterParseError):
         adapter = str(getattr(cause, "adapter_name", "") or "adapter")
         return FailureDiagnostic("adapter_parse_error", "none", f"LM response unparseable by {adapter}")
@@ -215,8 +218,12 @@ def walk_cause_chain(exc: BaseException) -> Iterator[BaseException]:
 
 
 def _diagnostic_cause(exc: BaseException) -> BaseException:
+    from fleet_rlm.rlm.budget import FinalizationExhausted, TurnBudgetExhausted
+
     current = exc
     for item in walk_cause_chain(exc):
+        if isinstance(item, (FinalizationExhausted, TurnBudgetExhausted)):
+            return item
         if item is not current and isinstance(item, (DaytonaAdapterError, AdapterParseError)):
             return item
         current = item

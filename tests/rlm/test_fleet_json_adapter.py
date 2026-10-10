@@ -2,10 +2,8 @@
 
 Wrap-up is keyed to the RLM iteration count: the adapter adds the final-answer
 budget directive when the ``iteration`` input reports a final iteration, i.e.
-``"<n>/<n>"`` as emitted by ``dspy.RLM``. The retired wall-clock reserve,
-per-invocation deadline, and provider-attempt admission take no part in that
-transition: nothing reserves ``BudgetDimension.PROVIDER_ATTEMPTS`` any more,
-so ``TurnBudget.exploration_exhausted()`` is false for every real limits pair.
+``"<n>/<n>"`` as emitted by ``dspy.RLM``. Fleet does not advertise an aggregate
+provider-attempt limit; DSPy owns provider retries.
 """
 
 from __future__ import annotations
@@ -17,16 +15,18 @@ import dspy
 import pytest
 from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
+from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter, InProcessInterpreterBackend
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
+from fleet_rlm.rlm.adapter import FleetJSONAdapter, _retry_correction_feedback
 from fleet_rlm.rlm.budget import (
+    BudgetDimension,
     BudgetLimits,
     FinalizationExhausted,
     TurnBudget,
     TurnBudgetExhausted,
 )
 from fleet_rlm.rlm.execution import _public_failure_message
-from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions, _retry_correction_feedback
+from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.recursion import _recursive_failure_category
 from fleet_rlm.rlm.submit_validation import is_finalization_action, normalize_action_code
 from tests.support.native_rlm import build_native_rlm_for_test
@@ -314,11 +314,27 @@ class _AlwaysTimeoutEngine:
 def _always_timeout_lm() -> tuple[dspy.LM, _AlwaysTimeoutEngine]:
     """Build a stock ``dspy.LM`` whose engine always reports a provider timeout."""
     engine = _AlwaysTimeoutEngine()
-    return dspy.LM("scripted-lm", model_type="chat", cache=False, engine=engine), engine
+
+    class AsyncEngine:
+        async def complete(self, request):
+            return engine.complete(request)
+
+        async def stream(self, request):
+            for event in engine.stream(request):
+                yield event
+
+        async def aclose(self):
+            pass
+
+    return dspy.LM("scripted-lm", model_type="chat", cache=False, engine=engine, async_engine=AsyncEngine()), engine
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize(("iteration", "wrap_up_entered"), [("1/3", False), ("3/3", True)])
-def test_provider_timeout_propagates_without_a_wrap_up_transition(iteration: str, wrap_up_entered: bool) -> None:
+async def test_provider_timeout_propagates_without_a_wrap_up_transition(
+    iteration: str, wrap_up_entered: bool, asynchronous: bool
+) -> None:
     """A provider timeout is never converted into a wrap-up attempt.
 
     DSPy owns retries, so a timed-out provider is re-attempted ``num_retries``
@@ -329,7 +345,11 @@ def test_provider_timeout_propagates_without_a_wrap_up_transition(iteration: str
     adapter = FleetJSONAdapter()
 
     with pytest.raises(LMTimeoutError):
-        _run_iteration_action(lm, adapter, iteration=iteration)
+        if asynchronous:
+            with dspy.context(lm=lm, adapter=adapter):
+                await dspy.Predict(_IterationActionSignature).acall(iteration=iteration)
+        else:
+            _run_iteration_action(lm, adapter, iteration=iteration)
 
     # One initial attempt plus three DSPy-owned retries, and nothing from the adapter.
     assert engine.attempts == 4
@@ -412,11 +432,9 @@ def test_wrap_up_directive_does_not_infer_ownership_from_caller_value() -> None:
 
 
 def test_child_lm_reclassification_does_not_consume_the_root_turn_ledger() -> None:
-    turn = TurnBudget(deadline=None, limits=BudgetLimits(provider_attempts=4, finalization_attempts=2))
-    adapter = FleetJSONAdapter(budget=turn)
+    turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=2))
+    adapter = FleetJSONAdapter(budget=turn, root_finalization=False)
     lm = _ScriptedLM([_EXPLORATORY_ACTION, _SUBMIT_BOUND_ANSWER])
-    # A sub/child Turn LM copy carries ``_fleet_can_finalize = False``.
-    lm._fleet_can_finalize = False
 
     prediction = _run_iteration_action(lm, adapter, iteration="3/3")
 
@@ -679,6 +697,113 @@ def test_exhausted_finalization_reports_exhaustion_not_deadline() -> None:
 
     assert len(lm.calls) == 3
     assert adapter.wrap_up_summary()["wrap_up_attempts"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_native_iteration_markers_drive_parse_repair_and_finalization(asynchronous) -> None:
+    lm = _ScriptedLM(
+        [
+            "not json",
+            _action("answer = 'kept'"),
+            _action("print('must not execute')"),
+            _action("SUBMIT(answer=answer)"),
+        ]
+    )
+    adapter = FleetJSONAdapter()
+    rlm = build_native_rlm_for_test(signature="request -> answer", options=RLMOptions(max_iters=2))
+    with dspy.context(lm=lm, adapter=adapter):
+        prediction = await rlm.acall(request="go") if asynchronous else rlm(request="go")
+    assert prediction.answer == "kept"
+    assert len(prediction.trajectory) == 2
+    assert len(lm.calls) == 4
+    assert "1/2" in _last_user_text(lm.calls[0])
+    assert "2/2" in _last_user_text(lm.calls[2])
+    assert adapter.repair_summary()["parse_repairs_used"] == 1
+    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_native_extraction_keeps_stock_adapter_behavior(asynchronous) -> None:
+    class NonSubmittingBackend(InProcessInterpreterBackend):
+        def run(self, code, variables=None, *, on_stdout=None):
+            del code, variables, on_stdout
+            return BackendExecutionResult(stdout="completed without final output")
+
+    interpreter = DaytonaCodeInterpreter(backend=NonSubmittingBackend())
+    lm = _ScriptedLM([_SUBMIT_LITERAL, json.dumps({"answer": "extracted"})])
+    adapter = FleetJSONAdapter()
+    rlm = build_native_rlm_for_test(
+        signature="request -> answer",
+        options=RLMOptions(max_iters=1),
+        interpreter_factory=lambda: interpreter,
+    )
+    with dspy.context(lm=lm, adapter=adapter):
+        prediction = await rlm.acall(request="go") if asynchronous else rlm(request="go")
+    assert prediction.answer == "extracted"
+    assert prediction.final_reasoning == "Extract forced final output"
+    assert len(lm.calls) == 2
+    assert adapter.wrap_up_summary()["wrap_up_attempts"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("semantic_limit", [1, 2])
+async def test_native_semantic_batch_preserves_per_invocation_admission(asynchronous, semantic_limit) -> None:
+    root = _ScriptedLM(
+        [
+            _action("values = []\ntry:\n    values = llm_query_batched(['one', 'two'])\nexcept Exception:\n    pass"),
+            _action("SUBMIT(answer=values)"),
+        ]
+    )
+    sub = _ScriptedLM(["semantic"])
+    rlm = build_native_rlm_for_test(
+        signature="request -> answer: list[str]",
+        options=RLMOptions(max_iters=2, max_llm_calls=semantic_limit),
+        sub_lm=sub,
+    )
+    with dspy.context(lm=root, adapter=FleetJSONAdapter()):
+        prediction = await rlm.acall(request="go") if asynchronous else rlm(request="go")
+    assert prediction.answer == (["semantic", "semantic"] if semantic_limit == 2 else [])
+    assert len(sub.calls) == (2 if semantic_limit == 2 else 0)
+    assert len(root.calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_late_malformed_response_cannot_start_a_parse_correction(monkeypatch, asynchronous) -> None:
+    turn = TurnBudget(deadline=None)
+    lm = _ScriptedLM(["not json", _SUBMIT_LITERAL])
+    complete = lm._scripted_engine.complete
+
+    def settle_before_delivery(request):
+        response = complete(request)
+        turn.settle()
+        return response
+
+    monkeypatch.setattr(lm._scripted_engine, "complete", settle_before_delivery)
+    adapter = FleetJSONAdapter(budget=turn)
+    with pytest.raises(TurnBudgetExhausted) as failure, dspy.context(lm=lm, adapter=adapter):
+        predict = dspy.Predict(_IterationActionSignature)
+        if asynchronous:
+            await predict.acall(iteration="1/3")
+        else:
+            predict(iteration="1/3")
+    assert failure.value.dimension == BudgetDimension.SETTLED
+    assert len(lm.calls) == 1
+    assert adapter.repair_summary()["parse_repairs_used"] == 0
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_finalization_diagnostics_preserve_dimension_through_parse_cause(shared) -> None:
+    from fleet_rlm.observability.diagnostics import trace_failure_details
+
+    parse = AdapterParseError(adapter_name="JSONAdapter", signature=_ActionSignature, lm_response="invalid")
+    error = TurnBudgetExhausted(BudgetDimension.FINALIZATION_ATTEMPTS) if shared else FinalizationExhausted("spent")
+    error.__cause__ = parse
+    assert normalize_turn_failure(error).detail == "finalization_attempts"
+    assert trace_failure_details(error)["failure_detail"] == "finalization_attempts"
 
 
 def test_unparseable_wrap_up_responses_terminate_at_the_finalization_ceiling() -> None:

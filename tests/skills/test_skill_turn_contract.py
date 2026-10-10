@@ -467,7 +467,7 @@ async def test_deterministic_composition_runs_data_analysis_signature() -> None:
         skill_catalog=catalog,
     ).prepare(
         _turn(selections=(SkillSelectionRef(selected.card.id, selected.card.version),)),
-        deadline=float("inf"),
+        deadline=asyncio.get_running_loop().time() + 3600,
     )
     stream = RLMRunner(program_builder=build_testing_rlm).stream(prepared.execution)
     _ = [event async for event in stream]

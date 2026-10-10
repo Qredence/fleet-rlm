@@ -102,8 +102,10 @@ keyword-only.
 - Fleet scopes `FleetJSONAdapter`, a DSPy JSON adapter with bounded corrective
   re-asks and shared deadline/budget accounting, to each Turn. Wrap-up starts
   on the final native iteration. When wrap-up is enabled, last-iteration
-  exhaustion is a Turn `timeout`; DSPy extract fallback is unreachable because
-  `generate_action` does not return. Empty or reasoning-only completions stay
+  exhaustion retains the existing Turn `timeout` status and identifies the
+  `finalization_attempts` dimension in diagnostics. Native extraction still runs
+  if the loop completes without a typed SUBMIT result; adapter exhaustion
+  propagates instead of triggering extraction. Empty or reasoning-only completions stay
   on the bounded parse re-ask path while time and iterations remain. It
   preserves the pinned action grammar; exhausted repair is an
   `adapter_parse_error`. RLM action output contains

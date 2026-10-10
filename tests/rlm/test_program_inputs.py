@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -417,7 +418,7 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
         attachments=Attachments(),
         acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
-    ).prepare(turn, deadline=float("inf"))
+    ).prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
     class Factory:
         kwargs: dict[str, object] | None = None
@@ -600,8 +601,6 @@ def test_model_bundle_forks_isolated_child_lms() -> None:
     assert first.root_lm is not second.root_lm
     assert first.sub_lm is not second.sub_lm
     assert first.root_lm.history is not second.root_lm.history
-    assert first.root_lm._fleet_can_finalize is False
-    assert first.sub_lm._fleet_can_finalize is False
     assert not hasattr(root, "_fleet_can_finalize")
     assert not hasattr(sub, "_fleet_can_finalize")
 
@@ -673,7 +672,7 @@ async def test_turn_bound_lm_preserves_dspy_sync_async_usage_and_callbacks():
     assert callback.starts == ["test/script", "test/script"]
 
 
-def test_turn_binding_isolates_role_copies_and_marks_finalization() -> None:
+def test_turn_binding_isolates_role_copies_without_lm_policy_attributes() -> None:
     from fleet_rlm.rlm.budget import TurnBudget
 
     root = _CopyableLM()
@@ -690,8 +689,6 @@ def test_turn_binding_isolates_role_copies_and_marks_finalization() -> None:
     assert bound.sub_lm is not sub
     assert root.calls == []
     assert sub.calls == []
-    assert bound.root_lm._fleet_can_finalize is True
-    assert bound.sub_lm._fleet_can_finalize is False
     assert bound.budget is budget
     assert source.budget is None
 
@@ -866,7 +863,7 @@ async def test_databricks_action_request_carries_json_schema(monkeypatch: pytest
     from dspy.clients.engines.lm15_engine import AsyncLM15Engine
     from dspy.lm15 import Request, Response, response_from_openai_chat
 
-    from fleet_rlm.rlm.program import FleetJSONAdapter
+    from fleet_rlm.rlm.adapter import FleetJSONAdapter
 
     class Action(dspy.Signature):
         """One RLM action."""
@@ -920,7 +917,7 @@ async def test_alibaba_action_request_uses_json_object_only(monkeypatch: pytest.
     from dspy.clients.engines.lm15_engine import AsyncLM15Engine
     from dspy.lm15 import Request, Response, response_from_openai_chat
 
-    from fleet_rlm.rlm.program import FleetJSONAdapter
+    from fleet_rlm.rlm.adapter import FleetJSONAdapter
 
     class Action(dspy.Signature):
         """One RLM action."""

@@ -130,7 +130,7 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
         task_service=TaskService(),
-    ).prepare(turn, deadline=float("inf"))
+    ).prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
     manifest = prepared.execution.session.session_context
     assert manifest.session_id == turn.session_id
@@ -337,7 +337,7 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
     )
 
     with pytest.raises(RuntimeError, match="private capability failure"):
-        await module.prepare(turn, deadline=float("inf"))
+        await module.prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
     assert staged_path not in values
     assert values == {workspace_path: b"immediate workspace state"}
@@ -428,7 +428,7 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
             attachments=Attachments(),
             acquire_environment=Environments().acquire,
             capabilities=CapabilityFactory(),
-        ).prepare(turn, deadline=float("inf"))
+        ).prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
     assert operations == ["remove-attachment", "close-capabilities", "release-environment"]
 
@@ -864,7 +864,7 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
     )
 
     with pytest.raises(RunPreparationUnavailableError, match="capabilities"):
-        await preparer.prepare(turn, deadline=float("inf"))
+        await preparer.prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
 
 @pytest.mark.asyncio
@@ -921,7 +921,7 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
     )
 
     with pytest.raises(RunPreparationUnavailableError, match="attachments"):
-        await preparer.prepare(turn, deadline=float("inf"))
+        await preparer.prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
 
 @pytest.mark.asyncio
@@ -995,7 +995,7 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
     )
 
     with pytest.raises(RunPreparationUnavailableError, match="cancellation"):
-        await preparer.prepare(turn, deadline=float("inf"))
+        await preparer.prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
 
 # --- Live Turn Preparation Contracts ---
@@ -1224,7 +1224,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             models=_test_models(),
         ),
         turn,
-        deadline=float("inf"),
+        deadline=asyncio.get_running_loop().time() + 3600,
     )
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
@@ -1232,7 +1232,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert first_interpreter.bound_runs == [turn.run_id]
     budget = prepared.execution.execution.models.budget
     assert budget is not None
-    assert budget.limits.provider_attempts == settings.rlm_max_provider_attempts
+    assert budget.deadline == prepared.execution.execution.deadline
     assert budget.limits.tool_calls == settings.rlm_max_tool_calls
     assert budget.limits.execution_output_bytes == settings.rlm_max_execution_output_bytes
     assert budget.limits.finalization_attempts == settings.rlm_finalization_attempts
@@ -1434,7 +1434,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             models=_test_models(),
         ),
         turn2,
-        deadline=float("inf"),
+        deadline=asyncio.get_running_loop().time() + 3600,
     )
     second_interpreter = resources.root_provider.interpreters[-1]
     assert second_interpreter.bound_runs == [turn2.run_id]
@@ -1470,7 +1470,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             models=_test_models(),
         ),
         turn3,
-        deadline=float("inf"),
+        deadline=asyncio.get_running_loop().time() + 3600,
     )
     assert len(resources.root_provider.interpreters) == 2
     assert second_interpreter.bound_runs == [turn2.run_id, turn3.run_id]
@@ -1548,7 +1548,7 @@ async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
                 models=_test_models(),
             ),
             turn,
-            deadline=float("inf"),
+            deadline=asyncio.get_running_loop().time() + 3600,
         )
     assert str(caught.value) == "Turn environment is unavailable"
     assert "secret" not in str(caught.value)

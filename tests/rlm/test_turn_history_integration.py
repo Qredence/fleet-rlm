@@ -128,7 +128,7 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
         acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
-    prepared = await preparer.prepare(claim, deadline=float("inf"))
+    prepared = await preparer.prepare(claim, deadline=asyncio.get_running_loop().time() + 3600)
 
     # The SessionView carries the canonical ``dspy.History`` snapshot.
     session = prepared.execution.session
@@ -246,7 +246,7 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
         acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
-    prepared = await preparer.prepare(claim, deadline=float("inf"))
+    prepared = await preparer.prepare(claim, deadline=asyncio.get_running_loop().time() + 3600)
 
     assert prepared.execution.session.history is not None
     assert type(prepared.execution.session.history) is dspy.History
@@ -339,7 +339,7 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
         acquire_environment=Environments().acquire,
         capabilities=CapabilityFactory(),
     )
-    prepared = await preparer.prepare(claim, deadline=float("inf"))
+    prepared = await preparer.prepare(claim, deadline=asyncio.get_running_loop().time() + 3600)
 
     assert list(prepared.execution.session.history.messages) == list(transport.messages)
     assert type(prepared.execution.session.history).__name__ == "CommittedSessionHistory"
@@ -495,7 +495,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     # Turn 1: stream through the runner, then commit the runner outcome.
     turn_one = await lifecycle.begin(RunClaim(access, session.id, TurnInput("turn one"), "key-1", uuid4()))
     assert isinstance(turn_one, ClaimedRun)
-    prepared_one = await preparer.prepare(turn_one, deadline=float("inf"))
+    prepared_one = await preparer.prepare(turn_one, deadline=asyncio.get_running_loop().time() + 3600)
     stream_one = runner.stream(prepared_one.execution)
     _events_one = [event async for event in stream_one]
     assert stream_one.outcome is not None and stream_one.outcome.succeeded
@@ -511,7 +511,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
         ("user", "turn one"),
         ("assistant", "turn-one-answer"),
     ]
-    prepared_two = await preparer.prepare(turn_two, deadline=float("inf"))
+    prepared_two = await preparer.prepare(turn_two, deadline=asyncio.get_running_loop().time() + 3600)
     stream_two = runner.stream(prepared_two.execution)
     _events_two = [event async for event in stream_two]
     assert stream_two.outcome is not None and stream_two.outcome.succeeded

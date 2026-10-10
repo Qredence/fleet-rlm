@@ -20,10 +20,11 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     OutputCallback,
 )
+from fleet_rlm.rlm.adapter import FleetJSONAdapter
 from fleet_rlm.rlm.events import ToolEventView, observe_tool
 from fleet_rlm.rlm.execution import RLMProviderContractError, probe_root_lm
 from fleet_rlm.rlm.output_contract import bind_output_contract
-from fleet_rlm.rlm.program import FleetJSONAdapter, RLMOptions
+from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.rlm.result import prediction_result
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.scripted_lm import _IterationActionSignature, _ScriptedLM

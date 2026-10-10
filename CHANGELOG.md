@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Remove the unenforced `rlm.max_provider_attempts` setting. Older configuration
+  files containing it now fail with an actionable migration message. DSPy owns
+  provider retries; Fleet retains its enforced iteration, tool, child, output,
+  deadline, and finalization limits. Wrap-up begins on the final RLM iteration,
+  and finalization exhaustion is reported under its own budget dimension.
+- Connect the shared admission ledger to the absolute Turn deadline, preserve
+  the root finalization reserve, and close root/child admissions before owned
+  cleanup drains. Isolate DSPy JSON/iteration compatibility in `rlm/adapter.py`
+  with explicit invocation finalization policy and direct LM-copy tracing.
+
 ## [0.7.11] - 2026-10-05
 
 Fleet RLM 0.7.11 aligns the execution and web stacks with current upstream

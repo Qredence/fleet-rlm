@@ -25,7 +25,7 @@ src/fleet_rlm/
 
 See the root [architecture](../../ARCHITECTURE.md) for dependency boundaries. Layering is `sessions` (contracts) ← `persistence` ← `turns` (orchestration) ← `api`; `rlm` is a sibling that shares event and result value types with `sessions`.
 
-Start lifecycle investigations in `turns/coordinator.py`, `turns/preparation.py`, and `turns/settlement.py`. Native invocation and observation live in `rlm/execution.py` and `rlm/events.py`; `rlm/program.py` constructs the pinned public DSPy API directly. Daytona interpreter result handling lives beside the interpreter in `daytona/interpreter.py`. Each Run gets a fresh DSPy program; a healthy broker Root Sandbox may persist across sequential clean Turns. SDK calls remain in `daytona/`. `app.py` owns FastAPI lifespan, `app_lifecycle.py` builds and closes provider resources, and `app_services.py` defines the composed service inventory.
+Start lifecycle investigations in `turns/coordinator.py`, `turns/preparation.py`, and `turns/settlement.py`. Native invocation and observation live in `rlm/execution.py` and `rlm/events.py`; `rlm/program.py` constructs the pinned public DSPy API directly, and `rlm/adapter.py` isolates JSON/iteration compatibility and bounded correction policy. Daytona interpreter result handling lives beside the interpreter in `daytona/interpreter.py`. Each Run gets a fresh DSPy program; a healthy broker Root Sandbox may persist across sequential clean Turns. SDK calls remain in `daytona/`. `app.py` owns FastAPI lifespan, `app_lifecycle.py` builds and closes provider resources, and `app_services.py` defines the composed service inventory.
 
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.

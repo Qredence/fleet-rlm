@@ -44,6 +44,7 @@ from fleet_rlm.observability.tracing import (
     start_turn_span,
     trace_preview_limit,
 )
+from fleet_rlm.rlm.adapter import FleetJSONAdapter
 from fleet_rlm.rlm.budget import BudgetDimension, current_host_action_deadline
 from fleet_rlm.rlm.events import (
     ChildProgress,
@@ -56,7 +57,6 @@ from fleet_rlm.rlm.events import (
 )
 from fleet_rlm.rlm.output_contract import bind_output_contract
 from fleet_rlm.rlm.program import (
-    FleetJSONAdapter,
     RLMModelBundle,
     RLMOptions,
     build_native_rlm,
@@ -1587,6 +1587,8 @@ class RecursiveRLMExecutor:
                 invocation_kwargs["deadline_monotonic"] = bound.at
             if "admission" in accepted:
                 invocation_kwargs["admission"] = functools.partial(self._ensure_call_authorized, batch_cancelled, bound)
+            if "root_finalization" in accepted:
+                invocation_kwargs["root_finalization"] = False
             interpreter = new_invocation(**invocation_kwargs)
             bind_output_contract(
                 interpreter,
@@ -1631,7 +1633,7 @@ class RecursiveRLMExecutor:
         self._ensure_call_authorized(batch_cancelled, bound)
         with dspy.context(
             lm=child_models.root_lm,
-            adapter=FleetJSONAdapter(budget=child_models.budget),
+            adapter=FleetJSONAdapter(budget=child_models.budget, root_finalization=False),
             callbacks=dspy_turn_callbacks(
                 _RLMTraceCallback(
                     root_lm=child_models.root_lm,

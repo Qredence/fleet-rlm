@@ -416,7 +416,7 @@ async def prepare_turn(plan: TurnPreparationPlan, run: ClaimedRun, *, deadline: 
     assert capabilities is not None
     resources = _build_resources()
     try:
-        turn_budget = TurnBudget(deadline=None, limits=plan.budget_limits)
+        turn_budget = TurnBudget(deadline=deadline, limits=plan.budget_limits)
         turn_models = plan.models.bind_turn(budget=turn_budget)
     except BaseException:
         await asyncio.shield(resources.aclose())

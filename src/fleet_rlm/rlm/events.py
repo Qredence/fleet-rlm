@@ -27,7 +27,7 @@ from dspy.utils.exceptions import AdapterParseError
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category, walk_cause_chain
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, turn_phase_span
-from fleet_rlm.rlm.program import FleetJSONAdapter
+from fleet_rlm.rlm.adapter import FleetJSONAdapter
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     RLMConfigError,
@@ -1976,7 +1976,7 @@ class _RLMTraceCallback(BaseCallback):
     def on_lm_start(self, call_id: str, instance: Any, inputs: dict[str, Any]) -> None:
         if self._deadline is not None and time.monotonic() >= self._deadline:
             return
-        role = self._roles.get(id(getattr(instance, "_fleet_trace_identity", instance)))
+        role = self._roles.get(id(instance))
         if role is None:
             return
         self._call_index += 1
@@ -2020,7 +2020,7 @@ class _RLMTraceCallback(BaseCallback):
         if state is None:
             return
         instance, span, history_length, call_index, started_at = state
-        role = self._roles.get(id(getattr(instance, "_fleet_trace_identity", instance)), "unknown")
+        role = self._roles.get(id(instance), "unknown")
         try:
             usage = _latest_lm_telemetry(instance, history_length, outputs)
         except Exception:

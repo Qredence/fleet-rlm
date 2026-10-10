@@ -14,6 +14,7 @@ import dspy
 import pytest
 from dspy.utils.usage_tracker import UsageTracker
 
+from fleet_rlm.rlm.adapter import FleetJSONAdapter
 from fleet_rlm.rlm.budget import (
     AdapterBudget,
     BudgetDimension,
@@ -28,7 +29,7 @@ from fleet_rlm.rlm.events import (
     ToolCompleted,
     _RLMTraceCallback,
 )
-from fleet_rlm.rlm.program import FleetJSONAdapter, RLMModelBundle
+from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import ChildRequest, RecursiveRLMOptions
 from tests.rlm.fakes import ChildLeaseRecorder
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
@@ -61,29 +62,12 @@ def test_atomic_reservations_never_over_admit(dimension: BudgetDimension) -> Non
     assert budget.snapshot()[dimension.value] == 7
 
 
-def test_exploration_exhausted_reports_configured_headroom() -> None:
-    """With provider admission retired this signal is limit-driven, not observed.
-
-    No caller reserves provider attempts any more, so the observed counters stay
-    at zero and the answer is decided by the configured finalization reserve.
-    """
-    unbounded = TurnBudget(deadline=None)
-    production_shaped = TurnBudget(deadline=None, limits=BudgetLimits(provider_attempts=2048, finalization_attempts=2))
-    reserve_swallows_limit = TurnBudget(
-        deadline=None, limits=BudgetLimits(provider_attempts=1, finalization_attempts=1)
-    )
-
-    assert unbounded.exploration_exhausted() is False
-    assert production_shaped.exploration_exhausted() is False
-    assert reserve_swallows_limit.exploration_exhausted() is True
-
-
 def test_finalization_allocation_is_independent_of_other_dimensions() -> None:
     budget = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=2))
     budget.reclassify_finalization(2)
     with pytest.raises(TurnBudgetExhausted) as error:
         budget.reclassify_finalization()
-    assert error.value.dimension == BudgetDimension.PROVIDER_ATTEMPTS
+    assert error.value.dimension == BudgetDimension.FINALIZATION_ATTEMPTS
     # Spending the finalization allocation leaves the reservable dimensions alone.
     budget.reserve(BudgetDimension.TOOL_CALLS)
     assert budget.snapshot()["tool_calls"] == 1
@@ -104,10 +88,36 @@ def test_deadline_reserve_and_settlement(monkeypatch: pytest.MonkeyPatch) -> Non
     assert not any(budget.snapshot().values())
 
 
+@pytest.mark.parametrize("can_finalize", [True, False])
+@pytest.mark.parametrize("closed_by", ["settlement", "deadline"])
+def test_local_finalization_cannot_outlive_shared_turn(monkeypatch, can_finalize, closed_by) -> None:
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
+    turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))
+    scope = AdapterBudget(turn=turn)
+    if closed_by == "settlement":
+        turn.settle()
+        expected = BudgetDimension.SETTLED
+    else:
+        monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 100.0)
+        expected = BudgetDimension.DEADLINE
+    with pytest.raises(TurnBudgetExhausted) as failure:
+        scope.reclassify_late_response(can_finalize=can_finalize)
+    assert failure.value.dimension == expected
+    assert scope.finalization_used == 0
+    assert turn.snapshot()["finalization_attempts"] == 0
+
+
+def test_local_finalization_exhaustion_identifies_its_dimension() -> None:
+    scope = AdapterBudget(max_finalization_attempts=0)
+    with pytest.raises(FinalizationExhausted) as failure:
+        scope.reclassify_late_response(can_finalize=False)
+    assert failure.value.dimension == BudgetDimension.FINALIZATION_ATTEMPTS
+
+
 @pytest.mark.parametrize("value", [-1])
 def test_invalid_limits(value: int) -> None:
     with pytest.raises(ValueError):
-        BudgetLimits(provider_attempts=value)
+        BudgetLimits(finalization_attempts=value)
 
 
 def test_failed_batch_does_not_partially_debit() -> None:
@@ -145,10 +155,7 @@ def test_turn_and_child_copies_share_the_ledger_without_mutating_the_template() 
     assert bound.root_lm.history is not template_lm.history
     assert child.root_lm.history is not bound.root_lm.history
     assert "budget" not in vars(template_lm)
-    assert bound.root_lm._fleet_can_finalize is True
-    assert bound.sub_lm._fleet_can_finalize is False
-    assert child.root_lm._fleet_can_finalize is False
-    assert child.sub_lm._fleet_can_finalize is False
+    assert not any(name.startswith("_fleet_") for lm in (bound.root_lm, child.root_lm) for name in vars(lm))
 
 
 @pytest.mark.parametrize("forked", [False, True])
@@ -267,24 +274,15 @@ async def test_parse_repair_counter_stays_zero_without_a_reask() -> None:
 @pytest.mark.parametrize(
     ("limits", "iteration", "wrap_up_expected"),
     [
-        (BudgetLimits(provider_attempts=2, finalization_attempts=1), "1/3", False),
-        # Nothing reserves provider attempts any more, so the wrap-up trigger is
-        # purely config-driven: a profile whose finalization reserve swallows the
-        # provider-attempt limit has no exploration headroom from the first action.
-        (BudgetLimits(provider_attempts=1, finalization_attempts=1), "1/3", True),
         (None, "2/3", False),
         (None, "3/3", True),
     ],
 )
 @pytest.mark.asyncio
-async def test_wrap_up_is_keyed_to_iteration_and_exploration_capacity(
+async def test_wrap_up_is_keyed_to_iteration(
     limits: BudgetLimits | None, iteration: str, wrap_up_expected: bool
 ) -> None:
-    """Wrap-up begins on the final RLM iteration or once exploration capacity is spent.
-
-    The retired wall-clock reserve trigger is gone: a mid-iteration action with
-    exploration headroom must not enter wrap-up.
-    """
+    """Wrap-up begins only on the final RLM iteration."""
     turn = TurnBudget(deadline=None, limits=limits)
     source = _ScriptedLM([GOOD])
     adapter = FleetJSONAdapter(budget=turn)
@@ -334,8 +332,6 @@ async def test_real_lm_template_is_copied_without_mutating_retries_or_history(mo
     assert models.sub_lm is not template
     assert models.root_lm.history is not template.history
     assert models.sub_lm.history is not template.history
-    assert models.root_lm._fleet_can_finalize is True
-    assert models.sub_lm._fleet_can_finalize is False
 
     callback = _RLMTraceCallback(root_lm=models.root_lm, sub_lm=models.sub_lm)
     with dspy.context(callbacks=[callback]):
@@ -350,7 +346,7 @@ async def test_real_lm_template_is_copied_without_mutating_retries_or_history(mo
     assert callback._call_index == 1
     assert callback._last_call["role"] == "root"
     # Provider-attempt admission is retired: a real adapter call never charges it.
-    assert turn.snapshot()["provider_attempts"] == 0
+    assert "provider_attempts" not in turn.snapshot()
 
 
 @pytest.mark.asyncio
@@ -478,24 +474,19 @@ async def test_turn_copy_preserves_role_and_usage_visibility() -> None:
     assert len(models.root_lm.history) == 1
 
 
-def test_turn_binding_marks_only_the_root_copy_as_finalization_capable() -> None:
+def test_root_and_child_finalization_capabilities_have_separate_allowances() -> None:
     """Only the Turn root may spend the shared ledger's finalization capacity."""
     source = _ScriptedLM([GOOD])
     turn = TurnBudget(deadline=None, limits=BudgetLimits(finalization_attempts=1))
     models = RLMModelBundle(source, source).bind_turn(budget=turn)
     child = models.fork_for_child()
 
-    assert models.root_lm._fleet_can_finalize is True
-    assert models.sub_lm._fleet_can_finalize is False
-    assert child.root_lm._fleet_can_finalize is False
-    assert child.sub_lm._fleet_can_finalize is False
-
-    child_scope = AdapterBudget(turn=turn, max_finalization_attempts=2)
-    child_scope.reclassify_late_response(can_finalize=child.root_lm._fleet_can_finalize)
+    child_scope = AdapterBudget(turn=child.budget, max_finalization_attempts=2)
+    child_scope.reclassify_late_response(can_finalize=False)
     # The child's late response consumed only its local allowance, so the Turn's
     # single reserved finalization slot is still there for the root.
     root_scope = AdapterBudget(turn=turn, max_finalization_attempts=2)
-    root_scope.reclassify_late_response(can_finalize=models.root_lm._fleet_can_finalize)
+    root_scope.reclassify_late_response(can_finalize=True)
     with pytest.raises(TurnBudgetExhausted):
         root_scope.reclassify_late_response(can_finalize=True)
 
@@ -512,9 +503,9 @@ def test_late_response_reclassification_consumes_shared_finalization_capacity() 
     with pytest.raises(TurnBudgetExhausted) as error:
         scope.reclassify_late_response()
 
-    assert error.value.dimension == BudgetDimension.PROVIDER_ATTEMPTS
+    assert error.value.dimension == BudgetDimension.FINALIZATION_ATTEMPTS
     assert scope.finalization_used == 2
-    assert turn.snapshot()["provider_attempts"] == 0
+    assert turn.snapshot()["finalization_attempts"] == 2
 
 
 def test_late_child_response_cannot_exceed_its_local_wrap_up_limit() -> None:
