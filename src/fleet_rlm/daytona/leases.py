@@ -728,30 +728,6 @@ def close_child_runtime_sync(
         raise ChildRuntimeCleanupError("recursive child cleanup failed or remains unresolved") from exc
 
 
-def _close_child_runtime_sync(
-    *,
-    loop: asyncio.AbstractEventLoop,
-    platform: SandboxPlatform,
-    sandbox: Any,
-    sandbox_id: str,
-    mount_path: str | None,
-    interpreter: Any,
-    permit: Any,
-    retain_pending_cleanup: Callable[[Future[Any]], None],
-) -> None:
-    close_child_runtime_sync(
-        loop=loop,
-        platform=platform,
-        sandbox=sandbox,
-        sandbox_id=sandbox_id,
-        mount_path=mount_path,
-        interpreter=interpreter,
-        permit=permit,
-        retain_pending_cleanup=retain_pending_cleanup,
-        cleanup_result_timeout_s=CHILD_CLEANUP_RESULT_TIMEOUT_S,
-    )
-
-
 def _retain_provider_task(task: asyncio.Future[Any], owner: set[asyncio.Future[Any]]) -> None:
     owner.add(task)
 

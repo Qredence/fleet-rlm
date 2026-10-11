@@ -6,6 +6,7 @@ import asyncio
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from functools import partial
 from threading import Event
 from types import SimpleNamespace
 from uuid import uuid4
@@ -199,7 +200,11 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     platform = _RecordingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
     release_shutdown = threading.Event()
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
 
     class _BlockingInterpreter:
@@ -543,7 +548,7 @@ async def test_owner_loop_loss_retains_cleanup_without_provider_settlement() -> 
 
     retained: list[Future[object]] = []
     with pytest.raises(ChildRuntimeCleanupError):
-        leases_module._close_child_runtime_sync(
+        leases_module.close_child_runtime_sync(
             loop=_ClosedLoop(),  # type: ignore[arg-type]
             platform=platform,
             sandbox=child,
@@ -604,7 +609,11 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
     monkeypatch.setattr(
         children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: _BlockingInterpreter(backend=sandbox)
     )
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()

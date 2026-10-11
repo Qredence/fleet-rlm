@@ -399,7 +399,7 @@ class TestSandboxIsolationInvariants:
         mock_admission.acquire = AsyncMock()
         mock_interpreter = MagicMock()
         monkeypatch.setattr(daytona_children, "sandbox_interpreter_factory", lambda *_args, **_kwargs: mock_interpreter)
-        monkeypatch.setattr(daytona_children, "_close_child_runtime_sync", MagicMock())
+        monkeypatch.setattr(daytona_children, "close_child_runtime_sync", MagicMock())
         monkeypatch.setattr(daytona_children, "cleanup_after_failed_acquire", AsyncMock())
         monkeypatch.setattr(daytona_children, "sandbox_id_for", lambda _sandbox: "sb-child-isolation")
 

@@ -31,10 +31,10 @@ from fleet_rlm.daytona.leases import (
     DaytonaAdmissionPermit,
     DaytonaAdmissionTimeoutError,
     LeaseState,
-    _close_child_runtime_sync,
     _retain_provider_task,
     cleanup_after_failed_acquire,
     cleanup_child_runtime_async,
+    close_child_runtime_sync,
 )
 from fleet_rlm.daytona.provider import list_files, read_file, write_file
 from fleet_rlm.daytona.specs import (
@@ -769,7 +769,7 @@ class ChildSandboxes:
 
             def close() -> None:
                 try:
-                    _close_child_runtime_sync(
+                    close_child_runtime_sync(
                         loop=loop,
                         platform=platform,
                         sandbox=sandbox,

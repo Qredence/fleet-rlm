@@ -6,6 +6,7 @@ import asyncio
 import threading
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from functools import partial
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -644,7 +645,11 @@ async def test_child_cleanup_timeout_retains_provider_future_until_it_settles(
     monkeypatch.setattr(
         children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: Interpreter(backend=sandbox)
     )
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     factory = make_daytona_child_factory(
@@ -695,7 +700,11 @@ async def test_interpreter_shutdown_timeout_quarantines_provider_cleanup(
     monkeypatch.setattr(
         children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: HangingInterpreter(backend=sandbox)
     )
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     factory = make_daytona_child_factory(
@@ -759,7 +768,11 @@ async def test_ordered_cleanup_never_starts_a_quarantine_thread(
     monkeypatch.setattr(
         children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: HangingInterpreter(backend=sandbox)
     )
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     factory = make_daytona_child_factory(
@@ -1125,7 +1138,7 @@ async def test_child_cleanup_retains_ownership_when_owner_loop_closed() -> None:
 
     retained: list[Future[object]] = []
     with pytest.raises(errors_module.ChildRuntimeCleanupError):
-        leases_module._close_child_runtime_sync(
+        leases_module.close_child_runtime_sync(
             loop=ClosedLoop(),  # type: ignore[arg-type]
             platform=platform,
             sandbox=child,
@@ -1174,7 +1187,11 @@ async def test_factory_wait_owned_bounds_never_completing_provider_acquisition(
     monkeypatch.setattr(
         children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: Interpreter(backend=sandbox)
     )
-    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module,
+        "close_child_runtime_sync",
+        partial(leases_module.close_child_runtime_sync, cleanup_result_timeout_s=0.05),
+    )
     monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     platform = HangingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
