@@ -460,12 +460,16 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
         "numpy==2.5.1",
         "pandas==3.0.5",
         "beautifulsoup4==4.15.0",
+        "playwright==1.63.0",
     )
     install_line = "pip install beautifulsoup4==4.15.0 mpmath==1.4.1 numpy==2.5.1 pandas==3.0.5"
     assert install_line in dockerfile
     assert dockerfile.index(install_line) < dockerfile.index("USER daytona")
     assert "apt-get install -y --no-install-recommends git ca-certificates procps" in dockerfile
     assert dockerfile.index("apt-get install") < dockerfile.index("USER daytona")
+    assert "python -m playwright install --with-deps chromium" in dockerfile
+    assert "PLAYWRIGHT_BROWSERS_PATH=/opt/fleet/playwright" in dockerfile
+    assert dockerfile.index("playwright install") < dockerfile.index("USER daytona")
     assert "dspy" not in dockerfile
 
 
@@ -553,6 +557,31 @@ def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
     assert semantic.resources == (2, 4, 4)
     assert semantic.digest != session.digest
     assert build_snapshot_image(spec).dockerfile() == build_snapshot_image(workspace_spec).dockerfile()
+
+
+def test_browser_image_identity_and_legacy_image_are_distinct() -> None:
+    from dataclasses import replace
+
+    from fleet_rlm.daytona.diagnostics import (
+        build_snapshot_image,
+        environment_manifest,
+        snapshot_dependency_import_names,
+    )
+
+    new_spec = DaytonaSandboxSpec("fleet-browser-v1")
+    manifest = environment_manifest(new_spec)
+    assert manifest.browser_enabled
+    assert manifest.digest != replace(manifest, browser_enabled=False).digest
+    assert manifest.as_dict()["browser"]["install_command"] == "python -m playwright install --with-deps chromium"
+    legacy_spec = DaytonaSandboxSpec("fleet-rlm-python313-v5")
+    legacy = environment_manifest(legacy_spec)
+    assert not legacy.browser_enabled
+    assert all(not dependency.startswith("playwright") for dependency in legacy.dependencies)
+    assert all(package != "playwright" for package, _, _ in snapshot_dependency_import_names(spec=legacy_spec))
+    legacy_image = build_snapshot_image(legacy_spec).dockerfile()
+    assert "playwright" not in legacy_image
+    assert "runtime-manifest.json" not in legacy_image
+    assert "USER daytona" in legacy_image
 
 
 # --- Deletion Lifecycle and Absence Confirmation ---

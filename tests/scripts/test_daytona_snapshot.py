@@ -57,6 +57,13 @@ async def test_runtime_probe_checks_profile_dependencies_and_cleans_up(
         assert f"dependencies = {snapshot_dependency_import_names(spec.profile)!r}" in code
         assert "importlib.import_module(module)" in code
         assert "importlib.metadata.version(distribution) == version" in code
+        if profile == "session":
+            assert "chromium.launch(headless=True, chromium_sandbox=True" in code
+            assert "page.set_content(" in code
+            assert "browser_context.close()" in code
+            assert "browser.close()" in code
+        else:
+            assert "playwright" not in code
         return SimpleNamespace(stdout="fleet-snapshot-runtime-ok" if succeeds else "", error=None)
 
     async def delete_context(received):

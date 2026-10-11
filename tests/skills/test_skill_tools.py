@@ -81,6 +81,7 @@ def test_progressive_load_reports_installed_paths_and_is_idempotent() -> None:
         "skills/long-context/scripts/semantic_chunk.py",
         "skills/long-context/scripts/rank_chunks.py",
         "skills/long-context/references/chunking-strategies.md",
+        "skills/long-context/scripts/browse_page.py",
     ]
     # One write pass for mark + one for the first load (dedupe), none on repeat.
     assert workspace.calls == workspace.calls[: len(workspace.written) * 2]
@@ -112,7 +113,7 @@ def test_mid_install_failure_reports_exact_successes_and_retries_best_effort() -
     assert first == second
     assert first["ok"] is True
     assert first["installed_paths"] == successful_paths
-    assert first["resource_install"] == {"declared": 3, "installed": 1, "complete": False}
+    assert first["resource_install"] == {"declared": 4, "installed": 1, "complete": False}
     remaining = "skills/long-context/references/chunking-strategies.md"
     assert remaining not in workspace.written
     resource = host.read_skill_resource(str(skill.card.id), "references/chunking-strategies.md", skill.card.version)

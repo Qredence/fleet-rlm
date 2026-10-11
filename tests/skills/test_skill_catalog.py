@@ -26,7 +26,9 @@ def test_catalog_contains_only_explicit_utf8_resources() -> None:
         "scripts/semantic_chunk.py",
         "scripts/rank_chunks.py",
         "references/chunking-strategies.md",
+        "scripts/browse_page.py",
     )
+    assert long_context.card.version == "2.4.0"
     assert tuple(workspace.resources) == ("references/filesystem-contract.md",)
     assert all(
         isinstance(resource.content, str)

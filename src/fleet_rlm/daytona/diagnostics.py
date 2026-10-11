@@ -39,6 +39,8 @@ from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.sessions.bindings import workspace_volume_subpath
 
 _SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
+_BROWSER_INSTALL = "python -m playwright install --with-deps chromium"
+_BROWSER_PATH = "/opt/fleet/playwright"
 _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
 _IMPORT_NAME = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$", re.IGNORECASE)
 
@@ -103,10 +105,11 @@ class DaytonaEnvironmentManifest:
     warm_pool_eligible: bool = False
     schema_version: str = "fleet.daytona-runtime-manifest/v1"
     helper_protocol: str = "daytona-native-context/v1"
+    browser_enabled: bool = False
 
     def as_dict(self) -> dict[str, object]:
         """Return the non-secret manifest payload baked into new images."""
-        return {
+        payload: dict[str, object] = {
             "schema_version": self.schema_version,
             "profile": self.profile.value,
             "image_kind": self.image_kind,
@@ -124,6 +127,14 @@ class DaytonaEnvironmentManifest:
             "volume_allowed": self.volume_allowed,
             "warm_pool_eligible": self.warm_pool_eligible,
         }
+        if self.browser_enabled:
+            payload["browser"] = {
+                "capability_version": "public-page/v1",
+                "install_command": _BROWSER_INSTALL,
+                "browsers_path": _BROWSER_PATH,
+                "chromium_sandbox": True,
+            }
+        return payload
 
     def image_identity(self) -> dict[str, object]:
         """Return the immutable image payload independent of its execution profile."""
@@ -171,9 +182,12 @@ def snapshot_execution_dependencies(
 
 def snapshot_dependency_import_names(
     profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+    *,
+    spec: DaytonaSandboxSpec | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
     triples = []
-    for dependency in snapshot_execution_dependencies(profile):
+    dependencies = snapshot_execution_dependencies(profile) if spec is None else environment_manifest(spec).dependencies
+    for dependency in dependencies:
         package, version = dependency.split("==", 1)
         triples.append((package, _IMPORT_NAME_OVERRIDES.get(package, package.replace("-", "_")), version))
     return tuple(triples)
@@ -195,6 +209,9 @@ def environment_manifest(
         raise TypeError("profile must be a DaytonaEnvironmentProfile")
     semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
     dependencies = snapshot_execution_dependencies(profile)
+    legacy = spec.snapshot == "fleet-rlm-python313-v5" and not semantic
+    if legacy:
+        dependencies = tuple(item for item in dependencies if not item.startswith("playwright=="))
     digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")
     return DaytonaEnvironmentManifest(
         profile=profile,
@@ -206,6 +223,7 @@ def environment_manifest(
         dependencies=dependencies,
         volume_allowed=not semantic,
         warm_pool_eligible=semantic,
+        browser_enabled=not semantic and not legacy,
     )
 
 
@@ -226,13 +244,17 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
         "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
         "chown -R daytona:daytona /home/daytona",
     )
-    dependencies = snapshot_execution_dependencies(image_profile)
+    dependencies = manifest.dependencies
     if dependencies:
         image = image.pip_install(list(dependencies))
+    if manifest.browser_enabled:
+        image = image.env({"PLAYWRIGHT_BROWSERS_PATH": _BROWSER_PATH}).run_commands(
+            f"{_BROWSER_INSTALL} && chmod -R a+rX {_BROWSER_PATH} && rm -rf /var/lib/apt/lists/*"
+        )
     image = image.env(
         {
             "PYTHONUNBUFFERED": "1",
-            "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": snapshot_dependency_sha256(image_profile),
+            "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": manifest.dependency_sha256,
         }
     ).workdir("/home/daytona")
     if not (spec.snapshot == "fleet-rlm-python313-v5" and image_profile is DaytonaEnvironmentProfile.SESSION):
@@ -492,7 +514,7 @@ class _ProductionDaytonaDoctorDependencies:
         context = await sandbox.code_interpreter.create_context()
         run_error: BaseException | None = None
         try:
-            dependencies = snapshot_dependency_import_names()
+            dependencies = snapshot_dependency_import_names(spec=self._sandbox_spec)
             result = await sandbox.code_interpreter.run_code(
                 "import importlib, importlib.metadata, os, shutil, sys\n"
                 "assert sys.version_info[:3] == (3, 13, 13)\n"

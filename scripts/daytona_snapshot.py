@@ -182,7 +182,7 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
                 f"{manifest.digest!r}\n"
                 "assert sys.version_info[:3] == (3, 13, 13)\n"
                 "assert pathlib.Path(sys.executable).is_file()\n"
-                f"dependencies = {snapshot_dependency_import_names(spec.profile)!r}\n"
+                f"dependencies = {snapshot_dependency_import_names(spec=spec)!r}\n"
                 "for distribution, module, version in dependencies:\n"
                 "    imported = importlib.import_module(module)\n"
                 "    assert importlib.metadata.version(distribution) == version\n"
@@ -191,8 +191,26 @@ async def verify_runtime(client: Any, spec: DaytonaSandboxSpec) -> None:
                 "assert getpass.getuser() == 'daytona'\n"
                 "assert pathlib.Path.cwd() == pathlib.Path('/home/daytona')\n"
                 "assert shutil.which('git')\n"
-                "print('fleet-snapshot-runtime-ok')"
             )
+            if manifest.browser_enabled:
+                code += (
+                    "from playwright.sync_api import sync_playwright\n"
+                    "with sync_playwright() as playwright:\n"
+                    "    browser = playwright.chromium.launch(headless=True, chromium_sandbox=True, timeout=15000)\n"
+                    "    try:\n"
+                    "        browser_context = browser.new_context(service_workers='block', accept_downloads=False)\n"
+                    "        try:\n"
+                    "            page = browser_context.new_page()\n"
+                    "            page.set_content('<title>Fleet probe</title><body>before<script>"
+                    'document.body.textContent="fleet-browser-render-ok"</script></body>\', timeout=10000)\n'
+                    "            assert page.title() == 'Fleet probe'\n"
+                    "            assert page.locator('body').inner_text(timeout=10000) == 'fleet-browser-render-ok'\n"
+                    "        finally:\n"
+                    "            browser_context.close()\n"
+                    "    finally:\n"
+                    "        browser.close()\n"
+                )
+            code += "print('fleet-snapshot-runtime-ok')"
             result = await sandbox.code_interpreter.run_code(code, context=context)
             stdout = getattr(result, "stdout", result)
             if getattr(result, "error", None) or str(stdout or "").strip() != "fleet-snapshot-runtime-ok":

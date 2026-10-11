@@ -6,7 +6,7 @@ Fleet ships five runtime Skills:
 |---|---:|---|
 | `data-analysis` | 1.2.0 | Compute and verify descriptive statistics, trends, and qualified anomalies. |
 | `dspy-rlm` | 1.1.0 | Use when analyzing, explaining, or implementing dspy.RLM (Recursive Language Model / REPL code agent). Not for RAG or dspy.Retrieve. |
-| `long-context` | 2.3.0 | Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python. |
+| `long-context` | 2.4.0 | Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python. |
 | `report-builder` | 1.3.0 | Create, save, read back, and verify reports from trusted source data. |
 | `workspace-files` | 1.4.0 | Use durable Session Workspace, Project, Attachment, and Artifact tools correctly. |
 

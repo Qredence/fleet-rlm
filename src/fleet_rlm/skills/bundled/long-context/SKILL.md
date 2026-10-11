@@ -3,7 +3,7 @@ name: long-context
 description: Discover public sources and analyze large documents, transcripts, code, or datasets with sandbox Python.
 compatibility: Requires Fleet RLM variable mode with a Python interpreter.
 metadata:
-  version: "2.3.0"
+  version: "2.4.0"
   affordances:
     - sandbox.search
     - llm_query_batched
@@ -17,6 +17,8 @@ resources:
     media_type: text/x-python
   - path: references/chunking-strategies.md
     media_type: text/markdown
+  - path: scripts/browse_page.py
+    media_type: text/x-python
 
 ---
 
@@ -39,7 +41,17 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
    results = DDGS(timeout=10).text(query, max_results=5)
    ```
 
-   Keep only selected titles and URLs in the REPL output. Download selected URLs with Python in the Sandbox to `/workspace/sources`; read each file in bounded pages. Record its URL, retrieval time, path, and SHA-256 in a small sidecar file and, when available, record the path and checksum in the active task.
+   Keep only selected titles and URLs in the REPL output. For one selected public HTTP(S) page, use the bundled `scripts/browse_page.py` in the Root Sandbox:
+
+   ```python
+   import runpy
+   browser_helper = runpy.run_path("/workspace/skills/long-context/scripts/browse_page.py")
+   evidence = browser_helper["retrieve"](url)  # HTTP first, Chromium fallback for JS shells
+   ```
+
+   If installation was partial, obtain this resource with `read_skill_resource` and execute its returned source in the Root interpreter. For a known dynamic page with substantial static shell text, pass `render=True`. Read the saved `text_path` in bounded slices; retain `provenance_path` with URL, final URL, title, UTC retrieval time, UTF-8 bytes, SHA-256 and extraction scope. The helper emits small live stdout milestones, never the whole page. Scratch evidence is Turn-local: copy verified evidence into Session Workspace only if reuse is needed.
+
+   Retrieval has bounded operations (20-second browser navigation, 1-second render settle, 5-second Chromium extraction, 2 MB HTTP response, 1 MB extracted text); oversized evidence fails rather than silently truncating. HTTP uses a 20-second socket inactivity timeout and checks its body deadline between single reads; a stalled read may overshoot that deadline by one inactivity timeout. DNS resolution and HTTP headers/redirects are not covered by a strict whole-retrieval wall-clock deadline. Completeness covers the extracted static response or rendered body at retrieval, not every later dynamic update, linked page, hidden section or infinite-scroll item. No logins, authenticated profiles, clicks, purchases, crawling or screenshots. Run this only in the Root, never a semantic child. Browser-enabled immutable images are required for fallback; old images retain HTTP-only behavior. Private/local URLs and redirects are rejected on a best-effort URL/DNS basis, not a guarantee of network containment.
 2. Locate candidate regions with deterministic searches, indexes, regular expressions, or bounded slices.
 3. Choose the task's coverage rule. For a sparse question, search selected regions and expand when evidence calls for it. For exhaustive extraction, process every required partition, record which were processed, and keep a list of failed or unprocessed partitions. Ranking may prioritize reading order but cannot exclude unseen required evidence. For dependent questions, resolve prerequisites before comparing or parallelizing downstream findings.
 4. Call `llm_query` or `llm_query_batched` only on self-contained excerpts that include the question and their source offsets or source identifiers, unless the request already specifies the exact prompt strings: then pass those strings unchanged and in the given order; do not add offsets, paraphrase, or substitute different wording. Use `rlm_query` only for the rare selected subproblem that needs a fresh iterative Python investigation; it is not the normal route for extraction, counting, parsing, aggregation, or independent excerpts.
