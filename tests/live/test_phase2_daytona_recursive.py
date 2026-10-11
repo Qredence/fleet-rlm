@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from fleet_rlm.app import create_app
 from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
-from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona import children as children_module
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from tests.live._cleanup import _retry_cleanup, _strict_cleanup
@@ -228,7 +228,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         pytest.fail("Phase 2 recursive canary requires runtime.live_enabled=true")
     if policy.run_environment != "daytona":
         pytest.fail("Phase 2 recursive canary requires runtime.environment=daytona")
-    if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
+    if (policy.root_model, policy.sub_model) != (
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,
     ):
@@ -260,11 +260,9 @@ def _install_child_evidence(
     ledger: _ProofLedger,
 ) -> None:
     """Instrument child-runtime acquisition and cleanup to record evidence for the test."""
-    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
+    original = children_module.ChildSandboxes._acquire_child_runtime
 
-    async def observed(
-        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: Any
-    ) -> recursive_child_runtime.ChildRuntimeLease:
+    async def observed(owner: children_module.ChildSandboxes, **kwargs: Any) -> children_module.ChildRuntimeLease:
         """
         Wrap child-runtime acquisition to record creation, recursive sibling scope, cleanup success, and duration.
 
@@ -273,7 +271,7 @@ def _install_child_evidence(
                     volume identifiers.
 
         Returns:
-                recursive_child_runtime.ChildRuntimeLease: The acquired child-runtime lease.
+                children_module.ChildRuntimeLease: The acquired child-runtime lease.
         """
         evidence.started_at = time.perf_counter()
         lease = await original(owner, **kwargs)
@@ -329,7 +327,7 @@ def _install_child_evidence(
         lease._close = observed_close
         return lease
 
-    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
+    monkeypatch.setattr(children_module.ChildSandboxes, "_acquire_child_runtime", observed)
 
 
 def _sse_chunks(response: Any) -> tuple[list[dict[str, Any]], int]:

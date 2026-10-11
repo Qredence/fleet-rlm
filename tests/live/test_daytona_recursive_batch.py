@@ -25,7 +25,7 @@ from fleet_rlm.api.local_scope import LocalScope
 from fleet_rlm.app import create_app
 from fleet_rlm.config.loader import load_configuration_environment_contract, require_live_execution
 from fleet_rlm.config.settings import FleetConfigurationError, Settings
-from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona import children as children_module
 from fleet_rlm.rlm.events import ToolEventView
 from fleet_rlm.rlm.program import has_llm_credentials
 from fleet_rlm.rlm.recursion import RecursiveRLMExecutor
@@ -241,7 +241,7 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
         pytest.fail("Recursive batch canary requires runtime.live_enabled=true")
     if policy.run_environment != "daytona":
         pytest.fail("Recursive batch canary requires runtime.environment=daytona")
-    if not policy.rlm_recursion_enabled or (policy.root_model, policy.sub_model) != (
+    if (policy.root_model, policy.sub_model) != (
         _LIVE_ROOT_MODEL,
         _LIVE_SUB_MODEL,
     ):
@@ -270,12 +270,10 @@ def _load_live_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Sett
 
 
 def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
-    original = recursive_child_runtime.DaytonaRuntime._acquire_child_runtime
+    original = children_module.ChildSandboxes._acquire_child_runtime
     lock = threading.Lock()
 
-    async def observed(
-        owner: recursive_child_runtime.DaytonaRuntime, **kwargs: Any
-    ) -> recursive_child_runtime.ChildRuntimeLease:
+    async def observed(owner: children_module.ChildSandboxes, **kwargs: Any) -> children_module.ChildRuntimeLease:
         lease = await original(owner, **kwargs)
         with lock:
             evidence._active += 1
@@ -300,7 +298,7 @@ def _install_child_evidence(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvi
         lease._close = observed_close
         return lease
 
-    monkeypatch.setattr(recursive_child_runtime.DaytonaRuntime, "_acquire_child_runtime", observed)
+    monkeypatch.setattr(children_module.ChildSandboxes, "_acquire_child_runtime", observed)
 
 
 def _install_batch_answer_capture(monkeypatch: pytest.MonkeyPatch, evidence: _ChildEvidence) -> None:
@@ -673,7 +671,6 @@ def test_daytona_recursive_partial_outcomes_through_one_fastapi_turn(
         {
             "schema": "fleet.p6d4-partial/v1",
             "candidate": candidate_identity(),
-            "recursion_enabled": True,
             "root_model": settings.root_model,
             "sub_model": settings.sub_model,
             "trace_id": trace_id,

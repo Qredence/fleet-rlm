@@ -714,7 +714,7 @@ def test_complete_daytona_mvp_through_fastapi(
         name="verify_workspace_reload",
         desc="Verify a fresh interpreter read the durable Session Workspace content.",
     )
-    skill = app.state.skill_catalog.require(stable_skill_id("long-context"))
+    skill = app.state.composition.skill_catalog.require(stable_skill_id("long-context"))
     proof_tools = (token_tool, semantic_tool, reload_tool)
     proof_views = MappingProxyType(
         {
@@ -1086,7 +1086,6 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
     """Verify single and ordered batch semantic calls through the live Daytona broker."""
     settings = _live_settings(tmp_path).model_copy(
         update={
-            "rlm_recursion_enabled": False,
             "rlm_max_iters": 6,
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
@@ -1094,8 +1093,6 @@ def test_native_semantic_calls_through_fastapi(tmp_path: Path) -> None:
             "mlflow_tracing_enabled": True,
         }
     )
-    if settings.rlm_recursion_enabled:
-        pytest.fail("Native-only semantic verification requires rlm.recursion_enabled=false in config/fleet.toml")
     started_at = datetime.now(UTC)
     started_at_text = started_at.isoformat()
     candidate = _candidate_metadata(settings)
@@ -1389,7 +1386,6 @@ def test_large_context_aggregate_across_seeded_workspace_files(tmp_path: Path) -
     """Prove an exact aggregate from facts split across five persistent files."""
     settings = _live_settings(tmp_path).model_copy(
         update={
-            "rlm_recursion_enabled": False,
             "rlm_max_iters": 6,
             "rlm_max_llm_calls": 12,
             "turn_timeout_seconds": 840,
@@ -1546,7 +1542,6 @@ def test_constrained_live_final_iteration_submits_typed_result(tmp_path: Path) -
     """Exercise a real model at the final allowed iteration and require bounded submission."""
     settings = _live_settings(tmp_path).model_copy(
         update={
-            "rlm_recursion_enabled": False,
             "rlm_max_iters": 1,
             "rlm_max_llm_calls": 4,
             "rlm_finalization_attempts": 2,

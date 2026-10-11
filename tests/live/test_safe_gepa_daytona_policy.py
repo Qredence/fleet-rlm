@@ -21,11 +21,8 @@ import pytest
 
 from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, is_final_output, sandbox_backend
-from fleet_rlm.daytona.runtime import (
-    DaytonaSandboxSpec,
-    LiveDaytonaPlatform,
-    build_daytona_client,
-)
+from fleet_rlm.daytona.provider import LiveDaytonaPlatform, build_daytona_client
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.daytona import (
     DisposableOptimizationSandboxFactory,

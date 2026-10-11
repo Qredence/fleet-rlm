@@ -206,8 +206,6 @@ def _load_live_settings(tmp_path: Path) -> Settings:
     candidate_snapshot = os.environ.get(_P27_SESSION_SNAPSHOT_ENV)
     if policy.run_environment != "daytona":
         pytest.fail("Phase 1 stream canary requires runtime.environment=daytona")
-    if policy.rlm_recursion_enabled and not candidate_snapshot:
-        pytest.fail("Phase 1 native-only stream canary requires rlm.recursion_enabled=false")
     if policy.root_model not in _APPROVED_MODELS or policy.sub_model not in _APPROVED_MODELS:
         pytest.fail("Phase 1 stream canary requires the committed Root and Sub policy")
     if policy.daytona_api_key is None or not has_llm_credentials(policy):

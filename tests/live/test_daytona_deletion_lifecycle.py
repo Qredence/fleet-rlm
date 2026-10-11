@@ -45,11 +45,8 @@ def _live_client_and_platform() -> tuple[Any, Any]:
     # unreachable, which makes the name local-but-unbound and raises
     # UnboundLocalError on the first use below.
     from fleet_rlm.config.loader import load_runtime_settings
-    from fleet_rlm.daytona.runtime import (
-        DaytonaSandboxSpec,
-        LiveDaytonaPlatform,
-        build_daytona_client,
-    )
+    from fleet_rlm.daytona.provider import LiveDaytonaPlatform, build_daytona_client
+    from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 
     settings = load_runtime_settings()
     client = build_daytona_client(settings)
@@ -75,7 +72,7 @@ async def test_live_delete_request_acceptance_is_not_absence_then_confirms() -> 
     request is accepted, transitions through deleting, and reaches confirmed
     absence only later; records the full observed state sequence and timing.
     """
-    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceConfirmation, confirm_absence
 
     client, platform = _live_client_and_platform()
     sandbox = await platform.create(
@@ -157,7 +154,7 @@ async def test_live_delete_wait_true_reference_blocks_until_destroyed() -> None:
             await sandbox.refresh_data()
         except Exception as exc:
             terminal_visibility = f"refresh_data raised {type(exc).__name__}: {str(exc)[:160]}"
-        from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+        from fleet_rlm.daytona.leases import AbsenceConfirmation, confirm_absence
 
         outcome = await confirm_absence(
             probe=platform.get,
@@ -194,7 +191,7 @@ async def test_live_interpreter_invocations_settle_before_sandbox_deletion() -> 
     from dspy import FinalOutput
 
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SyncBridgeLoop, sandbox_backend
-    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceConfirmation, confirm_absence
 
     client, platform = _live_client_and_platform()
     sandbox = None
@@ -215,17 +212,19 @@ async def test_live_interpreter_invocations_settle_before_sandbox_deletion() -> 
         sandbox = await platform.create(
             with_volume=False, ephemeral=True, labels={"purpose": "interpreter-boundary-lifecycle"}
         )
-        template = DaytonaCodeInterpreter(
-            backend=sandbox_backend(sandbox, loop=loop, timeout_s=20),
-            tools={"host_tool": host_tool, "async_host_tool": async_host_tool},
-            output_fields=[{"name": "answer", "type": "str", "required": True}],
-        )
-        interpreters.append(template)
-        first = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+
+        def invocation():
+            return DaytonaCodeInterpreter(
+                backend=sandbox_backend(sandbox, loop=loop, timeout_s=20),
+                tools={"host_tool": host_tool, "async_host_tool": async_host_tool},
+                output_fields=[{"name": "answer", "type": "str", "required": True}],
+                async_bridge=_SyncBridgeLoop(caller_loop=loop),
+            )
+
+        first = invocation()
         interpreters.append(first)
         assert await asyncio.to_thread(first.execute, "cached = host_tool(value='first'); print(cached)") == "first\n"
         assert first.broker is not None
-        assert template.broker is None
         result = await asyncio.to_thread(first.execute, "SUBMIT(answer=cached + '-' + async_host_tool())")
         assert isinstance(result, FinalOutput)
         assert result.output == {"answer": "first-async"}
@@ -235,7 +234,7 @@ async def test_live_interpreter_invocations_settle_before_sandbox_deletion() -> 
         assert first._backend is None
         assert await platform.get(sandbox.id) is not None
 
-        second = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+        second = invocation()
         interpreters.append(second)
         fresh = await asyncio.to_thread(
             second.execute, "SUBMIT(answer='fresh' if 'cached' not in globals() else 'leaked')"

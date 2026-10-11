@@ -232,7 +232,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 from fleet_rlm.workspace.memory import WorkspaceMemory
                 from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
 
-                memory_store = WorkspaceMemory.from_storage(
+                memory_store = WorkspaceMemory(
                     WorkspaceMemoryStorage(
                         WorkspaceStorage(
                             sandbox,
@@ -272,7 +272,7 @@ def test_live_memory_candidate_promotes_after_commit_and_retrieves_on_next_turn(
                 sandbox_ids.add(replacement.sandbox_id)
                 sandbox = sync_sandbox(portal.call(resources._platform.get, replacement.sandbox_id), portal_loop)
                 assert sandbox is not None
-                memory_store = WorkspaceMemory.from_storage(
+                memory_store = WorkspaceMemory(
                     WorkspaceMemoryStorage(
                         WorkspaceStorage(
                             sandbox,
