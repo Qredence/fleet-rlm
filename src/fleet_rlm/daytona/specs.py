@@ -30,8 +30,8 @@ from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 PREWARM_RUN_ID = UUID("00000000-0000-4000-8000-000000000000")
 DEFAULT_IDLE_STOP_SECONDS = 300.0
-DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v7"
-DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v2"
+DEFAULT_SNAPSHOT_NAME = "fleet-rlm-python313-v10"
+DEFAULT_CHILD_SNAPSHOT_NAME = "fleet-rlm-python313-child-v5"
 DEFAULT_VOLUME_NAME = "fleet-volume"
 PYTHON_VERSION = "3.13.13"
 BASE_IMAGE = "python:3.13.13-slim-bookworm@sha256:f576b530293e74140ea91d262232648d5c4f45640a95ec447757701bfcacf034"
