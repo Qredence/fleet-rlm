@@ -55,15 +55,8 @@ export interface CommandPresenter {
     skills: FleetSkillCard[],
     current: PendingSkillSelection[],
   ): Promise<PendingSkillSelection[] | null>;
-  /**
-   * Without `save` (compatibility path for mocks/tests): resolve the first
-   * chosen update and close. With `save`: keep the overlay open for successive
-   * edits, saving through the callback, and resolve `null` when dismissed.
-   */
-  chooseSetting(
-    settings: FleetSettingsPolicy,
-    save?: SettingsSaveCallback,
-  ): Promise<SettingsUpdate | null>;
+  /** Save successive edits through the callback until the overlay is dismissed. */
+  chooseSetting(settings: FleetSettingsPolicy, save: SettingsSaveCallback): Promise<void>;
   chooseTheme(themes: string[], current: string | undefined): Promise<string | null>;
 }
 

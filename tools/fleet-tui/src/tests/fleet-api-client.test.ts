@@ -283,7 +283,7 @@ describe("FleetApiClient", () => {
     const settings = await client.getSettings();
     expect(settings.fields[0]?.value).toBe("DATABRICKS_TOKEN");
     const updates = [
-      { path: "rlm.recursion_enabled", value: false },
+      { path: "mlflow.tracing_enabled", value: false },
       { path: "rlm.child_execution_timeout_s", value: 0 },
     ];
     const saved = await client.applySettings(settings.revision, updates);
