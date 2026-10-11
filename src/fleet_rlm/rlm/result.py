@@ -879,6 +879,30 @@ def validate_rlm_usage(value: Mapping[str, object]) -> RLMUsage:
     return usage
 
 
+def _usage_from_history_entry(entry: object) -> Mapping[str, Any] | None:
+    """Read one observed DSPy usage payload, preferring nonempty top-level usage."""
+
+    def usage_mapping(value: object) -> Mapping[str, Any] | None:
+        if isinstance(value, Mapping):
+            return dict(value) if value else None
+        if callable(dump := getattr(value, "model_dump", None)):
+            with contextlib.suppress(Exception):
+                dumped = dump()
+                if isinstance(dumped, Mapping):
+                    return dict(dumped) if dumped else None
+        raw = getattr(value, "__dict__", None)
+        return dict(raw) if isinstance(raw, dict) and raw else None
+
+    raw = entry.get("usage") if isinstance(entry, Mapping) else getattr(entry, "usage", None)
+    if usage := usage_mapping(raw):
+        return usage
+    response = entry.get("response") if isinstance(entry, Mapping) else getattr(entry, "response", None)
+    nested = getattr(response, "usage", None)
+    if nested is None and isinstance(response, Mapping):
+        nested = response.get("usage")
+    return usage_mapping(nested)
+
+
 def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]]:
     from fleet_rlm.rlm.recursion import normalize_lm_token_usage
 
@@ -891,8 +915,7 @@ def _history_token_usage(lms: tuple[Any, ...]) -> dict[str, dict[str, JsonValue]
         seen.add(id(history))
         totals: dict[str, int] = {}
         for entry in history:
-            raw = entry.get("usage") if isinstance(entry, Mapping) else getattr(entry, "usage", None)
-            for key, value in normalize_lm_token_usage(raw if isinstance(raw, Mapping) else None).items():
+            for key, value in normalize_lm_token_usage(_usage_from_history_entry(entry)).items():
                 totals[key] = totals.get(key, 0) + value
         if totals:
             name = getattr(lm, "model", None) or f"lm-{index}"

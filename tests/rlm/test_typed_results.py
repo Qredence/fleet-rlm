@@ -3,10 +3,66 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+from types import SimpleNamespace
 
 import pytest
 
 from fleet_rlm.rlm.submit_validation import is_finalization_action, is_submit_only_code
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (
+            {"usage": {"prompt_tokens": 4, "completion_tokens": 2}},
+            {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+        ),
+        (
+            {"response": SimpleNamespace(usage=SimpleNamespace(prompt_tokens=4, completion_tokens=2))},
+            {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+        ),
+        (
+            {"response": {"usage": {"input_tokens": 4, "output_tokens": 2}}},
+            {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6},
+        ),
+        (
+            {"response": SimpleNamespace(usage=SimpleNamespace(model_dump=lambda: {"total_tokens": 6}))},
+            {"total_tokens": 6},
+        ),
+        ({}, {}),
+        ({"usage": "malformed", "response": {"usage": ["malformed"]}}, {}),
+        (
+            {"response": {"usage": {"input_tokens": True, "output_tokens": -1, "total_tokens": "6"}}},
+            {"output_tokens": 0, "total_tokens": 0},
+        ),
+        ({"usage": {}, "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 6}),
+        ({"usage": "malformed", "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 6}),
+        ({"usage": {"total_tokens": 3}, "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 3}),
+        ({"usage": {"total_tokens": "bad"}, "response": {"usage": {"total_tokens": 6}}}, {}),
+        (SimpleNamespace(usage={"total_tokens": 6}), {"total_tokens": 6}),
+    ],
+)
+def test_observed_usage_recovers_history_once_with_top_level_precedence(
+    entry: object, expected: dict[str, int]
+) -> None:
+    from fleet_rlm.rlm.result import observed_usage
+
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {})
+    lm = SimpleNamespace(model="test-model", history=[entry])
+
+    usage = observed_usage(prediction, duration_ms=2, lms=(lm, lm))
+
+    assert usage["observed_lm_usage"] == ({"test-model": expected} if expected else {})
+
+
+def test_observed_usage_prediction_usage_takes_precedence_over_nested_history() -> None:
+    from fleet_rlm.rlm.result import observed_usage
+
+    prediction = SimpleNamespace(trajectory=[], get_lm_usage=lambda: {"test-model": {"total_tokens": 3}})
+    lm = SimpleNamespace(model="test-model", history=[{"response": {"usage": {"total_tokens": 6}}}])
+
+    usage = observed_usage(prediction, duration_ms=2, lms=(lm,))
+    assert usage["observed_lm_usage"] == {"test-model": {"total_tokens": 3}}
 
 
 def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:

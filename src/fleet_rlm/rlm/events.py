@@ -25,7 +25,7 @@ from dspy.utils.exceptions import AdapterParseError
 from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category, walk_cause_chain
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, turn_phase_span
-from fleet_rlm.rlm.adapter import FleetJSONAdapter
+from fleet_rlm.rlm.adapter import FleetJSONAdapter, _is_empty_adapter_parse
 from fleet_rlm.rlm.event_types import (
     ChildProgress,
     EventRecorder,
@@ -52,6 +52,7 @@ from fleet_rlm.rlm.result import (
     RunNoProgressError,
     TrajectoryStep,
     _safe_usage_entry,
+    _usage_from_history_entry,
     observed_usage,
     rlm_termination_mode,
     truncate_public_text,
@@ -1449,7 +1450,6 @@ __all__ = [
 
 # DSPy callbacks produce Fleet runtime observations; the DSPy program remains the loop owner.
 ReasoningObserver: TypeAlias = Callable[[Any], None]
-_EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
 _TRACE_FAILURE_DETAIL_MAX_CHARS = 300
 
 
@@ -1769,23 +1769,6 @@ def _lm_output_profile(outputs: Any, *, include_previews: bool = True) -> dict[s
     return profile
 
 
-def _mapping_from_usage_value(value: object) -> dict[str, Any] | None:
-    res = _extract_mapping(value)
-    return dict(res) if res else None
-
-
-def _usage_from_history_entry(entry: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    if usage := _mapping_from_usage_value(entry.get("usage")):
-        return usage
-    response = entry.get("response")
-    if response is None:
-        return None
-    nested = getattr(response, "usage", None)
-    if nested is None and isinstance(response, Mapping):
-        nested = response.get("usage")
-    return _mapping_from_usage_value(nested)
-
-
 def _reasoning_token_count(usage: Mapping[str, Any]) -> int | None:
     value = usage.get("reasoning_tokens")
     if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
@@ -1796,10 +1779,6 @@ def _reasoning_token_count(usage: Mapping[str, Any]) -> int | None:
         if isinstance(nested, int) and not isinstance(nested, bool) and nested >= 0:
             return nested
     return None
-
-
-def _is_empty_adapter_parse(exc: BaseException) -> bool:
-    return _EMPTY_RESPONSE_MARKER in str(getattr(exc, "message", "") or exc)
 
 
 def _adapter_parse_profile(exc: BaseException) -> dict[str, JsonValue]:

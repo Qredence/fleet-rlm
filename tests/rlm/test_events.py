@@ -41,6 +41,31 @@ from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 # --- from test_events_execution_trace.py ------------------------------
 
 
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({"usage": {"total_tokens": 6}}, {"total_tokens": 6}),
+        ({"response": SimpleNamespace(usage=SimpleNamespace(total_tokens=6))}, {"total_tokens": 6}),
+        ({"response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 6}),
+        (
+            {"response": SimpleNamespace(usage=SimpleNamespace(model_dump=lambda: {"total_tokens": 6}))},
+            {"total_tokens": 6},
+        ),
+        ({}, {}),
+        ({"usage": "malformed", "response": {"usage": ["malformed"]}}, {}),
+        ({"response": {"usage": {"total_tokens": "bad"}}}, {"total_tokens": "bad"}),
+        ({"usage": {}, "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 6}),
+        ({"usage": "malformed", "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 6}),
+        ({"usage": {"total_tokens": 3}, "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": 3}),
+        ({"usage": {"total_tokens": "bad"}, "response": {"usage": {"total_tokens": 6}}}, {"total_tokens": "bad"}),
+    ],
+)
+def test_latest_lm_telemetry_usage_sources_keep_precedence(entry: dict[str, Any], expected: dict[str, Any]) -> None:
+    from fleet_rlm.rlm.events import _latest_lm_telemetry
+
+    assert _latest_lm_telemetry(SimpleNamespace(history=[entry]), 0) == expected
+
+
 def test_record_phase_failure_preserves_callback_reasoning_flag_on_empty_parse() -> None:
     import dspy
     from dspy.utils.exceptions import AdapterParseError
