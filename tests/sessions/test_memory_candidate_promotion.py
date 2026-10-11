@@ -105,6 +105,9 @@ def test_memory_candidates_promote_only_after_committed_receipt() -> None:
     order: list[str] = []
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = SimpleNamespace()
 
         def drain_memory_candidates(self):
@@ -151,6 +154,9 @@ def test_memory_candidates_are_not_promoted_after_failed_commit() -> None:
     order: list[str] = []
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         def promote_memory_candidates(self, candidates):
             del candidates
             order.append("promote")
@@ -184,6 +190,9 @@ def test_memory_promotion_failure_preserves_the_committed_receipt() -> None:
     lifecycle = _Lifecycle()
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         def promote_memory_candidates(self, candidates):
             del candidates
             raise RuntimeError("Workspace Memory unavailable")
@@ -404,7 +413,7 @@ def _streaming_driver(lifecycle, stream, *, revoke_claim=None):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal", ["timeout", "cancelled"])
 async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_promotion(terminal: str) -> None:
-    from fleet_rlm.rlm.events import RunCancelled, RunTimedOut
+    from fleet_rlm.rlm.event_types import RunCancelled, RunTimedOut
 
     spy = _PromotionSpy()
     outcome = RLMOutcome(
@@ -434,7 +443,7 @@ async def test_driver_settles_timed_out_and_cancelled_outcomes_without_memory_pr
 
 @pytest.mark.asyncio
 async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.event_types import RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.turns import ClaimHeartbeat
 
@@ -475,7 +484,7 @@ async def test_driver_claim_lost_handoff_never_promotes_memory_candidates() -> N
 
 @pytest.mark.asyncio
 async def test_driver_settlement_failure_recovery_never_promotes_memory_candidates() -> None:
-    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.event_types import RunFailed
     from fleet_rlm.sessions.run_state import (
         FailedRunReceipt,
         RunFailure,

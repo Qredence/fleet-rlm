@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -24,6 +25,7 @@ from fleet_rlm.workspace.memory import (
     promote_memory_candidates,
 )
 from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 
 
 # --- from test_memory_candidate_wiring.py -----------------------------
@@ -115,7 +117,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
     from fleet_rlm.skills.catalog import build_bundled_skill_catalog
     from fleet_rlm.turns.preparation import DaytonaCapabilityPreparer, RunEnvironment
     from fleet_rlm.workspace.host_io import DaytonaRunStorage
-    from fleet_rlm.workspace.memory import build_workspace_memory_store
+    from fleet_rlm.workspace.memory import WorkspaceMemory
     from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
@@ -127,7 +129,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         rlm_autonomous_memory_categories=categories,
         max_upload_bytes=262_144,
     )
-    sandbox = SimpleNamespace(process=_GeneratedAgentProcess(), fs=_LocalSandboxFs())
+    sandbox = SimpleNamespace(code_interpreter=AsyncMock(), process=_GeneratedAgentProcess(), fs=_LocalSandboxFs())
     paths = VolumePaths.from_mount(str(volume_root))
     turn = _turn()
     dispatcher = SyncBridgeDispatcher()
@@ -153,9 +155,8 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         max_file_bytes=settings.max_upload_bytes,
         allow_volume_root=True,
     )
-    memory_store = build_workspace_memory_store(
+    memory_store = WorkspaceMemory(
         WorkspaceMemoryStorage(memory_session),
-        max_upload_bytes=settings.max_upload_bytes,
     )
 
     session_workspace = DaytonaSandboxWorkspaceStorage(
@@ -175,7 +176,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         return None
 
     environment = RunEnvironment(
-        interpreter=None,
+        interpreter=configured_invocation_factory(None),
         attachment_sink=sink,
         artifact_sink=sink,
         release=release,
@@ -183,6 +184,7 @@ async def _capabilities(tmp_path, *, categories: tuple[str, ...]):
         volume_fs=sink.volume_fs,
         session_workspace=session_workspace,
         project_workspace=project_workspace,
+        child_runtime_factory=ChildLeaseRecorder().factory,
     )
     preparer = DaytonaCapabilityPreparer(
         settings=settings,
@@ -253,7 +255,7 @@ def _store(tmp_path):
         max_file_bytes=262_144,
         allow_volume_root=True,
     )
-    return WorkspaceMemory.from_storage(WorkspaceMemoryStorage(session), max_file_bytes=262_144), volume_root
+    return WorkspaceMemory(WorkspaceMemoryStorage(session), max_file_bytes=262_144), volume_root
 
 
 def test_promoted_agent_candidate_becomes_searchable_and_injectable_on_the_next_turn(tmp_path) -> None:

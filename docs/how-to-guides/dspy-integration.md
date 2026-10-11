@@ -246,10 +246,9 @@ the model never to repeat an identical interpreter action.
 
 ## Recursive harness limits
 
-The shipped single configuration enables Fleet child-RLM tools; native
-`llm_query` / `llm_query_batched` remain available for semantic judgments. Set
-`rlm.recursion_enabled = false` and restart Fleet to disable the bounded
-recursive Tool and instruction. When enabled, one native child level is allowed,
+Every Root invocation receives Fleet child-RLM tools; native
+`llm_query` / `llm_query_batched` remain available for semantic judgments.
+One native child level is allowed,
 with four reserved child calls per Turn, a 50,000-character delegated prompt
 bound, eight child iterations, twelve child LM calls, 4,000 child output
 characters, and at most four child workers concurrently. A child request beyond
@@ -353,42 +352,13 @@ with host-mediated Tools and typed inputs.
 
 See the root [architecture](../../ARCHITECTURE.md) for ownership and Turn commit ordering.
 
-## Run the Phase 1 Daytona stream canary
-
-The Phase 1 one-Turn live canary is maintained as a pytest test. It checks that
-a small text Attachment is materialized through the Volume capsule, native
-`llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
-reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
-finishes the Turn, and Turn-owned broker, Sandbox, and Volume resources clean
-up. This canary requires native-only configuration unless an explicit Session
-snapshot is supplied for the aggregate candidate-certification path.
-
-For that aggregate canary, set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
-immutable Daytona snapshot name, then run:
-
-```bash
-FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
-FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
-uv run pytest -q -n 0 --timeout=900 \
-  tests/live/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
-```
-
-The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
-Daytona and model credentials. The evidence-path variable must be exported in
-the process environment before pytest starts. The immutable snapshot variable
-is required to admit a recursion-enabled configuration for this test. The test loads
-`.env` with `override=False`; operator exports retain precedence. A passing
-canary is evidence for this test only and does not promote or release the
-candidate. Replace the snapshot example with the candidate's immutable Daytona
-snapshot name, which must end in `-v` followed by a positive integer.
-
 ## Current live Daytona contracts
 
 The native verifier runs two current contracts against one committed candidate:
 the native single and ordered batch semantic-call path through FastAPI, and the
 staged Attachment / durable Artifact contract across Sandbox replacement.
 It requires explicit live authorization, `runtime.live_enabled`,
-`rlm.recursion_enabled = false`, bounded Root and Sub model IDs, configured provider
+bounded Root and Sub model IDs, configured provider
 credentials, and a clean tracked non-`main` candidate.
 
 ```bash
@@ -411,8 +381,7 @@ deployment.
 The separate recursive canary runs two native DSPy child RLMs from one ordered
 Root batch, verifies observed concurrency and child trace hierarchy, reuses the
 Root on a second Turn, and requires child cleanup and restored admission. It
-loads an unchanged copy of the single configuration and requires recursion
-enabled; it never silently enables children. It also requires `FLEET_LIVE=1`,
+loads an unchanged copy of the single configuration. It also requires `FLEET_LIVE=1`,
 enabled live policy, configured Daytona/model credentials, and a clean tracked
 non-`main` candidate.
 
@@ -449,8 +418,7 @@ child uses native `llm_query` calls under the child budget.
 The Root selects deterministic Python for parsing and calculation, native
 semantic calls for bounded judgments, and isolated children for work that
 needs iterative Python exploration. Recursive batching is reserved for
-independent subproblems that each justify a child. The configured
-`rlm.recursion_enabled` setting controls whether child tools are available.
+independent subproblems that each justify a child. Child tools are always available to the Root.
 See [Evaluation and Optimization](evaluation-optimization.md) for ownership
 and [Testing Strategy](testing-strategy.md) for the scope of deterministic and
 live evidence.

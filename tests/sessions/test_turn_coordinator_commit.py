@@ -30,7 +30,7 @@ async def test_open_commits_typed_result_then_replays_without_rerun() -> None:
     from hashlib import sha256
 
     importlib.import_module("fleet_rlm.rlm.result")
-    from fleet_rlm.rlm.events import (
+    from fleet_rlm.rlm.event_types import (
         TERMINAL_DETAIL_TYPES,
         ArtifactCreated,
         EventRecorder,
@@ -183,7 +183,7 @@ async def test_open_invalid_typed_output_never_promotes_candidate() -> None:
     from hashlib import sha256
 
     importlib.import_module("fleet_rlm.rlm.result")
-    from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.rlm.event_types import TERMINAL_DETAIL_TYPES, ArtifactCreated, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
@@ -299,7 +299,7 @@ async def test_open_commits_typed_result_through_temporary_sql(tmp_path) -> None
     from fleet_rlm.persistence.models import SessionRow, UserRow, WorkspaceRow
     from fleet_rlm.persistence.repositories import SqlAlchemySessionCatalog
     from fleet_rlm.persistence.repositories.run_state import SqlAlchemyRunStateStore
-    from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
+    from fleet_rlm.rlm.event_types import TERMINAL_DETAIL_TYPES, EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import TextPart, UsagePart
     from fleet_rlm.sessions.models import AssistantTurnRecord, SequenceCursor, TurnAccess, TurnInput, UserTurnRecord
@@ -469,11 +469,15 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             artifact_sink=None,
             result_snapshot_sink=None,
             memory_promotion=None,
+            on_commit=None,
         ):
             del claimed, resolution, artifact_sink, memory_promotion
             assert result_snapshot_sink is None
             operations.append("finish")
-            return CommittedTurnReceipt(run_id, 1, committed, ())
+            receipt = CommittedTurnReceipt(run_id, 1, committed, ())
+            if on_commit is not None:
+                on_commit(receipt)
+            return receipt
 
     class Prepared:
         execution = object()
@@ -526,7 +530,7 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
 # --- from test_turn_coordinator_concurrency.py ------------------------
 @pytest.mark.asyncio
 async def test_two_sessions_execute_concurrently_with_disjoint_stream_identities() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput

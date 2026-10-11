@@ -112,17 +112,7 @@ export const settingsCommand: CommandSpec = {
     try {
       const settings = await ctx.client.getSettings();
       if (ctx.presenter) {
-        const update = await ctx.presenter.chooseSetting(settings, (next) =>
-          saveSettingsUpdate(ctx, next),
-        );
-        // Compatibility path: presenters without save-callback support (test
-        // doubles) resolve the first update; save it once and close as before.
-        if (update) {
-          await ctx.client.applySettings(update.revision, [
-            { path: update.path, value: update.value },
-          ]);
-          notifySuccess(ctx, "Saved to config/fleet.toml. Restart Fleet to apply the new policy.");
-        }
+        await ctx.presenter.chooseSetting(settings, (next) => saveSettingsUpdate(ctx, next));
         return;
       }
       const lines = settings.fields.map(

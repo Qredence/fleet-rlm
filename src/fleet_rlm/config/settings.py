@@ -11,10 +11,12 @@ import re
 import urllib.parse
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, SecretStr, field_validator, model_validator
 
+from fleet_rlm.config import catalog
+from fleet_rlm.config.catalog import FIELD_POLICIES, EditorKind, FleetFieldPolicy
 from fleet_rlm.snapshot_contract import validate_snapshot_name
 
 _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
@@ -22,37 +24,6 @@ _ENVIRONMENT_NAME = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 class FleetConfigurationError(ValueError):
     """Raised when the required Fleet runtime policy is invalid."""
-
-
-EditorKind = Literal["text", "number", "boolean", "single_choice", "multi_choice", "string_list"]
-
-
-@dataclass(frozen=True, slots=True)
-class FleetFieldPolicy:
-    """Authoritative policy declaration for one ``Settings`` field.
-
-    Every ``Settings`` field carries exactly one declaration so the supported
-    TOML location, operator grouping, editor affordances, and compatibility
-    disposition live next to the field itself.  ``_TABLE_KEYS``, policy
-    flattening, and the ``config_policy`` editor inventory derive from these
-    declarations instead of mirroring field names by hand.
-
-    ``toml_path=None`` marks fields that TOML cannot set: secrets resolved at
-    the runtime seam and programmatic-only compatibility inputs.  Operator-
-    editable fields must declare complete editor metadata plus a unique
-    ``rank`` that pins the policy inventory ordering.
-    """
-
-    toml_path: str | None
-    group: str | None = None
-    label: str | None = None
-    editor: EditorKind | None = None
-    choices: tuple[str, ...] = ()
-    rank: int | None = None
-    required_in_policy: bool = False
-    secret: bool = False
-    compatibility: bool = False
-    doc: str | None = None
 
 
 class LLMRoleSettings(BaseModel):
@@ -165,602 +136,108 @@ class Settings(BaseModel):
         if unknown:
             raise FleetConfigurationError(f"unsupported Settings field(s): {', '.join(map(str, unknown))}")
 
-    app_name: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="application.name",
-            group="Application",
-            label="Name",
-            editor="text",
-            rank=0,
-            required_in_policy=True,
-        ),
-    ] = Field(default="fleet-rlm")
-    daytona_api_key: Annotated[
-        SecretStr | None,
-        FleetFieldPolicy(
-            toml_path=None, secret=True, doc="Provider credential resolved at runtime from daytona.api_key_env"
-        ),
-    ] = Field(default=None)
-    daytona_snapshot: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path=None,
-            doc="Session snapshot resolved at runtime from daytona.snapshot_env",
-        ),
-    ] = Field(default=None)
-    daytona_child_snapshot: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path=None,
-            doc="Lean SemanticChild snapshot resolved at runtime from daytona.child_snapshot_env",
-        ),
-    ] = Field(default=None)
-    daytona_org_id: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path=None,
-            doc="Daytona organization ID resolved at runtime from daytona.org_id_env",
-        ),
-    ] = Field(default=None)
-    llm_api_key: Annotated[
-        SecretStr | None,
-        FleetFieldPolicy(
-            toml_path=None,
-            secret=True,
-            compatibility=True,
-            doc="Legacy programmatic fallback key for roles naming FLEET_OPENAI_API_KEY; never settable via TOML",
-        ),
-    ] = Field(default=None)
-    root_model: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="llm.root.model",
-            group="Root LLM",
-            label="Model id",
-            editor="text",
-            rank=7,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    app_name: str = Field(default="fleet-rlm")
+    daytona_api_key: SecretStr | None = Field(default=None)
+    daytona_snapshot: str | None = Field(default=None)
+    daytona_child_snapshot: str | None = Field(default=None)
+    daytona_org_id: str | None = Field(default=None)
+    llm_api_key: SecretStr | None = Field(default=None)
+    root_model: str = Field(
         default="openai/gpt-4o-mini",
         description="Root model id sent through the OpenAI-compatible Chat Completion provider",
     )
-    sub_model: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="llm.sub.model",
-            group="Sub LLM",
-            label="Model id",
-            editor="text",
-            rank=16,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    sub_model: str = Field(
         default="openai/gpt-4o-mini",
         description="Sub model id sent through the OpenAI-compatible Chat Completion provider",
     )
-    database_url: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path=None, doc="Resolved at runtime from the environment named by storage.database_url_env"
-        ),
-    ] = Field(
+    database_url: str | None = Field(
         default=None,
         description="Async SQLAlchemy URL (e.g. sqlite+aiosqlite:///:memory: or postgresql+asyncpg://...)",
     )
-    volume_name: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="daytona.volume_name",
-            group="Daytona",
-            label="Volume name",
-            editor="text",
-            rank=47,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    volume_name: str = Field(
         default="fleet-volume",
         description="Daytona Volume name for workspace durable files",
     )
-    volume_mount_path: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="daytona.volume_mount_path",
-            group="Daytona",
-            label="Volume mount path",
-            editor="text",
-            rank=48,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    volume_mount_path: str = Field(
         default="/home/daytona/fleet",
         description="Absolute Sandbox mount path for the workspace Volume",
     )
-    run_environment: Annotated[
-        Literal["daytona"],
-        FleetFieldPolicy(
-            toml_path="runtime.environment",
-            group="Runtime",
-            label="Environment",
-            editor="single_choice",
-            choices=("daytona",),
-            rank=1,
-            required_in_policy=True,
-        ),
-    ] = Field(default="daytona")
-    live_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="runtime.live_enabled", group="Runtime", label="Live execution", editor="boolean", rank=2
-        ),
-    ] = Field(
+    run_environment: Literal["daytona"] = Field(default="daytona")
+    live_enabled: bool = Field(
         default=True,
         description="Allow explicitly invoked credentialed provider and benchmark commands",
     )
-    data_root: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="storage.data_root",
-            group="Storage",
-            label="Data root",
-            editor="text",
-            rank=39,
-            required_in_policy=True,
-        ),
-    ] = Field(default=".fleet_rlm")
-    max_upload_bytes: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="storage.max_upload_bytes",
-            group="Storage",
-            label="Maximum upload bytes",
-            editor="number",
-            rank=40,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    data_root: str = Field(default=".fleet_rlm")
+    max_upload_bytes: int = Field(
         default=10 * 1024 * 1024,
         description="Maximum upload size in bytes",
     )
-    max_artifact_bytes: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="storage.max_artifact_bytes",
-            group="Storage",
-            label="Maximum artifact bytes",
-            editor="number",
-            rank=42,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    max_artifact_bytes: int = Field(
         default=10 * 1024 * 1024,
         description="Maximum artifact body size in bytes",
     )
-    turn_timeout_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.turn_timeout_seconds",
-            group="Runtime",
-            label="Turn timeout seconds",
-            editor="number",
-            rank=3,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    turn_timeout_seconds: int = Field(
         default=1800,
         gt=0,
         description="Turn Timeout in wall-clock seconds for one RLM Turn",
     )
-    max_active_daytona_leases: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.max_active_daytona_leases",
-            group="Runtime",
-            label="Maximum Daytona leases",
-            editor="number",
-            rank=4,
-            required_in_policy=True,
-        ),
-    ] = Field(
+    max_active_daytona_leases: int = Field(
         default=8,
         ge=2,
         le=8,
         description="Daytona lease limit with one slot reserved for short-lived host I/O",
     )
-    workspace_io_idle_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.workspace_io_idle_seconds",
-            group="Runtime",
-            label="Workspace Sandbox idle seconds",
-            editor="number",
-            rank=121,
-        ),
-    ] = Field(default=300, gt=0, description="Idle retention of the single warm Workspace I/O Sandbox")
-    workspace_io_acquisition_timeout_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.workspace_io_acquisition_timeout_seconds",
-            group="Runtime",
-            label="Workspace acquisition timeout seconds",
-            editor="number",
-            rank=122,
-        ),
-    ] = Field(default=30, gt=0, description="Bound on Workspace I/O queueing, admission and Sandbox preparation")
-    rlm_max_iters: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_iters",
-            group="RLM",
-            label="Maximum iterations",
-            editor="number",
-            rank=25,
-            required_in_policy=True,
-        ),
-    ] = Field(default=20, gt=0)
-    rlm_max_llm_calls: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_llm_calls",
-            group="RLM",
-            label="Maximum LLM calls",
-            editor="number",
-            rank=26,
-            required_in_policy=True,
-        ),
-    ] = Field(default=50, gt=0)
-    rlm_max_tool_calls: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_tool_calls",
-            group="RLM",
-            label="Maximum Tool calls",
-            editor="number",
-            rank=74,
-            required_in_policy=True,
-        ),
-    ] = Field(default=256, gt=0)
-    rlm_max_output_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_output_chars",
-            group="RLM",
-            label="Maximum output characters",
-            editor="number",
-            rank=27,
-            required_in_policy=True,
-        ),
-    ] = Field(default=10_000, gt=0)
-    rlm_max_final_output_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_final_output_chars",
-            group="RLM",
-            label="Maximum final output characters",
-            editor="number",
-            rank=77,
-            required_in_policy=True,
-        ),
-    ] = Field(default=10_000, gt=0)
-    rlm_max_execution_output_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_execution_output_chars",
-            group="RLM",
-            label="Maximum execution output characters",
-            editor="number",
-            rank=28,
-            required_in_policy=True,
-        ),
-    ] = Field(default=4_000, gt=0)
-    rlm_max_execution_output_bytes: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.max_execution_output_bytes",
-            group="RLM",
-            label="Maximum execution output bytes",
-            editor="number",
-            rank=75,
-            required_in_policy=True,
-        ),
-    ] = Field(default=2_000_000, gt=0)
-    rlm_wrap_up_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.wrap_up_seconds",
-            group="RLM",
-            label="Final-answer reserve (seconds)",
-            editor="number",
-            rank=69,
-        ),
-    ] = Field(default=300, gt=0)
-    rlm_finalization_attempts: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.finalization_attempts",
-            group="RLM",
-            label="Finalization attempts",
-            editor="number",
-            rank=76,
-            required_in_policy=True,
-        ),
-    ] = Field(default=2, ge=0)
-    rlm_recursion_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_enabled",
-            group="RLM",
-            label="Enable recursive child RLMs",
-            editor="boolean",
-            rank=30,
-        ),
-    ] = False
-    rlm_recursion_max_calls: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_max_calls", group="RLM", label="Recursive maximum calls", editor="number", rank=31
-        ),
-    ] = Field(default=4, gt=0)
-    rlm_recursion_max_prompt_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_max_prompt_chars",
-            group="RLM",
-            label="Recursive prompt character bound",
-            editor="number",
-            rank=32,
-        ),
-    ] = Field(default=50_000, gt=0)
-    rlm_recursion_child_max_iters: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_child_max_iters",
-            group="RLM",
-            label="Child maximum iterations",
-            editor="number",
-            rank=33,
-        ),
-    ] = Field(default=8, gt=0)
-    rlm_recursion_child_max_llm_calls: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_child_max_llm_calls",
-            group="RLM",
-            label="Child maximum LLM calls",
-            editor="number",
-            rank=34,
-        ),
-    ] = Field(default=12, gt=0)
-    rlm_recursion_child_max_output_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_child_max_output_chars",
-            group="RLM",
-            label="Child maximum output characters",
-            editor="number",
-            rank=35,
-        ),
-    ] = Field(default=4_000, gt=0)
-    rlm_recursion_max_parallel_children: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="rlm.recursion_max_parallel_children",
-            group="RLM",
-            label="Maximum parallel child RLMs",
-            editor="number",
-            rank=36,
-        ),
-    ] = Field(default=2, gt=0, le=8)
-    rlm_autonomous_memory_categories: Annotated[
-        tuple[str, ...],
-        FleetFieldPolicy(
-            toml_path="rlm.autonomous_memory_categories",
-            group="RLM",
-            label="Autonomous Memory categories",
-            editor="string_list",
-            rank=37,
-        ),
-    ] = Field(default=())
-    run_heartbeat_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.heartbeat_seconds",
-            group="Runtime",
-            label="Heartbeat seconds",
-            editor="number",
-            rank=5,
-            required_in_policy=True,
-        ),
-    ] = Field(default=10, gt=0)
-    run_stale_after_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="runtime.stale_after_seconds",
-            group="Runtime",
-            label="Stale after seconds",
-            editor="number",
-            rank=6,
-            required_in_policy=True,
-        ),
-    ] = Field(default=60, gt=0)
-    rlm_verbose: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="rlm.verbose",
-            group="RLM",
-            label="DSPy host verbose logging",
-            editor="boolean",
-            rank=38,
-            required_in_policy=True,
-        ),
-    ] = True
-    log_level: Annotated[
-        Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
-        FleetFieldPolicy(
-            toml_path="logging.level",
-            group="Logging",
-            label="Level",
-            editor="single_choice",
-            choices=(
-                "CRITICAL",
-                "ERROR",
-                "WARNING",
-                "INFO",
-                "DEBUG",
-            ),
-            rank=49,
-            required_in_policy=True,
-        ),
-    ] = "INFO"
-    root_llm_api_key_env: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="llm.root.api_key_env",
-            group="Root LLM",
-            label="Provider API key environment variable",
-            editor="text",
-            rank=8,
-            required_in_policy=True,
-        ),
-    ] = "FLEET_OPENAI_API_KEY"
-    root_llm_base_url: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="llm.root.base_url", group="Root LLM", label="Provider base URL", editor="text", rank=9
-        ),
-    ] = None
-    root_llm_max_tokens: Annotated[
-        int | None,
-        FleetFieldPolicy(
-            toml_path="llm.root.max_tokens", group="Root LLM", label="Maximum tokens", editor="number", rank=11
-        ),
-    ] = Field(default=None, ge=1)
-    root_llm_timeout_seconds: Annotated[
-        int | None,
-        FleetFieldPolicy(
-            toml_path="llm.root.timeout_seconds",
-            group="Root LLM",
-            label="Provider timeout seconds",
-            editor="number",
-            rank=70,
-        ),
-    ] = Field(default=300, gt=0)
-    root_llm_temperature: Annotated[
-        float | None,
-        FleetFieldPolicy(
-            toml_path="llm.root.temperature", group="Root LLM", label="Temperature", editor="number", rank=12
-        ),
-    ] = None
-    root_llm_reasoning_effort: Annotated[
-        Literal["none", "low", "medium", "high"] | None,
-        FleetFieldPolicy(
-            toml_path="llm.root.reasoning_effort",
-            group="Root LLM",
-            label="Reasoning effort",
-            editor="single_choice",
-            choices=(
-                "none",
-                "low",
-                "medium",
-                "high",
-            ),
-            rank=15,
-        ),
-    ] = None
-    root_llm_cache: Annotated[
-        bool, FleetFieldPolicy(toml_path="llm.root.cache", group="Root LLM", label="Cache", editor="boolean", rank=13)
-    ] = True
-    root_llm_num_retries: Annotated[
-        int,
-        FleetFieldPolicy(toml_path="llm.root.num_retries", group="Root LLM", label="Retries", editor="number", rank=14),
-    ] = Field(default=3, ge=0)
-    sub_llm_api_key_env: Annotated[
-        str,
-        FleetFieldPolicy(
-            toml_path="llm.sub.api_key_env",
-            group="Sub LLM",
-            label="Provider API key environment variable",
-            editor="text",
-            rank=17,
-            required_in_policy=True,
-        ),
-    ] = "FLEET_OPENAI_API_KEY"
-    sub_llm_base_url: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="llm.sub.base_url", group="Sub LLM", label="Provider base URL", editor="text", rank=18
-        ),
-    ] = None
-    sub_llm_max_tokens: Annotated[
-        int | None,
-        FleetFieldPolicy(
-            toml_path="llm.sub.max_tokens", group="Sub LLM", label="Maximum tokens", editor="number", rank=20
-        ),
-    ] = Field(default=None, ge=1)
-    sub_llm_timeout_seconds: Annotated[
-        int | None,
-        FleetFieldPolicy(
-            toml_path="llm.sub.timeout_seconds",
-            group="Sub LLM",
-            label="Provider timeout seconds",
-            editor="number",
-            rank=71,
-        ),
-    ] = Field(default=90, gt=0)
-    sub_llm_temperature: Annotated[
-        float | None,
-        FleetFieldPolicy(
-            toml_path="llm.sub.temperature", group="Sub LLM", label="Temperature", editor="number", rank=21
-        ),
-    ] = None
-    sub_llm_reasoning_effort: Annotated[
-        Literal["none", "low", "medium", "high"] | None,
-        FleetFieldPolicy(
-            toml_path="llm.sub.reasoning_effort",
-            group="Sub LLM",
-            label="Reasoning effort",
-            editor="single_choice",
-            choices=(
-                "none",
-                "low",
-                "medium",
-                "high",
-            ),
-            rank=24,
-        ),
-    ] = None
-    sub_llm_cache: Annotated[
-        bool, FleetFieldPolicy(toml_path="llm.sub.cache", group="Sub LLM", label="Cache", editor="boolean", rank=22)
-    ] = True
-    sub_llm_num_retries: Annotated[
-        int,
-        FleetFieldPolicy(toml_path="llm.sub.num_retries", group="Sub LLM", label="Retries", editor="number", rank=23),
-    ] = Field(default=3, ge=0)
-    mlflow_tracing_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="mlflow.tracing_enabled", group="MLflow", label="Tracing enabled", editor="boolean", rank=50
-        ),
-    ] = Field(
+    workspace_io_idle_seconds: int = Field(
+        default=300, gt=0, description="Idle retention of the single warm Workspace I/O Sandbox"
+    )
+    workspace_io_acquisition_timeout_seconds: int = Field(
+        default=30, gt=0, description="Bound on Workspace I/O queueing, admission and Sandbox preparation"
+    )
+    rlm_max_iters: int = Field(default=20, gt=0)
+    rlm_max_llm_calls: int = Field(default=50, gt=0)
+    rlm_max_tool_calls: int = Field(default=256, gt=0)
+    rlm_max_output_chars: int = Field(default=10_000, gt=0)
+    rlm_max_final_output_chars: int = Field(default=10_000, gt=0)
+    rlm_max_execution_output_chars: int = Field(default=4_000, gt=0)
+    rlm_max_execution_output_bytes: int = Field(default=2_000_000, gt=0)
+    rlm_wrap_up_seconds: int = Field(default=300, gt=0)
+    rlm_finalization_attempts: int = Field(default=2, ge=0)
+    rlm_recursion_max_calls: int = Field(default=4, gt=0)
+    rlm_recursion_max_prompt_chars: int = Field(default=50_000, gt=0)
+    rlm_recursion_child_max_iters: int = Field(default=8, gt=0)
+    rlm_recursion_child_max_llm_calls: int = Field(default=12, gt=0)
+    rlm_recursion_child_max_output_chars: int = Field(default=4_000, gt=0)
+    rlm_recursion_max_parallel_children: int = Field(default=2, gt=0, le=8)
+    rlm_autonomous_memory_categories: tuple[str, ...] = Field(default=())
+    run_heartbeat_seconds: int = Field(default=10, gt=0)
+    run_stale_after_seconds: int = Field(default=60, gt=0)
+    rlm_verbose: bool = True
+    log_level: Literal["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"] = "INFO"
+    root_llm_api_key_env: str = "FLEET_OPENAI_API_KEY"
+    root_llm_base_url: str | None = None
+    root_llm_max_tokens: int | None = Field(default=None, ge=1)
+    root_llm_timeout_seconds: int | None = Field(default=300, gt=0)
+    root_llm_temperature: float | None = None
+    root_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
+    root_llm_cache: bool = True
+    root_llm_num_retries: int = Field(default=3, ge=0)
+    sub_llm_api_key_env: str = "FLEET_OPENAI_API_KEY"
+    sub_llm_base_url: str | None = None
+    sub_llm_max_tokens: int | None = Field(default=None, ge=1)
+    sub_llm_timeout_seconds: int | None = Field(default=90, gt=0)
+    sub_llm_temperature: float | None = None
+    sub_llm_reasoning_effort: Literal["none", "low", "medium", "high"] | None = None
+    sub_llm_cache: bool = True
+    sub_llm_num_retries: int = Field(default=3, ge=0)
+    mlflow_tracing_enabled: bool = Field(
         default=False,
         description="Enable Databricks-backed MLflow DSPy autolog (engineering observability)",
     )
-    mlflow_experiment_name: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="mlflow.experiment_name", group="MLflow", label="Experiment name", editor="text", rank=54
-        ),
-    ] = Field(
+    mlflow_experiment_name: str | None = Field(
         default=None,
         description="MLflow experiment name when tracing is enabled",
     )
-    mlflow_experiment_purpose: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="mlflow.experiment_purpose", group="MLflow", label="Experiment purpose", editor="text", rank=117
-        ),
-    ] = Field(
+    mlflow_experiment_purpose: str | None = Field(
         default=None,
         description=(
             "Optional purpose recorded as the fleet.experiment.purpose tag on the "
@@ -768,203 +245,60 @@ class Settings(BaseModel):
             "A conflicting recorded purpose fails configuration."
         ),
     )
-    mlflow_tracking_uri: Annotated[
-        str,
-        FleetFieldPolicy(toml_path="mlflow.tracking_uri", group="MLflow", label="Tracking URI", editor="text", rank=56),
-    ] = Field(
+    mlflow_tracking_uri: str = Field(
         default="databricks",
         description="MLflow tracking URI selected by the Fleet policy",
     )
-    mlflow_expose_trace_id: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="mlflow.expose_trace_id", group="MLflow", label="Expose trace ID", editor="boolean", rank=57
-        ),
-    ] = Field(
+    mlflow_expose_trace_id: bool = Field(
         default=True,
         description="When tracing is enabled, surface trace ids on Turn SSE metadata",
     )
-    mlflow_async_logging: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="mlflow.async_logging", group="MLflow", label="Async trace logging", editor="boolean", rank=51
-        ),
-    ] = Field(
+    mlflow_async_logging: bool = Field(
         default=True,
         description="Upload MLflow trace data asynchronously when tracing is enabled",
     )
-    mlflow_trace_sampling_ratio: Annotated[
-        float,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_sampling_ratio",
-            group="MLflow",
-            label="Trace sampling ratio",
-            editor="number",
-            rank=52,
-        ),
-    ] = Field(
+    mlflow_trace_sampling_ratio: float = Field(
         default=1.0,
         ge=0.0,
         le=1.0,
         description="Fraction of Turn traces to sample for MLflow",
     )
-    mlflow_trace_content_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_content_enabled",
-            group="MLflow",
-            label="Capture sanitized trace content",
-            editor="boolean",
-            rank=110,
-        ),
-    ] = Field(default=True, description="Permit bounded sanitized content in authorized engineering traces")
-    mlflow_trace_export_queue_size: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_export_queue_size",
-            group="MLflow",
-            label="Trace export queue size",
-            editor="number",
-            rank=111,
-        ),
-    ] = Field(default=128, ge=1, le=10000)
-    mlflow_trace_export_workers: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_export_workers",
-            group="MLflow",
-            label="Trace export workers",
-            editor="number",
-            rank=112,
-        ),
-    ] = Field(default=2, ge=1, le=16)
-    mlflow_trace_export_retry_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_export_retry_seconds",
-            group="MLflow",
-            label="Trace export retry limit",
-            editor="number",
-            rank=113,
-        ),
-    ] = Field(default=10, ge=1, le=120)
-    mlflow_http_request_timeout_seconds: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="mlflow.http_request_timeout_seconds",
-            group="MLflow",
-            label="MLflow HTTP request timeout",
-            editor="number",
-            rank=115,
-        ),
-    ] = Field(default=10, ge=1, le=600)
-    mlflow_trace_shutdown_seconds: Annotated[
-        float,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_shutdown_seconds",
-            group="MLflow",
-            label="Trace shutdown wait",
-            editor="number",
-            rank=114,
-        ),
-    ] = Field(default=5.0, gt=0, le=60)
-    mlflow_trace_content_max_chars: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_content_max_chars",
-            group="MLflow",
-            label="Trace payload character limit",
-            editor="number",
-            rank=53,
-        ),
-    ] = Field(
+    mlflow_trace_content_enabled: bool = Field(
+        default=True, description="Permit bounded sanitized content in authorized engineering traces"
+    )
+    mlflow_trace_export_queue_size: int = Field(default=128, ge=1, le=10000)
+    mlflow_trace_export_workers: int = Field(default=2, ge=1, le=16)
+    mlflow_trace_export_retry_seconds: int = Field(default=10, ge=1, le=120)
+    mlflow_http_request_timeout_seconds: int = Field(default=10, ge=1, le=600)
+    mlflow_trace_shutdown_seconds: float = Field(default=5.0, gt=0, le=60)
+    mlflow_trace_content_max_chars: int = Field(
         default=10_000,
         ge=256,
         le=50_000,
         description="Maximum characters retained in one readable MLflow trace payload field",
     )
-    mlflow_trace_catalog: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_catalog", group="MLflow", label="Trace catalog", editor="text", rank=58
-        ),
-    ] = Field(default=None)
-    mlflow_trace_schema: Annotated[
-        str | None,
-        FleetFieldPolicy(toml_path="mlflow.trace_schema", group="MLflow", label="Trace schema", editor="text", rank=60),
-    ] = Field(default=None)
-    mlflow_trace_table_prefix: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="mlflow.trace_table_prefix", group="MLflow", label="Trace table prefix", editor="text", rank=62
-        ),
-    ] = Field(default=None)
-    mlflow_tracing_sql_warehouse_id: Annotated[
-        str | None,
-        FleetFieldPolicy(
-            toml_path="mlflow.tracing_sql_warehouse_id",
-            group="MLflow",
-            label="Tracing SQL warehouse ID",
-            editor="text",
-            rank=64,
-        ),
-    ] = Field(default=None)
-    posthog_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="posthog.enabled", group="PostHog", label="Analytics enabled", editor="boolean", rank=66
-        ),
-    ] = Field(
+    mlflow_trace_catalog: str | None = Field(default=None)
+    mlflow_trace_schema: str | None = Field(default=None)
+    mlflow_trace_table_prefix: str | None = Field(default=None)
+    mlflow_tracing_sql_warehouse_id: str | None = Field(default=None)
+    posthog_enabled: bool = Field(
         default=False,
         description="Enable PostHog product analytics selected by the Fleet policy",
     )
-    posthog_project_token: Annotated[
-        SecretStr | None,
-        FleetFieldPolicy(
-            toml_path=None,
-            secret=True,
-            doc="Resolved at runtime from the environment named by posthog.project_token_env",
-        ),
-    ] = Field(
+    posthog_project_token: SecretStr | None = Field(
         default=None,
         description="PostHog project token resolved from posthog.project_token_env",
     )
-    posthog_host: Annotated[
-        str | None,
-        FleetFieldPolicy(toml_path="posthog.host", group="PostHog", label="Ingestion host", editor="text", rank=68),
-    ] = Field(
+    posthog_host: str | None = Field(
         default=None,
         description="PostHog ingestion host selected by the Fleet policy",
     )
-    capture_enabled: Annotated[
-        bool,
-        FleetFieldPolicy(
-            toml_path="capture.enabled", group="Capture", label="Turn capture enabled", editor="boolean", rank=118
-        ),
-    ] = Field(
+    capture_enabled: bool = Field(
         default=True,
         description="Retain one durable local Runtime Event capture file per Run",
     )
-    capture_retention_days: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="capture.retention_days",
-            group="Capture",
-            label="Capture retention (days)",
-            editor="number",
-            rank=119,
-        ),
-    ] = Field(default=14, ge=1)
-    capture_max_captures: Annotated[
-        int,
-        FleetFieldPolicy(
-            toml_path="capture.max_captures",
-            group="Capture",
-            label="Retained capture files",
-            editor="number",
-            rank=120,
-        ),
-    ] = Field(default=500, ge=1)
+    capture_retention_days: int = Field(default=14, ge=1)
+    capture_max_captures: int = Field(default=500, ge=1)
 
     _dotenv_values: dict[str, str] = PrivateAttr(default_factory=dict)
 
@@ -1078,119 +412,6 @@ class Settings(BaseModel):
 
 
 @dataclass(frozen=True, slots=True)
-class EnvironmentReferenceSpec:
-    """A TOML ``*_env`` key resolving one Settings field from the process environment.
-
-    Environment-reference keys are operator-editable policy surface but do not
-    bind a ``Settings`` field directly: ``load_runtime_settings`` resolves the
-    named variable via the environment/``.env`` seam only.  ``resolves_to``
-    names the owning Settings field so inventory generation cannot drift from
-    the schema.
-    """
-
-    toml_path: str
-    group: str
-    label: str
-    rank: int
-    resolves_to: str
-
-
-_ENVIRONMENT_REFERENCE_SPECS: tuple[EnvironmentReferenceSpec, ...] = (
-    EnvironmentReferenceSpec(
-        toml_path="llm.root.base_url_env",
-        group="Root LLM",
-        label="Provider base URL environment variable",
-        rank=10,
-        resolves_to="root_llm_base_url",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="llm.sub.base_url_env",
-        group="Sub LLM",
-        label="Provider base URL environment variable",
-        rank=19,
-        resolves_to="sub_llm_base_url",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="storage.database_url_env",
-        group="Storage",
-        label="Database URL environment variable",
-        rank=43,
-        resolves_to="database_url",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="daytona.api_key_env",
-        group="Daytona",
-        label="API key environment variable",
-        rank=44,
-        resolves_to="daytona_api_key",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="daytona.snapshot_env",
-        group="Daytona",
-        label="Session snapshot environment variable",
-        rank=45,
-        resolves_to="daytona_snapshot",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="daytona.child_snapshot_env",
-        group="Daytona",
-        label="SemanticChild snapshot environment variable",
-        rank=116,
-        resolves_to="daytona_child_snapshot",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="daytona.org_id_env",
-        group="Daytona",
-        label="Organization ID environment variable",
-        rank=46,
-        resolves_to="daytona_org_id",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="mlflow.experiment_name_env",
-        group="MLflow",
-        label="Experiment environment variable",
-        rank=55,
-        resolves_to="mlflow_experiment_name",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="mlflow.trace_catalog_env",
-        group="MLflow",
-        label="Trace catalog environment variable",
-        rank=59,
-        resolves_to="mlflow_trace_catalog",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="mlflow.trace_schema_env",
-        group="MLflow",
-        label="Trace schema environment variable",
-        rank=61,
-        resolves_to="mlflow_trace_schema",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="mlflow.trace_table_prefix_env",
-        group="MLflow",
-        label="Trace table prefix environment variable",
-        rank=63,
-        resolves_to="mlflow_trace_table_prefix",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="mlflow.tracing_sql_warehouse_id_env",
-        group="MLflow",
-        label="Tracing SQL warehouse environment variable",
-        rank=65,
-        resolves_to="mlflow_tracing_sql_warehouse_id",
-    ),
-    EnvironmentReferenceSpec(
-        toml_path="posthog.project_token_env",
-        group="PostHog",
-        label="Project token environment variable",
-        rank=67,
-        resolves_to="posthog_project_token",
-    ),
-)
-
-
-@dataclass(frozen=True, slots=True)
 class ConfigFieldSpec:
     """Resolved authoritative descriptor for one supported TOML policy key."""
 
@@ -1213,13 +434,13 @@ _EDITOR_KINDS: frozenset[str] = frozenset(getattr(EditorKind, "__args__", ()))
 def _field_policies() -> dict[str, FleetFieldPolicy]:
     """Return each Settings field's authoritative policy declaration."""
 
-    policies: dict[str, FleetFieldPolicy] = {}
-    for name, field_info in Settings.model_fields.items():
-        meta = next((item for item in field_info.metadata if isinstance(item, FleetFieldPolicy)), None)
-        if meta is None:
-            raise FleetConfigurationError(f"Settings.{name} is missing its authoritative FleetFieldPolicy declaration")
-        policies[name] = meta
-    return policies
+    missing = Settings.model_fields.keys() - FIELD_POLICIES.keys()
+    extra = FIELD_POLICIES.keys() - Settings.model_fields.keys()
+    if missing or extra:
+        raise FleetConfigurationError(
+            f"configuration catalog differs from Settings: missing={sorted(missing)}, extra={sorted(extra)}"
+        )
+    return dict(FIELD_POLICIES)
 
 
 def _build_field_specs() -> tuple[ConfigFieldSpec, ...]:
@@ -1234,7 +455,7 @@ def _build_field_specs() -> tuple[ConfigFieldSpec, ...]:
     policies = _field_policies()
     specs: list[ConfigFieldSpec] = []
     env_targets: set[str] = set()
-    for env in _ENVIRONMENT_REFERENCE_SPECS:
+    for env in catalog.ENVIRONMENT_REFERENCE_SPECS:
         if not env.toml_path.endswith("_env"):
             raise FleetConfigurationError(f"environment reference path must end with _env: {env.toml_path}")
         if env.resolves_to not in policies:

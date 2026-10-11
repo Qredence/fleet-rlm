@@ -19,24 +19,26 @@ from daytona_toolbox_api_client.exceptions import BadRequestException
 from pydantic import SecretStr
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona import children as children_module
+from fleet_rlm.daytona import host_io as host_io_module
+from fleet_rlm.daytona import leases as leases_module
 from fleet_rlm.daytona import runtime as runtime_module
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
+from fleet_rlm.daytona.children import ChildRuntimeLease
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError, classify_provider_error
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, sandbox_backend
-from fleet_rlm.daytona.runtime import (
+from fleet_rlm.daytona.leases import (
     AbsenceConfirmation,
     AbsenceTimeout,
-    ChildRuntimeLease,
     DaytonaAdmission,
     DaytonaAdmissionTimeoutError,
-    ExpectedWorkspaceMount,
     InterpreterLease,
     LeaseRequest,
-    RootSessionSpec,
-    SandboxLease,
-    SandboxLeasePolicy,
-    build_daytona_client,
+    SandboxResource,
 )
+from fleet_rlm.daytona.provider import build_daytona_client
+from fleet_rlm.daytona.runtime import RootSessionSpec
+from fleet_rlm.daytona.specs import ExpectedWorkspaceMount
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 from tests.support.session_manager import _FakePlatform, _FakeSandbox, make_daytona_runtime
 
@@ -54,7 +56,7 @@ def workspace_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[runtime_module.D
         live[sandbox.id] = sandbox
         return sandbox
 
-    async def delete(sandbox_id: str) -> None:
+    async def delete(sandbox_id: str, **_kwargs: object) -> None:
         deleted.append(sandbox_id)
         if platform.confirm_delete:
             live.pop(sandbox_id, None)
@@ -70,14 +72,14 @@ def workspace_runtime(monkeypatch: pytest.MonkeyPatch) -> tuple[runtime_module.D
     platform.delete = delete
     platform.get = get
     platform.start = AsyncMock()
-    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", AsyncMock(return_value="volume"))
-    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
-    monkeypatch.setattr(runtime_module, "sandbox_state", lambda sandbox: sandbox.state)
-    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", AsyncMock())
-    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
+    monkeypatch.setattr(host_io_module, "get_or_create_volume_id", AsyncMock(return_value="volume"))
+    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "sandbox_state", lambda sandbox: sandbox.state)
+    monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", AsyncMock())
+    monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(leases_module, "confirm_absence", confirm)
     runtime = make_daytona_runtime(platform=platform, admission=DaytonaAdmission(max_active_leases=2))
     return runtime, platform
 
@@ -127,7 +129,8 @@ async def test_warm_workspace_cache_preserves_turn_capacity(workspace_runtime) -
                 pass
         permit = await runtime._admission.acquire(deadline=asyncio.get_running_loop().time() + 0.1)
         permit.release()
-    assert len(runtime._warm_workspace_io_sandboxes) == 1
+    assert len(runtime._host_io._warm_workspace_io_sandboxes) == 1
+    assert runtime.lifecycle_counts() == {"active": 1, "acquiring": 0, "draining": 0, "quarantined": 0}
     assert len(platform.live) == 1
     assert await runtime.aclose(drain_seconds=1)
 
@@ -135,7 +138,7 @@ async def test_warm_workspace_cache_preserves_turn_capacity(workspace_runtime) -
 @pytest.mark.asyncio
 async def test_warm_workspace_idle_expiry_and_reuse_timer(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_idle_seconds = 0.03
+    runtime._host_io._workspace_io_idle_seconds = 0.03
     workspace_id = uuid4()
     async with runtime.open_workspace_sandbox(workspace_id, purpose="prime", reuse_warm=True):
         pass
@@ -145,7 +148,7 @@ async def test_warm_workspace_idle_expiry_and_reuse_timer(workspace_runtime) -> 
     async with asyncio.timeout(1):
         while not platform.deleted:
             await asyncio.sleep(0.01)
-    assert not runtime._warm_workspace_io_sandboxes
+    assert not runtime._host_io._warm_workspace_io_sandboxes
     async with asyncio.timeout(1):
         while runtime._admission._semaphore._value != 2:
             await asyncio.sleep(0.01)
@@ -211,7 +214,7 @@ def test_live_tool_pair_helper_supports_canonical_and_ai_sdk_chunk_names() -> No
 @pytest.mark.asyncio
 async def test_warm_workspace_failed_cleanup_blocks_replacement(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
     async with runtime.open_workspace_sandbox(uuid4(), purpose="prime", reuse_warm=True):
         pass
     platform.confirm_delete = False
@@ -229,7 +232,7 @@ async def test_warm_workspace_failed_cleanup_blocks_replacement(workspace_runtim
 @pytest.mark.asyncio
 async def test_workspace_queue_timeout_never_closes_active_sandbox(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
     workspace_id = uuid4()
     async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
         with pytest.raises(TimeoutError):
@@ -262,7 +265,7 @@ async def test_workspace_operation_groups_serialize_and_share_warm_sandbox(works
     second = asyncio.create_task(checkpoint())
     await asyncio.sleep(0)
     assert seen == ["io-0"]
-    assert runtime._workspace_io_contexts == 2
+    assert runtime._host_io._workspace_io_contexts == 2
     finish.set()
     await asyncio.gather(first, second)
     assert seen == ["io-0", "io-0"]
@@ -273,7 +276,7 @@ async def test_workspace_operation_groups_serialize_and_share_warm_sandbox(works
 @pytest.mark.asyncio
 async def test_workspace_acquisition_bound_does_not_limit_active_work(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
     async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
         await asyncio.sleep(0.05)
         assert not platform.deleted
@@ -284,9 +287,10 @@ async def test_workspace_acquisition_bound_does_not_limit_active_work(workspace_
 async def test_workspace_capacity_one_does_not_retain_idle_permit(workspace_runtime) -> None:
     runtime, platform = workspace_runtime
     runtime._admission = DaytonaAdmission(max_active_leases=1)
+    runtime._host_io._admission = runtime._admission
     async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
         assert runtime._admission._semaphore._value == 0
-    assert not runtime._warm_workspace_io_sandboxes
+    assert not runtime._host_io._warm_workspace_io_sandboxes
     assert platform.deleted == ["io-0"]
     assert runtime._admission._semaphore._value == 1
     assert await runtime.aclose(drain_seconds=1)
@@ -309,7 +313,7 @@ async def test_workspace_acquisition_honors_calling_action_deadline(workspace_ru
             pytest.fail("expired acquisition was admitted")
     assert loop.time() - started < 0.5
     assert not platform.created
-    assert runtime._workspace_io_contexts == 0
+    assert runtime._host_io._workspace_io_contexts == 0
     for permit in permits:
         permit.release()
     assert await runtime.aclose(drain_seconds=1)
@@ -319,7 +323,7 @@ async def test_workspace_acquisition_honors_calling_action_deadline(workspace_ru
 @pytest.mark.parametrize("reused", [False, True])
 async def test_workspace_preparation_timeout_retains_cleanup(workspace_runtime, monkeypatch, reused: bool) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_acquisition_timeout_seconds = 0.03
+    runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
     workspace_id = uuid4()
 
     async def blocked(*_args: object) -> None:
@@ -330,11 +334,11 @@ async def test_workspace_preparation_timeout_retains_cleanup(workspace_runtime, 
             pass
         sandbox.refresh_data.side_effect = blocked
     else:
-        monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", blocked)
+        monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", blocked)
     with pytest.raises(TimeoutError):
         async with runtime.open_workspace_sandbox(workspace_id, purpose="read", reuse_warm=True):
             pytest.fail("unfinished preparation was admitted")
-    assert not runtime._warm_workspace_io_sandboxes
+    assert not runtime._host_io._warm_workspace_io_sandboxes
     assert await runtime.wait_pending_cleanup(timeout=2)
     assert not platform.live
     assert runtime._admission._semaphore._value == 2
@@ -344,8 +348,8 @@ async def test_workspace_preparation_timeout_retains_cleanup(workspace_runtime, 
 @pytest.mark.asyncio
 async def test_workspace_late_create_blocks_replacement(workspace_runtime, monkeypatch) -> None:
     runtime, platform = workspace_runtime
-    runtime._workspace_io_acquisition_timeout_seconds = 0.03
-    original_create = runtime_module._create_daytona_sandbox
+    runtime._host_io._workspace_io_acquisition_timeout_seconds = 0.03
+    original_create = host_io_module._create_daytona_sandbox
     finish = asyncio.Event()
     creates = 0
 
@@ -355,7 +359,7 @@ async def test_workspace_late_create_blocks_replacement(workspace_runtime, monke
         await finish.wait()
         return await original_create(*args, **kwargs)
 
-    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", blocked_create)
+    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", blocked_create)
     for _ in range(2):
         with pytest.raises(TimeoutError):
             async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
@@ -382,7 +386,7 @@ async def test_workspace_shutdown_drains_preparation(workspace_runtime, monkeypa
         entered.set()
         await finish.wait()
 
-    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
+    monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
 
     async def prepare() -> None:
         async with runtime.open_workspace_sandbox(uuid4(), purpose="read", reuse_warm=True):
@@ -602,6 +606,7 @@ async def test_interpreter_release_maps_sdk_error_and_retains_cleanup_ownership(
         assert raised.value.status_code == 400
     assert lease.failed
     assert id(lease) in runtime._late_owners
+    assert runtime.lifecycle_counts()["quarantined"] == 1
     assert f"sandbox_id=sandbox-1 error_type={type(error).__name__}" in caplog.text
     assert "private" not in caplog.text
 
@@ -629,7 +634,7 @@ def test_interpreter_release_does_not_retry_a_body_type_error() -> None:
     assert lease.failed
 
 
-def test_interpreter_release_supports_no_argument_shutdown() -> None:
+def test_interpreter_release_rejects_no_argument_shutdown() -> None:
     calls: list[None] = []
 
     class LegacyInterpreter:
@@ -644,40 +649,10 @@ def test_interpreter_release_supports_no_argument_shutdown() -> None:
         interpreter=LegacyInterpreter(),
     )
 
-    lease.release()
-
-    assert calls == [None]
-    assert lease.closed
-
-
-def test_interpreter_release_tries_opaque_shutdown_once(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[bool] = []
-
-    class OpaqueInterpreter:
-        def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
-            calls.append(strict_broker_cleanup)
-            raise TypeError("opaque shutdown body failed")
-
-    actual_signature = runtime_module.inspect.signature
-
-    def unavailable_signature(callable_obj: object) -> object:
-        if getattr(callable_obj, "__name__", None) == "shutdown":
-            raise ValueError("signature unavailable")
-        return actual_signature(callable_obj)
-
-    monkeypatch.setattr(runtime_module.inspect, "signature", unavailable_signature)
-    lease = InterpreterLease(
-        sandbox_id="sandbox-1",
-        interpreter_id="interpreter-1",
-        volume_id="volume-1",
-        mount_path="/workspace",
-        interpreter=OpaqueInterpreter(),
-    )
-
-    with pytest.raises(TypeError, match="opaque shutdown body failed"):
+    with pytest.raises(TypeError):
         lease.release()
 
-    assert calls == [True]
+    assert calls == []
     assert lease.failed
 
 
@@ -712,13 +687,14 @@ def test_interpreter_release_rejects_non_callable_shutdown_attribute() -> None:
         interpreter=SimpleNamespace(shutdown=None),
     )
 
-    with pytest.raises(TypeError, match="shutdown attribute is not callable"):
+    with pytest.raises(TypeError):
         lease.release()
 
     assert lease.failed
 
 
-def test_sandbox_lease_shutdown_preserves_body_type_error() -> None:
+@pytest.mark.asyncio
+async def test_sandbox_resource_shutdown_preserves_body_type_error() -> None:
     calls: list[bool] = []
 
     class TypeErrorInterpreter:
@@ -730,16 +706,14 @@ def test_sandbox_lease_shutdown_preserves_body_type_error() -> None:
             raise TypeError("failure inside shutdown")
 
     owner = make_daytona_runtime()
-    lease = SandboxLease(
+    lease = SandboxResource(
         owner=owner,
         sandbox=None,
         interpreter=TypeErrorInterpreter(),
-        policy=SandboxLeasePolicy(kind="retained_session"),
     )
-
-    outcome = lease._shutdown_interpreter()
-
-    assert outcome.status == "failed"
+    assert await lease.aclose() is False
+    assert isinstance(lease.failure, TypeError)
+    assert lease.has_pending_ownership
     assert calls == [True]
 
 
@@ -753,24 +727,15 @@ async def test_recovery_fence_confirms_concurrent_native_stop_from_provider_stat
             return SimpleNamespace(state="stopped")
 
     runtime = make_daytona_runtime(platform=Platform())
-    lease = SandboxLease(
+    lease = SandboxResource(
         owner=runtime,
         sandbox=None,
         sandbox_id="sandbox-1",
         platform=runtime._platform,
-        policy=SandboxLeasePolicy(
-            kind="recovery_fence",
-            stop_force=True,
-            confirm_absence=True,
-            confirm_timeout_s=1,
-        ),
+        role="fence",
     )
-
-    outcome = await lease._provider_close()
-
-    assert outcome.action == "stop"
-    assert outcome.error is None
-    assert outcome.plateau == ("stopped",)
+    assert await lease.aclose() is True
+    assert not lease.has_pending_ownership
 
 
 @pytest.mark.asyncio
@@ -824,7 +789,7 @@ async def test_root_retains_admission_when_real_broker_delete_fails_until_quaran
     assert lease.failed
     assert id(lease) in runtime._late_owners
     assert process.deleted == ["fleet-tool-broker-runtime-test"]
-    with pytest.raises(runtime_module.DaytonaAdmissionTimeoutError):
+    with pytest.raises(leases_module.DaytonaAdmissionTimeoutError):
         await admission.acquire(deadline=asyncio.get_running_loop().time() + 0.02)
 
     await runtime.release(lease)
@@ -902,7 +867,7 @@ async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdow
             close_calls.append("closed")
             permit._released = True
 
-        runtime._child_cleanup_records[sandbox_id] = runtime_module._ChildCleanupRecord(
+        runtime._children._child_cleanup_records[sandbox_id] = children_module._ChildCleanupRecord(
             runtime._platform,
             sandbox,
             sandbox_id,
@@ -917,7 +882,7 @@ async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdow
             close_child,
         )
 
-    monkeypatch.setattr(runtime, "_acquire_child_runtime", acquire_child)
+    monkeypatch.setattr(runtime._children, "_acquire_child_runtime", acquire_child)
     factory = runtime.build_child_factory(
         volume_id="child-volume",
         workspace_id=uuid4(),
@@ -930,7 +895,7 @@ async def test_runtime_owned_child_factory_registers_and_closes_child_on_shutdow
     lease = await asyncio.to_thread(factory, 4)
 
     assert runtime.has_pending_ownership
-    assert runtime._child_cleanup_records[lease.sandbox_id].lease is lease
+    assert runtime._children._child_cleanup_records[lease.sandbox_id].lease is lease
     assert await runtime.aclose(deadline=loop.time() + 5)
     assert lease.state.value == "CLOSED"
     assert close_calls == ["closed"]
@@ -952,7 +917,7 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
         def __init__(self) -> None:
             self.deleted = False
 
-        async def delete(self, sandbox_id: str) -> None:
+        async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
             assert sandbox_id == sandbox.id
             self.deleted = True
 
@@ -977,13 +942,13 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
     async def layout(*_args: object) -> None:
         return None
 
-    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
-    monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
-    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
-    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
+    monkeypatch.setattr(host_io_module, "sandbox_state", lambda _sandbox: "running")
+    monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
+    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
     async with runtime.open_workspace_sandbox(uuid4(), purpose="test") as acquired:
         assert acquired is sandbox
@@ -994,7 +959,7 @@ async def test_workspace_io_sandbox_is_runtime_owned_through_absence(
 
     assert platform.deleted
     assert admission._semaphore._value == 1
-    assert not runtime._workspace_io_resources()
+    assert not runtime._host_io._workspace_io_resources()
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)
 
 
@@ -1013,7 +978,7 @@ def _warm_workspace_io_harness(monkeypatch: pytest.MonkeyPatch, *, sandbox_id: s
             state["create_count"] += 1
             return sandbox
 
-        async def delete(self, sandbox_id: str) -> None:
+        async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
             state["deleted"].append(sandbox_id)
 
         async def get(self, _sandbox_id: str) -> object | None:
@@ -1029,16 +994,16 @@ def _warm_workspace_io_harness(monkeypatch: pytest.MonkeyPatch, *, sandbox_id: s
         return None
 
     platform = Platform()
-    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
-    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
+    monkeypatch.setattr(leases_module, "confirm_absence", confirm)
+    monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
     monkeypatch.setattr(
-        runtime_module, "_create_daytona_sandbox", lambda _platform, _expected, **_kwargs: platform.create(**_kwargs)
+        host_io_module, "_create_daytona_sandbox", lambda _platform, _expected, **_kwargs: platform.create(**_kwargs)
     )
-    monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
-    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
-    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "sandbox_state", lambda _sandbox: "running")
+    monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
+    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
     runtime = make_daytona_runtime(
         platform=platform,
@@ -1064,7 +1029,7 @@ async def test_workspace_io_warm_lease_reuses_resident_sandbox_and_closes_on_acl
 
     # Not deleted on exit of contextmanager
     assert not state["deleted"]
-    assert ws_id in runtime._warm_workspace_io_sandboxes
+    assert ws_id in runtime._host_io._warm_workspace_io_sandboxes
 
     # Second call reuses the existing warm sandbox without creating a new one
     creates_before_reuse = state["create_count"]
@@ -1076,7 +1041,7 @@ async def test_workspace_io_warm_lease_reuses_resident_sandbox_and_closes_on_acl
     # Calling aclose() cleanly terminates and confirms deletion of the warm sandbox
     assert await runtime.aclose(deadline=asyncio.get_running_loop().time() + 1)
     assert sandbox.id in state["deleted"]
-    assert not runtime._warm_workspace_io_sandboxes
+    assert not runtime._host_io._warm_workspace_io_sandboxes
 
 
 @pytest.mark.asyncio
@@ -1096,7 +1061,7 @@ async def test_workspace_io_warm_lease_body_error_propagates_and_retains_lease(
         assert acquired is sandbox
         assert state["create_count"] == 1
 
-    assert ws_id in runtime._warm_workspace_io_sandboxes
+    assert ws_id in runtime._host_io._warm_workspace_io_sandboxes
 
     try:
         async with runtime.open_workspace_sandbox(ws_id, purpose="read-task", reuse_warm=True) as acquired:
@@ -1105,7 +1070,7 @@ async def test_workspace_io_warm_lease_body_error_propagates_and_retains_lease(
     except FileNotFoundError as exc:
         assert "task.json" in str(exc)
         assert not state["deleted"]
-        assert ws_id in runtime._warm_workspace_io_sandboxes
+        assert ws_id in runtime._host_io._warm_workspace_io_sandboxes
         assert state["create_count"] == 1
 
 
@@ -1122,7 +1087,7 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     confirmed = False
 
     class Platform:
-        async def delete(self, _sandbox_id: str) -> None:
+        async def delete(self, _sandbox_id: str, **_kwargs: object) -> None:
             return None
 
         async def get(self, _sandbox_id: str) -> object | None:
@@ -1142,10 +1107,10 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     async def layout(*_args: object) -> None:
         return None
 
-    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
-    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
-    monkeypatch.setattr(runtime_module, "sandbox_state", lambda _sandbox: "running")
-    monkeypatch.setattr(runtime_module, "ensure_shared_volume_layout", layout)
+    monkeypatch.setattr(leases_module, "confirm_absence", confirm)
+    monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
+    monkeypatch.setattr(host_io_module, "sandbox_state", lambda _sandbox: "running")
+    monkeypatch.setattr(host_io_module, "ensure_shared_volume_layout", layout)
     admission = DaytonaAdmission(max_active_leases=1)
     runtime = make_daytona_runtime(
         platform=Platform(),
@@ -1153,10 +1118,10 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
         volume_config=SimpleNamespace(paths=object),
         admission=admission,
     )
-    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
     async with runtime.open_workspace_sandbox(uuid4(), purpose="test"):
         pass
@@ -1166,7 +1131,7 @@ async def test_workspace_io_unconfirmed_delete_retains_permit_and_retries(
     confirmed = True
     assert await runtime.wait_pending_cleanup(timeout=2)
     assert admission._semaphore._value == 1
-    assert not runtime._workspace_io_resources()
+    assert not runtime._host_io._workspace_io_resources()
 
 
 @pytest.mark.asyncio
@@ -1179,7 +1144,7 @@ async def test_workspace_io_cancelled_create_is_settled_by_runtime(
     sandbox = SimpleNamespace(id="late-io")
 
     class Platform:
-        async def delete(self, sandbox_id: str) -> None:
+        async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
             deleted.append(sandbox_id)
 
         async def get(self, _sandbox_id: str) -> None:
@@ -1193,7 +1158,7 @@ async def test_workspace_io_cancelled_create_is_settled_by_runtime(
         await finish.wait()
         return sandbox
 
-    monkeypatch.setattr(runtime_module, "get_or_create_volume_id", volume_id)
+    monkeypatch.setattr(host_io_module, "get_or_create_volume_id", volume_id)
     admission = DaytonaAdmission(max_active_leases=1)
     runtime = make_daytona_runtime(
         platform=Platform(),
@@ -1201,10 +1166,10 @@ async def test_workspace_io_cancelled_create_is_settled_by_runtime(
         volume_config=SimpleNamespace(paths=lambda: object()),
         admission=admission,
     )
-    monkeypatch.setattr(runtime_module, "_expected_workspace_mount", lambda *_args: object())
-    monkeypatch.setattr(runtime_module, "_create_daytona_sandbox", create)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_workspace_mount", lambda *_args: None)
-    monkeypatch.setattr(runtime_module, "verify_sandbox_spec", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "_expected_workspace_mount", lambda *_args: object())
+    monkeypatch.setattr(host_io_module, "_create_daytona_sandbox", create)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_workspace_mount", lambda *_args: None)
+    monkeypatch.setattr(host_io_module, "verify_sandbox_spec", lambda *_args: None)
 
     async def use_workspace() -> None:
         async with runtime.open_workspace_sandbox(uuid4(), purpose="test"):
@@ -1230,7 +1195,7 @@ async def test_process_disposal_keeps_client_open_until_tracked_absence() -> Non
     steps: list[str] = []
 
     class Platform:
-        async def delete(self, sandbox_id: str) -> None:
+        async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
             steps.append(f"delete:{sandbox_id}")
 
         async def get(self, sandbox_id: str) -> object | None:
@@ -1271,13 +1236,13 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
             assert depth is None
             return []
 
-    sandbox = SimpleNamespace(id="child-unconfirmed", fs=Fs())
+    sandbox = SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), id="child-unconfirmed", fs=Fs())
 
     class Platform:
         async def create(self, **_kwargs: object) -> object:
             return sandbox
 
-        async def delete(self, _sandbox_id: str) -> None:
+        async def delete(self, _sandbox_id: str, **_kwargs: object) -> None:
             return None
 
         async def get(self, _sandbox_id: str) -> object | None:
@@ -1298,9 +1263,7 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
             return AbsenceConfirmation(sandbox.id, ("absent",), 0.0)
         return AbsenceTimeout(sandbox.id, "running", ("running",), 0.0)
 
-    monkeypatch.setattr(runtime_module, "DaytonaCodeInterpreter", Interpreter)
-    monkeypatch.setattr(runtime_module, "sandbox_backend", lambda child, **_kwargs: child)
-    monkeypatch.setattr(runtime_module, "confirm_absence", confirm)
+    monkeypatch.setattr(leases_module, "confirm_absence", confirm)
     loop = asyncio.get_running_loop()
     admission = DaytonaAdmission(max_active_leases=1)
     runtime = make_daytona_runtime(platform=Platform(), admission=admission)
@@ -1317,12 +1280,12 @@ async def test_child_unconfirmed_delete_keeps_capacity_until_runtime_retry(
     with pytest.raises(ChildRuntimeCleanupError):
         await asyncio.to_thread(lease.close)
     assert admission._semaphore._value == 0
-    assert "child-unconfirmed" in runtime._child_cleanup_records
+    assert "child-unconfirmed" in runtime._children._child_cleanup_records
 
     confirmed = True
     await runtime.aclose(deadline=loop.time() + 5)
     assert admission._semaphore._value == 1
-    assert runtime._child_cleanup_records == {}
+    assert runtime._children._child_cleanup_records == {}
     assert await runtime.aclose(deadline=loop.time() + 5)
 
 
@@ -1651,7 +1614,7 @@ async def test_run_attachment_copy_uses_local_scratch_with_parent_directories() 
     attachment_id = uuid4()
     fs = Fs()
     fs.directories.add(f"/tmp/fleet/{run_id}")
-    sandbox = SimpleNamespace(fs=fs)
+    sandbox = SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=fs)
     paths = VolumePaths.from_mount("/volume")
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
@@ -1724,7 +1687,7 @@ async def test_run_sink_routes_sync_storage_to_host_or_private_scratch() -> None
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
     sink = DaytonaRunStorage(
-        SimpleNamespace(fs=sandbox_fs),
+        SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=sandbox_fs),
         dispatcher=dispatcher,
         paths=VolumePaths.from_mount("/volume"),
         host_io=SimpleNamespace(volume_fs=host_fs),
@@ -1868,7 +1831,7 @@ async def test_active_root_suppresses_provider_autostop_and_restores_only_health
     runtime = make_daytona_runtime()
     workspace_id, session_id = uuid4(), uuid4()
     sandbox = SimpleNamespace(id="active-root", auto_stop_interval=15, set_autostop_interval=AsyncMock())
-    lease = runtime_module.InterpreterLease(
+    lease = leases_module.InterpreterLease(
         sandbox_id=sandbox.id,
         interpreter_id="interp",
         volume_id="volume",
@@ -1891,18 +1854,18 @@ async def test_active_root_suppresses_provider_autostop_and_restores_only_health
 
 @pytest.mark.asyncio
 async def test_session_fence_stops_only_its_children_and_retains_cleanup_ownership() -> None:
-    platform = SimpleNamespace(stop=AsyncMock())
+    platform = SimpleNamespace(stop=AsyncMock(), get=AsyncMock(return_value=None))
     runtime = make_daytona_runtime(platform=platform)
     session_id = uuid4()
     admission = DaytonaAdmission(max_active_leases=3)
     for sandbox_id, owner_session in (("child-active", session_id), ("child-other", uuid4())):
         permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
-        runtime._child_cleanup_records[sandbox_id] = runtime_module._ChildCleanupRecord(
+        runtime._children._child_cleanup_records[sandbox_id] = children_module._ChildCleanupRecord(
             platform, SimpleNamespace(id=sandbox_id), sandbox_id, None, permit, session_id=owner_session
         )
     await runtime.fence_session(session_id)
-    platform.stop.assert_awaited_once_with("child-active", timeout=60, force=True)
-    assert set(runtime._child_cleanup_records) == {"child-active", "child-other"}
+    platform.stop.assert_awaited_once_with("child-active", timeout=30.0, force=True)
+    assert set(runtime._children._child_cleanup_records) == {"child-active", "child-other"}
     assert admission._semaphore._value == 1
-    for record in runtime._child_cleanup_records.values():
+    for record in runtime._children._child_cleanup_records.values():
         record.permit.release()

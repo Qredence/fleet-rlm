@@ -1,10 +1,10 @@
 # Fleet RLM
 
-Fleet RLM is a terminal-based assistant for work that needs reasoning, Python,
-and files. Ask a question, watch its work stream into the terminal, and return
-to a saved Session later. Fleet uses [DSPy](https://github.com/stanfordnlp/dspy)
-for the RLM reasoning loop, [Daytona](https://www.daytona.io/) for isolated
-execution, and FastAPI for its backend.
+Fleet RLM is a recursive AI system for large context, complex analysis,
+reasoning, and long-term memory, built natively on
+[DSPy](https://github.com/stanfordnlp/dspy). It uses Daytona for isolated
+execution and FastAPI for its backend, with a terminal client for live work and
+saved Sessions for continuity.
 
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/Qredence/fleet-rlm/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/Qredence/fleet-rlm/tree/main)
 [![PyPI](https://img.shields.io/pypi/v/fleet-rlm?style=flat-square&logo=pypi&logoColor=white)](https://pypi.org/project/fleet-rlm/)
@@ -21,7 +21,7 @@ execution, and FastAPI for its backend.
   and download committed Artifacts.
 - **Choose how much delegation to use.** The configuration enables DSPy's
   native semantic calls and bounded, isolated child RLMs for independent
-  investigations. Set `rlm.recursion_enabled = false` for native-only operation.
+  investigations. Every Root receives child tools; the model decides whether to delegate.
 
 ## Run a live local Session
 

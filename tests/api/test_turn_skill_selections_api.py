@@ -16,7 +16,7 @@ from fleet_rlm.api.errors import install_error_handlers
 from fleet_rlm.api.routes.turns import router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.config.settings import Settings
-from fleet_rlm.rlm.events import RuntimeEvent
+from fleet_rlm.rlm.event_types import RuntimeEvent
 from fleet_rlm.skills.errors import InvalidSkillSelectionError
 from fleet_rlm.turns import OpenTurnCommand
 

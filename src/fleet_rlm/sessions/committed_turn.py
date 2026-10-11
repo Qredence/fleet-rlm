@@ -9,7 +9,7 @@ from typing import Any, Literal, assert_never, cast
 from fleet_rlm.json_types import JsonScalar as JsonScalar
 from fleet_rlm.json_types import JsonValue as JsonValue
 from fleet_rlm.observability.tracing import current_turn_trace_id
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     ArtifactCreated,
     AttachmentRead,
     ChildProgress,

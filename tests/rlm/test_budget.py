@@ -23,12 +23,8 @@ from fleet_rlm.rlm.budget import (
     TurnBudget,
     TurnBudgetExhausted,
 )
-from fleet_rlm.rlm.events import (
-    ChildProgress,
-    Status,
-    ToolCompleted,
-    _RLMTraceCallback,
-)
+from fleet_rlm.rlm.event_types import ChildProgress, Status, ToolCompleted
+from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import ChildRequest, RecursiveRLMOptions
 from tests.rlm.fakes import ChildLeaseRecorder
@@ -105,6 +101,33 @@ def test_local_finalization_cannot_outlive_shared_turn(monkeypatch, can_finalize
     assert failure.value.dimension == expected
     assert scope.finalization_used == 0
     assert turn.snapshot()["finalization_attempts"] == 0
+
+
+def test_child_finalization_corrections_cannot_use_root_deadline_reserve(monkeypatch) -> None:
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
+    turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))
+
+    with pytest.raises(TurnBudgetExhausted) as failure:
+        turn.reclassify_finalization(shared=False)
+
+    assert failure.value.dimension == BudgetDimension.DEADLINE
+    assert turn.snapshot()["finalization_attempts"] == 0
+
+
+@pytest.mark.parametrize("can_finalize", [True, False])
+def test_parse_repair_admission_respects_root_finalization_authority(monkeypatch, can_finalize) -> None:
+    monkeypatch.setattr("fleet_rlm.rlm.budget.time.monotonic", lambda: 98.0)
+    turn = TurnBudget(deadline=100, limits=BudgetLimits(finalization_seconds=3))
+    scope = AdapterBudget(turn=turn)
+
+    if can_finalize:
+        scope.note_parse_repair(can_finalize=True)
+        assert scope.parse_repairs_used == 1
+    else:
+        with pytest.raises(TurnBudgetExhausted) as failure:
+            scope.note_parse_repair(can_finalize=False)
+        assert failure.value.dimension == BudgetDimension.DEADLINE
+        assert scope.parse_repairs_used == 0
 
 
 def test_local_finalization_exhaustion_identifies_its_dimension() -> None:

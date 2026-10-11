@@ -12,20 +12,19 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     RLMCode,
     RLMOutput,
     RLMReasoning,
     StepFinished,
     StepStarted,
     ToolCompleted,
-    ToolEventView,
     ToolFailed,
     ToolStarted,
-    bind_native_rlm_observer,
-    observe_tool,
 )
+from fleet_rlm.rlm.events import ToolEventView, bind_native_rlm_observer, observe_tool
 from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionSpec,
     RLMRunner,
@@ -34,6 +33,7 @@ from fleet_rlm.rlm.execution import (
 )
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import TurnAccess
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 
 
@@ -489,6 +489,9 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
     from fleet_rlm.sessions.context import SessionContextManifest
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -523,13 +526,14 @@ async def test_runner_completes_native_repair_and_extract_as_prediction_result(f
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=options,
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())),
             cancellation_requested=not_cancelled,
         ),
         capabilities=Capabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=NativeFactory().create).stream(context)
     events = [event async for event in stream]

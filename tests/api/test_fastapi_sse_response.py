@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 
 from fleet_rlm.api.routes.turns import create_turn
 from fleet_rlm.api.schemas import CreateTurnRequest
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     EventRecorder,
     RLMCode,
     RLMOutput,
@@ -534,8 +534,6 @@ async def test_run_scratch_cleanup_preserves_completed_sse_boundary(missing_scra
 
     template = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=Filesystem())))
     template.bind_run_scratch(run_id)
-    invocation = template.new_invocation()
-    assert invocation._backend._run_scratch_path == path
 
     recorder = EventRecorder(uuid4(), run_id)
 

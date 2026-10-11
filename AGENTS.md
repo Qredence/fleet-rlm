@@ -5,12 +5,14 @@ Fleet RLM combines a Python FastAPI backend, DSPy reasoning, Daytona execution, 
 ## Project Structure & Module Organization
 
 - `src/fleet_rlm/` contains backend packages for sessions, turns, persistence, API, reasoning, workspace, and Daytona.
+  - `daytona/` splits concrete ownership: `provider.py` (SDK ops), `leases.py` (admission/cleanup), `children.py`, `host_io.py`, coordinated by `runtime.py`.
+  - `config/catalog.py` owns the field-policy inventory; `rlm/event_types.py` owns Runtime Event dataclasses; `app_preparation.py` prepares claimed Turns.
 - `tests/` groups backend tests by behavior owner; shared fixtures live in `tests/support/`.
 - `tools/fleet-tui/` contains the terminal client and its tests.
 - `config/fleet.toml` owns runtime policy; `migrations/` contains Alembic migrations.
 - `docs/` holds guides and references; `scripts/` contains repository helpers. Runtime skill resources live in `src/fleet_rlm/skills/bundled/`.
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes.
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes. Child RLM tools are always available (bounded to depth one); operators do not toggle recursion in TOML.
 
 ## Build, Test, and Development Commands
 
@@ -23,6 +25,7 @@ Use Python 3.11–3.13, uv, Node 22.19+, and the TUI’s pinned pnpm version.
 - `make test`: run default non-live backend tests.
 - `make tui-check`: check generated contracts, formatting, lint, types, and client tests.
 - `make check`: run the primary repository quality gate.
+- `make check-docs`: validate documentation links and structure after docs edits.
 
 ## Coding Style & Naming Conventions
 

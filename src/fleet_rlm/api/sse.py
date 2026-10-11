@@ -8,7 +8,7 @@ from fastapi.sse import ServerSentEvent
 
 from fleet_rlm.api.json_util import to_plain_json
 from fleet_rlm.api.ui_stream import fleet_ui_chunk_payload
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     ArtifactCreated,
     AttachmentRead,
     ChildProgress,

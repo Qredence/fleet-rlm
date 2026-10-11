@@ -128,7 +128,7 @@ def _run_composition_local(*, payload: dict[str, Any]) -> None:
     from tests.support.testing_app import build_testing_services
 
     app = FastAPI()
-    app.state.skill_catalog = build_bundled_skill_catalog()
+    app.state.composition.skill_catalog = build_bundled_skill_catalog()
     build_testing_services(app, Settings(run_environment="daytona"))
     payload["outcome"] = "accepted"
 

@@ -25,8 +25,8 @@ def test_fleet_doctor_daytona_prints_safe_steps_and_succeeds(
     result = diagnostics.DaytonaDoctorResult(
         ok=True,
         steps=(
-            diagnostics.DaytonaDoctorStep("settings", True, "Settings valid."),
-            diagnostics.DaytonaDoctorStep("cleanup", True, "Sandbox deleted."),
+            diagnostics.DaytonaDoctorStep("settings", "pass", "Settings valid."),
+            diagnostics.DaytonaDoctorStep("cleanup", "pass", "Sandbox deleted."),
         ),
     )
 
@@ -53,7 +53,7 @@ def test_fleet_doctor_reads_single_toml_policy(
     monkeypatch.chdir(tmp_path)
     result = diagnostics.DaytonaDoctorResult(
         ok=True,
-        steps=(diagnostics.DaytonaDoctorStep("settings", True, "Settings valid."),),
+        steps=(diagnostics.DaytonaDoctorStep("settings", "pass", "Settings valid."),),
     )
 
     async def run(_settings: object) -> diagnostics.DaytonaDoctorResult:
@@ -77,7 +77,7 @@ def test_fleet_doctor_daytona_returns_nonzero_with_provider_action(
         steps=(
             diagnostics.DaytonaDoctorStep(
                 "provider",
-                False,
+                "fail",
                 "Daytona authentication was rejected.",
                 "auth",
             ),
@@ -113,7 +113,7 @@ def test_fleet_doctor_snapshot_mismatch_has_specific_action(
         steps=(
             diagnostics.DaytonaDoctorStep(
                 "sandbox",
-                False,
+                "fail",
                 "The disposable Sandbox snapshot did not match the configured Fleet snapshot.",
                 "snapshot_mismatch",
             ),
@@ -147,7 +147,7 @@ def test_fleet_doctor_reports_invalid_environment_without_traceback(
     async def run(_settings: object) -> diagnostics.DaytonaDoctorResult:
         return diagnostics.DaytonaDoctorResult(
             ok=True,
-            steps=(diagnostics.DaytonaDoctorStep("settings", True, "Settings valid."),),
+            steps=(diagnostics.DaytonaDoctorStep("settings", "pass", "Settings valid."),),
         )
 
     monkeypatch.setattr(diagnostics, "run_daytona_doctor", run)
@@ -167,8 +167,8 @@ def test_fleet_doctor_prints_cleanup_action_after_primary_failure(
     result = diagnostics.DaytonaDoctorResult(
         ok=False,
         steps=(
-            diagnostics.DaytonaDoctorStep("interpreter", False, "Interpreter failed.", "interpreter"),
-            diagnostics.DaytonaDoctorStep("cleanup", False, "Cleanup failed.", "cleanup"),
+            diagnostics.DaytonaDoctorStep("interpreter", "fail", "Interpreter failed.", "interpreter"),
+            diagnostics.DaytonaDoctorStep("cleanup", "fail", "Cleanup failed.", "cleanup"),
         ),
         failure_category="interpreter",
     )

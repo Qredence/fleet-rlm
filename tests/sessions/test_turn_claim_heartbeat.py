@@ -14,12 +14,8 @@ from tests.support.turn_settlement import TestingRunSettlement
 def test_host_tool_rejects_calls_after_authority_revocation() -> None:
     import dspy
 
-    from fleet_rlm.rlm.events import (
-        ToolEventView,
-        ToolFailed,
-        ToolStarted,
-        observe_tool,
-    )
+    from fleet_rlm.rlm.event_types import ToolFailed, ToolStarted
+    from fleet_rlm.rlm.events import ToolEventView, observe_tool
     from fleet_rlm.sessions.run_state import RunAuthority
 
     authority = RunAuthority()
@@ -113,7 +109,7 @@ async def test_heartbeat_supervision_covers_preparation() -> None:
 
 @pytest.mark.asyncio
 async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunCompleted, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -212,7 +208,7 @@ async def test_transient_heartbeat_failure_recovers_without_ending_run() -> None
 
 @pytest.mark.asyncio
 async def test_repeated_transient_failures_revoke_without_provider_fence() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
@@ -303,7 +299,7 @@ async def test_repeated_transient_failures_revoke_without_provider_fence() -> No
 
 @pytest.mark.asyncio
 async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() -> None:
-    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.event_types import RunFailed
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
@@ -366,7 +362,7 @@ async def test_runner_exception_after_claim_loss_still_revokes_and_fences_run() 
 
 @pytest.mark.asyncio
 async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
-    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.event_types import RunFailed
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -469,7 +465,7 @@ async def test_claim_loss_wins_finalization_and_prevents_stale_commit() -> None:
 
 @pytest.mark.asyncio
 async def test_invalid_heartbeat_revokes_run_fences_before_releasing_claim() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import RunStateError
@@ -587,7 +583,7 @@ async def test_post_commit_heartbeat_does_not_fail_committed_turn(caplog) -> Non
     """RC-8 regression: a heartbeat racing post-commit must never fail the live stream."""
     import logging
 
-    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunFailed, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunCompleted, RunFailed, RunStarted
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput

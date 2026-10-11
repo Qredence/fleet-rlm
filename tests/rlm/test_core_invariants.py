@@ -12,8 +12,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
+from fleet_rlm.daytona.children import ChildRuntimeLease
 from fleet_rlm.rlm.program import (
     _MAX_CONTEXT_ATTACHMENT_COUNT,
     _MAX_PREVIEW_CHARS,
@@ -28,6 +27,7 @@ from fleet_rlm.rlm.recursion import (
     RecursiveRLMOptions,
     RecursiveSubtaskSignature,
 )
+from tests.rlm.fakes import invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
@@ -137,18 +137,18 @@ def test_child_sandbox_delegation_strictly_depth_one() -> None:
 
     def recording_factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         del profile
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        interpreter = invocation_factory
         return ChildRuntimeLease(
             interpreter,
             f"child-{call_index}",
             "test-vol",
             f"child-path-{call_index}",
-            interpreter.shutdown,
+            lambda: None,
         )
 
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm, sub_lm),
-        options=RecursiveRLMOptions(enabled=True),
+        options=RecursiveRLMOptions(),
         child_runtime_factory=recording_factory,
         deadline=1e9,
     )
@@ -424,11 +424,10 @@ SUBMIT(answer=ans, evidence=[], gaps=[], result_files=[])
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         del profile
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        interpreter = invocation_factory
 
         def _cleanup() -> None:
             closed_leases.append(f"child-{call_index}")
-            interpreter.shutdown()
 
         return ChildRuntimeLease(
             interpreter,
@@ -440,7 +439,7 @@ SUBMIT(answer=ans, evidence=[], gaps=[], result_files=[])
 
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm, sub_lm),
-        options=RecursiveRLMOptions(enabled=True),
+        options=RecursiveRLMOptions(),
         child_runtime_factory=factory,
         deadline=1e9,
     )
@@ -484,18 +483,18 @@ SUBMIT(answer=f"child_filtered:{summary}", evidence=[], gaps=[], result_files=[]
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         del profile
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        interpreter = invocation_factory
         return ChildRuntimeLease(
             interpreter,
             f"child-{call_index}",
             "test-vol",
             f"child-path-{call_index}",
-            interpreter.shutdown,
+            lambda: None,
         )
 
     executor = RecursiveRLMExecutor(
         models=RLMModelBundle(root_lm, sub_lm),
-        options=RecursiveRLMOptions(enabled=True),
+        options=RecursiveRLMOptions(),
         child_runtime_factory=factory,
         deadline=1e9,
     )

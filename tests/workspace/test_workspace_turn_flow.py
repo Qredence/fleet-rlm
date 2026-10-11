@@ -10,8 +10,9 @@ from uuid import UUID, uuid4
 import dspy
 import pytest
 
-from fleet_rlm.rlm.events import RuntimeEvent
+from fleet_rlm.rlm.event_types import RuntimeEvent
 from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
@@ -37,6 +38,7 @@ from fleet_rlm.workspace.models import (
     parse_workspace_memory_lines,
 )
 from fleet_rlm.workspace.workspace import WorkspaceToolError, WorkspaceToolHost
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 
 
 class MemoryStore:
@@ -181,6 +183,9 @@ class MemoryWorkspace:
 
 
 class Capabilities:
+    def loaded_skills(self):
+        return ()
+
     def __init__(self, workspace: MemoryWorkspace) -> None:
         workspace_host = WorkspaceToolHost(workspace, max_file_bytes=1024)
         memory_host = WorkspaceMemoryToolHost(workspace.memory_registry.resolve(workspace.access.workspace_id))
@@ -315,6 +320,7 @@ async def _run(
     else:
         task_request = request
     context = RLMExecutionContext(
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
         identity=RunIdentity(run_id=uuid4(), session_id=workspace.session_id, access=workspace.access),
         session=SessionView(
             request=task_request,
@@ -323,10 +329,10 @@ async def _run(
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=Interpreter(),
+            interpreter=configured_invocation_factory(Interpreter()),
             cancellation_requested=not_cancelled,
         ),
         capabilities=Capabilities(workspace),

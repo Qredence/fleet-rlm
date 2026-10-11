@@ -659,7 +659,7 @@ describe("PiCommandPresenter", () => {
 
     // Escape closes the root list, which resolves the command.
     screen.handleInput(ESCAPE);
-    await expect(result).resolves.toBeNull();
+    await expect(result).resolves.toBeUndefined();
     expect(hide).toHaveBeenCalled();
   });
 
@@ -718,7 +718,7 @@ describe("PiCommandPresenter", () => {
     });
 
     screen.handleInput(ESCAPE);
-    await expect(result).resolves.toBeNull();
+    await expect(result).resolves.toBeUndefined();
   });
 
   it("flashes a parse error and does not save when a number field gets NaN input", async () => {
@@ -745,7 +745,7 @@ describe("PiCommandPresenter", () => {
     screen.handleInput(ESCAPE);
     screen.handleInput(ESCAPE);
     screen.handleInput(ESCAPE);
-    await expect(result).resolves.toBeNull();
+    await expect(result).resolves.toBeUndefined();
   });
 
   it("keeps a draft for retry when its batch save fails", async () => {
@@ -774,6 +774,6 @@ describe("PiCommandPresenter", () => {
       updates: [{ path: "rlm.verbose", value: true }],
     });
     screen.handleInput(ESCAPE);
-    await expect(result).resolves.toBeNull();
+    await expect(result).resolves.toBeUndefined();
   });
 });

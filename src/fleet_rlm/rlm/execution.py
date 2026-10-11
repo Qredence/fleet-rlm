@@ -33,12 +33,9 @@ from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.observability.diagnostics import normalize_turn_failure
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
-    AsyncToolBridge,
     AttachmentRead,
-    ExecutionTraceAssembler,
-    ObservationSession,
     RLMReasoning,
     RunStarted,
     RuntimeEvent,
@@ -46,8 +43,13 @@ from fleet_rlm.rlm.events import (
     SkillActivated,
     SkillLoaded,
     Status,
-    ToolEventView,
     WarningEvent,
+)
+from fleet_rlm.rlm.events import (
+    AsyncToolBridge,
+    ExecutionTraceAssembler,
+    ObservationSession,
+    ToolEventView,
     bind_native_rlm_observer,
     has_reasoning,
     is_native_rlm,
@@ -55,7 +57,7 @@ from fleet_rlm.rlm.events import (
     reconcile_trajectory,
     recursive_summary,
 )
-from fleet_rlm.rlm.output_contract import FleetOutputContract, bind_output_contract
+from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import (
     AttachmentContextCapsule,
@@ -193,10 +195,10 @@ class PreparationNotice:
     message: str
 
 
-class RLMInterpreter(CodeInterpreter, Protocol):
-    """Narrow interpreter surface consumed by DSPy's RLM adapter."""
+class RLMInterpreter(Protocol):
+    """Construct one interpreter after Run-local configuration is known."""
 
-    def drain_context_accesses(self) -> tuple[str, ...]: ...
+    def __call__(self, **configuration: Any) -> CodeInterpreter: ...
 
 
 class PreparedCapabilities(Protocol):
@@ -287,7 +289,7 @@ class ExecutionRuntime:
 
 @dataclass(frozen=True, slots=True)
 class DelegationPolicy:
-    """Cross-sandbox recursive-RLM policy (empty when recursion is disabled)."""
+    """Depth-one cross-sandbox investigation policy for every root Run."""
 
     child_runtime_factory: ChildRuntimeFactory | None = None
     child_result_writer: Callable[[int, str, bytes], Awaitable[str]] | None = None
@@ -1398,87 +1400,84 @@ class RLMRunner:
             observations (ObservationSession): Session used to publish worker and capability events.
 
         Returns:
-            tuple: The execution specification, tool guards, worker handle, optional
+            tuple: The execution specification, tool guards, worker handle,
             recursive executor, and session runtime lease.
 
         Raises:
-            RLMConfigError: If recursive execution is enabled without a child runtime or
-            the session tool registry is unavailable.
+            RLMConfigError: If the required child runtime or
+            session tool registry is unavailable.
         """
         if self._closed:
             raise RunTerminalError("RLM runner is closed")
         spec = context.capabilities.spec
-        guards = RunToolGuards(budget=getattr(context.execution.models, "budget", None))
-        recursive_executor = None
-        if context.delegation.recursive_options.enabled:
-            if context.delegation.child_runtime_factory is None:
-                raise RLMConfigError("recursive child runtime is unavailable")
-            application_loop = asyncio.get_running_loop()
+        guards = RunToolGuards(budget=context.execution.models.budget)
+        if context.delegation.child_runtime_factory is None:
+            raise RLMConfigError("recursive child runtime is unavailable")
+        application_loop = asyncio.get_running_loop()
 
-            def check_selected_authority() -> None:
-                if context.identity.authority.revoked:
-                    raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
-                if time.monotonic() >= context.execution.deadline:
-                    raise TimeoutError("recursive child deadline exceeded")
+        def check_selected_authority() -> None:
+            if context.identity.authority.revoked:
+                raise ChildRuntimeAuthorizationError("Turn is no longer authorized")
+            if time.monotonic() >= context.execution.deadline:
+                raise TimeoutError("recursive child deadline exceeded")
 
-            def prepare_child_inputs(request: ChildRequest) -> Mapping[str, bytes]:
-                return materialize_child_inputs(
-                    request,
-                    tools={str(tool.name): tool for tool in spec.tools},
-                    check_authority=check_selected_authority,
-                    turn_deadline=context.execution.deadline,
-                    source_reader=spec.child_source_reader,
-                )
-
-            def write_child_result(call_index: int, relative_path: str, content: bytes) -> str:
-                check_selected_authority()
-                writer = context.delegation.child_result_writer
-                if writer is None:
-                    raise ChildRuntimeAuthorizationError("parent Run result persistence is unavailable")
-
-                async def persist() -> str:
-                    return await writer(call_index, relative_path, content)
-
-                coroutine = persist()
-                try:
-                    future = asyncio.run_coroutine_threadsafe(coroutine, application_loop)
-                except BaseException:
-                    coroutine.close()
-                    raise
-                remaining = context.execution.deadline - time.monotonic()
-                if remaining <= 0:
-                    raise ChildRuntimeCleanupError("parent Run result persistence deadline exceeded")
-                try:
-                    reference = future.result(timeout=remaining)
-                except TimeoutError:
-                    raise ChildRuntimeCleanupError("parent Run result persistence did not settle") from None
-                check_selected_authority()
-                return reference
-
-            recursive_executor = RecursiveRLMExecutor(
-                models=context.execution.models,
-                options=context.delegation.recursive_options,
-                child_runtime_factory=context.delegation.child_runtime_factory,
-                deadline=context.execution.deadline,
-                metrics=context.delegation.metrics,
-                observer=observations.publish,
-                is_authorized=lambda: not context.identity.authority.revoked,
-                input_materializer=prepare_child_inputs,
-                result_writer=write_child_result,
-                parent_run_id=str(context.identity.run_id),
-                loaded_skills=getattr(context.capabilities, "loaded_skills", lambda: ()),
+        def prepare_child_inputs(request: ChildRequest) -> Mapping[str, bytes]:
+            return materialize_child_inputs(
+                request,
+                tools={str(tool.name): tool for tool in spec.tools},
+                check_authority=check_selected_authority,
+                turn_deadline=context.execution.deadline,
+                source_reader=spec.child_source_reader,
             )
-            # Register the executor's owned scheduler before any remaining
-            # worker startup step can fail. Externally supplied schedulers are
-            # preserved by RecursiveRLMExecutor.wait_owned().
-            ownership.add_blocking_waiter(recursive_executor.wait_owned)
+
+        def write_child_result(call_index: int, relative_path: str, content: bytes) -> str:
+            check_selected_authority()
+            writer = context.delegation.child_result_writer
+            if writer is None:
+                raise ChildRuntimeAuthorizationError("parent Run result persistence is unavailable")
+
+            async def persist() -> str:
+                return await writer(call_index, relative_path, content)
+
+            coroutine = persist()
+            try:
+                future = asyncio.run_coroutine_threadsafe(coroutine, application_loop)
+            except BaseException:
+                coroutine.close()
+                raise
+            remaining = context.execution.deadline - time.monotonic()
+            if remaining <= 0:
+                raise ChildRuntimeCleanupError("parent Run result persistence deadline exceeded")
+            try:
+                reference = future.result(timeout=remaining)
+            except TimeoutError:
+                raise ChildRuntimeCleanupError("parent Run result persistence did not settle") from None
+            check_selected_authority()
+            return reference
+
+        recursive_executor = RecursiveRLMExecutor(
+            models=context.execution.models,
+            options=context.delegation.recursive_options,
+            child_runtime_factory=context.delegation.child_runtime_factory,
+            deadline=context.execution.deadline,
+            metrics=context.delegation.metrics,
+            observer=observations.publish,
+            is_authorized=lambda: not context.identity.authority.revoked,
+            input_materializer=prepare_child_inputs,
+            result_writer=write_child_result,
+            parent_run_id=str(context.identity.run_id),
+            loaded_skills=context.capabilities.loaded_skills,
+        )
+        # Register the executor's owned scheduler before any remaining
+        # worker startup step can fail. Externally supplied schedulers are
+        # preserved by RecursiveRLMExecutor.wait_owned().
+        ownership.add_blocking_waiter(recursive_executor.wait_owned)
         spec = replace(
             spec,
             signature=root_signature_for_recursion(
                 spec.signature,
-                recursion_enabled=context.delegation.recursive_options.enabled,
                 skill_instructions=spec.skill_instructions,
-                tool_names=frozenset(str(tool.name) for tool in spec.tools),
+                tool_names=frozenset(str(tool.name) for tool in spec.tools) | {"rlm_query", "rlm_query_batched"},
             ),
         )
 
@@ -1490,8 +1489,7 @@ class RLMRunner:
         # The broker acknowledges remote results after delivery. It completes
         # the durable integrity ledger there; observed tools remain responsible
         # for public lifecycle events and no-progress accounting.
-        fleet_dispatch = bool(getattr(context.execution.interpreter, "fleet_host_tool_dispatch_available", False))
-        broker_acknowledges_tools = callable(getattr(context.execution.interpreter, "bind_tool_outcomes", None))
+        broker_acknowledges_tools = bool(getattr(context.execution.interpreter, "broker_acknowledges_tools", False))
         observed_tools = tuple(
             observe_tool(
                 tool,
@@ -1500,17 +1498,11 @@ class RLMRunner:
                 after_result=(relay_capability_details if str(tool.name) == "load_skill" else None),
                 is_authorized=lambda: not context.identity.authority.revoked,
                 guards=guards,
-                async_bridge=getattr(context.execution, "async_bridge", None),
+                async_bridge=context.execution.async_bridge,
             )
             for tool in spec.tools
         )
-        if recursive_executor is None:
-            recursive_tools = ()
-        else:
-            recursive_tools = (
-                recursive_executor.tool,
-                recursive_executor.batched_tool,
-            )
+        recursive_tools = (recursive_executor.tool, recursive_executor.batched_tool)
         all_tools = (*observed_tools, *recursive_tools)
         # A Run receives a fresh DSPy program and direct tool bindings. The broker
         # root remains provider-owned, while no Python program, callbacks, or
@@ -1537,53 +1529,37 @@ class RLMRunner:
             # them into the execution namespace. DSPy's native semantic tools
             # are injected separately by dspy.RLM and are deliberately not
             # represented by this Fleet-only capability.
-            fresh_interpreter = getattr(state_context.execution.interpreter, "new_invocation", None)
-            if not callable(fresh_interpreter) and self._program_builder is build_native_rlm:
-                # Serving path: a real native RLM requires the
-                # invocation-scoped factory. Tests injecting a fake program
-                # builder retain the explicit in-process boundary below.
-                raise RLMConfigError("native RLM execution requires an invocation-scoped interpreter factory")
-            supports_invocation_bindings = bool(
-                getattr(state_context.execution.interpreter, "invocation_scoped_bindings", False)
-            )
-            # Run-local record of factory-created invocations; their context
-            # accesses are drained after settlement, never via the template.
+            fresh_interpreter = state_context.execution.interpreter
+            if not callable(fresh_interpreter):
+                raise RLMConfigError("RLM execution requires an invocation-scoped interpreter factory")
             created_invocations: list[Any] = []
-            if callable(fresh_interpreter) and supports_invocation_bindings:
-                # The retained Daytona adapter is a resource template only.
-                # Capture every Run-local binding in DSPy's zero-argument
-                # invocation factory rather than rebinding that template.
-                output_contract = FleetOutputContract.from_signature(
-                    spec.signature,
-                    max_output_chars=state_context.execution.options.max_final_output_chars,
+            # The retained Daytona adapter is a resource template only.
+            # Capture every Run-local binding in DSPy's zero-argument
+            # invocation factory rather than rebinding that template.
+            output_contract = FleetOutputContract.from_signature(
+                spec.signature,
+                max_output_chars=state_context.execution.options.max_final_output_chars,
+            )
+
+            def invocation_factory() -> Any:
+                invocation = fresh_interpreter(
+                    observer=observations.publish,
+                    observation_max_chars=state_context.execution.options.max_output_chars,
+                    turn_budget=state_context.execution.models.budget,
+                    turn_request=state_context.session.request,
+                    async_bridge=state_context.execution.async_bridge,
+                    tool_settled=(
+                        lambda name, arguments, result: (
+                            guards.integrity.completed(name, arguments, result) if broker_acknowledges_tools else None
+                        )
+                    ),
+                    tool_failed=guards.integrity.failed if broker_acknowledges_tools else None,
+                    context_capsule=state_context.session.attachment_context,
+                    output_contract=output_contract,
+                    deadline_monotonic=state_context.execution.deadline,
                 )
-
-                def invocation_factory() -> Any:
-                    invocation = fresh_interpreter(
-                        observer=observations.publish,
-                        observation_max_chars=state_context.execution.options.max_output_chars,
-                        turn_budget=getattr(state_context.execution.models, "budget", None),
-                        turn_request=state_context.session.request,
-                        async_bridge=getattr(state_context.execution, "async_bridge", None),
-                        tool_settled=(
-                            lambda name, arguments, result: (
-                                guards.integrity.completed(name, arguments, result)
-                                if broker_acknowledges_tools
-                                else None
-                            )
-                        ),
-                        tool_failed=guards.integrity.failed if broker_acknowledges_tools else None,
-                        context_capsule=state_context.session.attachment_context,
-                        output_contract=output_contract,
-                        deadline_monotonic=state_context.execution.deadline,
-                    )
-                    created_invocations.append(invocation)
-                    return invocation
-            else:
-                interpreter = state_context.execution.interpreter
-
-                def invocation_factory(interpreter: Any = interpreter) -> Any:
-                    return interpreter
+                created_invocations.append(invocation)
+                return invocation
 
             invocation_factory.__dict__["execution_instructions"] = (
                 f"{DAYTONA_EXECUTION_INSTRUCTIONS} "
@@ -1594,42 +1570,12 @@ class RLMRunner:
             rlm = self._program_builder(
                 signature=spec.signature,
                 options=state_context.execution.options,
-                tools=(all_tools or None) if fleet_dispatch else None,
+                tools=all_tools,
                 sub_lm=state_context.execution.models.sub_lm,
-                host_tool_dispatch=fleet_dispatch,
+                host_tool_dispatch=True,
                 interpreter_factory=invocation_factory,
                 verbose=self._verbose,
             )
-            if not supports_invocation_bindings:
-                bind_budget = getattr(state_context.execution.interpreter, "bind_turn_budget", None)
-                if callable(bind_budget):
-                    bind_budget(getattr(state_context.execution.models, "budget", None))
-                bind_request = getattr(state_context.execution.interpreter, "bind_turn_request", None)
-                if callable(bind_request):
-                    bind_request(state_context.session.request)
-                bind_async_bridge = getattr(state_context.execution.interpreter, "bind_async_bridge", None)
-                if callable(bind_async_bridge):
-                    bind_async_bridge(getattr(state_context.execution, "async_bridge", None))
-                bind_tool_outcomes = getattr(state_context.execution.interpreter, "bind_tool_outcomes", None)
-                if broker_acknowledges_tools and callable(bind_tool_outcomes):
-                    bind_tool_outcomes(
-                        tool_settled=lambda name, arguments, result: guards.integrity.completed(
-                            name, arguments, result
-                        ),
-                        tool_failed=guards.integrity.failed,
-                    )
-                self._bind_observer(
-                    state_context.execution.interpreter,
-                    observations.publish,
-                    state_context.execution.options.max_output_chars,
-                    deadline=state_context.execution.deadline,
-                )
-                self._bind_context_capsule(state_context)
-                bind_output_contract(
-                    state_context.execution.interpreter,
-                    getattr(rlm, "signature", None),
-                    max_output_chars=state_context.execution.options.max_final_output_chars,
-                )
             self._bind_observer(
                 rlm,
                 observations.publish,
@@ -1712,15 +1658,6 @@ class RLMRunner:
                 yield observations.record(item)
         for item in self._drain_capability_details(context):
             yield observations.record(item)
-
-    @staticmethod
-    def _bind_context_capsule(context: RLMExecutionContext) -> None:
-        """Bind the prepared Volume context to the interpreter before the RLM starts."""
-        if context.session.attachment_context is None:
-            return
-        bind = getattr(context.execution.interpreter, "bind_context_capsule", None)
-        if callable(bind):
-            bind(context.session.attachment_context)
 
     @staticmethod
     def _bind_observer(

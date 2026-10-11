@@ -47,8 +47,7 @@ class BindingGenerationAuthority:
     Native callbacks are synchronous, so they cannot await a database lookup.
     Session-manager reads and writes observe the durable row here; a
     replacement therefore revokes every older lease before its next callback.
-    Unknown identities are rejected when this authority is used, while legacy
-    test doubles that do not install an authority retain their existing seam.
+    Every runtime installs this authority; unknown identities are rejected.
     """
 
     def __init__(self) -> None:

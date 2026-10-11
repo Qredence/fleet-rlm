@@ -19,9 +19,11 @@ from fleet_rlm.daytona.interpreter import (
     InProcessInterpreterBackend,
     OutputCallback,
 )
+from fleet_rlm.rlm.execution import DelegationPolicy
 from fleet_rlm.rlm.program import (
     RLMOptions,
 )
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 
 
@@ -56,15 +58,15 @@ class _OneAction:
 
 @pytest.mark.asyncio
 async def test_explicit_interpreter_factory_owns_lifecycle_and_prompt_metadata() -> None:
-    from tests.support.native_rlm import in_process_interpreter_factory
+    from tests.support.native_rlm import local_interpreter_factory
 
     rlm = _rlm()
     provider = rlm._interpreter_factory
 
     assert inspect.signature(provider).parameters == {}
-    assert provider is in_process_interpreter_factory
+    assert provider is local_interpreter_factory
     assert provider.execution_instructions == DAYTONA_EXECUTION_INSTRUCTIONS
-    assert isinstance(provider(), DaytonaCodeInterpreter)
+    assert isinstance(provider(), dspy.LocalInterpreter)
 
 
 def test_daytona_action_prompt_contains_each_runtime_fact_once() -> None:
@@ -457,13 +459,14 @@ async def test_runner_rejects_native_build_without_invocation_factory() -> None:
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=_asyncio.get_running_loop().time() + 10,
-            interpreter=LegacyInterpreter(),
+            interpreter=configured_invocation_factory(LegacyInterpreter()),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner().stream(context)
     _ = [event async for event in stream]
@@ -535,7 +538,9 @@ async def test_root_records_attachment_accesses_from_the_created_invocation(late
     async def not_cancelled() -> bool:
         return False
 
-    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    from tests.rlm.fakes import invocation_factory
+
+    template = invocation_factory
     capabilities = Capabilities()
     context = RLMExecutionContext(
         identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
@@ -546,20 +551,20 @@ async def test_root_records_attachment_accesses_from_the_created_invocation(late
             attachment_context=capsule,
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=dspy.utils.DummyLM([]), sub_lm=dspy.utils.DummyLM([])),
+            models=SimpleNamespace(budget=None, root_lm=dspy.utils.DummyLM([]), sub_lm=dspy.utils.DummyLM([])),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=template,
+            interpreter=configured_invocation_factory(template),
             cancellation_requested=not_cancelled,
         ),
         capabilities=capabilities,
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
     _ = [event async for event in RLMRunner(program_builder=build_program).stream(context)]
 
     assert len(created) == 2 and template not in created
     assert capabilities.recorded == [(str(attachment_id), str(attachment_id))]
-    assert template.drain_context_accesses() == ()
     assert all(invocation.drain_context_accesses() == () for invocation in created)
 
 

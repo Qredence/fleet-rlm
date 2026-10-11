@@ -19,13 +19,8 @@ from fleet_rlm.paths import VolumePaths
 from fleet_rlm.persistence.database import DatabaseConnectionError
 from fleet_rlm.result_snapshot import ResultSnapshotSink
 from fleet_rlm.rlm.budget import BudgetLimits, TurnBudget
-from fleet_rlm.rlm.events import (
-    AsyncToolBridge,
-    AttachmentRead,
-    SkillActivated,
-    SkillLoaded,
-    ToolEventView,
-)
+from fleet_rlm.rlm.event_types import AttachmentRead, SkillActivated, SkillLoaded
+from fleet_rlm.rlm.events import AsyncToolBridge, ToolEventView
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -204,6 +199,8 @@ def _active_task_summary(capabilities: PreparedCapabilities) -> str:
 
 
 class RunPreparation(Protocol):
+    async def aclose(self) -> bool: ...
+
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn: ...
 
 
@@ -274,6 +271,10 @@ class TurnPreparationPlan:
     task_service: SessionTaskService | None = None
     recursive_options: RecursiveRLMOptions = field(default_factory=RecursiveRLMOptions)
     budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
+
+    async def aclose(self) -> bool:
+        """Individual prepared Turns own resources; this immutable plan owns none."""
+        return True
 
     async def prepare(self, run: ClaimedRun, *, deadline: float) -> PreparedTurn:
         return await prepare_turn(self, run, deadline=deadline)

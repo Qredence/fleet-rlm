@@ -19,8 +19,8 @@ full slash-command list; read it for those and do not restate them here.
 - Run `uv run python scripts/database.py upgrade` before the first launch. The supervisor
   verifies Alembic head and never migrates, so a stale database fails the launch.
 - Inspect the single `config/fleet.toml` policy before launching. The shipped
-  configuration enables bounded children; edit `/settings` or TOML and restart
-  to change `rlm.recursion_enabled`.
+  configuration always supplies bounded children; edit `/settings` or TOML and restart
+  to change child limits.
 - A Turn consumes provider and Daytona quota. Confirm the run is authorized
   before starting.
 
@@ -97,7 +97,7 @@ The final answer prints on its own line below the transcript.
 scrollback when a long Turn pushed the answer off the top.
 
 A Turn can finish with no semantic calls or children when they are unnecessary.
-Child availability is controlled by `rlm.recursion_enabled` in the configuration;
+Every Root invocation receives bounded child tools;
 usage counts alone do not prove a child ran.
 
 ## Inspect the traces

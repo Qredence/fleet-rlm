@@ -21,7 +21,7 @@ from fleet_rlm.api.routes.turns import router as turns_router
 from fleet_rlm.api.schemas import CreateTurnRequest
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.paths import volume_paths_from_settings
-from fleet_rlm.rlm.events import EventRecorder, RuntimeEvent
+from fleet_rlm.rlm.event_types import EventRecorder, RuntimeEvent
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
@@ -34,6 +34,7 @@ from fleet_rlm.skills.models import SkillSelectionRef
 from fleet_rlm.turns import OpenTurnCommand
 from fleet_rlm.workspace.attachments import AttachmentRef, PreparedAttachments, StagedAttachment
 from fleet_rlm.workspace.storage import DaytonaSandboxWorkspaceStorage, WorkspaceMemoryStorage
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 
 
 class _EmptyOpenedTurn:
@@ -131,11 +132,11 @@ def _live_capability_environment(settings: Settings, session_id: UUID):
     from fleet_rlm.paths import volume_paths_from_settings
     from fleet_rlm.turns.preparation import RunEnvironment
     from fleet_rlm.workspace.host_io import DaytonaRunStorage
-    from fleet_rlm.workspace.memory import build_workspace_memory_store
+    from fleet_rlm.workspace.memory import WorkspaceMemory
     from tests.support.workspace_storage import daytona_host_io_for_test_sandbox
 
     paths = volume_paths_from_settings(settings)
-    sandbox = SimpleNamespace(fs=_DaytonaFilesystem())
+    sandbox = SimpleNamespace(code_interpreter=SimpleNamespace(), process=SimpleNamespace(), fs=_DaytonaFilesystem())
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
     host_io = daytona_host_io_for_test_sandbox(
@@ -159,9 +160,8 @@ def _live_capability_environment(settings: Settings, session_id: UUID):
         max_file_bytes=settings.max_upload_bytes,
         allow_volume_root=True,
     )
-    memory_store = build_workspace_memory_store(
+    memory_store = WorkspaceMemory(
         WorkspaceMemoryStorage(memory_session),
-        max_upload_bytes=settings.max_upload_bytes,
     )
     session_workspace = DaytonaSandboxWorkspaceStorage(
         sink.sandbox,
@@ -180,7 +180,7 @@ def _live_capability_environment(settings: Settings, session_id: UUID):
         return None
 
     return RunEnvironment(
-        interpreter=None,
+        interpreter=configured_invocation_factory(None),
         attachment_sink=sink,
         artifact_sink=sink,
         release=release,
@@ -188,6 +188,7 @@ def _live_capability_environment(settings: Settings, session_id: UUID):
         volume_fs=sink.volume_fs,
         session_workspace=session_workspace,
         project_workspace=project_workspace,
+        child_runtime_factory=ChildLeaseRecorder().factory,
     )
 
 

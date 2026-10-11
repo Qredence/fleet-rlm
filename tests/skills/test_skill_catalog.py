@@ -131,10 +131,9 @@ def test_runner_signature_recomposition_uses_actual_policy_without_duplicate_bod
 
     recomposed = root_signature_for_recursion(
         prepared,
-        recursion_enabled=False,
         skill_instructions=resolved.instructions,
     )
 
-    assert "rlm_query(task=task, inputs=inputs" not in recomposed.instructions
+    assert "rlm_query(task=task, inputs=inputs" in recomposed.instructions
     assert recomposed.instructions.count("Compute only the requested metrics") == 1
     assert recomposed.output_fields.keys() == DataAnalysisSignature.output_fields.keys()

@@ -1,18 +1,11 @@
 /**
- * Interactive presenter for slash commands and the narrow compatibility
- * facade for the presenter modules: overlay scaffolding lives in
+ * Interactive presenter for slash commands. Overlay scaffolding lives in
  * `presenter/overlay.ts`, shared list mechanics in `presenter/list-overlay.ts`,
  * settings editors in `presenter/settings.ts`, and the list pickers in
  * `presenter/{skill-selector,session-browser}.ts`.
  */
 
-import {
-  type Editor,
-  type SelectItem,
-  type SettingItem,
-  SettingsList,
-  type TUI,
-} from "@earendil-works/pi-tui";
+import { type Editor, type SelectItem, SettingsList, type TUI } from "@earendil-works/pi-tui";
 
 import type {
   FleetApiClient,
@@ -25,7 +18,6 @@ import type {
   CommandSpec,
   SettingsBatchUpdate,
   SettingsSaveCallback,
-  SettingsUpdate,
 } from "./commands/registry.js";
 import {
   ModalSurface,
@@ -33,27 +25,25 @@ import {
   SelectOverlay,
   TitledComponent,
 } from "./presenter/overlay.js";
+import { SessionBrowserOverlay } from "./presenter/session-browser.js";
 import {
-  applyFieldValue,
   displayValue,
   fieldItem,
   parseFieldValue,
   type SettingsField,
 } from "./presenter/settings.js";
-import { SessionBrowserOverlay } from "./presenter/session-browser.js";
 import { SkillSelector } from "./presenter/skill-selector.js";
-import { isBusy, type ConversationStore, type PendingSkillSelection } from "./store.js";
+import { type ConversationStore, isBusy, type PendingSkillSelection } from "./store.js";
 import { settingsListTheme } from "./theme.js";
 
-export { SelectOverlay } from "./presenter/overlay.js";
-export { ModalSurface } from "./presenter/overlay.js";
+export { ModalSurface, SelectOverlay } from "./presenter/overlay.js";
+export { SessionBrowserOverlay } from "./presenter/session-browser.js";
 export {
   fieldItem,
   MultiChoiceEditor,
   parseFieldValue,
   TextSettingEditor,
 } from "./presenter/settings.js";
-export { SessionBrowserOverlay } from "./presenter/session-browser.js";
 export { SkillSelector } from "./presenter/skill-selector.js";
 
 export class PiCommandPresenter implements CommandPresenter {
@@ -142,15 +132,8 @@ export class PiCommandPresenter implements CommandPresenter {
     });
   }
 
-  async chooseSetting(
-    settings: FleetSettingsPolicy,
-    save?: SettingsSaveCallback,
-  ): Promise<SettingsUpdate | null> {
-    if (save) {
-      await this.editSettingsInteractively(settings, save);
-      return null;
-    }
-    return this.chooseSettingOnce(settings);
+  async chooseSetting(settings: FleetSettingsPolicy, save: SettingsSaveCallback): Promise<void> {
+    await this.editSettingsInteractively(settings, save);
   }
 
   async chooseTheme(themes: string[], current: string | undefined): Promise<string | null> {
@@ -194,49 +177,6 @@ export class PiCommandPresenter implements CommandPresenter {
   }
 
   /** Resolve one field edit when no save callback is supplied. */
-  private chooseSettingOnce(settings: FleetSettingsPolicy): Promise<SettingsUpdate | null> {
-    return new Promise((resolve) => {
-      const finish = (update: SettingsUpdate | null) => {
-        handle.hide();
-        this.restoreFocus();
-        resolve(update);
-      };
-      const groupItems = (): SettingItem[] =>
-        settingGroups(settings).map((group) => ({
-          id: group.name,
-          label: group.name,
-          description: `${group.fields.length} setting${group.fields.length === 1 ? "" : "s"}`,
-          currentValue: "",
-          submenu: (_current, done) =>
-            new SettingsList(
-              group.fields.map((field) => fieldItem(field)),
-              10,
-              settingsListTheme,
-              (id, value) => {
-                const field = settings.fields.find((candidate) => candidate.path === id);
-                if (field) applyFieldValue(settings, field, value, finish);
-              },
-              () => done(undefined),
-              { enableSearch: true },
-            ),
-        }));
-      const handle = this.showModal(
-        new TitledComponent(
-          new SettingsList(
-            groupItems(),
-            10,
-            settingsListTheme,
-            () => undefined,
-            () => finish(null),
-            { enableSearch: true },
-          ),
-          "Fleet settings",
-          "Saved changes apply after a Fleet restart",
-        ),
-      );
-    });
-  }
-
   /** Settings edits stay local until the operator explicitly applies one batch. */
   private editSettingsInteractively(
     settings: FleetSettingsPolicy,

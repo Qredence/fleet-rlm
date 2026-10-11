@@ -46,16 +46,9 @@ from fleet_rlm.observability.tracing import (
 )
 from fleet_rlm.rlm.adapter import FleetJSONAdapter
 from fleet_rlm.rlm.budget import BudgetDimension, current_host_action_deadline
-from fleet_rlm.rlm.events import (
-    ChildProgress,
-    Status,
-    ToolEventView,
-    ToolObserver,
-    _RLMTraceCallback,
-    is_native_rlm,
-    observe_tool,
-)
-from fleet_rlm.rlm.output_contract import bind_output_contract
+from fleet_rlm.rlm.event_types import ChildProgress, Status
+from fleet_rlm.rlm.events import ToolEventView, ToolObserver, _RLMTraceCallback, is_native_rlm, observe_tool
+from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.program import (
     RLMModelBundle,
     RLMOptions,
@@ -102,7 +95,7 @@ class ChildRuntimeLease(Protocol):
     """A dedicated child interpreter and its strictly owned cleanup operation."""
 
     @property
-    def interpreter(self) -> CodeInterpreter: ...
+    def interpreter(self) -> Callable[..., CodeInterpreter]: ...
 
     sandbox_id: str
     volume_id: str
@@ -707,7 +700,6 @@ class ChildAsyncScheduler:
 class RecursiveRLMOptions:
     """Invocation limits for the custom recursive RLM Tool."""
 
-    enabled: bool = False
     max_calls: int = 4
     max_prompt_chars: int = 50_000
     child_max_iters: int = 8
@@ -734,7 +726,6 @@ class RecursiveRLMOptions:
 
 def recursive_rlm_options(settings: Settings) -> RecursiveRLMOptions:
     return RecursiveRLMOptions(
-        enabled=settings.rlm_recursion_enabled,
         max_calls=settings.rlm_recursion_max_calls,
         max_prompt_chars=settings.rlm_recursion_max_prompt_chars,
         child_max_iters=settings.rlm_recursion_child_max_iters,
@@ -1576,31 +1567,17 @@ class RecursiveRLMExecutor:
         child_models = self._models.fork_for_child()
 
         def invocation_factory() -> CodeInterpreter:
-            new_invocation = getattr(lease.interpreter, "new_invocation", None)
-            if not callable(new_invocation):
-                raise RLMConfigError("recursive child requires an invocation-scoped interpreter factory")
-            accepted = inspect.signature(new_invocation).parameters
-            invocation_kwargs: dict[str, Any] = {"turn_budget": child_models.budget, "turn_request": None}
-            # Every child action must end by the call deadline, and the next
-            # action is refused once it passes or the batch is cancelled.
-            if "deadline_monotonic" in accepted:
-                invocation_kwargs["deadline_monotonic"] = bound.at
-            if "admission" in accepted:
-                invocation_kwargs["admission"] = functools.partial(self._ensure_call_authorized, batch_cancelled, bound)
-            if "root_finalization" in accepted:
-                invocation_kwargs["root_finalization"] = False
-            interpreter = new_invocation(**invocation_kwargs)
-            bind_output_contract(
-                interpreter,
-                RecursiveSubtaskSignature,
-                max_output_chars=self._options.child_max_output_chars,
+            return lease.interpreter(
+                turn_budget=child_models.budget,
+                turn_request=None,
+                deadline_monotonic=bound.at,
+                admission=functools.partial(self._ensure_call_authorized, batch_cancelled, bound),
+                root_finalization=False,
+                output_contract=FleetOutputContract.from_signature(
+                    RecursiveSubtaskSignature,
+                    max_output_chars=self._options.child_max_output_chars,
+                ),
             )
-            if self._parent_run_id is not None:
-                bind_scratch = getattr(interpreter, "bind_run_scratch", None)
-                if not callable(bind_scratch):
-                    raise RLMConfigError("recursive child cannot bind its private scratch")
-                bind_scratch(self._parent_run_id, call_index=call.call_index)
-            return interpreter
 
         invocation_factory.__dict__["execution_instructions"] = (
             f"{DAYTONA_EXECUTION_INSTRUCTIONS} "

@@ -30,12 +30,9 @@ from fleet_rlm.config.loader import load_runtime_settings
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.errors import map_provider_error
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-from fleet_rlm.daytona.runtime import (
-    DEFAULT_IDLE_STOP_SECONDS,
-    DaytonaRuntime,
-    LeaseRequest,
-    sandbox_spec_from_settings,
-)
+from fleet_rlm.daytona.leases import LeaseRequest
+from fleet_rlm.daytona.runtime import DaytonaRuntime
+from fleet_rlm.daytona.specs import DEFAULT_IDLE_STOP_SECONDS, sandbox_spec_from_settings
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 from fleet_rlm.sessions.bindings import SandboxBinding
@@ -235,7 +232,7 @@ async def test_staged_attachment_is_readable_and_artifact_survives_replacement(t
             ),
             mount_root=sink.scratch_root,
         )
-        invocation = lease.interpreter.new_invocation(context_capsule=capsule)
+        invocation = lease.interpreter(context_capsule=capsule)
         try:
             await asyncio.to_thread(
                 invocation.execute,

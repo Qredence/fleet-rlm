@@ -8,8 +8,6 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-
 
 def test_dspy_rlm_constructor_uses_max_iters_and_factory_owned_interpreters() -> None:
     """Lock the DSPy 3.4 constructor and invocation contract at the dependency seam."""
@@ -136,7 +134,7 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
             pi_text = format(constant / series, "f")
         digit = pi_text[digit_index + 1]
         window = pi_text[digit_index - 9:digit_index + 12]
-        _out = window
+        print(window)
         """
     )
     adapter = dspy.JSONAdapter(use_native_function_calling=True)
@@ -149,7 +147,7 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
             {
                 "reasoning": "Verify the computed window against the known reference prefix.",
                 "code": (
-                    'assert window == "049449650117321313895"\nverified = digit == "1"\n_out = f"{window}:{verified}"'
+                    'assert window == "049449650117321313895"\nverified = digit == "1"\nprint(f"{window}:{verified}")'
                 ),
             },
             {
@@ -159,7 +157,7 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
         ],
         adapter=adapter,
     )
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter = dspy.LocalInterpreter()
     try:
         rlm = dspy.RLM("request -> answer: str", max_iters=3)
 
@@ -178,7 +176,7 @@ async def test_native_json_rlm_computes_and_submits_verified_pi_digit_without_re
 
 
 @pytest.mark.asyncio
-async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action() -> None:
+async def test_native_rlm_continues_after_a_repeated_interpreter_action() -> None:
     class Actions:
         def __init__(self) -> None:
             self.calls = 0
@@ -186,11 +184,11 @@ async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action(
         async def acall(self, **_kwargs: Any) -> dspy.Prediction:
             self.calls += 1
             if self.calls < 3:
-                return dspy.Prediction(reasoning="inspect", code="_out = 'same'")
+                return dspy.Prediction(reasoning="inspect", code="print('same')")
             return dspy.Prediction(reasoning="submit repaired result", code="SUBMIT(answer='recovered')")
 
     actions = Actions()
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    interpreter = dspy.LocalInterpreter()
     rlm = dspy.RLM("request -> answer: str", max_iters=3)
     rlm.generate_action = actions
 
@@ -201,14 +199,12 @@ async def test_native_rlm_allows_one_repair_after_a_repeated_interpreter_action(
 
     assert prediction.answer == "recovered"
     assert actions.calls == 3
-    assert "Repeated interpreter action produced no progress" in prediction.trajectory[1]["output"]
+    assert prediction.trajectory[1]["output"] == "same"
 
 
 @pytest.mark.asyncio
 async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_bound() -> None:
     from dspy.primitives.repl_types import REPLHistory
-
-    from tests.support.native_rlm import in_process_interpreter_factory
 
     class Actions:
         def __init__(self) -> None:
@@ -222,7 +218,7 @@ async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_b
             if self.calls in (1, 3):
                 assert len(history.entries) == 0
                 self.initial_histories.append(history)
-                return dspy.Prediction(reasoning="create long output", code="_out = 'x' * 64")
+                return dspy.Prediction(reasoning="create long output", code="print('x' * 64)")
             assert history.max_output_chars == 12
             assert "x" * 64 not in history.format()
             return dspy.Prediction(reasoning="submit typed output", code="SUBMIT(answer='ok')")
@@ -231,8 +227,8 @@ async def test_pinned_async_rlm_creates_fresh_native_history_and_honors_output_b
     rlm = dspy.RLM("request -> answer: str", max_iters=2, max_output_chars=12)
     rlm.generate_action = actions
 
-    first = await rlm.acall(interpreter_factory=in_process_interpreter_factory, request="first")
-    second = await rlm.acall(interpreter_factory=in_process_interpreter_factory, request="second")
+    first = await rlm.acall(interpreter_factory=dspy.LocalInterpreter, request="first")
+    second = await rlm.acall(interpreter_factory=dspy.LocalInterpreter, request="second")
 
     assert first.answer == second.answer == "ok"
     assert first.final_reasoning == second.final_reasoning == "submit typed output"

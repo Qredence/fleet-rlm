@@ -308,7 +308,7 @@ def test_supervisor_runs_pi_tui_against_ready_backend_and_terminates_backend_gro
         (4312, supervisor.signal.SIGTERM),
         (4312, supervisor.signal.SIGKILL),
     ]
-    assert processes[0].wait_timeouts == [5.0, None]
+    assert processes[0].wait_timeouts == [120.0, None]
 
 
 def test_supervisor_reports_backend_exit_after_readiness_and_stops_tui_group(
@@ -538,4 +538,4 @@ def test_supervisor_uses_longer_daytona_readiness_timeout(
         )
 
     assert str(tmp_path / ".fleet_rlm" / "logs") in str(error.value)
-    assert backend.wait_timeouts == [5.0]
+    assert backend.wait_timeouts == [120.0]

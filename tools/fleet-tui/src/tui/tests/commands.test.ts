@@ -1158,12 +1158,8 @@ describe("interactive success notifications", () => {
   function presenterEditingOnce(update: SettingsUpdate) {
     return {
       chooseSetting: vi.fn(
-        async (_settings: unknown, save?: (next: SettingsUpdate) => Promise<unknown>) => {
-          if (save) {
-            await save(update);
-            return null;
-          }
-          return update;
+        async (_settings: unknown, save: (next: SettingsUpdate) => Promise<unknown>) => {
+          await save(update);
         },
       ),
     } as never;
@@ -1229,14 +1225,12 @@ describe("interactive success notifications", () => {
     let savedPolicy: unknown;
     const presenter = {
       chooseSetting: vi.fn(
-        async (_settings: unknown, save?: (next: SettingsUpdate) => Promise<unknown>) => {
-          if (!save) return null;
+        async (_settings: unknown, save: (next: SettingsUpdate) => Promise<unknown>) => {
           savedPolicy = await save({
             revision: policy.revision,
             path: "rlm.max_iters",
             value: 8,
           });
-          return null;
         },
       ),
     } as never;
@@ -1266,28 +1260,6 @@ describe("interactive success notifications", () => {
     if (settings) await settings.handler([], { ...ctx, presenter: presenterEditingOnce(update) });
 
     expect(systemTexts(ctx).join("\n")).toContain("Failed to save settings");
-  });
-
-  it("/settings keeps the compatibility path for presenters that ignore the save callback", async () => {
-    const { ctx } = makeContext();
-    const policy = policyFixture();
-    ctx.client.getSettings = vi.fn().mockResolvedValue(policy);
-    ctx.client.applySettings = vi.fn().mockResolvedValue(policy);
-    const update: SettingsUpdate = {
-      revision: policy.revision,
-      path: "rlm.max_iters",
-      value: 8,
-    };
-    const notify = vi.fn();
-    const presenter = { chooseSetting: vi.fn().mockResolvedValue(update) } as never;
-    const settings = listCommands().find((c) => c.name === "settings");
-    if (settings) await settings.handler([], { ...ctx, presenter, notify });
-
-    expect(ctx.client.applySettings).toHaveBeenCalledWith(update.revision, [
-      { path: update.path, value: update.value },
-    ]);
-    expect(notify).toHaveBeenCalledWith(expect.stringContaining("Saved"));
-    expect(systemTexts(ctx)).toHaveLength(0);
   });
 
   it("/theme flashes after applying a picked theme and keeps failures in the transcript", async () => {

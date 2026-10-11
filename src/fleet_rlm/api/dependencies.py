@@ -12,7 +12,13 @@ from fastapi import Depends, HTTPException, Request
 
 from fleet_rlm.api.errors import http_error
 from fleet_rlm.api.local_scope import LocalScope, get_local_scope
-from fleet_rlm.app_services import RouteServices, RuntimeInventory, get_route_services, get_runtime_inventory
+from fleet_rlm.app_services import (
+    RouteServices,
+    RuntimeInventory,
+    get_application_composition,
+    get_route_services,
+    get_runtime_inventory,
+)
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.observability.feedback import TraceFeedbackService
@@ -122,7 +128,7 @@ def get_settings(request: Request) -> Settings:
 
 def get_trace_feedback_service(request: Request) -> TraceFeedbackService:
     """Return the application-owned MLflow feedback service."""
-    service = getattr(request.app.state, "trace_feedback_service", None)
+    service = get_application_composition(request.app).trace_feedback_service
     if not isinstance(service, TraceFeedbackService):
         raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable")
     return service
@@ -130,14 +136,14 @@ def get_trace_feedback_service(request: Request) -> TraceFeedbackService:
 
 def get_mlflow_runtime(request: Request) -> MLflowRuntime:
     """Return the application-owned MLflow lifecycle for synchronous SDK work."""
-    runtime = getattr(request.app.state, "mlflow_runtime", None)
+    runtime = get_application_composition(request.app).mlflow_runtime
     if not isinstance(runtime, MLflowRuntime):
         raise http_error(503, "trace_feedback_unavailable", "Trace feedback is unavailable")
     return runtime
 
 
 def get_skill_catalog(request: Request) -> SkillCatalog:
-    catalog = getattr(request.app.state, "skill_catalog", None)
+    catalog = get_application_composition(request.app).skill_catalog
     if not isinstance(catalog, SkillCatalog):
         # The bundled catalog is installed by create_app() independently of
         # lifespan composition; its absence still surfaces as the closed 503.

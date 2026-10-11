@@ -93,12 +93,12 @@ def test_policy_accepts_zero_and_false(tmp_path: Path) -> None:
     after = service.apply(
         updates=(
             PolicyMutation(path="llm.root.num_retries", value=0),
-            PolicyMutation(path="rlm.recursion_enabled", value=False),
+            PolicyMutation(path="mlflow.tracing_enabled", value=False),
         ),
         revision=service.read().revision,
     )
     assert _field(after, "llm.root.num_retries")["value"] == 0
-    assert _field(after, "rlm.recursion_enabled")["value"] is False
+    assert _field(after, "mlflow.tracing_enabled")["value"] is False
 
 
 def test_policy_can_disable_live_execution(tmp_path: Path) -> None:

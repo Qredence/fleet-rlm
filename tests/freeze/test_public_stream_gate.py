@@ -13,10 +13,9 @@ import pytest
 
 from fleet_rlm.api.sse import FLEET_UI_CHUNK_TYPES, AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     RUNTIME_DETAIL_TYPES,
     EventRecorder,
-    ObservationSession,
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -34,6 +33,7 @@ from fleet_rlm.rlm.events import (
     Usage,
     WarningEvent,
 )
+from fleet_rlm.rlm.events import ObservationSession
 from fleet_rlm.sessions.assistant_parts import AssistantPartModelUnion
 from tests.support.testing_app import create_testing_app
 

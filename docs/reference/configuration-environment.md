@@ -10,7 +10,7 @@ Generated from `config/fleet.toml`, the source of truth for the single runtime c
 | Root model | `uscentral.ai_gateway.deepseek-v4-1-flash-service` |
 | Sub model | `uscentral.ai_gateway.deepseek-v4-1-flash-service` |
 | Root / Sub max tokens | 16384 / 16384 |
-| Fleet child recursion | enabled |
+| Fleet child recursion | Always available; bounded to depth one |
 | MLflow | http://127.0.0.1:5001 |
 | Provider environment names | `FLEET_DAYTONA_API_KEY`, `FLEET_DAYTONA_ORG_ID`, `DATABRICKS_TOKEN`, `FLEET_LLM_BASE_URL` |
 | Database environment name | `FLEET_DATABASE_URL` |
@@ -19,4 +19,4 @@ Generated from `config/fleet.toml`, the source of truth for the single runtime c
 
 Startup requires a configured database URL at Alembic head. Local SQLite and PostgreSQL are supported; the explicit Lakebase preflight additionally enforces its TLS and role requirements.
 
-Live verification requires operator authorization and the configured provider credentials. Native-only checks require `rlm.recursion_enabled = false`; recursive checks require it enabled. Checks never select another configuration. Isolated proofs use temporary database URLs as documented.
+Live verification requires operator authorization and the configured provider credentials. Root invocations always receive bounded child tools; tasks choose whether to delegate. Checks never select another configuration. Isolated proofs use temporary database URLs as documented.

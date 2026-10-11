@@ -77,7 +77,6 @@ class ConfigurationEnvironmentContract:
     mlflow_tracing_enabled: bool
     mlflow_tracking_uri: str | None
     mlflow_environment_names: tuple[str, ...]
-    recursion_enabled: bool
 
     @property
     def provider_environment_names(self) -> tuple[str, ...]:
@@ -213,6 +212,10 @@ def _validate_policy_table(value: object, location: str) -> None:
         if name != "llm":
             allowed = _TABLE_KEYS[name]
             child_table = _require_mapping(child, f"{location}.{name}")
+            if name == "rlm" and "recursion_enabled" in child_table:
+                raise FleetConfigurationError(
+                    "Remove rlm.recursion_enabled from the TOML policy; child recursion is always available."
+                )
             extras = set(child_table).difference(allowed)
             if extras:
                 raise FleetConfigurationError(
@@ -426,7 +429,6 @@ def load_configuration_environment_contract(path: Path | None = None) -> Configu
         mlflow_tracing_enabled=settings.mlflow_tracing_enabled,
         mlflow_tracking_uri=mlflow.get("tracking_uri"),
         mlflow_environment_names=mlflow_environment_names,
-        recursion_enabled=settings.rlm_recursion_enabled,
     )
 
 

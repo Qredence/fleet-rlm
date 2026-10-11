@@ -24,7 +24,7 @@ from fleet_rlm.daytona.interpreter import (
     _SyncBridgeLoop,
     sandbox_backend,
 )
-from fleet_rlm.rlm.events import RLMOutput
+from fleet_rlm.rlm.event_types import RLMOutput
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
 
 
@@ -41,6 +41,9 @@ class _LocalBroker:
         self.closed = False
         self.instances.append(self)
 
+    def start(self) -> None:
+        pass
+
     def bind_tools(self, tools: dict[str, Any]) -> None:
         self.tools = tools
         self.namespace.update(tools)
@@ -51,7 +54,10 @@ class _LocalBroker:
     def setup_source(self, source: str) -> str:
         return source
 
-    def execute(self, code: str, variables: dict[str, Any], *, timeout_s: float | None) -> dict[str, Any]:
+    def execute(
+        self, code: str, variables: dict[str, Any], *, timeout_s: float | None, on_stdout=None
+    ) -> dict[str, Any]:
+        del on_stdout
         assert timeout_s is None or timeout_s > 0
         self.calls.append(code)
         self.namespace.update(json.loads(json.dumps(variables, ensure_ascii=False, allow_nan=False)))
@@ -78,15 +84,14 @@ def test_broker_namespace_persists_within_turn_and_resets_for_next_turn(
 ) -> None:
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
-    root = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()))
-    first = root.new_invocation()
+    first = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()))
     first.execute(
         "cached = session_context['workspace']['available']", {"session_context": {"workspace": {"available": True}}}
     )
     assert first.execute("print(cached)") == "True\n"
     assert len(_LocalBroker.instances) == 1
 
-    second = root.new_invocation()
+    second = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()))
     with pytest.raises(Exception, match="cached"):
         second.execute("print(cached)")
     assert len(_LocalBroker.instances) == 2
@@ -108,7 +113,7 @@ def test_run_scratch_setup_exports_the_scratch_path_to_the_environment(
     created: list[str] = []
     monkeypatch.setattr(os, "makedirs", lambda path, **_kwargs: created.append(path))
     monkeypatch.setenv("FLEET_RUN_SCRATCH", "unrelated-previous-value")
-    child = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock())).new_invocation()
+    child = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()))
     scratch = child.bind_run_scratch(uuid4(), call_index=1)
 
     output = child.execute("import os\nprint(FLEET_RUN_SCRATCH == os.environ['FLEET_RUN_SCRATCH'], FLEET_RUN_SCRATCH)")
@@ -150,7 +155,11 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     assert not _LocalBroker.instances
 
     observed: list[object] = []
-    first = root.new_invocation(observer=observed.append)
+    first = DaytonaCodeInterpreter(
+        backend=sandbox_backend(object(), **options),
+        tools={"host_tool": lambda: "host result"},
+        observer=observed.append,
+    )
     assert first._backend.broker_port == expected_port
     assert first.broker is None
     assert first.execute("cached = host_tool(); print(cached)") == "host result\n"
@@ -167,7 +176,7 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     assert root.broker is None
     assert not backend._closed
 
-    second = root.new_invocation()
+    second = DaytonaCodeInterpreter(backend=sandbox_backend(object(), **options))
     assert second._backend.broker_port == expected_port
     assert second.execute("print('cached' in globals())") == "False\n"
     assert second.broker is not broker
@@ -411,7 +420,7 @@ def test_sandbox_context_integrity_failure_is_a_verification_error(
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
     capsule = _capsule(tmp_path, {_TEXT_ID: ("note.txt", b"Fleet context")})
     (tmp_path / "note.txt").write_bytes(b"Fleet CONTEXT")
-    invocation = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock())).new_invocation(context_capsule=capsule)
+    invocation = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock()), context_capsule=capsule)
 
     with pytest.raises(DaytonaAdapterError) as raised:
         invocation.execute(
@@ -447,11 +456,11 @@ def test_setup_is_installed_once_and_actions_carry_only_model_code(monkeypatch: 
 
 def test_setup_failure_stops_before_model_code(monkeypatch: pytest.MonkeyPatch) -> None:
     class FailingSetupBroker(_LocalBroker):
-        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int) -> dict[str, Any]:
+        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int, on_stdout=None) -> dict[str, Any]:
             if not self.calls:
                 self.calls.append(code)
                 return {"stdout": "", "stderr": "", "error": "setup exploded", "final": None}
-            return super().execute(code, variables, timeout_s=timeout_s)
+            return super().execute(code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
 
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", FailingSetupBroker)

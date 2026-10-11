@@ -12,13 +12,11 @@ from uuid import uuid4
 
 import pytest
 
+from fleet_rlm.daytona import children as children_module
+from fleet_rlm.daytona import leases as leases_module
 from fleet_rlm.daytona import runtime as recursive_child_runtime
-from fleet_rlm.daytona.runtime import (
-    ChildRuntimeLease,
-    ChildRuntimeLeaseState,
-    DaytonaAdmission,
-    LateCleanupOwner,
-)
+from fleet_rlm.daytona.children import ChildRuntimeLease, ChildRuntimeLeaseState, LateCleanupOwner
+from fleet_rlm.daytona.leases import DaytonaAdmission
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 from tests.support.session_manager import make_daytona_child_factory
 
@@ -65,7 +63,7 @@ class _RecordingPlatform:
         self.steps.append("create")
         return self.child
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
         self.steps.append(f"delete:{sandbox_id}")
         self.deleted.append(sandbox_id)
         if self.delete_error is not None:
@@ -111,8 +109,11 @@ def _factory(
         return interpreter
 
     if monkeypatch is not None:
-        monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
-        monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+        monkeypatch.setattr(
+            children_module,
+            "sandbox_interpreter_factory",
+            lambda sandbox, **_kwargs: interpreter_factory(backend=sandbox),
+        )
     factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
@@ -198,7 +199,8 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
     platform = _RecordingPlatform(child)
     admission = DaytonaAdmission(max_active_leases=1)
     release_shutdown = threading.Event()
-    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
 
     class _BlockingInterpreter:
         def __init__(self, **_kwargs: object) -> None:
@@ -212,8 +214,9 @@ async def test_blocked_broker_shutdown_is_quarantined_and_still_settles(
             platform.steps.append("interpreter_shutdown")
             release_shutdown.wait(2)
 
-    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", _BlockingInterpreter)
-    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    monkeypatch.setattr(
+        children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: _BlockingInterpreter(backend=sandbox)
+    )
     loop = asyncio.get_running_loop()
     factory = make_daytona_child_factory(
         loop=loop,
@@ -299,8 +302,9 @@ async def test_admission_restored_exactly_once_on_every_path(
     def interpreter_factory(**_kwargs: object) -> _RecordingInterpreter:
         return interpreter
 
-    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
-    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    monkeypatch.setattr(
+        children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: interpreter_factory(backend=sandbox)
+    )
     factory = make_daytona_child_factory(
         loop=loop,
         platform=platform,
@@ -539,7 +543,7 @@ async def test_owner_loop_loss_retains_cleanup_without_provider_settlement() -> 
 
     retained: list[Future[object]] = []
     with pytest.raises(ChildRuntimeCleanupError):
-        recursive_child_runtime._close_child_runtime_sync(
+        leases_module._close_child_runtime_sync(
             loop=_ClosedLoop(),  # type: ignore[arg-type]
             platform=platform,
             sandbox=child,
@@ -597,9 +601,11 @@ async def test_ordered_cleanup_does_not_need_quarantine_thread_dispatch(
             release_shutdown.wait(2)
 
     monkeypatch.setattr(recursive_child_runtime, "Thread", _FailingQuarantineThread, raising=False)
-    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", _BlockingInterpreter)
-    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
-    monkeypatch.setattr(recursive_child_runtime, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(
+        children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: _BlockingInterpreter(backend=sandbox)
+    )
+    monkeypatch.setattr(leases_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(children_module, "CHILD_CLEANUP_RESULT_TIMEOUT_S", 0.05)
     admission = DaytonaAdmission(max_active_leases=1)
     loop = asyncio.get_running_loop()
     factory = make_daytona_child_factory(

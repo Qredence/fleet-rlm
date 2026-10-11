@@ -327,9 +327,6 @@ class DaytonaHttpToolBroker:
 
         def listen_events() -> None:
             nonlocal streamed_stdout
-            if not hasattr(client, "stream") or type(client).__name__ == "MagicMock":
-                sse_ready.set()
-                return
             try:
                 with client.stream(
                     "GET", "/events", timeout=(timeout_s + _EXECUTE_RESPONSE_GRACE_S if timeout_s is not None else None)
@@ -364,14 +361,11 @@ class DaytonaHttpToolBroker:
                 sse_ready.set()
 
         worker = threading.Thread(target=post, daemon=True)
-        sse_thread: threading.Thread | None = None
-        if hasattr(client, "stream") and type(client).__name__ != "MagicMock":
-            sse_thread = threading.Thread(target=listen_events, daemon=True)
+        sse_thread = threading.Thread(target=listen_events, daemon=True)
 
         with host_action_deadline(time.monotonic() + timeout_s) if timeout_s is not None else contextlib.nullcontext():
-            if sse_thread is not None:
-                sse_thread.start()
-                sse_ready.wait(timeout=0.2)
+            sse_thread.start()
+            sse_ready.wait(timeout=0.2)
             worker.start()
             while worker.is_alive():
                 if self._stopped:

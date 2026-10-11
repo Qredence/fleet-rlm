@@ -254,7 +254,7 @@ class _QRE142Runner:
             assert sandbox is not None
             self._volume_fs = DaytonaSandboxVolumeFs(sandbox)
             paths = volume_paths_from_settings(self.settings)
-            self._store = WorkspaceMemory.from_storage(
+            self._store = WorkspaceMemory(
                 WorkspaceMemoryStorage(
                     WorkspaceStorage(
                         sandbox,
@@ -638,7 +638,7 @@ def test_live_skill_consumes_declared_resource_with_truthful_card(tmp_path: Path
     ledger = _CaptureLedger()
     started = time.perf_counter()
     with _QRE142Runner(settings) as run:
-        skill = run.app.state.skill_catalog.require(stable_skill_id("long-context"))
+        skill = run.app.state.composition.skill_catalog.require(stable_skill_id("long-context"))
         run.preparation._capabilities = _QRE142SpecCapture(run.preparation._capabilities, ledger)
         assert skill.card.resources_available is True
         assert skill.resources, "long-context must declare loadable resources"
@@ -693,7 +693,7 @@ def test_live_custom_signature_skill_coexistence(tmp_path: Path) -> None:
     ledger = _CaptureLedger()
     started = time.perf_counter()
     with _QRE142Runner(settings) as run:
-        skill = run.app.state.skill_catalog.require(stable_skill_id("data-analysis"))
+        skill = run.app.state.composition.skill_catalog.require(stable_skill_id("data-analysis"))
         run.preparation._capabilities = _QRE142SpecCapture(run.preparation._capabilities, ledger)
         _ = run.start_session("QRE-142 custom-Signature Skill coexistence")
         chunks = run.post_turn(_ANALYSIS_TEXT, skill=skill)

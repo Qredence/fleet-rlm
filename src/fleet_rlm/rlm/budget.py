@@ -237,7 +237,7 @@ class TurnBudget:
             # Child-local capacity never spends the root allowance, but cannot
             # outlive the shared Turn's admission authority or deadline.
             with self._lock:
-                self._remaining(finalization=True)
+                self._remaining(finalization=False)
 
     def snapshot(self) -> dict[str, int]:
         """
@@ -317,13 +317,13 @@ class AdapterBudget:
         with self._lock:
             return self._parse_repairs_used
 
-    def note_parse_repair(self) -> None:
+    def note_parse_repair(self, *, can_finalize: bool = True) -> None:
         """Admit and record one corrective parse re-ask against this invocation."""
         with self._lock:
             # A returned malformed response cannot start new Fleet correction
             # work after settlement. This does not intercept DSPy retries or
             # impose a deadline on an already-running LM request.
-            self.turn.remaining(finalization=True)
+            self.turn.remaining(finalization=can_finalize)
             self._parse_repairs_used += 1
 
     @property

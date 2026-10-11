@@ -5,8 +5,6 @@ from __future__ import annotations
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.optimization.routing import (
     CURATED_ROUTING_SCENARIOS,
     RoutingFacts,
@@ -16,6 +14,7 @@ from fleet_rlm.optimization.routing import (
     score_routing_execution,
     summarize_scores,
 )
+from tests.rlm.fakes import invocation_factory
 
 
 def test_routing_classifier_maps_each_public_route_shape() -> None:
@@ -66,7 +65,7 @@ def test_live_scoring_supports_normalized_containment_and_run_indexes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_harness_runs_an_isolated_fake_lm_python_scenario(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_harness_runs_an_isolated_fake_lm_python_scenario() -> None:
     adapter = dspy.JSONAdapter()
     root = dspy.utils.DummyLM(
         [{"reasoning": "compute in Python", "code": "value = 18434 + 92786\nSUBMIT(answer=str(value))"}],
@@ -74,42 +73,23 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario(monkeypatch: pyt
     )
     sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
     child_calls = 0
-    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    invocations: list[DaytonaCodeInterpreter] = []
-    new_invocation = retained.new_invocation
+    invocations: list[dspy.LocalInterpreter] = []
 
-    def track_invocation(**kwargs):
-        invocation = new_invocation(**kwargs)
+    def factory(**configuration):
+        del configuration
+        invocation = dspy.LocalInterpreter()
         invocations.append(invocation)
-        shutdown = invocation.shutdown
-
-        def shutdown_invocation():
-            assert not retained._shutdown
-            shutdown()
-
-        monkeypatch.setattr(invocation, "shutdown", shutdown_invocation)
         return invocation
 
-    monkeypatch.setattr(retained, "new_invocation", track_invocation)
-
     def child_factory(call_index: int):
-        nonlocal child_calls
-        child_calls += 1
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        return ChildRuntimeLease(
-            interpreter,
-            f"routing-child-{call_index}",
-            "routing-test-volume",
-            f"recursive/routing/scenario/{call_index}",
-            interpreter.shutdown,
-        )
+        raise AssertionError(f"unexpected child {call_index}")
 
     scenario = next(item for item in CURATED_ROUTING_SCENARIOS if item.expected_route == "python_native")
     scores = await run_routing_scenario(
         scenario,
         root_lm=root,
         sub_lm=sub,
-        root_interpreter_factory=lambda: retained,
+        root_interpreter_factory=lambda: factory,
         child_runtime_factory=child_factory,
     )
 
@@ -120,9 +100,6 @@ async def test_harness_runs_an_isolated_fake_lm_python_scenario(monkeypatch: pyt
     assert child_calls == 0
     assert scores[0].facts.sandbox_count == 0
     assert len(invocations) == 1
-    assert invocations[0] is not retained
-    assert invocations[0]._shutdown
-    assert retained._shutdown
 
 
 @pytest.mark.asyncio
@@ -147,7 +124,7 @@ async def test_harness_routes_one_native_semantic_call_to_configured_sub_lm() ->
         scenario,
         root_lm=root,
         sub_lm=sub,
-        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        root_interpreter_factory=lambda: invocation_factory,
         child_runtime_factory=unexpected_child,
     )
 
@@ -188,7 +165,7 @@ async def test_harness_routes_native_semantic_batch_to_configured_sub_lm() -> No
         scenario,
         root_lm=root,
         sub_lm=sub,
-        root_interpreter_factory=lambda: DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+        root_interpreter_factory=lambda: invocation_factory,
         child_runtime_factory=unexpected_child,
     )
 

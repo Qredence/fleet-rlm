@@ -57,13 +57,8 @@ def create_app(
         Raises:
             RuntimeError: If the configured runtime environment is unsupported.
         """
-        from fleet_rlm.observability.mlflow import MLflowRuntime
-
         settings_obj: Settings = app.state.settings
-        mlflow_runtime = app.state.mlflow_runtime
-        if not isinstance(mlflow_runtime, MLflowRuntime):
-            mlflow_runtime = MLflowRuntime(settings_obj)
-            app.state.mlflow_runtime = mlflow_runtime
+        mlflow_runtime = app.state.composition.mlflow_runtime
 
         try:
             init_posthog(settings_obj)
@@ -80,6 +75,7 @@ def create_app(
                 else:
                     builder = _services_builder
                 async with builder(app, settings_obj) as services:
+                    app.state.composition.runtime = services
                     install_runtime_inventory(app, services)
                     try:
                         yield
@@ -108,11 +104,16 @@ def create_app(
     app.state.composition_ready = False
     app.state.runtime_inventory = None
     app.state.route_services = None
+    from fleet_rlm.app_services import ApplicationComposition
     from fleet_rlm.observability.feedback import TraceFeedbackService
     from fleet_rlm.observability.mlflow import MLflowRuntime
+    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
 
-    app.state.mlflow_runtime = MLflowRuntime(resolved)
-    app.state.trace_feedback_service = TraceFeedbackService()
+    app.state.composition = ApplicationComposition(
+        skill_catalog=build_bundled_skill_catalog(),
+        mlflow_runtime=MLflowRuntime(resolved),
+        trace_feedback_service=TraceFeedbackService(),
+    )
 
     from fleet_rlm.api.errors import install_error_handlers
     from fleet_rlm.api.openapi import install_openapi_contract
@@ -150,7 +151,4 @@ def create_app(
     app.include_router(volume_router)
     app.include_router(health_router)
 
-    from fleet_rlm.skills.catalog import build_bundled_skill_catalog
-
-    app.state.skill_catalog = build_bundled_skill_catalog()
     return app

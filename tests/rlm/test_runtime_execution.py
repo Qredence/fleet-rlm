@@ -22,6 +22,7 @@ import dspy
 import pytest
 
 from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
     RLMRunner,
@@ -35,19 +36,15 @@ from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
-from tests.rlm.fakes import EmptyCapabilities
+from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities, configured_invocation_factory
 from tests.support.role_lm import placeholder_bundle
 
 
 # --- from test_runtime_execution.py -----------------------------------
 @pytest.mark.asyncio
 async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -> None:
-    from fleet_rlm.rlm.events import (
-        MAX_DETAIL_EVENTS,
-        DetailRelay,
-        RLMOutput,
-        SkillLoaded,
-    )
+    from fleet_rlm.rlm.event_types import RLMOutput, SkillLoaded
+    from fleet_rlm.rlm.events import MAX_DETAIL_EVENTS, DetailRelay
 
     relay = DetailRelay()
     for index in range(MAX_DETAIL_EVENTS):
@@ -64,7 +61,8 @@ async def test_detail_relay_keeps_1024_ordinary_events_and_lifecycle_details() -
 
 @pytest.mark.asyncio
 async def test_detail_relay_retains_step_lifecycle_when_ordinary_queue_is_full() -> None:
-    from fleet_rlm.rlm.events import ChildProgress, DetailRelay, RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.event_types import ChildProgress, RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.events import DetailRelay
 
     relay = DetailRelay(maxsize=1)
     relay.publish(RLMOutput("queued", 1))
@@ -130,13 +128,14 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=SimpleNamespace(),
+            interpreter=configured_invocation_factory(SimpleNamespace()),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
     factory = Factory()
@@ -153,7 +152,7 @@ async def test_runner_uses_native_path_for_plain_greeting() -> None:
         "step.finished",
     ]
     assert factory.created
-    assert factory.host_tool_dispatch is False
+    assert factory.host_tool_dispatch is True
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
     assert stream.outcome.prediction.answer == "Hi! How can I help you today?"
@@ -168,7 +167,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
 
     The outcome includes events, usage metrics, configured tools, and execution tracing.
     """
-    from fleet_rlm.rlm.events import RLMCode, RLMOutput, StepFinished, StepStarted
+    from fleet_rlm.rlm.event_types import RLMCode, RLMOutput, StepFinished, StepStarted
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -193,6 +192,7 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
             self.options = kwargs["options"]
             self.tools = kwargs["tools"]
             factory = self
+            invocation = kwargs["interpreter_factory"]()
 
             class Program:
                 async def acall(self, **call_kwargs):
@@ -215,11 +215,11 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
                         "instructions": "Use durable workspace tools.",
                     }
                     assert threading.get_ident() != main_thread
-                    interpreter.observer(StepStarted(1))
-                    interpreter.observer(RLMCode("answer = helper(value='sample')", 1))
+                    invocation.observer(StepStarted(1))
+                    invocation.observer(RLMCode("answer = helper(value='sample')", 1))
                     assert factory.tools[0](value="sample") == "done:sample"
-                    interpreter.observer(RLMOutput("FINAL submitted", 1))
-                    interpreter.observer(StepFinished(1, 1))
+                    invocation.observer(RLMOutput("FINAL submitted", 1))
+                    invocation.observer(StepFinished(1, 1))
                     prediction = dspy.Prediction(
                         answer="42",
                         trajectory=[
@@ -299,13 +299,14 @@ async def test_runner_uses_supported_async_call_and_returns_typed_outcome(
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=interpreter,
+            interpreter=configured_invocation_factory(interpreter),
             cancellation_requested=not_cancelled,
         ),
         capabilities=capabilities,
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=factory.create, _adapter_factory=stock_adapter).stream(context)
     capabilities.spec = RLMExecutionSpec(
@@ -429,13 +430,14 @@ async def test_runner_passes_prepared_attachment_context_to_rlm() -> None:
             attachment_context=attachment_context,
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
     stream = RLMRunner(program_builder=Factory().create).stream(context)
@@ -487,15 +489,16 @@ async def test_runner_validates_host_metadata_before_provider_execution() -> Non
             request="validate me", session_context=malformed_context, attachments=(), preparation_notices=()
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(
             spec=SimpleNamespace(tools=(), tool_event_views={}, skill_cards=(), signature=None, workspace=None)
         ),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     factory = Factory()
     stream = RLMRunner(program_builder=factory.create).stream(context)
@@ -594,13 +597,14 @@ async def test_runner_loads_two_skills_reads_python_resource_and_completes_submi
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=SimpleNamespace(fleet_host_tool_dispatch_available=True),
+            interpreter=configured_invocation_factory(SimpleNamespace(fleet_host_tool_dispatch_available=True)),
             cancellation_requested=not_cancelled,
         ),
         capabilities=capabilities,
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
@@ -757,11 +761,12 @@ def _context(
         execution=ExecutionRuntime(
             models=placeholder_bundle(),
             options=RLMOptions(),
-            interpreter=interpreter,
+            interpreter=configured_invocation_factory(interpreter),
             cancellation_requested=_not_cancelled,
             deadline=10**12,
         ),
         capabilities=cast(Any, EmptyCapabilities()),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
 
@@ -904,10 +909,11 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
             models=RLMModelBundle(root_lm=MagicMock(), sub_lm=MagicMock()),
             options=RLMOptions(),
             deadline=123.0,
-            interpreter=SimpleNamespace(execute=lambda code: code),
+            interpreter=configured_invocation_factory(SimpleNamespace(execute=lambda code: code)),
             cancellation_requested=lambda: False,
         ),
         capabilities=SimpleNamespace(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
     assert context.identity.session_id == session_id
@@ -921,7 +927,7 @@ def test_execution_context_is_immutable_and_contains_prepared_runner_inputs() ->
 
 
 def test_child_progress_is_a_bounded_snapshot() -> None:
-    from fleet_rlm.rlm.events import ChildProgress
+    from fleet_rlm.rlm.event_types import ChildProgress
 
     detail = ChildProgress("run:call-2", "Search official docs", "completed", 1200, "Found two sources", "complete")
     assert detail.kind == "child.progress"
@@ -933,7 +939,7 @@ def test_child_progress_is_a_bounded_snapshot() -> None:
 
 
 def test_event_recorder_wraps_typed_details_in_an_immutable_ordered_envelope() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, RunStarted, TextDelta
+    from fleet_rlm.rlm.event_types import EventRecorder, RunStarted, TextDelta
 
     run_id = uuid4()
     session_id = uuid4()
@@ -953,7 +959,7 @@ def test_event_recorder_wraps_typed_details_in_an_immutable_ordered_envelope() -
 
 
 def test_event_recorder_rejects_second_or_post_terminal_details() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, EventSequenceError, RunCompleted, TextDelta
+    from fleet_rlm.rlm.event_types import EventRecorder, EventSequenceError, RunCompleted, TextDelta
 
     recorder = EventRecorder(run_id=uuid4(), session_id=uuid4())
     recorder.record(RunCompleted(checkpoint_version=3, delivery="live"))
@@ -1111,13 +1117,14 @@ async def test_runner_returns_promptly_and_retains_blocking_worker_for_cleanup()
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=cancellation_probe,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
 
@@ -1180,13 +1187,14 @@ async def test_runner_transfers_blocking_worker_after_caller_cancellation() -> N
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
 
@@ -1274,13 +1282,14 @@ async def test_runner_retains_prediction_usage_when_typed_output_is_invalid() ->
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
@@ -1343,13 +1352,14 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(max_output_chars=32, max_final_output_chars=32),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     _ = [event async for event in stream]
@@ -1365,7 +1375,7 @@ async def test_runner_reports_turn_output_too_large_for_oversized_answer() -> No
 
 @pytest.mark.asyncio
 async def test_runner_emits_preloaded_skill_events_before_later_output_failure() -> None:
-    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.event_types import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -1411,13 +1421,14 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=Capabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
@@ -1437,7 +1448,7 @@ async def test_runner_emits_preloaded_skill_events_before_later_output_failure()
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal_status", ["cancelled", "timeout"])
 async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(terminal_status: str) -> None:
-    from fleet_rlm.rlm.events import SkillActivated, SkillLoaded
+    from fleet_rlm.rlm.event_types import SkillActivated, SkillLoaded
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -1484,13 +1495,14 @@ async def test_runner_emits_preloaded_skill_events_before_cancel_or_timeout(term
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=loop.time() - 1 if terminal_status == "timeout" else loop.time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=cancellation_probe,
         ),
         capabilities=Capabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     events = [event async for event in stream]
@@ -1536,13 +1548,14 @@ async def test_stream_closed_before_iteration_synthesizes_cancelled_outcome() ->
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=loop.time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     stream = RLMRunner(program_builder=Factory().create).stream(context)
     await stream.aclose()
@@ -1611,13 +1624,14 @@ def _memory_candidate_context(*, drain_calls: list[int], returned_candidates=(),
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=cast("Any", SimpleNamespace(root_lm=object(), sub_lm=object())),
+            models=cast("Any", SimpleNamespace(budget=None, root_lm=object(), sub_lm=object())),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=cancellation_probe,
         ),
         capabilities=cast("Any", Capabilities()),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
 

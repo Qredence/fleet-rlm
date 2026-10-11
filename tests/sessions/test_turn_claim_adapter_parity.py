@@ -205,3 +205,35 @@ async def test_committed_run_rejects_late_claim_transitions(adapter_kind: str) -
         assert (await harness.state())[0] == "completed"
     finally:
         await harness.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command_name", ("fail", "settle", "revoke"))
+async def test_sql_claim_commands_preserve_usage_through_terminal_cleanup(command_name: str) -> None:
+    from fleet_rlm.persistence.models import RunRow
+    from fleet_rlm.rlm.result import empty_rlm_usage
+    from fleet_rlm.sessions.run_state import (
+        BeginSettlement,
+        ClaimFailure,
+        CompleteSettlement,
+        FailClaim,
+        HeartbeatClaim,
+        RevokeClaim,
+    )
+
+    harness = await _build_harness("sql")
+    usage = empty_rlm_usage()
+    usage["iterations"] = 3
+    failure = ClaimFailure("cancelled", "cancelled", "Turn cancelled")
+    command_type = {"fail": FailClaim, "settle": BeginSettlement, "revoke": RevokeClaim}[command_name]
+    try:
+        await harness.store.transition_claim(harness.turn, HeartbeatClaim())
+        await harness.store.transition_claim(harness.turn, command_type(failure, usage))
+        if command_name != "fail":
+            await harness.store.transition_claim(harness.turn, CompleteSettlement())
+        async with harness.store._sessions() as db:
+            row = await db.get(RunRow, harness.turn.run_id)
+            assert row is not None
+            assert row.failure_usage_json == usage
+    finally:
+        await harness.close()

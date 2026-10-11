@@ -39,9 +39,9 @@ import dspy
 import pytest
 from dspy import CodeExecutionError, CodeInterpreterError
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend, wrap_final_output
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import RunCompleted, Status
+from fleet_rlm.daytona.children import ChildRuntimeLease
+from fleet_rlm.daytona.interpreter import wrap_final_output
+from fleet_rlm.rlm.event_types import RunCompleted, Status
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -63,7 +63,7 @@ from fleet_rlm.rlm.recursion import (
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
-from tests.rlm.fakes import EmptyCapabilities
+from tests.rlm.fakes import EmptyCapabilities, configured_invocation_factory, invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
@@ -88,7 +88,7 @@ class _CountingInterpreter:
         self.execute_calls = 0
         self.invocations: list[_CountingInterpreter] = []
 
-    def new_invocation(self, **_kwargs: object) -> _CountingInterpreter:
+    def __call__(self, **_kwargs: object) -> _CountingInterpreter:
         invocation = _CountingInterpreter(self.behavior)
         self.invocations.append(invocation)
         return invocation
@@ -446,11 +446,11 @@ async def test_runner_cancellation_terminal_outcome_with_same_fence(
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=cancellation_probe,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2, max_parallel_children=1),
+            recursive_options=RecursiveRLMOptions(max_calls=2, max_parallel_children=1),
             child_runtime_factory=counting_factory,
         ),
         capabilities=EmptyCapabilities(),

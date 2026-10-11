@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     TERMINAL_DETAIL_TYPES,
     AttachmentRead,

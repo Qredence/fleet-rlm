@@ -1,11 +1,10 @@
 # Table of contents
 
-Current guides, active migration records, and historical baselines are grouped
-in [Documentation Home](index.md). Retained broker-backed execution is the sole
-supported runtime; Fleet child RLM tools follow the single configuration and are
-enabled by the shipped `rlm.recursion_enabled = true` setting. A dated
-decision or passing receipt is scoped to its recorded revision and is not
-current production certification.
+Current guides, active migration records, and dated reports are grouped in
+[Documentation Home](index.md). Retained broker-backed execution is the sole
+supported runtime; Fleet child RLM tools are always available and their limits
+follow the single configuration. A dated decision or passing receipt is scoped
+to its recorded revision and is not current production certification.
 
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
@@ -16,16 +15,17 @@ current production certification.
 * [MLflow evaluation pilot](how-to-guides/mlflow-evaluation.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
-* Proposals
-  * [Book-scale RLM implementation (proposed, unimplemented)](testing/book-scale-rlm-implementation.md)
-* Historical baselines
-  * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
 * Dated reports
   * [PRD 1 completion receipt](reports/prd-01-completion-2026-10-10.md)
   * [Live capability verification](reports/live-capability-verification-2026-10-10.md)
+  * [PRD 2 Daytona lifecycle acceptance](reports/prd-02-daytona-lifecycle-acceptance.md)
+  * [Fleet simplification verification](reports/fleet-simplification-verification.md)
+  * [Legacy cleanup verification](reports/legacy-cleanup-verification.md)
 * [Reference](reference/index.md)
   * [Configuration](reference/configuration.md)
   * [Configuration Environment Reference](reference/configuration-environment.md)
+  * [Daytona lifecycle](reference/daytona-lifecycle.md)
+  * [Turn walkthrough](reference/turn-walkthrough.md)
   * [HTTP API](reference/http-api.md)
   * [CLI](reference/cli.md)
   * [Database](reference/database.md)

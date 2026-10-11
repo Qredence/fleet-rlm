@@ -32,19 +32,10 @@ from fleet_rlm.daytona.errors import (
 )
 from fleet_rlm.observability.tracing import trace_preview_limit, turn_phase_span
 from fleet_rlm.rlm.budget import BudgetDimension, TurnBudget, TurnBudgetExhausted
-from fleet_rlm.rlm.events import (
-    ObservationObserver,
-    RLMCode,
-    RLMOutput,
-    StepFinished,
-    StepStarted,
-    ToolEventView,
-    ToolObserver,
-    observe_tool,
-)
+from fleet_rlm.rlm.event_types import ObservationObserver, RLMCode, RLMOutput, StepFinished, StepStarted
+from fleet_rlm.rlm.events import ToolEventView, ToolObserver, observe_tool
 from fleet_rlm.rlm.output_contract import FleetOutputContract
 from fleet_rlm.rlm.result import (
-    RunNoProgressError,
     RunTerminalError,
     sanitize_repair_text,
     sanitize_trace_text,
@@ -681,20 +672,14 @@ class _SandboxProcessBackend:
             except TypeError as exc:
                 raise DaytonaAdapterError(message=str(exc), cause_type="InterpreterBindingError") from exc
         broker = self._ensure_broker()
-        start = getattr(broker, "start", None)
-        if callable(start):
-            start()
+        broker.start()
         self._action_timeout()
         if not self._setup_installed:
             self._install_setup(broker, self._action_timeout())
         if loader_source:
             code = f"{loader_source}\n\n{code}"
-        execute_kwargs: dict[str, Any] = {"timeout_s": self._action_timeout()}
-        with contextlib.suppress(ValueError, TypeError):
-            if "on_stdout" in inspect.signature(broker.execute).parameters:
-                execute_kwargs["on_stdout"] = on_stdout
         try:
-            result = broker.execute(code, variables or {}, **execute_kwargs)
+            result = broker.execute(code, variables or {}, timeout_s=self._action_timeout(), on_stdout=on_stdout)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -796,8 +781,6 @@ class _SandboxProcessBackend:
 class DaytonaCodeInterpreter:
     """CodeInterpreter-compatible adapter with host-tool / SUBMIT mediation."""
 
-    invocation_scoped_bindings = True
-
     def __init__(
         self,
         *,
@@ -807,6 +790,17 @@ class DaytonaCodeInterpreter:
         callbacks: list[BaseCallback] | None = None,
         execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
         max_code_chars: int = DEFAULT_INTERMEDIATE_CODE_CHARS,
+        observer: ObservationObserver | None = None,
+        observation_max_chars: int = 10_000,
+        turn_budget: TurnBudget | None = None,
+        turn_request: str | None = None,
+        async_bridge: Any | None = None,
+        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
+        tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
+        context_capsule: Any | None = None,
+        output_contract: FleetOutputContract | None = None,
+        admission: Callable[[], None] | None = None,
+        root_finalization: bool = True,
     ) -> None:
         self._backend = backend
         self.callbacks = list(callbacks or [])
@@ -837,80 +831,26 @@ class DaytonaCodeInterpreter:
         self._observation_step = 0
         self._public_observation = True
         self._observation_namespace = uuid4().hex
-        self._last_execution: tuple[str, str] | None = None
-        self._no_progress_repair_used = False
         self._context_accesses: list[str] = []
         self._context_binding: tuple[str, str] | None = None
-        self._action_admission: Callable[[], None] | None = None
-
-    def new_invocation(
-        self,
-        *,
-        observer: ObservationObserver | None = None,
-        observation_max_chars: int | None = None,
-        turn_budget: TurnBudget | None = None,
-        turn_request: str | None = None,
-        async_bridge: Any | None = None,
-        tool_settled: Callable[[str, Mapping[str, Any], Any], None] | None = None,
-        tool_failed: Callable[[str, Mapping[str, Any]], None] | None = None,
-        context_capsule: Any | None = None,
-        output_contract: FleetOutputContract | None = None,
-        timeout_s: int | None = None,
-        deadline_monotonic: float | None = None,
-        admission: Callable[[], None] | None = None,
-        root_finalization: bool = True,
-    ) -> DaytonaCodeInterpreter:
-        """Create an invocation-scoped adapter without retiring its Sandbox.
-
-        DSPy owns factory-created adapter shutdown.  The returned adapter gets a
-        new backend and broker/context state, while the existing retained root
-        adapter—and therefore its session Sandbox lease—remains owned by Fleet.
-        The optional arguments are invocation-local bindings.  Production
-        callers pass them through the zero-argument factory supplied to DSPy;
-        the retained template never receives per-Run observer, budget,
-        request, bridge, tool-settlement, context, or output-contract state.
-        ``deadline_monotonic`` bounds every action by remaining invocation
-        time. ``timeout_s`` is an explicit standalone backend bound when no
-        invocation deadline exists. ``admission`` runs before each action and may raise
-        to refuse it (a recursive child past its call deadline).
-        """
-        backend = self._backend
-        if isinstance(backend, InProcessInterpreterBackend):
-            fresh_backend: InterpreterBackend | None = InProcessInterpreterBackend()
-        elif isinstance(backend, _SandboxProcessBackend):
-            fresh_backend = _SandboxProcessBackend(
-                backend.sandbox,
-                timeout_s=timeout_s if timeout_s is not None else backend.timeout_s,
-                broker_port=backend.broker_port,
-                deadline_monotonic=deadline_monotonic,
-            )
-            if backend._run_scratch_path is not None:
-                fresh_backend.bind_run_scratch(backend._run_scratch_path)
-        else:
-            raise DaytonaAdapterError(
-                message="interpreter cannot create an invocation-scoped adapter",
-                cause_type="InterpreterConfigurationError",
-            )
-        fresh = DaytonaCodeInterpreter(
-            backend=fresh_backend,
-            tools=dict(self._tools),
-            output_fields=list(self._output_fields) if self._output_fields is not None else None,
-            callbacks=list(self.callbacks),
-            execution_output_cap=self._execution_output_cap,
-            max_code_chars=self._max_code_chars,
-        )
-        fresh.bind_observer(observer, max_chars=observation_max_chars or self._observation_max_chars)
-        fresh.bind_turn_budget(turn_budget)
-        fresh.bind_turn_request(turn_request)
-        fresh.bind_async_bridge(async_bridge)
-        fresh.bind_tool_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
-        fresh._action_admission = admission
-        fresh._root_finalization = root_finalization
+        self._action_admission = admission
+        self._root_finalization = root_finalization
+        self._observer = observer
+        self._observation_max_chars = max(1, observation_max_chars)
+        self._turn_budget = turn_budget
+        self._turn_request = turn_request
+        self._async_bridge = async_bridge
+        if backend is not None:
+            bind_bridge = getattr(backend, "bind_async_bridge", None)
+            if callable(bind_bridge) and async_bridge is not None:
+                bind_bridge(async_bridge)
+            bind_outcomes = getattr(backend, "bind_tool_outcomes", None)
+            if callable(bind_outcomes) and (tool_settled is not None or tool_failed is not None):
+                bind_outcomes(tool_settled=tool_settled, tool_failed=tool_failed)
         if context_capsule is not None:
-            fresh.bind_context_capsule(context_capsule)
+            self.bind_context_capsule(context_capsule)
         if output_contract is not None:
-            fresh.bind_output_contract(output_contract)
-        return fresh
+            self.bind_output_contract(output_contract)
 
     @contextlib.contextmanager
     def _exclusive_access(self) -> Iterator[None]:
@@ -1264,14 +1204,7 @@ class DaytonaCodeInterpreter:
                             if _is_context_verification_failure(result.feedback)
                             else "HostSetupError",
                         )
-                    repair_np = self._reject_repeated_no_progress(normalized_code, result.feedback)
-                    if repair_np is not None:
-                        raise repair_np
                     raise _repair_error(result.feedback, category=result.category)
-
-                repair_np = self._reject_repeated_no_progress(normalized_code, result)
-                if repair_np is not None:
-                    raise repair_np
 
                 stdout_projector.finish(expected_final=_submitted_payload(result))
                 _flush_step_output(
@@ -1479,31 +1412,62 @@ class DaytonaCodeInterpreter:
             return wrap_final_output(raw.final)
         return truncate_head_tail(raw.stdout, max_chars=self._execution_output_cap)
 
-    def _reject_repeated_no_progress(self, normalized_code: str, result: Any) -> CodeExecutionError | None:
-        if is_final_output(result):
-            self._last_execution = None
-            self._no_progress_repair_used = False
-            return None
-        current = (normalized_code, str(result))
-        if current == self._last_execution:
-            if not self._no_progress_repair_used:
-                self._no_progress_repair_used = True
-                return _repair_error(
-                    "Repeated interpreter action produced no progress. "
-                    "Choose a different action, use the existing output, or call SUBMIT.",
-                    category="no_progress",
-                )
-            raise RunNoProgressError
-        self._last_execution = current
-        self._no_progress_repair_used = False
-        return None
-
 
 def hashlib_sha256(data: bytes | str) -> str:
     import hashlib
 
     raw = data.encode("utf-8") if isinstance(data, str) else bytes(data)
     return hashlib.sha256(raw).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxInvocationFactory:
+    """Remote configuration; DSPy owns each interpreter created by an invocation."""
+
+    sandbox: Any
+    loop: asyncio.AbstractEventLoop
+    dispatcher: SyncBridgeDispatcher | None = None
+    execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS
+    run_id: Any | None = None
+    call_index: int | None = None
+    timeout_s: int | None = None
+    fleet_host_tool_dispatch_available = True
+    broker_acknowledges_tools = True
+    supports_sandbox_serializable_inputs = True
+    execution_instructions = DAYTONA_EXECUTION_INSTRUCTIONS
+
+    def __call__(self, **invocation: Any) -> DaytonaCodeInterpreter:
+        backend = sandbox_backend(
+            self.sandbox,
+            loop=self.loop,
+            dispatcher=self.dispatcher,
+            timeout_s=self.timeout_s,
+            deadline_monotonic=invocation.pop("deadline_monotonic", None),
+        )
+        interpreter = DaytonaCodeInterpreter(
+            backend=backend,
+            execution_output_cap=self.execution_output_cap,
+            **invocation,
+        )
+        if self.run_id is not None:
+            interpreter.bind_run_scratch(self.run_id, call_index=self.call_index)
+        return interpreter
+
+    def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
+        """The factory retains no invocation interpreters or brokers to shut down."""
+
+
+def sandbox_interpreter_factory(
+    sandbox: Any,
+    *,
+    loop: asyncio.AbstractEventLoop,
+    dispatcher: SyncBridgeDispatcher | None = None,
+    execution_output_cap: int = DEFAULT_EXECUTION_OUTPUT_CHARS,
+    run_id: Any | None = None,
+    call_index: int | None = None,
+    timeout_s: int | None = None,
+) -> SandboxInvocationFactory:
+    return SandboxInvocationFactory(sandbox, loop, dispatcher, execution_output_cap, run_id, call_index, timeout_s)
 
 
 def sandbox_backend(
@@ -1782,12 +1746,9 @@ class _DSPySyncSandboxView:
         dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         owner = _SyncBridgeLoop(caller_loop=loop, dispatcher=dispatcher)
-        if hasattr(sandbox, "code_interpreter"):
-            self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
-        if hasattr(sandbox, "process"):
-            self.process = _SyncProcess(sandbox.process, owner, loop)
-        if hasattr(sandbox, "fs"):
-            self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
+        self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
+        self.process = _SyncProcess(sandbox.process, owner, loop)
+        self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
         self._sandbox = sandbox
         self._loop = loop
         self._owner = owner
