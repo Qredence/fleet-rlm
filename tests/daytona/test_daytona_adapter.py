@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -301,7 +301,7 @@ def test_typed_backend_context_accesses_are_drained_even_on_execution_error(monk
 
 def test_inprocess_stdout_reaches_adapter_output_projection() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     observed: list[object] = []
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -327,9 +327,12 @@ def test_validated_root_submit_output_uses_reserve_without_bypassing_byte_limit(
     def broken_observer(_event):
         raise RuntimeError("observer unavailable")
 
-    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), output_fields=[{"name": "answer"}])
-    interpreter = template.new_invocation(
-        turn_budget=turn, root_finalization=root_finalization, observer=broken_observer
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(),
+        output_fields=[{"name": "answer"}],
+        turn_budget=turn,
+        root_finalization=root_finalization,
+        observer=broken_observer,
     )
     try:
         if root_finalization and limit:
@@ -342,7 +345,6 @@ def test_validated_root_submit_output_uses_reserve_without_bypassing_byte_limit(
             assert failure.value.dimension == expected
     finally:
         interpreter.shutdown()
-        template.shutdown()
 
 
 def test_reserve_exemption_requires_validated_finalization_code(monkeypatch) -> None:
@@ -374,86 +376,6 @@ def test_public_output_classifies_dspy_execution_errors_before_interpreter_error
 
     assert interpreter._public_output(CodeExecutionError("recoverable")) == "Execution error"
     assert interpreter._public_output(CodeInterpreterError("terminal")) == "Execution failed"
-
-
-def test_factory_created_adapter_is_invocation_scoped_and_does_not_close_retained_backend() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-
-    retained_backend = InProcessInterpreterBackend()
-    retained = DaytonaCodeInterpreter(backend=retained_backend)
-
-    fresh = retained.new_invocation()
-    fresh.shutdown()
-
-    assert fresh is not retained
-    assert retained_backend.closed is False
-    assert retained.execute("value = 1") == ""
-
-
-def test_factory_created_adapter_keeps_run_bindings_off_retained_template() -> None:
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-
-    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    observed: list[object] = []
-    observer = observed.append
-
-    fresh = retained.new_invocation(observer=observer, turn_request="one isolated turn")
-
-    assert fresh._observer is observer
-    assert fresh._turn_request == "one isolated turn"
-    assert retained._observer is None
-    assert retained._turn_request is None
-
-
-def test_new_invocation_timeout_override_scopes_only_the_fresh_backend() -> None:
-    from fleet_rlm.daytona.interpreter import (
-        DaytonaCodeInterpreter,
-        _SandboxProcessBackend,
-    )
-
-    retained = DaytonaCodeInterpreter(
-        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
-    )
-
-    fresh = retained.new_invocation(timeout_s=45)
-    assert fresh._backend.timeout_s == 45
-    assert retained._backend.timeout_s == 300
-
-    inherited = retained.new_invocation()
-    assert inherited._backend.timeout_s == 300
-
-
-def test_new_invocation_rejects_non_positive_timeout_override() -> None:
-    from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import (
-        DaytonaCodeInterpreter,
-        _SandboxProcessBackend,
-    )
-
-    retained = DaytonaCodeInterpreter(
-        backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace()), timeout_s=300)
-    )
-
-    with pytest.raises(DaytonaAdapterError, match="execution timeout must be positive") as caught:
-        retained.new_invocation(timeout_s=0)
-    assert caught.value.cause_type == "InterpreterConfigurationError"
-
-
-def test_new_invocation_deadline_uses_remaining_turn_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, _SandboxProcessBackend
-
-    clock = {"now": 100.0}
-    monkeypatch.setattr("fleet_rlm.daytona.interpreter.time.monotonic", lambda: clock["now"])
-    retained = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=SimpleNamespace())))
-    fresh = retained.new_invocation(deadline_monotonic=1900.0)
-    assert fresh._backend._action_timeout() == 1800.0
-    clock["now"] = 1900.0
-    with pytest.raises(DaytonaAdapterError, match="deadline exceeded"):
-        fresh._backend.run("print('must not dispatch')")
-    assert fresh._backend.broker is None
-    with pytest.raises(DaytonaAdapterError, match="deadline must be finite"):
-        retained.new_invocation(deadline_monotonic=float("nan"))
 
 
 def test_execution_error_preserves_bounded_sanitized_stdout_and_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -494,7 +416,7 @@ def test_new_invocation_admission_refuses_the_next_action() -> None:
         if refused["now"]:
             raise TimeoutError("recursive child deadline exceeded")
 
-    child = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()).new_invocation(admission=admission)
+    child = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), admission=admission)
     child.execute("value = 1")
     refused["now"] = True
     # The refusal reaches the caller unchanged and the refused code never runs.
@@ -529,8 +451,9 @@ async def test_async_host_tool_runs_on_application_loop_through_bridge() -> None
         assert asyncio.get_running_loop() is loop
         return "bridged"
 
-    template = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), tools={"tool": tool})
-    interpreter = template.new_invocation(async_bridge=_SyncBridgeLoop(caller_loop=loop))
+    interpreter = DaytonaCodeInterpreter(
+        backend=InProcessInterpreterBackend(), tools={"tool": tool}, async_bridge=_SyncBridgeLoop(caller_loop=loop)
+    )
     assert await asyncio.to_thread(interpreter.execute, "_out = tool()") == "bridged"
     result = await asyncio.to_thread(interpreter.execute, "SUBMIT(answer=tool())")
     assert result.output == {"answer": "bridged"}
@@ -630,7 +553,7 @@ def test_strict_shutdown_retries_real_broker_session_deletion(error_type: type[E
 
 def test_lease_release_is_idempotent() -> None:
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter
-    from fleet_rlm.daytona.runtime import InterpreterLease
+    from fleet_rlm.daytona.leases import InterpreterLease
 
     backend = _FakeBackend()
     interp = DaytonaCodeInterpreter(backend=backend)
@@ -666,7 +589,7 @@ async def test_sync_sandbox_bridges_async_filesystem_from_dspy_worker() -> None:
             return path.encode()
 
     sandbox = sync_sandbox(
-        SimpleNamespace(fs=AsyncFilesystem()),
+        SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=AsyncFilesystem()),
         asyncio.get_running_loop(),
     )
 
@@ -751,7 +674,9 @@ async def test_sync_sandbox_rejects_calls_from_owning_loop() -> None:
         async def download_file(self, path: str) -> bytes:
             return path.encode()
 
-    bridge = sync_sandbox(SimpleNamespace(fs=Fs()), asyncio.get_running_loop())
+    bridge = sync_sandbox(
+        SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=Fs()), asyncio.get_running_loop()
+    )
     with pytest.raises(DaytonaAdapterError, match="owning event loop"):
         bridge.fs.download_file("x")
 
@@ -769,7 +694,7 @@ async def test_async_volume_fs_normalizes_text_and_missing_files() -> None:
         async def delete_file(self, path: str) -> None:
             raise FileNotFoundError(path)
 
-    volume = AsyncDaytonaVolumeFS(SimpleNamespace(fs=Fs()))
+    volume = AsyncDaytonaVolumeFS(SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=Fs()))
     assert await volume.read_bytes("text") == b"text"
     assert await volume.exists("text") is True
     assert await volume.exists("missing") is False
@@ -787,7 +712,9 @@ async def test_sync_sandbox_bridges_workspace_metadata_operations() -> None:
         async def create_folder(self, path: str, mode: str):
             return path, mode
 
-    bridge = sync_sandbox(SimpleNamespace(fs=Fs()), asyncio.get_running_loop())
+    bridge = sync_sandbox(
+        SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=Fs()), asyncio.get_running_loop()
+    )
     assert await asyncio.to_thread(bridge.fs.get_file_info, "/workspace/a") == {"path": "/workspace/a"}
     assert await asyncio.to_thread(bridge.fs.create_folder, "/workspace/a") == ("/workspace/a", "755")
 
@@ -812,7 +739,11 @@ def test_run_scratch_cleanup_calls_delete_once_and_keeps_failed_paths(outcome: s
             if outcome == "missing":
                 raise DaytonaFileNotFoundError("missing Run scratch", status_code=404)
 
-    interp = DaytonaCodeInterpreter(backend=_SandboxProcessBackend(SimpleNamespace(fs=Filesystem())))
+    interp = DaytonaCodeInterpreter(
+        backend=_SandboxProcessBackend(
+            SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=Filesystem())
+        )
+    )
     path = interp.bind_run_scratch(uuid4())
 
     if outcome == "body_type_error":
@@ -956,7 +887,7 @@ async def test_volume_creation_race_reconciles_without_another_create(err_name: 
         DaytonaInternalServerError,
     )
 
-    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+    from fleet_rlm.daytona.provider import LiveDaytonaVolumeClient
 
     cls_map = {
         "DaytonaConflictError": DaytonaConflictError,
@@ -986,7 +917,7 @@ async def test_volume_creation_failure_without_winner_keeps_the_create_error(
     )
 
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+    from fleet_rlm.daytona.provider import LiveDaytonaVolumeClient
 
     cls_map = {
         "DaytonaConflictError": DaytonaConflictError,
@@ -1023,7 +954,7 @@ async def test_volume_failures_are_normalized_without_retry(err_cls_name: str) -
     )
 
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.runtime import LiveDaytonaVolumeClient
+    from fleet_rlm.daytona.provider import LiveDaytonaVolumeClient
 
     cls_map = {
         "DaytonaAuthenticationError": DaytonaAuthenticationError,
@@ -1163,7 +1094,7 @@ async def test_live_daytona_sink_commit_failure_deletes_snapshot_through_adapter
 
     access, session_id, run_id = TurnAccess(uuid4(), uuid4()), uuid4(), uuid4()
     paths = VolumePaths.from_mount()
-    sandbox = type("Sandbox", (), {"fs": Fs()})()
+    sandbox = type("Sandbox", (), {"fs": Fs(), "code_interpreter": AsyncMock(), "process": AsyncMock()})()
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
     host_io = daytona_host_io_for_test_sandbox(
@@ -1270,8 +1201,8 @@ def test_backend_rechecks_deadline_after_startup_and_setup(monkeypatch: pytest.M
         def setup_source(self, code):
             return code
 
-        def execute(self, code, variables, *, timeout_s):
-            del code, variables
+        def execute(self, code, variables, *, timeout_s, on_stdout=None):
+            del code, variables, on_stdout
             calls.append(timeout_s)
             clock["now"] = 111.0
             return {}

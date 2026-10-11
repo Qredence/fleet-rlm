@@ -45,7 +45,6 @@ max_execution_output_chars = 4000
 max_execution_output_bytes = 2000000
 wrap_up_seconds = 300
 finalization_attempts = 2
-recursion_enabled = true
 recursion_max_calls = 4
 recursion_max_prompt_chars = 50000
 recursion_child_max_iters = 8

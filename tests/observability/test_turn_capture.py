@@ -19,7 +19,7 @@ import pytest
 
 from fleet_rlm.observability import turn_capture
 from fleet_rlm.observability.turn_capture import NullEventCapture, TurnCaptureStore
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     EventRecorder,
     RLMOutput,
     RunCompleted,

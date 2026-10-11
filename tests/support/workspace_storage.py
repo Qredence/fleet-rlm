@@ -218,8 +218,14 @@ class _InMemoryDaytonaFilesystem:
         )
         self.files[str(path)] = bytes(data)
 
-    async def delete_file(self, value: str) -> None:
-        self.files.pop(str(self._path(value)), None)
+    async def delete_file(self, value: str, *, recursive: bool = False) -> None:
+        path = self._path(value)
+        self.files.pop(str(path), None)
+        if recursive:
+            self.files = {key: data for key, data in self.files.items() if path not in PurePosixPath(key).parents}
+            self.directories = {
+                key for key in self.directories if PurePosixPath(key) != path and path not in PurePosixPath(key).parents
+            }
 
     async def list_files(self, value: str, *, depth: int = 1) -> list[dict[str, object]]:
         root = self._path(value)
@@ -254,7 +260,7 @@ class InMemoryDaytonaWorkspaceGateway:
         from types import SimpleNamespace
 
         self.fs = _InMemoryDaytonaFilesystem(mount_path)
-        self.sandbox = SimpleNamespace(fs=self.fs, process=SimpleNamespace())
+        self.sandbox = SimpleNamespace(code_interpreter=SimpleNamespace(), fs=self.fs, process=SimpleNamespace())
 
     @contextlib.asynccontextmanager
     async def open_sandbox(self, workspace_id: UUID, *, purpose: str) -> AsyncIterator[object]:

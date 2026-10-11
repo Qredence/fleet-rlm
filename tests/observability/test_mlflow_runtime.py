@@ -271,7 +271,7 @@ def test_app_lifespan_starts_tracing_and_closes_explicitly(monkeypatch: pytest.M
         assert calls == ["configure"]
         assert client.get("/openapi.json").status_code == 200
     assert calls == ["configure", "flush"]
-    assert app.state.mlflow_runtime.state is MLflowRuntimeState.CLOSED
+    assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.CLOSED
 
 
 def test_mlflow_runtime_start_failure_still_shuts_down_posthog(monkeypatch: pytest.MonkeyPatch) -> None:

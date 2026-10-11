@@ -2,7 +2,7 @@
 """Run the native semantic FastAPI and attachment durability live contracts.
 
 This operator command checks one committed candidate with the configured
-native-only configuration (``rlm.recursion_enabled=false``). It does not certify recursive execution, provider
+native-only task expectations. It does not certify recursive execution, provider
 containment, release readiness, or deployment.
 """
 
@@ -124,10 +124,9 @@ def _load_native_integrations() -> None:
 
 def _configuration_contract() -> Any:
     contract = load_configuration_environment_contract()
-    if contract.runtime_environment != "daytona" or contract.recursion_enabled:
+    if contract.runtime_environment != "daytona":
         raise FleetConfigurationError(
-            "native-only verification requires runtime.environment=daytona and rlm.recursion_enabled=false "
-            "in config/fleet.toml"
+            "native-only verification requires runtime.environment=daytona in config/fleet.toml"
         )
     return contract
 
@@ -520,7 +519,7 @@ def _native_main(argv: list[str] | None = None) -> int:
     receipt = {
         "schema": RECEIPT_SCHEMA,
         "candidate": candidate,
-        "policy": {"runtime_environment": contract.runtime_environment, "recursion_enabled": False, "models": models},
+        "policy": {"runtime_environment": contract.runtime_environment, "models": models},
         "timing": {"started_at": started_at, "finished_at": _utc_now()},
         "contracts": {
             "attachment_artifact_durability": {"passed": True, "evidence": durability_evidence},

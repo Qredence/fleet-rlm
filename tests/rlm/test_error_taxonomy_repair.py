@@ -11,7 +11,6 @@ import pytest
 
 from fleet_rlm.daytona.errors import ProviderRequestError
 from fleet_rlm.daytona.interpreter import BackendExecutionResult, DaytonaCodeInterpreter, OutputCallback
-from fleet_rlm.rlm.result import RunNoProgressError
 
 
 class _ScriptBackend:
@@ -158,18 +157,16 @@ def test_typed_backend_terminal_error_is_not_repairable(category: str) -> None:
     interpreter.shutdown()
 
 
-def test_no_progress_has_one_native_repair_then_terminal_bound() -> None:
-    from dspy.primitives.code_interpreter import CodeExecutionError
-
-    from fleet_rlm.daytona.interpreter import InProcessInterpreterBackend
-
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    assert interpreter.execute("_out = 'same'") == "same"
-    with pytest.raises(CodeExecutionError, match="Repeated interpreter action produced no progress"):
-        interpreter.execute("_out = 'same'")
-    with pytest.raises(RunNoProgressError, match="repeated tool calls made no progress"):
-        interpreter.execute("_out = 'same'")
-    assert interpreter.execute("_out = 'different'") == "different"
+def test_repeated_successful_actions_return_their_results() -> None:
+    backend = _ScriptBackend(
+        *(BackendExecutionResult(stdout="same") for _ in range(3)),
+        BackendExecutionResult(stdout="different"),
+    )
+    interpreter = DaytonaCodeInterpreter(backend=backend)
+    for _ in range(3):
+        assert interpreter.execute("print('same')") == "same"
+    assert interpreter.execute("print('different')") == "different"
+    interpreter.shutdown()
 
 
 def test_repair_text_is_bounded_and_safe_for_native_context() -> None:

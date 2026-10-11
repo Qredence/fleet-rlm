@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from fleet_rlm.api.sse import AISDKUIProjector
 from fleet_rlm.api.ui_stream import FleetUIMessageChunkAdapter, fleet_ui_chunk_payload
-from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
+from fleet_rlm.rlm.event_types import EventRecorder, RunCompleted, RunStarted
 from tests.support.testing_app import create_testing_app
 
 # --- from test_ui_stream.py -------------------------------------------

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import inspect
 import logging
 from collections.abc import AsyncIterator, Callable, Collection, Mapping
 from contextlib import asynccontextmanager
@@ -247,17 +246,7 @@ class DaytonaWorkspaceGateway:
     ) -> AsyncIterator[Any]:
         """Yield one verified mounted Sandbox for a bounded I/O operation group."""
         try:
-            open_fn = self._runtime.open_workspace_sandbox
-            kwargs: dict[str, Any] = {"purpose": purpose}
-            try:
-                sig = inspect.signature(open_fn)
-                if "reuse_warm" in sig.parameters or any(
-                    p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-                ):
-                    kwargs["reuse_warm"] = True
-            except (TypeError, ValueError):
-                pass
-            async with open_fn(workspace_id, **kwargs) as sandbox:
+            async with self._runtime.open_workspace_sandbox(workspace_id, purpose=purpose, reuse_warm=True) as sandbox:
                 yield sandbox
         except (
             ValueError,

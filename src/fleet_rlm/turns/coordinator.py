@@ -17,7 +17,7 @@ from fleet_rlm.observability.tracing import (
     turn_trace,
 )
 from fleet_rlm.observability.turn_capture import EventCapture, EventCaptureSource
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     TERMINAL_DETAIL_TYPES,
     EventRecorder,
     RunCompleted,

@@ -29,20 +29,15 @@ from fleet_rlm.daytona.interpreter import (
     sync_sandbox,
     validate_json_value,
 )
-from fleet_rlm.daytona.runtime import (
+from fleet_rlm.daytona.leases import (
     AbsenceConfirmation,
     AbsenceProbeError,
     AbsenceTimeout,
     DaytonaAdmission,
     cleanup_child_runtime_async,
     confirm_absence,
-    create_folder,
-    delete_file,
-    get_file_info,
-    list_files,
-    read_file,
-    write_file,
 )
+from fleet_rlm.daytona.provider import create_folder, delete_file, get_file_info, list_files, read_file, write_file
 from fleet_rlm.rlm.recursion import ChildRuntimeCleanupError
 
 # ============================================================================
@@ -115,7 +110,7 @@ class _SlowAsyncFS:
 def test_sync_bridge_massive_concurrency() -> None:
     """Stress test: 50 concurrent threads executing sync bridge operations."""
     fs = _SlowAsyncFS()
-    sandbox_double = SimpleNamespace(fs=fs)
+    sandbox_double = SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=fs)
 
     with _registered_bridge() as (_server, dispatcher):
         bridge = sync_sandbox(sandbox_double, asyncio.new_event_loop(), dispatcher)
@@ -265,7 +260,11 @@ def test_sync_bridge_service_loop_stopped_mid_execution() -> None:
 def test_sync_bridge_direct_loop_reentrancy_fails_typed() -> None:
     """Calling synchronous bridge from the service loop itself fails fast."""
     with _registered_bridge() as (server, dispatcher):
-        bridge = sync_sandbox(SimpleNamespace(fs=_SlowAsyncFS()), server.loop, dispatcher)
+        bridge = sync_sandbox(
+            SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=_SlowAsyncFS()),
+            server.loop,
+            dispatcher,
+        )
 
         async def inner_call() -> bytes:
             return bridge.fs.download_file("/reentrancy")
@@ -510,7 +509,7 @@ async def test_child_runtime_cleanup_leak_free_on_failure() -> None:
     with pytest.raises(ChildRuntimeCleanupError):
         await cleanup_child_runtime_async(
             sandbox_id="child-sb-leak-test",
-            sandbox=SimpleNamespace(fs=MagicMock()),
+            sandbox=SimpleNamespace(code_interpreter=AsyncMock(), process=AsyncMock(), fs=MagicMock()),
             platform=mock_platform,
             permit=permit,
             mount_path="/workspace",
@@ -569,23 +568,6 @@ async def test_fs_create_folder_and_get_file_info():
     info = await get_file_info(mock_sandbox, "/workspace/test.txt")
     assert info == mock_info
     mock_fs.get_file_info.assert_awaited_once_with("/workspace/test.txt")
-
-
-@pytest.mark.asyncio
-async def test_fs_list_files_fallback_on_type_error():
-    """Verify that list_files falls back to single-argument call when depth causes TypeError."""
-    mock_sandbox = MagicMock()
-    mock_fs = MagicMock()
-    mock_sandbox.fs = mock_fs
-
-    async def mock_list_files(_path: str, **kwargs: object) -> list[str]:
-        if "depth" in kwargs:
-            raise TypeError("unexpected keyword argument 'depth'")
-        return ["file_fallback.txt"]
-
-    mock_fs.list_files = mock_list_files
-    result = await list_files(mock_sandbox, "/workspace", depth=2)
-    assert result == ["file_fallback.txt"]
 
 
 def test_repair_category_from_multiline_traceback():

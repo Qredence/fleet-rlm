@@ -22,7 +22,7 @@ from fleet_rlm.daytona.interpreter import (
     DaytonaCodeInterpreter,
     sandbox_backend,
 )
-from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from fleet_rlm.optimization.curated_input import CuratedEvaluationStore
 from fleet_rlm.optimization.evidence import ValidatedStrictDaytonaProof
 from fleet_rlm.rlm.ownership import OwnedEffect, RunCleanupSupervisor
@@ -418,20 +418,19 @@ class StrictDaytonaEvaluationLifecycle:
         self._cleanup_records[record.sandbox_id] = record
         try:
             loop = asyncio.get_running_loop()
-            interpreter = DaytonaCodeInterpreter(
-                backend=sandbox_backend(
-                    sandbox,
-                    loop=loop,
-                    timeout_s=self._execution_timeout_seconds,
-                ),
-                tools={"read_curated_input": reader},
-                execution_output_cap=self._options.max_output_chars,
-            )
-            record.interpreter = interpreter
 
-            def interpreter_factory(interpreter: DaytonaCodeInterpreter = interpreter) -> DaytonaCodeInterpreter:
-                assert interpreter is not None
-                return interpreter.new_invocation()
+            def interpreter_factory() -> DaytonaCodeInterpreter:
+                interpreter = DaytonaCodeInterpreter(
+                    backend=sandbox_backend(
+                        sandbox,
+                        loop=loop,
+                        timeout_s=self._execution_timeout_seconds,
+                    ),
+                    tools={"read_curated_input": reader},
+                    execution_output_cap=self._options.max_output_chars,
+                )
+                record.interpreter = interpreter
+                return interpreter
 
             interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
             signature = _strict_evaluator_signature()

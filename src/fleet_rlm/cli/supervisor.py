@@ -299,7 +299,7 @@ def _wait_until_ready(
     raise SupervisorError(f"Fleet backend was not ready within {timeout:g}s; see {log_path}")
 
 
-def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
+def _stop_process_group(process: subprocess.Popen[bytes], *, timeout: float = 5.0) -> None:
     """Stop one owned child process group, escalating after a bounded wait."""
     if process.poll() is not None:
         return
@@ -308,7 +308,7 @@ def _stop_process_group(process: subprocess.Popen[bytes]) -> None:
     except ProcessLookupError:
         return
     try:
-        process.wait(timeout=5.0)
+        process.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
@@ -398,7 +398,7 @@ def _run_backend_and_tui(
             finally:
                 if tui is not None:
                     _stop_process_group(tui)
-                _stop_process_group(backend)
+                _stop_process_group(backend, timeout=120.0)
     finally:
         for signum, handler in previous_handlers.items():
             try:

@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import fleet_rlm.config.catalog as catalog
 import fleet_rlm.config.loader as config_loader
 import fleet_rlm.config.policy as config_policy
 import fleet_rlm.config.settings as config
@@ -75,7 +76,6 @@ _EXPECTED_INVENTORY: tuple[tuple[str, str, str, str, tuple[str, ...], str | None
         (),
         "rlm_max_execution_output_chars",
     ),
-    ("rlm.recursion_enabled", "RLM", "Enable recursive child RLMs", "boolean", (), "rlm_recursion_enabled"),
     ("rlm.recursion_max_calls", "RLM", "Recursive maximum calls", "number", (), "rlm_recursion_max_calls"),
     (
         "rlm.recursion_max_prompt_chars",
@@ -271,34 +271,34 @@ def test_policy_inventory_is_derived_from_the_schema_identically() -> None:
 
 def test_environment_reference_specs_reference_real_fields_and_follow_naming() -> None:
     policies = config._field_policies()
-    for spec in config._ENVIRONMENT_REFERENCE_SPECS:
+    for spec in catalog.ENVIRONMENT_REFERENCE_SPECS:
         assert spec.toml_path.endswith("_env")
         assert spec.resolves_to in policies
 
 
 def test_schema_build_rejects_reference_to_nonexistent_field(monkeypatch: pytest.MonkeyPatch) -> None:
-    bogus = config.EnvironmentReferenceSpec(
+    bogus = catalog.EnvironmentReferenceSpec(
         toml_path="storage.bogus_env",
         group="Storage",
         label="Bogus environment variable",
         rank=999,
         resolves_to="not_a_settings_field",
     )
-    monkeypatch.setattr(config, "_ENVIRONMENT_REFERENCE_SPECS", (*config._ENVIRONMENT_REFERENCE_SPECS, bogus))
+    monkeypatch.setattr(catalog, "ENVIRONMENT_REFERENCE_SPECS", (*catalog.ENVIRONMENT_REFERENCE_SPECS, bogus))
 
     with pytest.raises(config.FleetConfigurationError, match="not_a_settings_field"):
         config._build_field_specs()
 
 
 def test_schema_build_rejects_duplicate_ranks(monkeypatch: pytest.MonkeyPatch) -> None:
-    colliding = config.EnvironmentReferenceSpec(
+    colliding = catalog.EnvironmentReferenceSpec(
         toml_path="storage.colliding_env",
         group="Storage",
         label="Colliding environment variable",
         rank=0,
         resolves_to="database_url",
     )
-    monkeypatch.setattr(config, "_ENVIRONMENT_REFERENCE_SPECS", (*config._ENVIRONMENT_REFERENCE_SPECS, colliding))
+    monkeypatch.setattr(catalog, "ENVIRONMENT_REFERENCE_SPECS", (*catalog.ENVIRONMENT_REFERENCE_SPECS, colliding))
 
     with pytest.raises(config.FleetConfigurationError, match="duplicate policy inventory rank"):
         config._build_field_specs()
@@ -329,10 +329,11 @@ def test_committed_policy_loads_single_configuration(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(config_loader, "_CONFIG_PATH", policy)
     monkeypatch.setenv("DATABRICKS_TOKEN", "test-token")
     monkeypatch.setenv("FLEET_LLM_BASE_URL", "https://gateway.example.test/ai-gateway/mlflow/v1")
+    monkeypatch.delenv("FLEET_DATABASE_URL", raising=False)
     settings = config_loader.load_runtime_settings()
     assert settings.run_environment == "daytona"
     assert settings.root_model == settings.sub_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-    assert settings.rlm_recursion_enabled is True
+    assert "rlm_recursion_enabled" not in type(settings).model_fields
     assert settings.database_url is None  # Startup owns the database requirement.
 
 

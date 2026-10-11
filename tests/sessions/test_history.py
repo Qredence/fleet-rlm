@@ -1,28 +1,7 @@
 """P44 first-class durable Session History projection contract.
 
-The tests exercise, in the exact order below:
-
-1.  Failed, cancelled, timed-out, and uncommitted Turns are excluded.
-2.  Committed user/assistant records are included.
-3.  An empty committed-Turn list returns ``dspy.History(messages=[])``.
-4.  Round-trip: every emitted ``dspy.History`` message has exactly the
-    canonical ``{"request", "answer"}`` keys.
-5.  ``validate_legacy_records`` tolerates canonical dicts and rejects
-    non-canonical shapes.
-6.  Cross-Session isolation: records from another Session are not present.
-7.  Corrupt legacy payloads raise ``ValueError``.
-8.  ``dspy.History`` reuse: identical input yields deep-equal messages.
-9.  The returned object is exactly ``dspy.History`` (not a subclass or
-    Pydantic shadow).
-10. Store-level cross-Session isolation: a ``begin`` for one Session never
-    loads another Session's committed records (in-memory and SQL stores).
-11. A timed-out Turn persists only its durable terminal status — never a
-    Session History tombstone — and stays out of the committed History
-    projection (store → claim → ``claimed_history_records``).
-12. Failed and cancelled Turns are excluded end-to-end through
-    ``claimed_history_records``/``dspy_history_for_claim``.
-13. ``claimed_history_records`` excludes tombstone-bearing checkpoints whose
-    assistant messages carry failed/timed-out terminal metadata.
+The tests cover committed history projection, failure exclusion, exact DSPy
+History values, cross-Session isolation, replay, and bounded host-tool output.
 """
 
 from __future__ import annotations
@@ -52,7 +31,6 @@ from fleet_rlm.sessions.history import (
     committed_session_history_payload,
     to_canonical_history_records,
     to_dspy_history,
-    validate_legacy_records,
 )
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory
 from tests.support.turn_settlement import TestingRunSettlement
@@ -187,25 +165,6 @@ def test_cross_session_isolation_excludes_records_from_another_session() -> None
         {"request": "other request 1", "answer": "other answer 1"},
         {"request": "other request 2", "answer": "other answer 2"},
     ]
-
-
-def test_corrupt_legacy_payloads_raise_value_error() -> None:
-    """Corrupt legacy payloads fail closed with ``ValueError`` (no silent truncation)."""
-    corrupt_payloads: tuple[Any, ...] = (
-        {"request": "r", "answer": "a", "extra": "x"},
-        {"answer": "only answer"},
-        {"request": "only request"},
-        {"request": 1, "answer": "answer"},
-        {"request": "request", "answer": 2},
-        {"request": "request", "answer": "answer", "trajectory": "leak"},
-        [{"request": "r", "answer": "a"}],
-        "raw-string-payload",
-        42,
-        None,
-    )
-    for payload in corrupt_payloads:
-        with pytest.raises(ValueError):
-            validate_legacy_records([payload])  # type: ignore[list-item]
 
 
 @pytest.mark.asyncio

@@ -34,6 +34,8 @@ from fleet_rlm.rlm.events import (
     ToolEventView,
     observe_tool,
 )
+from fleet_rlm.rlm.execution import DelegationPolicy
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
@@ -184,8 +186,8 @@ def _in_process_child_runtime(call_index: int, *, profile: str):
     Returns:
         ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
+    from fleet_rlm.daytona.children import ChildRuntimeLease
     from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-    from fleet_rlm.daytona.runtime import ChildRuntimeLease
 
     interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
@@ -247,6 +249,7 @@ def test_turn_trace_enabled_sets_tags_and_trace_id(monkeypatch: pytest.MonkeyPat
             "metadata": {
                 "fleet.run_id": str(run_id),
                 "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
+                "mlflow.source.name": "fleet-rlm",
             },
         }
     assert calls.update_kwargs[-1] == {"state": "OK"}
@@ -353,13 +356,14 @@ async def test_rlm_stream_delays_root_trace_until_owned_worker_drains(monkeypatc
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     runner = RLMRunner(program_builder=Factory().create)
     stream = None
@@ -399,7 +403,7 @@ async def test_turn_disconnect_records_cancellation_before_owned_worker_drains(
 ) -> None:
     """A client disconnect records cancellation promptly while its owned RLM worker drains."""
     calls = _install_fake_mlflow(monkeypatch)
-    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.event_types import RLMReasoning
     from fleet_rlm.rlm.execution import (
         ExecutionRuntime,
         RLMExecutionContext,
@@ -476,13 +480,14 @@ async def test_turn_disconnect_records_cancellation_before_owned_worker_drains(
                     attachments=(),
                 ),
                 execution=ExecutionRuntime(
-                    models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+                    models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
                     options=RLMOptions(),
                     deadline=asyncio.get_running_loop().time() + 10,
-                    interpreter=None,
+                    interpreter=configured_invocation_factory(None),
                     cancellation_requested=not_cancelled,
                 ),
                 capabilities=EmptyCapabilities(),
+                delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
             )
             return Prepared(context)
 
@@ -576,6 +581,7 @@ def test_turn_trace_preparation_phase_records_phase_tag_without_link(
     assert tagged[0]["metadata"] == {
         "fleet.run_id": str(run_id),
         "fleet.app_version": turn_tracing._FLEET_APP_VERSION,
+        "mlflow.source.name": "fleet-rlm",
         "fleet.trace_phase": "preparation",
     }
     # One-way link: preparation traces never carry the execution link key.
@@ -1469,7 +1475,7 @@ def test_annotate_turn_metadata_is_noop_without_active_turn_trace(monkeypatch: p
 @pytest.mark.asyncio
 async def test_turn_execution_records_skill_versions_as_they_load(monkeypatch: pytest.MonkeyPatch) -> None:
     from fleet_rlm import turns as turn_module
-    from fleet_rlm.rlm.events import EventRecorder, SkillLoaded
+    from fleet_rlm.rlm.event_types import EventRecorder, SkillLoaded
     from fleet_rlm.turns import TurnRuntime
 
     run_id = uuid4()
@@ -1725,6 +1731,9 @@ def _make_preparer(*, environments: Any = None) -> Any:
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self) -> tuple[Any, ...]:
@@ -1754,7 +1763,13 @@ def _make_preparer(*, environments: Any = None) -> Any:
                 return None
 
             sink = Sink()
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     return TestingRunPreparer(
         models=placeholder_bundle(),
@@ -1951,7 +1966,7 @@ async def _run_success_turn(
     tracing_enabled: bool,
     expose_trace_id: bool,
 ) -> list[Any]:
-    from fleet_rlm.rlm.events import EventRecorder, RunStarted, Status
+    from fleet_rlm.rlm.event_types import EventRecorder, RunStarted, Status
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
@@ -2023,7 +2038,7 @@ def _trace_root_updates(calls: SimpleNamespace) -> list[dict[str, Any]]:
 
 @pytest.mark.asyncio
 async def test_execution_trace_links_preparation_trace_id_one_way(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.rlm.events import RunCompleted, RunStarted
+    from fleet_rlm.rlm.event_types import RunCompleted, RunStarted
 
     calls = _install_phase_link_fake_mlflow(monkeypatch)
     monkeypatch.setattr(turn_tracing, "_TRACKING_URI_APPLIED", "http://127.0.0.1:5001")
@@ -2080,7 +2095,7 @@ async def test_preparation_link_fail_soft_for_legacy_prepared_double(monkeypatch
 
 @pytest.mark.asyncio
 async def test_hidden_expose_trace_id_keeps_link_out_of_sse(monkeypatch: pytest.MonkeyPatch) -> None:
-    from fleet_rlm.rlm.events import RunCompleted, RunStarted
+    from fleet_rlm.rlm.event_types import RunCompleted, RunStarted
 
     calls = _install_phase_link_fake_mlflow(monkeypatch)
     events = await _run_success_turn(

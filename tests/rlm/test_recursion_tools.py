@@ -21,11 +21,11 @@ import pytest
 from pydantic import ValidationError
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.children import ChildRuntimeLease, ChildRuntimeLeaseState
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.observability.tracing import start_turn_span
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget
-from fleet_rlm.rlm.events import ChildProgress, RunCompleted, Status, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.event_types import ChildProgress, RunCompleted, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -55,7 +55,7 @@ from fleet_rlm.skills.catalog import build_bundled_skill_catalog, stable_skill_i
 from fleet_rlm.skills.tools import SkillToolHost
 from fleet_rlm.workspace.errors import FilesystemToolError
 from tests.live.test_daytona_recursive_batch import _ChildEvidence, _install_batch_answer_capture
-from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
+from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities, configured_invocation_factory, invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
@@ -103,15 +103,26 @@ def _executor(
         Returns:
                 ChildRuntimeLease: A lease for the newly created child runtime.
         """
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        if factory_calls is not None:
-            factory_calls.append(interpreter)
+        created: list[DaytonaCodeInterpreter] = []
+
+        def interpreter_factory(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+            created.append(interpreter)
+            if factory_calls is not None:
+                factory_calls.append(interpreter)
+            return interpreter
+
+        def close():
+            for interpreter in created:
+                interpreter.shutdown()
+
         return ChildRuntimeLease(
-            interpreter,
+            interpreter_factory,
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            close,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -154,7 +165,7 @@ def _context(
             models=RLMModelBundle(root, sub),
             options=root_options or RLMOptions(max_iters=6, max_llm_calls=6),
             deadline=deadline if deadline is not None else time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
@@ -175,14 +186,14 @@ class _SpyInvocationFactory:
 
     def __call__(self, call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         lease = self.recorder.factory(call_index, profile=profile)
-        real_new_invocation = lease.interpreter.new_invocation
+        real_new_invocation = lease.interpreter
 
         @functools.wraps(real_new_invocation)
         def recording_new_invocation(**kwargs: object) -> object:
             self.invocation_kwargs.append(dict(kwargs))
             return real_new_invocation(**kwargs)
 
-        lease.interpreter.new_invocation = recording_new_invocation
+        lease.interpreter = recording_new_invocation
         return lease
 
 
@@ -221,13 +232,17 @@ def test_child_inherits_only_loaded_skill_guidance_and_private_resources(
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:
         assert profile == "semantic-child"
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+        def invocation(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+
         return ChildRuntimeLease(
-            interpreter,
+            invocation,
             f"skill-child-{call_index}",
             "",
             "",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda files: staged.setdefault(call_index, dict(files)),
         )
 
@@ -500,13 +515,16 @@ def test_child_failure_categories_distinguish_harvest_and_declared_output(
         raise ValueError(f"child result file is missing or not a file: {paths[0]}")
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        def invocation(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+
         return ChildRuntimeLease(
-            interpreter,
+            invocation,
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=missing_results,
         )
@@ -804,14 +822,18 @@ def test_recursive_batched_tool_preserves_order_and_bounds_child_concurrency() -
     events: list[object] = []
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        created.append(interpreter)
+        def invocation(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+            created.append(interpreter)
+            return interpreter
+
         return ChildRuntimeLease(
-            interpreter,
+            invocation,
             f"batch-child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1032,20 +1054,11 @@ def test_recursive_tool_closes_lease_when_authority_is_revoked_after_acquisition
 
 
 def test_recursive_tool_discards_result_when_authority_is_revoked_after_execution() -> None:
-    checks = 0
     created: list[DaytonaCodeInterpreter] = []
     events: list[object] = []
 
     def is_authorized() -> bool:
-        """
-        Determines whether authorization remains valid for the next check.
-
-        Returns:
-                bool: `True` for the first six checks and `False` thereafter.
-        """
-        nonlocal checks
-        checks += 1
-        return checks < 7
+        return not created or not created[0]._shutdown
 
     executor = _executor(
         [{"reasoning": "submit", "code": "SUBMIT(answer='child-secret', evidence=[], gaps=[], result_files=[])"}],
@@ -1092,13 +1105,16 @@ def test_turn_bound_batch_straggler_stops_at_its_next_action(monkeypatch: pytest
         return LoopingChild(kwargs["interpreter_factory"])  # type: ignore[arg-type]
 
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        def invocation(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+
         return ChildRuntimeLease(
-            interpreter,
+            invocation,
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1175,13 +1191,17 @@ def _action_bound_executor(
     def factory(call_index: int, *, profile: str = "semantic-child") -> ChildRuntimeLease:  # noqa: ARG001
         if call_indexes is not None:
             call_indexes.append(call_index)
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+
+        def invocation(**configuration):
+            configuration.pop("deadline_monotonic", None)
+            return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+
         return ChildRuntimeLease(
-            interpreter,
+            invocation,
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1301,7 +1321,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1318,7 +1338,7 @@ def test_recursive_batch_preserves_order_when_workers_finish_out_of_order(
     outcomes = executor.batched_tool(tasks=[{"task": task} for task in ["A", "B", "C"]])
     assert [item["answer"] for item in outcomes] == ["A", "B", "C"]
     assert finish_order == ["B", "C", "A"]
-    assert all(lease.interpreter._shutdown for lease in created)
+    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
     assert executor.summary().recursive_children_completed == 3
 
 
@@ -1356,7 +1376,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1373,7 +1393,7 @@ def test_recursive_batch_wraps_failure_when_all_children_are_done(
     outcomes = executor.batched_tool(tasks=[{"task": task} for task in ["fail", "ok"]])
     assert [item["status"] for item in outcomes] == ["failed", "completed"]
     executor.wait_owned()
-    assert all(lease.interpreter._shutdown for lease in created)
+    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
     # Only the successful child counts as completed; the failed one is failed.
     assert executor.summary().recursive_children_completed == 1
     assert executor.summary().recursive_children_failed == 1
@@ -1541,7 +1561,7 @@ def test_recursive_batch_ordinary_failure_waits_for_successful_sibling_cleanup(
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1578,7 +1598,7 @@ def test_recursive_batch_ordinary_failure_waits_for_successful_sibling_cleanup(
     assert "error" not in result
     assert [item["status"] for item in result["outcomes"]] == ["failed", "completed"]
     executor.wait_owned()
-    assert all(lease.interpreter._shutdown for lease in created)
+    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
     executor.raise_if_cleanup_failed()
 
 
@@ -1729,7 +1749,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
             f"child-{call_index}",
             "test-volume",
             f"recursive/test-workspace/test-run/{call_index}",
-            interpreter.shutdown,
+            lambda: None,
             _stage_files=lambda _files: None,
             _read_result_files=lambda _paths: {},
         )
@@ -1757,7 +1777,7 @@ def test_recursive_batch_cancels_queued_children_before_they_acquire_a_lease(
         release.set()
         executor.wait_owned()
 
-    assert all(lease.interpreter._shutdown for lease in created)
+    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in created)
     assert executor.summary().call_count == 3
     assert executor.summary().recursive_children_started == 1
     # The released straggler fails its batch-cancellation check: not completed.
@@ -1863,7 +1883,7 @@ def test_child_call_wait_is_fenced_by_the_absolute_deadline(
     release.set()
     executor.wait_owned()
     assert recorder.close_calls.get(1) == 1
-    assert recorder.interpreters[1]._shutdown
+    assert recorder.leases[0].state is ChildRuntimeLeaseState.CLOSED
     failed = [event for event in events if isinstance(event, Status) and event.status == "child_failed"]
     assert len(failed) == 1
     assert failed[0].message is not None
@@ -2091,11 +2111,11 @@ async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=3, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=never_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            recursive_options=RecursiveRLMOptions(max_calls=2),
             child_runtime_factory=recorder.factory,
         ),
         capabilities=EmptyCapabilities(),
@@ -2123,7 +2143,7 @@ async def test_claim_loss_during_blocked_child_discards_result_and_fails_parent(
     assert recorder.call_indexes == [1]
     await asyncio.wait_for(stream.wait_owned(), timeout=10)
     assert recorder.close_calls.get(1) == 1
-    assert all(lease.interpreter._shutdown for lease in recorder.leases)
+    assert all(lease.state is ChildRuntimeLeaseState.CLOSED for lease in recorder.leases)
 
 
 # --- Policy surface and public composition contracts ---
@@ -2150,7 +2170,7 @@ def test_public_composition_fixes_root_depth_zero() -> None:
     assert [status.status for status in statuses] == ["child_started", "child_completed"]
     assert all("recursive_depth=1" in (status.message or "") for status in statuses)
 
-    options = RecursiveRLMOptions(enabled=True)
+    options = RecursiveRLMOptions()
     assert not any("depth" in field.name for field in dataclasses.fields(options))
     with pytest.raises(TypeError):
         RecursiveRLMOptions(depth=1)  # type: ignore[call-arg]
@@ -2177,7 +2197,7 @@ async def test_public_runner_first_child_reservation_reports_depth_one() -> None
         root=root,
         sub=sub,
         factory=recorder.factory,
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+        recursive_options=RecursiveRLMOptions(max_calls=2),
         root_options=RLMOptions(max_iters=6, max_llm_calls=6),
     )
 
@@ -2267,10 +2287,7 @@ def test_child_batch_attempt_fails_without_reservation_or_allocation() -> None:
     assert summary.recursive_batch_calls == 0
 
 
-@pytest.mark.parametrize("enabled", [False, True])
-def test_root_receives_exactly_the_approved_recursive_tools_through_public_composition(
-    enabled: bool,
-) -> None:
+def test_root_receives_exactly_the_approved_recursive_tools_through_public_composition() -> None:
     captured: dict[str, object] = {}
 
     def capturing_builder(**kwargs: object) -> object:
@@ -2284,7 +2301,7 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
         root=root,
         sub=sub,
         factory=ChildLeaseRecorder().factory,
-        recursive_options=RecursiveRLMOptions(enabled=enabled),
+        recursive_options=RecursiveRLMOptions(),
         root_options=RLMOptions(max_iters=2, max_llm_calls=2),
         runner_factory=capturing_builder,
     )
@@ -2297,7 +2314,7 @@ def test_root_receives_exactly_the_approved_recursive_tools_through_public_compo
     asyncio.run(drive())
 
     tool_names = [str(tool.name) for tool in (captured.get("tools") or ())]
-    assert tool_names == (["rlm_query", "rlm_query_batched"] if enabled else [])
+    assert tool_names == ["rlm_query", "rlm_query_batched"]
 
 
 @pytest.mark.asyncio
@@ -2354,7 +2371,7 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
         root=root,
         sub=sub,
         factory=recorder.factory,
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+        recursive_options=RecursiveRLMOptions(max_calls=1),
         root_options=RLMOptions(max_iters=4, max_llm_calls=4),
         runner_factory=root_builder,
     )
@@ -2374,7 +2391,7 @@ async def test_root_and_child_are_exact_native_rlm_with_owned_invocations() -> N
     assert child_types == [dspy.RLM]
     assert len(root_invocations) == 1
     assert len(child_interpreters) == 1
-    assert child_interpreters[0] is not recorder.interpreters[1]
+    assert child_interpreters[0] is recorder.interpreters[1]
     assert child_interpreters[0]._shutdown
     assert root_invocations[0][1] is None
     assert "request" in root_invocations[0][2]

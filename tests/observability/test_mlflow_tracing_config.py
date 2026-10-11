@@ -205,32 +205,16 @@ def test_configure_tracing_purpose_conflict_propagates_configuration_error(
 
 
 def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
-    class Span:
-        def __init__(self) -> None:
-            self.inputs: dict[str, object] = {"token": "real-secret", "body": "x" * 2_000}
-            self.outputs: dict[str, object] = {"answer": "y" * 2_000}
-            self.attributes: dict[str, object] = {"api_key": "real-secret", "kind": "tool"}
+    from mlflow.entities import LiveSpan
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
 
-        def set_inputs(self, value: object) -> None:
-            """Set the span inputs to the specified value.
-
-            Parameters:
-                value (object): The inputs associated with the span.
-            """
-            self.inputs = value
-
-        def set_outputs(self, value: object) -> None:
-            self.outputs = value
-
-        def set_attributes(self, value: dict[str, object]) -> None:
-            """Set the span attributes to the provided mapping.
-
-            Parameters:
-                value (dict[str, object]): Attributes to associate with the span.
-            """
-            self.attributes = value
-
-    span = Span()
+    provider = TracerProvider(resource=Resource({}))
+    otel = provider.get_tracer("fleet-sanitizer-test").start_span("operation")
+    span = LiveSpan(otel, trace_id="tr-0123456789abcdef0123456789abcdef")
+    span.set_inputs({"token": "real-secret", "body": "x" * 2_000})
+    span.set_outputs({"answer": "y" * 2_000})
+    span.set_attributes({"api_key": "real-secret", "kind": "tool"})
 
     tracing._sanitize_mlflow_span(span)
 
@@ -239,6 +223,8 @@ def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
     assert span.inputs["body"] == "x" * 2_000
     assert span.outputs["answer"] == "y" * 2_000
     assert span.attributes["api_key"] == "[redacted]"
+    span.end()
+    provider.shutdown()
 
 
 def test_trace_sanitizer_preserves_authorized_content_and_input_key_names(

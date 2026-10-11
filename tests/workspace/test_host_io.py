@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -40,9 +41,15 @@ class _Runtime:
         self.filesystem = _Fs()
 
     @asynccontextmanager
-    async def open_workspace_sandbox(self, workspace_id, *, purpose):
+    async def open_workspace_sandbox(self, workspace_id, *, purpose, reuse_warm):
+        assert reuse_warm is True
         del workspace_id, purpose
-        sandbox = SimpleNamespace(fs=self.filesystem, id=f"sandbox-{len(self.sandboxes)}")
+        sandbox = SimpleNamespace(
+            code_interpreter=AsyncMock(),
+            process=SimpleNamespace(exec=AsyncMock(return_value=SimpleNamespace(exit_code=0))),
+            fs=self.filesystem,
+            id=f"sandbox-{len(self.sandboxes)}",
+        )
         self.sandboxes.append(sandbox)
         yield sandbox
 
@@ -136,7 +143,11 @@ async def test_run_scratch_read_uses_overflow_probe_byte() -> None:
     run_id = uuid4()
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
-    sandbox = SimpleNamespace(fs=SimpleNamespace(download_file=AsyncMock(return_value=b"oversized")))
+    sandbox = SimpleNamespace(
+        code_interpreter=AsyncMock(),
+        process=AsyncMock(),
+        fs=SimpleNamespace(download_file=AsyncMock(return_value=b"oversized")),
+    )
     storage = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,
@@ -163,7 +174,9 @@ async def test_host_volume_read_uses_overflow_probe_byte() -> None:
     dispatcher = SyncBridgeDispatcher()
     dispatcher.set_loop(asyncio.get_running_loop())
     volume_fs = SimpleNamespace(aread_bytes=AsyncMock(return_value=b"x" * 6))
-    sandbox = SimpleNamespace(fs=SimpleNamespace(download_file=AsyncMock()))
+    sandbox = SimpleNamespace(
+        code_interpreter=AsyncMock(), process=AsyncMock(), fs=SimpleNamespace(download_file=AsyncMock())
+    )
     storage = DaytonaRunStorage(
         sandbox,
         dispatcher=dispatcher,

@@ -198,7 +198,9 @@ class MemoryStorage(Protocol):
     def read_tail(self, path: str, *, byte_budget: int = WORKSPACE_MEMORY_BYTE_BUDGET) -> Mapping[str, object]: ...
     def read_full_bytes(self, path: str, *, max_bytes: int | None = None) -> Mapping[str, object]: ...
     def append_text(self, path: str, content: str, *, expected_sha256: str | None = None) -> Any: ...
-    def write_text(self, path: str, content: str, *, overwrite: bool = True) -> Any: ...
+    def write_text(
+        self, path: str, content: str, *, overwrite: bool = True, expected_sha256: str | None = None
+    ) -> Any: ...
     def delete_bytes(self, path: str, *, expected_sha256: str | None = None) -> bool: ...
 
 
@@ -323,23 +325,17 @@ class WorkspaceMemory:
 
     def __init__(
         self,
-        storage: Any,
+        storage: MemoryStorage,
         *,
         memory_path: str = _MEMORY_PATH,
         legacy_path: str = _LEGACY_MEMORY_PATH,
         max_file_bytes: int = WORKSPACE_MEMORY_BYTE_BUDGET,
-        **kwargs: Any,
     ) -> None:
         self._storage = storage
         self._memory_path = memory_path
         self._legacy_path = legacy_path
         self._max_file_bytes = max_file_bytes
         self._lock = _WORKSPACE_MEMORY_LOCK
-        del kwargs
-
-    @classmethod
-    def from_storage(cls, storage: Any, **kwargs: Any) -> WorkspaceMemory:
-        return cls(storage, **kwargs)
 
     def _read_storage_path(
         self,
@@ -348,20 +344,11 @@ class WorkspaceMemory:
         full: bool,
         byte_budget: int | None = None,
     ) -> MemoryStorageRead:
-        reader_name = "read_full_bytes" if full else "read_tail"
-        reader = getattr(self._storage, reader_name, None)
-        using_full_reader = callable(reader) and full
-        if not callable(reader):
-            if full:
-                reader = getattr(self._storage, "read_tail", None)
-                using_full_reader = False
-            if not callable(reader):
-                raise MemoryMigrationError("Workspace Memory storage cannot read the canonical file")
         try:
             result = (
-                reader(path, max_bytes=self._max_file_bytes)
-                if using_full_reader
-                else reader(path, byte_budget=byte_budget or self._max_file_bytes)
+                self._storage.read_full_bytes(path, max_bytes=self._max_file_bytes)
+                if full
+                else self._storage.read_tail(path, byte_budget=byte_budget or self._max_file_bytes)
             )
         except FileNotFoundError:
             return MemoryStorageRead("", True, "", 0)
@@ -373,7 +360,10 @@ class WorkspaceMemory:
         if not isinstance(content, str):
             raise MemoryMigrationError("Workspace Memory storage returned invalid content")
         try:
-            byte_size = int(result.get("byte_size", len(content.encode("utf-8"))))
+            raw_size = result.get("byte_size", len(content.encode("utf-8")))
+            if not isinstance(raw_size, (str, int, float)):
+                raise ValueError("invalid byte size")
+            byte_size = int(raw_size)
         except (TypeError, ValueError, UnicodeError) as exc:
             raise MemoryMigrationError("Workspace Memory storage returned an invalid byte size") from exc
         if full and byte_size != len(content.encode("utf-8")):
@@ -386,15 +376,8 @@ class WorkspaceMemory:
         )
 
     def _retire_legacy(self, legacy: MemoryStorageRead) -> None:
-        remover = getattr(self._storage, "delete_bytes", None)
-        if not callable(remover):
-            remover = getattr(self._storage, "delete_path", None)
-        if not callable(remover):
-            return
         try:
-            remover(self._legacy_path, expected_sha256=legacy.sha256)
-        except TypeError:
-            remover(self._legacy_path)
+            self._storage.delete_bytes(self._legacy_path, expected_sha256=legacy.sha256)
         except FileNotFoundError:
             pass
         except (OSError, ValueError) as exc:
@@ -643,30 +626,8 @@ class WorkspaceMemory:
         return "".join(rendered)
 
 
-def build_workspace_memory(storage: object, **kwargs: Any) -> WorkspaceMemory:
-    return WorkspaceMemory(storage, **kwargs)
-
-
-def build_workspace_memory_store(storage: object, **kwargs: Any) -> WorkspaceMemory:
-    return WorkspaceMemory(storage, **kwargs)
-
-
-def read_workspace_memory_injection_digest(store: Any, *, request: str = "") -> str:
-    if hasattr(store, "read_injection_digest"):
-        return store.read_injection_digest(request=request)
-    if hasattr(store, "read_recent"):
-        recent = store.read_recent(limit=10)
-        active = [e for e in recent if getattr(e, "active", True)]
-        if not active:
-            return ""
-        lines: list[str] = []
-        for e in active:
-            if getattr(e, "source", None) and e.source != "legacy_unknown":
-                lines.append(f"- ({e.category}) <!-- source:{e.source} -->: {e.learning}\n")
-            else:
-                lines.append(f"- ({e.category}): {e.learning}\n")
-        return "".join(lines)
-    return ""
+def read_workspace_memory_injection_digest(store: WorkspaceMemory, *, request: str = "") -> str:
+    return store.read_injection_digest(request=request)
 
 
 class MemoryCandidateCollector:
@@ -1795,8 +1756,6 @@ __all__ = [
     "WorkspaceMemoryStore",
     "WorkspaceMemoryToolHost",
     "build_memory_promotion_intents",
-    "build_workspace_memory",
-    "build_workspace_memory_store",
     "classify_memory_failure",
     "normalize_memory_candidate_categories",
     "normalize_memory_search_query",

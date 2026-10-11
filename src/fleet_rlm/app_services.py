@@ -14,10 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 if TYPE_CHECKING:
     from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
+    from fleet_rlm.daytona.runtime import DaytonaRuntime
     from fleet_rlm.observability.turn_capture import TurnCaptureStore
 
 from fleet_rlm.config.policy import ConfigPolicyService
 from fleet_rlm.config.validation import CompositionError
+from fleet_rlm.observability.feedback import TraceFeedbackService
+from fleet_rlm.observability.mlflow import MLflowRuntime
 from fleet_rlm.persistence.repositories.run_state import ReconciliationSummary
 from fleet_rlm.rlm.execution import RLMRunner
 from fleet_rlm.rlm.ownership import RunCleanupSupervisor
@@ -25,12 +28,27 @@ from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.lifecycle import SessionLifecycle
 from fleet_rlm.sessions.models import SessionCatalog
 from fleet_rlm.sessions.task import SessionTaskService
+from fleet_rlm.skills.catalog import SkillCatalog
 from fleet_rlm.turns import TurnRuntime
 from fleet_rlm.turns.preparation import RunPreparation
 from fleet_rlm.workspace.artifacts import ArtifactReader
 from fleet_rlm.workspace.attachments import AttachmentLifecycle
 from fleet_rlm.workspace.storage import WorkspaceVolumeGateway
 from fleet_rlm.workspace.workspace import WorkspaceFileService
+
+
+@dataclass(slots=True)
+class ApplicationComposition:
+    """One application owns static services and retains its runtime through disposal."""
+
+    skill_catalog: SkillCatalog
+    mlflow_runtime: MLflowRuntime
+    trace_feedback_service: TraceFeedbackService
+    runtime: RuntimeInventory | None = None
+
+
+def get_application_composition(app: FastAPI) -> ApplicationComposition:
+    return app.state.composition
 
 
 class SettlingRunStateStore(Protocol):
@@ -42,39 +60,6 @@ class SettlingRunStateStore(Protocol):
         *,
         deadline: float | None = None,
     ) -> ReconciliationSummary: ...
-
-
-class DaytonaRuntimeSurface(Protocol):
-    """Daytona runtime operations needed by startup recovery and prewarming."""
-
-    async def fence_session(self, session_id: UUID, *, deadline: float | None = None) -> None: ...
-
-    async def prewarm_session(
-        self,
-        session_id: UUID,
-        *,
-        user_id: UUID,
-        workspace_id: UUID,
-        deadline: float | None = None,
-    ) -> bool: ...
-
-    def schedule_prewarm(
-        self,
-        session_id: UUID,
-        user_id: UUID,
-        workspace_id: UUID,
-    ) -> asyncio.Task[None]:
-        pass
-
-
-class DaytonaRuntimeOwner(Protocol):
-    """Lifecycle surface of the process-owned DaytonaRuntime."""
-
-    def has_pending_cleanup(self) -> bool: ...
-
-    async def wait_pending_cleanup(self, *, timeout: float | None = None) -> bool: ...
-
-    async def adispose(self, *, drain_seconds: float = 30.0) -> bool | None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,16 +98,25 @@ class RuntimeDatabaseLifecycle:
         return "ok"
 
 
+@dataclass(slots=True)
+class CompositionDisposal:
+    """Application-owned deferred teardown, retained until resources settle."""
+
+    task: asyncio.Task[bool] | None = None
+    pending: bool = False
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeInventory:
     """Route services and optional process resources for one application lifespan."""
 
     route_services: RouteServices
+    disposal: CompositionDisposal = field(default_factory=CompositionDisposal)
     run_preparation: RunPreparation | None = None
     run_cleanup_supervisor: RunCleanupSupervisor | None = None
     run_state_store: SettlingRunStateStore | None = None
     database: RuntimeDatabaseLifecycle = field(default_factory=RuntimeDatabaseLifecycle)
-    daytona_runtime_owner: DaytonaRuntimeOwner | None = None
+    daytona_runtime_owner: DaytonaRuntime | None = None
     model_bundle: RLMModelBundle | None = None
     # The Daytona lifespan clears its own loop authority via clear_loop().
     bridge_dispatcher: SyncBridgeDispatcher | None = None
@@ -148,7 +142,7 @@ class RouteServices:
     config_policy: ConfigPolicyService
     workspace_volume_gateway: WorkspaceVolumeGateway
     workspace_file_service: WorkspaceFileService
-    daytona_runtime: DaytonaRuntimeSurface | None
+    daytona_runtime: DaytonaRuntime | None
     session_task_service: SessionTaskService | None = None
 
 
@@ -205,8 +199,7 @@ class CloseServicesResult:
 
 
 async def close_preparation_services(preparation: RunPreparation | None) -> bool:
-    close = getattr(preparation, "aclose", None)
-    return bool(await close()) if callable(close) else True
+    return await preparation.aclose() if preparation is not None else True
 
 
 async def close_inventory_services(
@@ -227,7 +220,7 @@ async def close_inventory_services(
     cancellation: asyncio.CancelledError | None = None
     preparation_settled = True
 
-    cleanup = getattr(inventory, "run_cleanup_supervisor", None)
+    cleanup = inventory.run_cleanup_supervisor
     if cleanup is not None:
         try:
             await cleanup.shutdown(drain_seconds=drain_seconds)
@@ -244,7 +237,7 @@ async def close_inventory_services(
         except Exception as exc:
             errors.append(exc)
 
-    preparation = getattr(inventory, "run_preparation", None)
+    preparation = inventory.run_preparation
     if preparation is not None:
         try:
             result = await close_preparation_services(preparation)
@@ -267,8 +260,6 @@ async def close_inventory_services(
 __all__ = [
     "CloseServicesResult",
     "CompositionError",
-    "DaytonaRuntimeOwner",
-    "DaytonaRuntimeSurface",
     "RuntimeDatabaseLifecycle",
     "RuntimeInventory",
     "SettlingRunStateStore",

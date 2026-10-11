@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Self
 from uuid import UUID
 
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE,
     EventRecorder,
     RunCancelled,

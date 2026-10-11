@@ -14,7 +14,8 @@ from typing import Any
 import dspy
 import pytest
 
-from fleet_rlm.daytona.runtime import DaytonaSandboxSpec, LiveDaytonaPlatform
+from fleet_rlm.daytona.provider import LiveDaytonaPlatform
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from fleet_rlm.optimization import daytona as subject
 from fleet_rlm.optimization.daytona import (
     DisposableOptimizationSandboxFactory,
@@ -206,21 +207,15 @@ class _Interpreter:
         self._fail_shutdown = fail_shutdown
         self._shutdown = False
 
-    def new_invocation(self) -> SimpleNamespace:
-        def shutdown() -> None:
-            assert not self._shutdown
-            self._events.append("invocation_shutdown")
-
-        return SimpleNamespace(shutdown=shutdown)
-
     def shutdown(self, *, strict_broker_cleanup: bool = False) -> None:
         """Record interpreter shutdown and raise an error when shutdown is configured to fail."""
-        assert strict_broker_cleanup is True
         if self._shutdown:
             return
         self._events.append("shutdown")
         if self._fail_shutdown:
-            raise RuntimeError("shutdown failed")
+            if strict_broker_cleanup:
+                raise RuntimeError("shutdown failed")
+            return
         self._shutdown = True
 
 
@@ -293,7 +288,7 @@ class _LifecycleFactory:
         assert all(character in "0123456789abcdef" for character in kwargs["candidate_sha256"])
         return SimpleNamespace(id=f"sandbox-{self.events.count('create')}")
 
-    async def delete(self, sandbox: object) -> None:
+    async def delete(self, sandbox: object, **_kwargs: object) -> None:
         """Delete a sandbox and record the deletion event.
 
         Parameters:
@@ -494,7 +489,7 @@ async def test_lifecycle_builds_fresh_interpreter_and_rlm_then_deletes(monkeypat
     assert len(interpreters) == len(rlms) == 2
     assert interpreters[0] is not interpreters[1]
     assert rlms[0] is not rlms[1]
-    assert events == ["create", "invocation_shutdown", "delete", "shutdown"] * 2
+    assert events == ["create", "shutdown", "delete"] * 2
 
 
 @pytest.mark.asyncio
@@ -559,7 +554,7 @@ async def test_lifecycle_keeps_event_loop_responsive_and_revokes_timed_out_worke
         await evaluation
 
     assert release.is_set()
-    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+    assert events == ["create", "delete", "shutdown"]
 
 
 @pytest.mark.asyncio
@@ -591,7 +586,7 @@ async def test_lifecycle_retains_ownership_for_late_worker_completion(monkeypatc
     assert events == ["create", "delete"]
     release.set()
     await lifecycle.aclose(drain_seconds=2)
-    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+    assert events == ["create", "delete", "shutdown"]
 
 
 @pytest.mark.asyncio
@@ -619,7 +614,7 @@ async def test_lifecycle_cancellation_deletes_sandbox_and_observes_worker(monkey
         await evaluation
 
     assert release.is_set()
-    assert events == ["create", "delete", "invocation_shutdown", "shutdown"]
+    assert events == ["create", "delete", "shutdown"]
 
 
 @pytest.mark.asyncio
@@ -650,7 +645,7 @@ async def test_lifecycle_preserves_primary_failure_when_cleanup_also_fails(monke
     with pytest.raises(RuntimeError, match="rlm failed"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
+    assert events == ["create", "shutdown", "delete", "shutdown", "delete"]
 
 
 @pytest.mark.asyncio
@@ -670,7 +665,7 @@ async def test_lifecycle_raises_cleanup_error_without_primary_failure(monkeypatc
     with pytest.raises(StrictEvaluationCleanupError, match="cleanup"):
         await _lifecycle(factory, _proof()).evaluate(StrictEvaluationRequest("candidate", _record(), "run-1"))
 
-    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
+    assert events == ["create", "shutdown", "delete", "delete"]
 
 
 @pytest.mark.asyncio
@@ -692,7 +687,7 @@ async def test_lifecycle_retries_one_failed_delete_after_worker_drain(monkeypatc
     )
 
     assert result.prediction.display_text == "typed answer"
-    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "delete"]
+    assert events == ["create", "shutdown", "delete", "delete"]
 
 
 @pytest.mark.asyncio
@@ -828,4 +823,4 @@ async def test_lifecycle_does_not_accept_success_when_shutdown_fails(monkeypatch
     with pytest.raises(StrictEvaluationCleanupError, match="sandbox-1"):
         await lifecycle.aclose(drain_seconds=1)
 
-    assert events == ["create", "invocation_shutdown", "delete", "shutdown", "shutdown"]
+    assert events == ["create", "shutdown", "delete", "shutdown", "shutdown"]

@@ -73,7 +73,7 @@ def test_settings_policy_is_loopback_only_atomic_and_revision_checked(monkeypatc
         assert fields["llm.root.model"] == fields["llm.sub.model"] == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
         assert fields["llm.root.api_key_env"] == fields["llm.sub.api_key_env"] == "DATABRICKS_TOKEN"
         assert fields["llm.root.base_url_env"] == "FLEET_LLM_BASE_URL"
-        assert fields["rlm.recursion_enabled"] is True
+        assert fields["mlflow.tracing_enabled"] is True
         assert all("origin" not in field and "can_reset" not in field for field in body["fields"])
 
         batch = client.patch(
@@ -82,7 +82,7 @@ def test_settings_policy_is_loopback_only_atomic_and_revision_checked(monkeypatc
                 "revision": body["revision"],
                 "updates": [
                     {"path": "rlm.max_iters", "value": 22},
-                    {"path": "rlm.recursion_enabled", "value": False},
+                    {"path": "mlflow.tracing_enabled", "value": False},
                     {"path": "llm.root.num_retries", "value": 0},
                 ],
             },
@@ -92,7 +92,7 @@ def test_settings_policy_is_loopback_only_atomic_and_revision_checked(monkeypatc
         assert saved["revision"] != body["revision"]
         fields = {field["path"]: field["value"] for field in saved["fields"]}
         assert fields["rlm.max_iters"] == 22
-        assert fields["rlm.recursion_enabled"] is False
+        assert fields["mlflow.tracing_enabled"] is False
         assert fields["llm.root.num_retries"] == 0
         # Policy edits do not alter the application's composed runtime settings.
         assert app.state.settings.rlm_max_iters != 22

@@ -14,10 +14,8 @@ import json
 import time
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
 from functools import wraps
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 from uuid import UUID, uuid4
 
 import dspy
@@ -28,10 +26,28 @@ from fleet_rlm.json_types import JsonValue, validate_json_value
 from fleet_rlm.observability.diagnostics import trace_failure_category, walk_cause_chain
 from fleet_rlm.observability.tracing import dspy_turn_callbacks, rlm_callback_parent, turn_phase_span
 from fleet_rlm.rlm.adapter import FleetJSONAdapter
+from fleet_rlm.rlm.event_types import (
+    ChildProgress,
+    EventRecorder,
+    ObservationDetail,
+    RLMCode,
+    RLMOutput,
+    RLMReasoning,
+    RuntimeEvent,
+    RuntimeEventDetail,
+    SkillActivated,
+    SkillLoaded,
+    Status,
+    StepFinished,
+    StepStarted,
+    ToolCompleted,
+    ToolFailed,
+    ToolStarted,
+    WarningEvent,
+)
 from fleet_rlm.rlm.result import (
     ExecutionDetail,
     RLMConfigError,
-    RLMUsage,
     RunCancelledError,
     RunNoProgressError,
     TrajectoryStep,
@@ -39,7 +55,6 @@ from fleet_rlm.rlm.result import (
     observed_usage,
     rlm_termination_mode,
     truncate_public_text,
-    validate_rlm_usage,
 )
 from fleet_rlm.rlm.submit_validation import normalize_action_code
 from fleet_rlm.tool_events import (
@@ -58,408 +73,6 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Canonical Event Types & Event Recorder
 # ---------------------------------------------------------------------------
-
-from typing import ClassVar
-
-from fleet_rlm.json_types import JsonScalar as JsonScalar
-
-RunFailedMessage: TypeAlias = Literal[
-    "Turn failed",
-    "Provider endpoint not found; check model and base URL",
-    "Turn output is invalid",
-    "Turn output is too large",
-    "Turn could not be prepared",
-    "Turn could not be committed",
-]
-
-PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE = "Provider endpoint not found; check model and base URL"
-
-
-def _freeze_json(value: object) -> JsonValue:
-    if value is None or isinstance(value, (bool, int, float, str)):
-        return value
-    if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
-            raise TypeError("JSON object keys must be strings")
-        return MappingProxyType({str(key): _freeze_json(item) for key, item in value.items()})
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return tuple(_freeze_json(item) for item in value)
-    raise TypeError("Runtime Event values must be JSON-compatible")
-
-
-@dataclass(frozen=True, slots=True)
-class RunStarted:
-    kind: ClassVar[Literal["run.started"]] = "run.started"
-    delivery: Literal["live", "replay"]
-    trace_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class Status:
-    kind: ClassVar[Literal["status"]] = "status"
-    phase: str
-    status: str
-    message: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ChildProgress:
-    """Bounded progress snapshot for one recursive child invocation."""
-
-    kind: ClassVar[Literal["child.progress"]] = "child.progress"
-    child_id: str
-    task_label: str
-    state: Literal["not_started", "running", "completed", "failed", "cancelled", "timed_out"]
-    elapsed_ms: int
-    outcome: str | None = None
-    cleanup_state: Literal["pending", "complete", "failed", "not_required"] = "not_required"
-    parent_run_id: str | None = None
-    evidence: tuple[str, ...] = ()
-    gaps: tuple[str, ...] = ()
-    result_file_count: int = 0
-    code_excerpt: str | None = None
-    output_excerpt: str | None = None
-
-    def __post_init__(self) -> None:
-        if not self.child_id.strip() or len(self.child_id) > 128:
-            raise ValueError("child_id must contain 1 to 128 non-blank characters")
-        if not self.task_label.strip() or len(self.task_label) > 240:
-            raise ValueError("task_label must contain 1 to 240 non-blank characters")
-        if (
-            len(self.evidence) > 8
-            or len(self.gaps) > 8
-            or any(not isinstance(item, str) or len(item) > 200 for item in (*self.evidence, *self.gaps))
-        ):
-            raise ValueError("child progress details exceed their bounds")
-        if self.state not in ("not_started", "running", "completed", "failed", "cancelled", "timed_out"):
-            raise ValueError("unsupported child progress state")
-        if self.cleanup_state not in ("pending", "complete", "failed", "not_required"):
-            raise ValueError("unsupported child cleanup state")
-        if not isinstance(self.elapsed_ms, int) or isinstance(self.elapsed_ms, bool) or self.elapsed_ms < 0:
-            raise ValueError("elapsed_ms must be a non-negative integer")
-        if (
-            not isinstance(self.result_file_count, int)
-            or isinstance(self.result_file_count, bool)
-            or not 0 <= self.result_file_count <= 16
-        ):
-            raise ValueError("result_file_count must be between 0 and 16")
-        if self.outcome is not None and len(self.outcome) > 500:
-            raise ValueError("outcome must not exceed 500 characters")
-        if any(value is not None and len(value) > 800 for value in (self.code_excerpt, self.output_excerpt)):
-            raise ValueError("child code and output excerpts must not exceed 800 characters")
-        if self.parent_run_id is not None and (not self.parent_run_id.strip() or len(self.parent_run_id) > 128):
-            raise ValueError("parent_run_id must contain 1 to 128 non-blank characters")
-
-
-@dataclass(frozen=True, slots=True)
-class StepStarted:
-    kind: ClassVar[Literal["step.started"]] = "step.started"
-    step: int
-
-
-@dataclass(frozen=True, slots=True)
-class StepFinished:
-    kind: ClassVar[Literal["step.finished"]] = "step.finished"
-    step: int
-    duration_ms: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RLMReasoning:
-    kind: ClassVar[Literal["rlm.reasoning"]] = "rlm.reasoning"
-    text: str
-    step: int | None = None
-    stream_id: str | None = None
-    is_delta: bool = False
-    is_final: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class RLMCode:
-    kind: ClassVar[Literal["rlm.code"]] = "rlm.code"
-    code: str
-    step: int | None = None
-    stream_id: str | None = None
-    is_delta: bool = False
-    is_final: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class RLMOutput:
-    kind: ClassVar[Literal["rlm.output"]] = "rlm.output"
-    output: str
-    step: int | None = None
-    stream_id: str | None = None
-    is_delta: bool = False
-    is_final: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class ToolStarted:
-    kind: ClassVar[Literal["tool.started"]] = "tool.started"
-    tool_call_id: str
-    tool_name: str
-    input: JsonValue
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "input", _freeze_json(self.input))
-
-
-@dataclass(frozen=True, slots=True)
-class ToolCompleted:
-    kind: ClassVar[Literal["tool.completed"]] = "tool.completed"
-    tool_call_id: str
-    tool_name: str
-    output: JsonValue
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "output", _freeze_json(self.output))
-
-
-@dataclass(frozen=True, slots=True)
-class ToolFailed:
-    kind: ClassVar[Literal["tool.failed"]] = "tool.failed"
-    tool_call_id: str
-    tool_name: str
-    error: str
-
-
-ObservationDetail: TypeAlias = (
-    StepStarted
-    | StepFinished
-    | RLMReasoning
-    | RLMCode
-    | RLMOutput
-    | ToolStarted
-    | ToolCompleted
-    | ToolFailed
-    | ChildProgress
-)
-ObservationObserver: TypeAlias = Callable[[ObservationDetail], None]
-
-
-@dataclass(frozen=True, slots=True)
-class SkillActivated:
-    kind: ClassVar[Literal["skill.activated"]] = "skill.activated"
-    skill_id: str
-    name: str
-    version: str
-    trust: str
-    affordances: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
-class SkillLoaded:
-    kind: ClassVar[Literal["skill.loaded"]] = "skill.loaded"
-    skill_id: str
-    name: str
-    version: str
-
-
-@dataclass(frozen=True, slots=True)
-class AttachmentRead:
-    kind: ClassVar[Literal["attachment.read"]] = "attachment.read"
-    attachment_id: UUID
-    filename: str
-    byte_size: int
-
-
-@dataclass(frozen=True, slots=True)
-class WarningEvent:
-    kind: ClassVar[Literal["warning"]] = "warning"
-    message: str
-    code: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ArtifactCreated:
-    kind: ClassVar[Literal["artifact.created"]] = "artifact.created"
-    artifact_id: UUID
-    artifact_kind: Literal["text", "markdown", "json"]
-    title: str | None
-    media_type: str
-    byte_size: int
-    checksum_sha256: str
-
-
-@dataclass(frozen=True, slots=True)
-class Usage:
-    kind: ClassVar[Literal["usage"]] = "usage"
-    value: RLMUsage
-
-    def __post_init__(self) -> None:
-        try:
-            usage = validate_rlm_usage(self.value)
-        except ValueError as exc:
-            raise TypeError(str(exc)) from exc
-        frozen = _freeze_json(usage)
-        if not isinstance(frozen, Mapping):
-            raise TypeError("usage must be an object")
-        object.__setattr__(self, "value", frozen)
-
-
-@dataclass(frozen=True, slots=True)
-class StructuredResult:
-    kind: ClassVar[Literal["structured.result"]] = "structured.result"
-    schema_id: str
-    schema_version: str
-    value: JsonValue
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "value", _freeze_json(self.value))
-
-
-@dataclass(frozen=True, slots=True)
-class TextDelta:
-    kind: ClassVar[Literal["text.delta"]] = "text.delta"
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class TextCompleted:
-    kind: ClassVar[Literal["text.completed"]] = "text.completed"
-    text: str
-
-
-@dataclass(frozen=True, slots=True)
-class RunCompleted:
-    kind: ClassVar[Literal["run.completed"]] = "run.completed"
-    checkpoint_version: int
-    delivery: Literal["live", "replay"]
-    duration_ms: int | None = None
-    trace_id: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RunFailed:
-    kind: ClassVar[Literal["run.failed"]] = "run.failed"
-    code: Literal["preparation_failed", "execution_failed", "commit_failed", "protocol_error", "unavailable"]
-    message: RunFailedMessage
-    duration_ms: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RunCancelled:
-    kind: ClassVar[Literal["run.cancelled"]] = "run.cancelled"
-    message: Literal["Turn cancelled"] = "Turn cancelled"
-    duration_ms: int | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class RunTimedOut:
-    kind: ClassVar[Literal["run.timed_out"]] = "run.timed_out"
-    message: Literal["Turn timed out"] = "Turn timed out"
-    duration_ms: int | None = None
-
-
-RuntimeEventDetail: TypeAlias = (
-    RunStarted
-    | Status
-    | ChildProgress
-    | StepStarted
-    | StepFinished
-    | RLMReasoning
-    | RLMCode
-    | RLMOutput
-    | ToolStarted
-    | ToolCompleted
-    | ToolFailed
-    | SkillActivated
-    | SkillLoaded
-    | AttachmentRead
-    | WarningEvent
-    | ArtifactCreated
-    | Usage
-    | StructuredResult
-    | TextDelta
-    | TextCompleted
-    | RunCompleted
-    | RunFailed
-    | RunCancelled
-    | RunTimedOut
-)
-
-RUNTIME_DETAIL_TYPES = (
-    RunStarted,
-    Status,
-    ChildProgress,
-    StepStarted,
-    StepFinished,
-    RLMReasoning,
-    RLMCode,
-    RLMOutput,
-    ToolStarted,
-    ToolCompleted,
-    ToolFailed,
-    SkillActivated,
-    SkillLoaded,
-    AttachmentRead,
-    WarningEvent,
-    ArtifactCreated,
-    Usage,
-    StructuredResult,
-    TextDelta,
-    TextCompleted,
-    RunCompleted,
-    RunFailed,
-    RunCancelled,
-    RunTimedOut,
-)
-
-TERMINAL_DETAIL_TYPES = (RunCompleted, RunFailed, RunCancelled, RunTimedOut)
-
-
-class EventSequenceError(RuntimeError):
-    """Raised for a duplicate terminal or any post-terminal detail."""
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeEvent:
-    """Immutable delivery envelope around one closed typed detail."""
-
-    schema_version: Literal[1]
-    event_id: UUID
-    run_id: UUID
-    session_id: UUID
-    sequence: int
-    timestamp: datetime
-    detail: RuntimeEventDetail
-
-    @property
-    def kind(self) -> str:
-        return self.detail.kind
-
-
-@dataclass(slots=True)
-class EventRecorder:
-    """Assign strictly increasing delivery metadata and guard one terminal."""
-
-    run_id: UUID
-    session_id: UUID
-    start_sequence: int = 0
-    _sequence: int = field(init=False, repr=False)
-    _terminal_emitted: bool = field(default=False, init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self._sequence = int(self.start_sequence)
-
-    def record(self, detail: RuntimeEventDetail) -> RuntimeEvent:
-        if self._terminal_emitted:
-            raise EventSequenceError(f"run {self.run_id} already emitted a terminal detail")
-        self._sequence += 1
-        event = RuntimeEvent(
-            schema_version=1,
-            event_id=uuid4(),
-            run_id=self.run_id,
-            session_id=self.session_id,
-            sequence=self._sequence,
-            timestamp=datetime.now(UTC),
-            detail=detail,
-        )
-        if isinstance(detail, TERMINAL_DETAIL_TYPES):
-            self._terminal_emitted = True
-        return event
-
 
 # ---------------------------------------------------------------------------
 # Tool Observation & Event Views
@@ -1813,44 +1426,15 @@ class ObservationSession:
 
 
 __all__ = [
-    "PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE",
-    "ArtifactCreated",
     "AsyncToolBridge",
-    "AttachmentRead",
     "DetailRelay",
-    "EventRecorder",
-    "EventSequenceError",
     "ExecutionTraceAssembler",
-    "ObservationDetail",
     "ObservationSession",
-    "RLMCode",
-    "RLMOutput",
-    "RLMReasoning",
-    "RunCancelled",
-    "RunCompleted",
-    "RunFailed",
-    "RunStarted",
-    "RunTimedOut",
-    "RuntimeEvent",
-    "RuntimeEventDetail",
-    "SkillActivated",
-    "SkillLoaded",
-    "Status",
-    "StepFinished",
-    "StepStarted",
-    "StructuredResult",
-    "TextCompleted",
-    "TextDelta",
-    "ToolCompleted",
     "ToolEventView",
-    "ToolFailed",
     "ToolInputProjection",
     "ToolObserver",
     "ToolOutputProjection",
     "ToolResultSerializationError",
-    "ToolStarted",
-    "Usage",
-    "WarningEvent",
     "WorkerMonitor",
     "bound_event_text",
     "has_reasoning",
@@ -1946,7 +1530,7 @@ class _RLMReasoningCallback(BaseCallback):
                         "code_preview": _trace_preview(code if isinstance(code, str) else ""),
                     },
                 )
-            from fleet_rlm.rlm.events import RLMReasoning
+            from fleet_rlm.rlm.event_types import RLMReasoning
 
             self._observer(RLMReasoning(truncate_public_text(reasoning, max_len=self._max_chars), self._iteration))
         except Exception:

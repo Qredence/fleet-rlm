@@ -243,7 +243,7 @@ def test_status_part_follows_the_execution_band_order_rule() -> None:
 
 def test_projector_replays_terminal_child_progress_with_the_same_payload() -> None:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import EventRecorder
+    from fleet_rlm.rlm.event_types import EventRecorder
     from fleet_rlm.sessions.committed_turn import (
         ChildProgressPart,
         CommittedTurn,
@@ -314,7 +314,7 @@ def test_projector_replays_terminal_child_progress_with_the_same_payload() -> No
 
 
 def test_projector_replays_every_semantic_part_in_order() -> None:
-    from fleet_rlm.rlm.events import EventRecorder
+    from fleet_rlm.rlm.event_types import EventRecorder
     from fleet_rlm.sessions.committed_turn import (
         ArtifactPart,
         AttachmentPart,
@@ -361,7 +361,7 @@ def test_projector_replays_every_semantic_part_in_order() -> None:
 
 
 def test_live_suffix_excludes_execution_parts() -> None:
-    from fleet_rlm.rlm.events import EventRecorder
+    from fleet_rlm.rlm.event_types import EventRecorder
     from fleet_rlm.sessions.committed_turn import (
         CommittedTurn,
         CommittedTurnEventProjector,
@@ -389,7 +389,7 @@ def test_live_suffix_excludes_execution_parts() -> None:
 
 
 def test_projector_maps_status_parts_back_to_transient_status_events() -> None:
-    from fleet_rlm.rlm.events import EventRecorder, Status
+    from fleet_rlm.rlm.event_types import EventRecorder, Status
     from fleet_rlm.rlm.result import empty_rlm_usage
     from fleet_rlm.sessions.committed_turn import (
         CommittedTurnEventProjector,
@@ -410,7 +410,7 @@ def test_projector_maps_status_parts_back_to_transient_status_events() -> None:
 
 
 def test_commit_success_normalizes_details_and_appends_the_canonical_suffix() -> None:
-    from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, ToolCompleted, ToolStarted
+    from fleet_rlm.rlm.event_types import RLMReasoning, StepFinished, StepStarted, ToolCompleted, ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import commit_success
     from fleet_rlm.workspace.artifacts import ArtifactRef
@@ -458,7 +458,7 @@ def test_commit_serializes_frozen_tool_and_prediction_values_without_mutation() 
     import json
     from types import MappingProxyType
 
-    from fleet_rlm.rlm.events import ToolCompleted, ToolStarted
+    from fleet_rlm.rlm.event_types import ToolCompleted, ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import CommittedTurnCodec, commit_success
 
@@ -484,7 +484,7 @@ def test_commit_serializes_frozen_tool_and_prediction_values_without_mutation() 
 
 
 def test_commit_success_coalesces_incremental_output_before_durable_commit() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import OutputPart, commit_success
 
@@ -506,7 +506,7 @@ def test_commit_success_coalesces_incremental_output_before_durable_commit() -> 
 
 
 def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
-    from fleet_rlm.rlm.events import ChildProgress
+    from fleet_rlm.rlm.event_types import ChildProgress
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import ChildProgressPart, commit_success
 
@@ -551,7 +551,7 @@ def test_commit_persists_only_the_latest_terminal_child_progress() -> None:
 
 
 def test_commit_persists_not_started_child_admission_refusal() -> None:
-    from fleet_rlm.rlm.events import ChildProgress
+    from fleet_rlm.rlm.event_types import ChildProgress
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import ChildProgressPart, commit_success
 
@@ -603,7 +603,7 @@ def test_commit_omits_structured_duplicate_for_single_output_prediction() -> Non
 
 
 def test_commit_success_rejects_failed_outcomes_or_unmatched_tool_calls() -> None:
-    from fleet_rlm.rlm.events import ToolStarted
+    from fleet_rlm.rlm.event_types import ToolStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.committed_turn import TurnDetailPolicyError, commit_success
 
@@ -624,13 +624,8 @@ def test_commit_success_normalizes_guard_closed_no_progress_tool_call() -> None:
     """RC-2: ToolStarted closed by the guard's ToolFailed commits as failed."""
     import dspy
 
-    from fleet_rlm.rlm.events import (
-        ToolCompleted,
-        ToolEventView,
-        ToolFailed,
-        ToolStarted,
-        observe_tool,
-    )
+    from fleet_rlm.rlm.event_types import ToolCompleted, ToolFailed, ToolStarted
+    from fleet_rlm.rlm.events import ToolEventView, observe_tool
     from fleet_rlm.rlm.execution import RunToolGuards
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome, RunNoProgressError
     from fleet_rlm.sessions.committed_turn import ToolCallPart, commit_success

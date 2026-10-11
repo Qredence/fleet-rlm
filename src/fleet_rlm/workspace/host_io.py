@@ -23,7 +23,6 @@ from fleet_rlm.workspace.storage import (
     AsyncTextStorage,
     DaytonaSandboxVolumeFs,
     DaytonaSandboxWorkspaceStorage,
-    WorkspaceMemoryStorage,
 )
 
 
@@ -126,6 +125,9 @@ class _WorkspaceMemoryStore:
         self._max_file_bytes = max_file_bytes
 
     def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        from fleet_rlm.workspace.memory import WorkspaceMemory
+        from fleet_rlm.workspace.storage import WorkspaceMemoryStorage
+
         async def operation() -> Any:
             async with self._gateway.open_sandbox(self._workspace_id, purpose="workspace-memory-io") as sandbox:
                 view = sync_sandbox(sandbox, asyncio.get_running_loop(), self._dispatcher)
@@ -137,11 +139,8 @@ class _WorkspaceMemoryStore:
                         max_file_bytes=self._max_file_bytes,
                         allow_volume_root=True,
                     )
-                    from fleet_rlm.workspace.memory import build_workspace_memory_store
 
-                    store = build_workspace_memory_store(
-                        WorkspaceMemoryStorage(storage), max_upload_bytes=self._max_file_bytes
-                    )
+                    store = WorkspaceMemory(WorkspaceMemoryStorage(storage))
                     return await asyncio.to_thread(getattr(store, method), *args, **kwargs)
                 finally:
                     tombstone_sync_sandbox(view)
@@ -205,6 +204,7 @@ class _HostWorkspaceStorage:
         return ()
 
     def _call(self, method: str, *args: Any, **kwargs: Any) -> Any:
+
         async def operation() -> Any:
             async with self._gateway.open_sandbox(self._workspace_id, purpose="workspace-host-file-io") as sandbox:
                 view = sync_sandbox(sandbox, asyncio.get_running_loop(), self._dispatcher)

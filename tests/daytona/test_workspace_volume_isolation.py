@@ -14,17 +14,16 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from fleet_rlm.daytona import runtime as recursive_child_runtime
+from fleet_rlm.daytona import children as children_module
+from fleet_rlm.daytona import errors as errors_module
+from fleet_rlm.daytona.children import ChildRuntimeLeaseState
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.daytona.runtime import (
-    SESSION_WORKSPACE_MOUNT_PATH,
-    ChildRuntimeLeaseState,
-    DaytonaAdmission,
-    DaytonaRuntime,
+from fleet_rlm.daytona.leases import DaytonaAdmission, LeaseRequest
+from fleet_rlm.daytona.provider import LiveDaytonaPlatform
+from fleet_rlm.daytona.runtime import SESSION_WORKSPACE_MOUNT_PATH, DaytonaRuntime
+from fleet_rlm.daytona.specs import (
     DaytonaSandboxSpec,
     ExpectedWorkspaceMount,
-    LeaseRequest,
-    LiveDaytonaPlatform,
     VolumeConfig,
     ensure_volume_layout,
     get_or_create_volume_id,
@@ -163,7 +162,7 @@ class _FakePlatform:
         )
         return sb
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
         self.deleted.append(sandbox_id)
         self.sandboxes.pop(sandbox_id, None)
 
@@ -702,7 +701,7 @@ class _PreservedMultiSandboxPlatform:
         self.create_calls.append(kwargs)
         return self._queue.pop(0)
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
         self.deleted.append(sandbox_id)
 
     async def get(self, _sandbox_id: str) -> None:
@@ -749,8 +748,9 @@ def _preserved_factory(
         box.instances.append(interpreter)
         return interpreter
 
-    monkeypatch.setattr(recursive_child_runtime, "DaytonaCodeInterpreter", interpreter_factory)
-    monkeypatch.setattr(recursive_child_runtime, "sandbox_backend", lambda sandbox, **_kwargs: sandbox)
+    monkeypatch.setattr(
+        children_module, "sandbox_interpreter_factory", lambda sandbox, **_kwargs: interpreter_factory(backend=sandbox)
+    )
     return make_daytona_child_factory(
         loop=asyncio.get_running_loop(),
         platform=platform,
@@ -877,10 +877,10 @@ async def test_child_failure_cleanup_still_preserves_root_and_sibling_volume(
     root_manifest_before = _checksum_manifest(root_fs)
     sibling_manifest_before = _checksum_manifest(child_b_fs)
 
-    with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
+    with pytest.raises(errors_module.ChildRuntimeCleanupError, match="recursive child cleanup failed"):
         await asyncio.to_thread(lease_a.close)
     assert lease_a.state is ChildRuntimeLeaseState.FAILED
-    with pytest.raises(recursive_child_runtime.ChildRuntimeCleanupError):
+    with pytest.raises(errors_module.ChildRuntimeCleanupError):
         await asyncio.to_thread(lease_a.close)
     assert interpreter_box.instances[0].shutdown_calls == [True]
 
@@ -937,7 +937,7 @@ async def test_cancellation_preserves_volume_state_and_allocates_nothing_further
     sibling_manifest_before = _checksum_manifest(sibling_fs)
 
     authorized = False
-    with pytest.raises(recursive_child_runtime.ChildRuntimeAuthorizationError, match="no longer authorized"):
+    with pytest.raises(errors_module.ChildRuntimeAuthorizationError, match="no longer authorized"):
         await asyncio.to_thread(factory, 2)
     assert len(platform.create_calls) == 1
     assert sibling_fs.deleted == []

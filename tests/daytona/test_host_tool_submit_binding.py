@@ -59,8 +59,7 @@ def test_final_output_type_is_dspy_final_output() -> None:
 
 def test_native_injection_configures_factory_invocation_before_execution() -> None:
     """DSPy's injected tools and output metadata work on an open invocation."""
-    retained = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-    interp = retained.new_invocation()
+    interp = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     interp.start()
     interp.start()
     rlm = build_native_rlm_for_test(
@@ -72,5 +71,3 @@ def test_native_injection_configures_factory_invocation_before_execution() -> No
     assert interp.output_fields is not None
     assert interp.execute("SUBMIT(answer=injected_tool())").output == {"answer": "injected"}
     interp.shutdown()
-    assert retained.output_fields is None
-    assert retained.tools == {}

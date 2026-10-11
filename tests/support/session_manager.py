@@ -10,13 +10,9 @@ from unittest.mock import AsyncMock
 from uuid import UUID
 
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-from fleet_rlm.daytona.runtime import (
-    DaytonaAdmission,
-    DaytonaEnvironmentProfile,
-    DaytonaRuntime,
-    DaytonaSandboxSpec,
-    VolumeConfig,
-)
+from fleet_rlm.daytona.leases import DaytonaAdmission
+from fleet_rlm.daytona.runtime import DaytonaRuntime
+from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile, DaytonaSandboxSpec, VolumeConfig
 from tests.support.in_memory_stores import InMemorySandboxBindingStore as InMemoryBindingStore
 
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
@@ -184,7 +180,8 @@ class _FakePlatform:
         )
         return sb
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, *, wait: bool = True, timeout: float = 60) -> None:
+        del wait, timeout
         self.deleted.append(sandbox_id)
         self.sandboxes.pop(sandbox_id, None)
 

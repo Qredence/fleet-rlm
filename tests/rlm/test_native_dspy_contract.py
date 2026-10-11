@@ -241,7 +241,8 @@ async def test_native_json_action_contract_parses_first_and_followup_iterations(
 
 @pytest.mark.asyncio
 async def test_native_rlm_callback_observes_completed_action_without_altering_prediction() -> None:
-    from fleet_rlm.rlm.events import RLMReasoning, bind_native_rlm_observer
+    from fleet_rlm.rlm.event_types import RLMReasoning
+    from fleet_rlm.rlm.events import bind_native_rlm_observer
     from fleet_rlm.rlm.program import (
         RLMOptions,
     )
@@ -1501,15 +1502,15 @@ def _probe_interpreter():
 
 def _probe_child_runtime(call_index: int, *, profile: str = "semantic-child"):
     del profile
-    from fleet_rlm.daytona.runtime import ChildRuntimeLease
+    from fleet_rlm.daytona.children import ChildRuntimeLease
+    from tests.rlm.fakes import invocation_factory
 
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
-        interpreter=interpreter,
+        interpreter=invocation_factory,
         sandbox_id=f"provider-probe-{call_index}",
         volume_id="in-process",
         volume_subpath=f"recursive/provider-probe/run/{call_index}",
-        _close=interpreter.shutdown,
+        _close=lambda: None,
     )
 
 

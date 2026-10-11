@@ -31,9 +31,7 @@ from fleet_rlm.daytona.interpreter import (
     final_output_frame,
     sandbox_backend,
 )
-from fleet_rlm.daytona.runtime import (
-    DaytonaEnvironmentProfile,
-    DaytonaSandboxSpec,
+from fleet_rlm.daytona.provider import (
     LiveDaytonaPlatform,
     create_folder,
     delete_file,
@@ -42,7 +40,7 @@ from fleet_rlm.daytona.runtime import (
     read_file,
     write_file,
 )
-from fleet_rlm.rlm.result import RunNoProgressError
+from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile, DaytonaSandboxSpec
 from tests.support.session_manager import make_daytona_runtime
 
 # ============================================================================
@@ -51,7 +49,7 @@ from tests.support.session_manager import make_daytona_runtime
 
 
 class TestInterpreterSyntaxAndExceptions:
-    """Interpreter errors remain recoverable, with repeated failures bounded."""
+    """Interpreter errors remain recoverable across repeated actions."""
 
     def test_syntax_and_runtime_categories(self) -> None:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
@@ -64,15 +62,13 @@ class TestInterpreterSyntaxAndExceptions:
                 interpreter.execute(code)
             assert error.value.category == category
 
-    def test_repeated_failure_becomes_terminal(self) -> None:
+    def test_repeated_failure_remains_repairable(self) -> None:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-        with pytest.raises(CodeExecutionError):
-            interpreter.execute("1 / 0")
-        with pytest.raises(CodeExecutionError) as repeated:
-            interpreter.execute("1 / 0")
-        assert repeated.value.category == "no_progress"
-        with pytest.raises(RunNoProgressError):
-            interpreter.execute("1 / 0")
+        for _ in range(3):
+            with pytest.raises(CodeExecutionError) as error:
+                interpreter.execute("1 / 0")
+            assert error.value.category == "ZeroDivisionError"
+        interpreter.shutdown()
 
 
 class TestInterpreterTimeoutsAndLimits:
@@ -98,7 +94,8 @@ class TestInterpreterTimeoutsAndLimits:
     def test_timeout_is_forwarded_to_broker(self, monkeypatch: pytest.MonkeyPatch) -> None:
         observed: list[int] = []
 
-        def execute(_broker: Any, _code: str, _variables: Any, *, timeout_s: int) -> dict[str, Any]:
+        def execute(_broker: Any, _code: str, _variables: Any, *, timeout_s: int, on_stdout=None) -> dict[str, Any]:
+            del on_stdout
             observed.append(timeout_s)
             return {"stdout": "done\n"}
 
@@ -269,15 +266,6 @@ class TestFilesystemOperations:
             await read_file(mock_sandbox, "/workspace/non_existent.txt")
 
     @pytest.mark.asyncio
-    async def test_read_file_direct_fs_object(self) -> None:
-        """read_file works when the sandbox argument is itself the filesystem client."""
-        mock_fs = MagicMock(spec=["download_file"])
-        mock_fs.download_file = AsyncMock(return_value=b"direct_fs_data")
-
-        data = await read_file(mock_fs, "/workspace/file.txt")
-        assert data == b"direct_fs_data"
-
-    @pytest.mark.asyncio
     async def test_write_file_empty_and_binary(self) -> None:
         """write_file writes empty bytes and binary bytes without alteration."""
         mock_fs = MagicMock()
@@ -295,43 +283,23 @@ class TestFilesystemOperations:
         mock_fs.upload_file.assert_awaited_with(binary_data, "/workspace/data.bin")
 
     @pytest.mark.asyncio
-    async def test_list_files_empty_and_sync_fallback(self) -> None:
-        """list_files handles empty directories and sync fallback when depth raises TypeError synchronously."""
-        mock_fs = MagicMock()
-        # First call: depth supported, returns empty list
-        mock_fs.list_files = AsyncMock(return_value=[])
-        mock_sandbox = MagicMock()
-        mock_sandbox.fs = mock_fs
-
-        entries = await list_files(mock_sandbox, "/workspace/empty_dir")
-        assert entries == []
-
-        # Second call: synchronous function raising TypeError on depth
-        def list_without_depth(_path: str, **kwargs: Any) -> list[str]:
-            if "depth" in kwargs:
-                raise TypeError("unexpected keyword argument 'depth'")
-            return ["file_a.txt", "file_b.txt"]
-
-        mock_fs.list_files = MagicMock(side_effect=list_without_depth)
-        entries2 = await list_files(mock_sandbox, "/workspace")
-        assert entries2 == ["file_a.txt", "file_b.txt"]
+    async def test_list_files_uses_the_async_sdk_depth_contract(self) -> None:
+        fs = MagicMock()
+        fs.list_files = AsyncMock(return_value=[])
+        sandbox = MagicMock()
+        sandbox.fs = fs
+        assert await list_files(sandbox, "/workspace", depth=2) == []
+        fs.list_files.assert_awaited_once_with("/workspace", depth=2)
 
     @pytest.mark.asyncio
-    async def test_list_files_async_coroutine_type_error_finding(self) -> None:
-        """Verify fs.py properly falls back when async list_files raises TypeError for depth."""
-
-        async def async_list_without_depth(_path: str, **kwargs: Any) -> list[str]:
-            if "depth" in kwargs:
-                raise TypeError("async: unexpected keyword argument 'depth'")
-            return ["file_x.txt"]
-
-        mock_fs = MagicMock()
-        mock_fs.list_files = MagicMock(side_effect=async_list_without_depth)
-        mock_sandbox = MagicMock()
-        mock_sandbox.fs = mock_fs
-
-        result = await list_files(mock_sandbox, "/workspace")
-        assert result == ["file_x.txt"]
+    async def test_list_files_does_not_retry_an_internal_type_error(self) -> None:
+        fs = MagicMock()
+        fs.list_files = AsyncMock(side_effect=TypeError("invalid provider response"))
+        sandbox = MagicMock()
+        sandbox.fs = fs
+        with pytest.raises(TypeError, match="invalid provider response"):
+            await list_files(sandbox, "/workspace")
+        assert fs.list_files.await_count == 1
 
     @pytest.mark.asyncio
     async def test_create_folder_nested_and_mode(self) -> None:
@@ -422,7 +390,7 @@ class TestSandboxIsolationInvariants:
     @pytest.mark.asyncio
     async def test_semantic_child_requests_network_block_all(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify the adapter requests network blocking; provider enforcement is unverified."""
-        import fleet_rlm.daytona.runtime as daytona_runtime
+        import fleet_rlm.daytona.children as daytona_children
 
         loop = asyncio.get_running_loop()
         mock_platform = MagicMock()
@@ -430,14 +398,13 @@ class TestSandboxIsolationInvariants:
         mock_admission = MagicMock()
         mock_admission.acquire = AsyncMock()
         mock_interpreter = MagicMock()
-        monkeypatch.setattr(daytona_runtime, "DaytonaCodeInterpreter", lambda **_kwargs: mock_interpreter)
-        monkeypatch.setattr(daytona_runtime, "sandbox_backend", lambda *_args, **_kwargs: MagicMock())
-        monkeypatch.setattr(daytona_runtime, "_close_child_runtime_sync", MagicMock())
-        monkeypatch.setattr(daytona_runtime, "cleanup_after_failed_acquire", AsyncMock())
-        monkeypatch.setattr(daytona_runtime, "sandbox_id_for", lambda _sandbox: "sb-child-isolation")
+        monkeypatch.setattr(daytona_children, "sandbox_interpreter_factory", lambda *_args, **_kwargs: mock_interpreter)
+        monkeypatch.setattr(daytona_children, "_close_child_runtime_sync", MagicMock())
+        monkeypatch.setattr(daytona_children, "cleanup_after_failed_acquire", AsyncMock())
+        monkeypatch.setattr(daytona_children, "sandbox_id_for", lambda _sandbox: "sb-child-isolation")
 
         runtime = make_daytona_runtime(platform=mock_platform, admission=mock_admission)
-        await runtime._acquire_child_runtime(
+        await runtime._children._acquire_child_runtime(
             volume_id=None,
             profile=DaytonaEnvironmentProfile.SEMANTIC_CHILD,
             workspace_id=uuid4(),

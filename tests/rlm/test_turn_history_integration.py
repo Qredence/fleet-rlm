@@ -21,7 +21,9 @@ from uuid import uuid4
 import dspy
 import pytest
 
+from fleet_rlm.rlm.execution import DelegationPolicy
 from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.role_lm import placeholder_bundle
 from tests.support.turn_preparation import TestingRunPreparer
 from tests.support.turn_settlement import TestingRunSettlement
@@ -90,6 +92,9 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -119,7 +124,13 @@ async def test_in_process_turn_preparation_forwards_dspy_history_identity_to_rlm
             async def release():
                 return None
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     preparer = TestingRunPreparer(
         models=placeholder_bundle(),
@@ -209,6 +220,9 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -237,7 +251,13 @@ async def test_in_process_turn_preparation_passes_empty_history_for_fresh_sessio
             async def release():
                 return None
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     preparer = TestingRunPreparer(
         models=placeholder_bundle(),
@@ -296,6 +316,9 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -325,11 +348,12 @@ async def test_daytona_preparation_selects_sandbox_history_transport_for_rlm() -
                 return None
 
             return RunEnvironment(
-                SimpleNamespace(),
+                configured_invocation_factory(SimpleNamespace()),
                 sink,
                 sink,
                 release,
                 history_format="sandbox",
+                child_runtime_factory=ChildLeaseRecorder().factory,
             )
 
     preparer = TestingRunPreparer(
@@ -424,6 +448,9 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -453,7 +480,13 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
             async def release():
                 return None
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     preparer = TestingRunPreparer(
         models=placeholder_bundle(),
@@ -523,7 +556,7 @@ async def test_turn_two_answer_derives_from_committed_history_content() -> None:
     # cross-Turn input.
     assert len(factory.programs) == 2
     assert len(factory.calls) == 2
-    assert not factory.tools
+    assert {tool.name for tool in factory.tools} == {"rlm_query", "rlm_query_batched"}
     second_history = factory.calls[1]["history"]
     assert second_history is prepared_two.execution.session.history
     assert type(second_history) is dspy.History
@@ -573,6 +606,9 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
     (history_tool,) = SessionHistoryToolHost(history).as_tools()
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):
@@ -614,13 +650,14 @@ async def test_native_rlm_retrieves_older_content_absent_from_initial_kwargs() -
             request="What was the project codename?", session_context=manifest, attachments=(), preparation_notices=()
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(max_iters=1),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())),
             cancellation_requested=not_cancelled,
         ),
         capabilities=Capabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     factory = Factory()
     stream = RLMRunner(program_builder=factory.create).stream(context)
@@ -667,6 +704,9 @@ async def test_native_rlm_reads_past_truncated_page_boundary() -> None:
     assert second_page["messages"][-1]["content"] == "final-detail"
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec(tools=(history_tool,))
 
         def drain_public_details(self):
@@ -712,13 +752,14 @@ async def test_native_rlm_reads_past_truncated_page_boundary() -> None:
             request="What is the final detail?", session_context=manifest, attachments=(), preparation_notices=()
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(max_iters=1),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())),
             cancellation_requested=not_cancelled,
         ),
         capabilities=Capabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
     factory = Factory()
     stream = RLMRunner(program_builder=factory.create).stream(context)

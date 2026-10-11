@@ -15,8 +15,33 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
+import dspy
 import pytest
 
+from fleet_rlm.rlm.event_types import ChildProgress, RunCompleted
+from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
+    ExecutionRuntime,
+    RLMExecutionContext,
+    RLMExecutionSpec,
+    RLMRunner,
+    RunIdentity,
+    SessionView,
+)
+from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions
+from fleet_rlm.sessions.context import build_session_context_manifest
+from fleet_rlm.sessions.models import TurnAccess, TurnInput
+from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+from fleet_rlm.turns.settlement import OwnedPostCommitMemoryPromotion
+from fleet_rlm.workspace.memory import (
+    MemoryCandidateCollector,
+    MemoryCandidateToolHost,
+    WorkspaceMemory,
+    promote_memory_candidates,
+)
+from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
+from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities, invocation_factory
+from tests.support.in_memory_stores import InMemoryRunStateStore
 from tests.support.turn_settlement import TestingRunSettlement
 
 
@@ -190,7 +215,7 @@ def _driver(lifecycle, runner, cleanup):
 
 @pytest.mark.asyncio
 async def test_finalization_wins_simultaneous_claim_loss() -> None:
-    from fleet_rlm.rlm.events import RunFailed
+    from fleet_rlm.rlm.event_types import RunFailed
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.turns import ClaimHeartbeat
@@ -228,7 +253,7 @@ async def test_finalization_wins_simultaneous_claim_loss() -> None:
 @pytest.mark.asyncio
 async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
     """A claim-loss waiter must not turn a concurrently committed Turn into failure."""
-    from fleet_rlm.rlm.events import RunCompleted, RunFailed, TextCompleted, TextDelta
+    from fleet_rlm.rlm.event_types import RunCompleted, RunFailed, TextCompleted, TextDelta
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
     from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
@@ -814,7 +839,7 @@ async def test_native_context_cleanup_failure_blocks_durable_success() -> None:
 def test_terminal_maps_turn_output_too_large_public_message() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.rlm.events import EventRecorder, RunFailed
+    from fleet_rlm.rlm.event_types import EventRecorder, RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.turns import terminal
 
@@ -833,7 +858,7 @@ def test_terminal_maps_turn_output_too_large_public_message() -> None:
 
 
 def test_terminal_preserves_provider_endpoint_not_found_message_from_durable_failure() -> None:
-    from fleet_rlm.rlm.events import PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE, EventRecorder, RunFailed
+    from fleet_rlm.rlm.event_types import PROVIDER_ENDPOINT_NOT_FOUND_MESSAGE, EventRecorder, RunFailed
     from fleet_rlm.sessions.run_state import FailedRunReceipt
     from fleet_rlm.turns import terminal
 
@@ -862,7 +887,7 @@ async def test_open_non_success_has_one_last_terminal_and_never_promotes(
 ) -> None:
     from hashlib import sha256
 
-    from fleet_rlm.rlm.events import (
+    from fleet_rlm.rlm.event_types import (
         TERMINAL_DETAIL_TYPES,
         EventRecorder,
         RunCancelled,
@@ -1149,7 +1174,7 @@ async def test_open_preparation_timeout_finishes_as_typed_timeout_before_stream(
 @pytest.mark.asyncio
 async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_order() -> None:
 
-    from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
+    from fleet_rlm.rlm.event_types import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
     from tests.support.in_memory_stores import InMemoryRunStateStore, InMemorySessionCatalog
@@ -1229,7 +1254,7 @@ async def test_open_midstream_execution_failure_keeps_sequence_and_terminal_orde
 @pytest.mark.asyncio
 async def test_open_commit_failure_projects_commit_failure_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
 
-    from fleet_rlm.rlm.events import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
+    from fleet_rlm.rlm.event_types import TERMINAL_DETAIL_TYPES, EventRecorder, RunFailed, RunStarted
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
     from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
@@ -1357,7 +1382,7 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from fleet_rlm.observability import tracing as turn_tracing
-    from fleet_rlm.rlm.events import EventRecorder, RunFailed, RunStarted, Status
+    from fleet_rlm.rlm.event_types import EventRecorder, RunFailed, RunStarted, Status
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome
     from fleet_rlm.sessions.models import TurnAccess, TurnInput
@@ -1480,3 +1505,122 @@ async def test_failed_turn_emits_settlement_claim_and_cleanup_spans(
         assert [name for name in names if name.startswith("Turn.progress.")] == []
     finally:
         turn_tracing._fleet_trace_active.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_turn_walkthrough_preserves_child_isolation_memory_commit_and_replay(tmp_path) -> None:
+    access = TurnAccess(uuid4(), uuid4())
+    session_id, run_id = uuid4(), uuid4()
+    store = InMemoryRunStateStore()
+    await store.add_session(session_id, access)
+    memory = WorkspaceMemory(WorkspaceMemoryStorage(WorkspaceStorage(root=tmp_path)))
+    children = ChildLeaseRecorder()
+    phases: list[str] = []
+    adapter = dspy.JSONAdapter()
+    root = dspy.utils.DummyLM(
+        [
+            {
+                "reasoning": "Verify through an isolated child before proposing durable learning.",
+                "code": (
+                    "root_secret = 'root-only'\n"
+                    "child = rlm_query(task='independently verify the sum', inputs=[])\n"
+                    "assert child['status'] == 'completed' and child['answer'] == '6'\n"
+                    "propose_memory(key_learning='Verified walkthrough sum is 6', category='Project')"
+                ),
+            },
+            {
+                "reasoning": "Inspect isolated inputs.",
+                "code": "assert 'root_secret' not in globals()\nvalue = sum([1,2,3])",
+            },
+            {
+                "reasoning": "Independently verify and submit.",
+                "code": (
+                    "assert value == 3*4//2\n"
+                    "SUBMIT(answer=str(value), evidence=['sum and formula agree'], gaps=[], result_files=[])"
+                ),
+            },
+            {"reasoning": "The child verified the result; submit.", "code": "SUBMIT(answer='6')"},
+        ],
+        adapter=adapter,
+    )
+    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
+
+    class Preparation:
+        async def prepare(self, run, *, deadline):
+            phases.append("prepare")
+            collector = MemoryCandidateCollector(run_id=run.run_id, allowed_categories=("Project",))
+            host = MemoryCandidateToolHost(collector)
+
+            class Capabilities(EmptyCapabilities):
+                def drain_memory_candidates(self):
+                    return collector.drain()
+
+            execution = RLMExecutionContext(
+                identity=RunIdentity(run_id=run.run_id, session_id=run.session_id, access=run.access),
+                session=SessionView(
+                    request=run.input.text,
+                    session_context=build_session_context_manifest(run.session_id, run.checkpoint_version, run.history),
+                    attachments=(),
+                    preparation_notices=(),
+                ),
+                execution=ExecutionRuntime(
+                    models=RLMModelBundle(root, sub),
+                    options=RLMOptions(max_iters=3, max_llm_calls=4),
+                    deadline=deadline,
+                    interpreter=invocation_factory,
+                    cancellation_requested=run.cancellation_requested,
+                ),
+                delegation=DelegationPolicy(child_runtime_factory=children.factory),
+                capabilities=Capabilities(
+                    spec=RLMExecutionSpec(tools=host.as_tools(), tool_event_views=host.event_views())
+                ),
+            )
+
+            class Prepared:
+                artifact_sink = None
+                result_snapshot_sink = None
+
+                def __init__(self):
+                    self.execution = execution
+
+                @staticmethod
+                def post_commit_memory_promotion(candidates):
+                    phases.append("promote")
+                    return promote_memory_candidates(
+                        store=memory, candidates=candidates, allowed_categories=("Project",)
+                    )
+
+                async def aclose(self):
+                    phases.append("cleanup")
+
+            prepared = Prepared()
+            prepared.post_commit_memory_promotion = OwnedPostCommitMemoryPromotion(
+                prepared.post_commit_memory_promotion
+            )
+            return prepared
+
+    runner = RLMRunner()
+    runtime = TurnRuntime(
+        lifecycle=TestingRunSettlement(store, max_artifact_bytes=1024), preparation=Preparation(), runner=runner
+    )
+    command = OpenTurnCommand(access, session_id, TurnInput("verify and remember"), "walkthrough", run_id)
+    events = [event async for event in await runtime.open(command)]
+    assert isinstance(events[-1].detail, RunCompleted)
+    assert events[-1].detail.checkpoint_version == 1
+    assert any(isinstance(event.detail, ChildProgress) and event.detail.state == "completed" for event in events)
+    assert children.call_indexes == [1]
+    assert children.close_calls == {1: 1}
+    assert phases == ["prepare", "promote", "cleanup"]
+    assert "Verified walkthrough sum is 6" in memory.read_injection_digest(request="walkthrough")
+
+    replay = [event async for event in await runtime.open(command)]
+    assert isinstance(replay[-1].detail, RunCompleted)
+    assert replay[-1].detail.delivery == "replay"
+    assert phases == ["prepare", "promote", "cleanup"]
+    assert children.call_indexes == [1]
+    await runner.aclose()
+    await runtime._cleanup.shutdown(drain_seconds=1)
+    assert not runtime._cleanup.active_jobs
+    assert not any(
+        task.get_name().startswith("fleet-") for task in asyncio.all_tasks() if task is not asyncio.current_task()
+    )

@@ -32,8 +32,8 @@ def test_public_turn_succeeds_when_tracing_is_disabled_by_policy() -> None:
 
     with TestClient(app) as client:
         _post_canned_turn(client)
-        assert app.state.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
-    assert app.state.mlflow_runtime.state is MLflowRuntimeState.CLOSED
+        assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
+    assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.CLOSED
 
 
 def test_public_turn_succeeds_when_tracing_setup_is_unavailable(monkeypatch) -> None:
@@ -54,9 +54,9 @@ def test_public_turn_succeeds_when_tracing_setup_is_unavailable(monkeypatch) -> 
 
     with TestClient(app) as client:
         _post_canned_turn(client)
-        assert app.state.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
+        assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
     assert len(configure_calls) == 1
-    assert app.state.mlflow_runtime.state is MLflowRuntimeState.CLOSED
+    assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.CLOSED
 
 
 def test_two_fresh_app_lifespans_can_reconfig_after_a_failed_attempt(monkeypatch) -> None:
@@ -77,9 +77,9 @@ def test_two_fresh_app_lifespans_can_reconfig_after_a_failed_attempt(monkeypatch
     second = create_testing_app(settings=settings)
 
     with TestClient(first):
-        assert first.state.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
+        assert first.state.composition.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
     with TestClient(second):
-        assert second.state.mlflow_runtime.state is MLflowRuntimeState.ACTIVE
+        assert second.state.composition.mlflow_runtime.state is MLflowRuntimeState.ACTIVE
 
     assert configure_calls == ["configure", "configure"]
 
@@ -97,5 +97,5 @@ def test_native_fastapi_telemetry_does_not_adopt_ambient_exporters(monkeypatch) 
     assert not app._native_telemetry.enabled()
     with TestClient(app) as client:
         _post_canned_turn(client)
-        assert app.state.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
-    assert app.state.mlflow_runtime.state is MLflowRuntimeState.CLOSED
+        assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.UNAVAILABLE
+    assert app.state.composition.mlflow_runtime.state is MLflowRuntimeState.CLOSED

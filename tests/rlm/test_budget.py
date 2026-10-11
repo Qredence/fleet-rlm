@@ -23,12 +23,8 @@ from fleet_rlm.rlm.budget import (
     TurnBudget,
     TurnBudgetExhausted,
 )
-from fleet_rlm.rlm.events import (
-    ChildProgress,
-    Status,
-    ToolCompleted,
-    _RLMTraceCallback,
-)
+from fleet_rlm.rlm.event_types import ChildProgress, Status, ToolCompleted
+from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.rlm.recursion import ChildRequest, RecursiveRLMOptions
 from tests.rlm.fakes import ChildLeaseRecorder

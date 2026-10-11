@@ -10,7 +10,7 @@ from fleet_rlm.rlm.submit_validation import is_finalization_action, is_submit_on
 
 
 def test_rlm_outcome_is_internal_immutable_and_terminally_typed() -> None:
-    from fleet_rlm.rlm.events import RLMReasoning
+    from fleet_rlm.rlm.event_types import RLMReasoning
     from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
 
     outcome = RLMOutcome(
@@ -203,3 +203,105 @@ def test_sanitizer_keeps_url_trailing_delimiters() -> None:
     cleaned = sanitize_trace_text('requests.get("http://host/preview?token=abc123")', max_len=1_000)
 
     assert cleaned == 'requests.get("[redacted-url]")'
+
+
+# JSON-encoded payloads (every MLflow span attribute, provider error text, and
+# ``repr()``ed interpreter output) spell a newline as the two characters ``\``
+# and ``n``. The Windows-drive alternative in the path patterns treated any
+# ``<letter>:\n`` as a drive path, so live trace tr-a521d879 flattened 92
+# occurrences of generated code into ``[path]`` -- ``else:\n`` became
+# ``els[path]``, ``exactly:\n`` became ``exactl[path]`` -- which is exactly the
+# payload the trace exists to let a reader recover.
+_ESCAPED_NEWLINE_TEXT = (
+    "they match exactly:\\n1) Chudnovsky\\n"
+    "try:\\n    pw = str(pi_int)\\nexcept NameError:\\n    def bs(a, b):\\n"
+    "        if b - a == 1:\\n            Pab = Qab = 1\\n        else:\\n"
+    "            Pab = (6*a-5)*(2*a-1)*(6*a-1)\\n"
+    "Available Variables: `request`, `history`\\n"
+    "Your input fields are:\\n `variables_info` (str): "
+)
+
+
+def test_trace_sanitizer_keeps_json_escaped_newlines_verbatim() -> None:
+    """A ``<letter>:\\n`` is an escaped newline, never a Windows drive path."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text(_ESCAPED_NEWLINE_TEXT, max_len=10_000)
+
+    assert cleaned == _ESCAPED_NEWLINE_TEXT
+    assert "[path]" not in cleaned
+
+
+def test_repair_sanitizer_keeps_json_escaped_newlines_verbatim() -> None:
+    """Repair text reaches the model, so a mangled source line compounds the repair."""
+    from fleet_rlm.rlm.result import sanitize_repair_text
+
+    line = 'SyntaxError: invalid syntax\\n    print("note:\\n")\\n'
+
+    cleaned = sanitize_repair_text(line, max_len=512)
+
+    assert cleaned == line
+
+
+def test_trace_sanitizer_still_redacts_real_windows_drive_paths() -> None:
+    """The escaped-newline carve-out must not weaken drive-path redaction."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    for raw, resident in (
+        ("open(r'C:\\Users\\op\\notes.txt')", "notes.txt"),
+        ("C:\\\\Users\\\\op\\\\notes.txt", "notes.txt"),
+        ("D:\\data\\results.csv", "results.csv"),
+        ("C:\\new", "new"),
+    ):
+        cleaned = sanitize_trace_text(raw, max_len=1_000)
+
+        assert "[path]" in cleaned, raw
+        assert resident not in cleaned, raw
+
+
+# A live Turn (tr-0ae69536a4ed569b331cf36d3db3b091, 2026-10-11) exposed a second
+# shape of the same artifact that the escaped-newline carve-out did not cover:
+# a drive-letter-looking token whose "path" is a string escape or a lone letter.
+# ``except ... as e:\n`` and a doubly-escaped ``e:\\n`` are a parameter name and
+# an escape, not ``E:`` drives.
+_TRAILING_NAME_TEXT = (
+    'lines.append("except ZeroDivisionError as e:")\n'
+    "lines.append('    result = 0')\n"
+    'print("try:", "except SomeError as e:", "else:", "exactly:")\n'
+)
+
+
+def test_trace_sanitizer_keeps_parameter_names_and_prose_verbatim() -> None:
+    """``as e:`` is a parameter name and ``exactly:`` is prose, never a drive path."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    cleaned = sanitize_trace_text(_TRAILING_NAME_TEXT, max_len=10_000)
+
+    assert cleaned == _TRAILING_NAME_TEXT
+    assert "[path]" not in cleaned
+
+
+def test_trace_sanitizer_keeps_doubly_escaped_newlines_verbatim() -> None:
+    """A ``\\\\n`` inside a JSON string is still an escape, not a drive path."""
+    from fleet_rlm.rlm.result import sanitize_trace_text
+
+    for raw in (
+        "    except ZeroDivisionError as e:\\\\n        return None",
+        'lines.append(\\"except ZeroDivisionError as e:\\")\\nlines.append(1)',
+        'print("step:\\\\nmore")',
+    ):
+        cleaned = sanitize_trace_text(raw, max_len=1_000)
+
+        assert cleaned == raw, raw
+        assert "[path]" not in cleaned, raw
+
+
+@pytest.mark.parametrize("component", ["a", "n", "0", "123", "a1"])
+@pytest.mark.parametrize("separator", ["\\", "\\\\"])
+def test_windows_short_directory_components_remain_private(component: str, separator: str) -> None:
+    from fleet_rlm.rlm.result import sanitize_trace_text, validate_declared_public_value
+
+    path = f"C:{separator}{component}{separator}secret.txt"
+    assert "secret.txt" not in sanitize_trace_text(path, max_len=1000)
+    with pytest.raises(ValueError):
+        validate_declared_public_value(path)

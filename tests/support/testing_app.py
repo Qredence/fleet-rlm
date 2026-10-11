@@ -39,6 +39,7 @@ from fleet_rlm.turns.preparation import (
 from fleet_rlm.workspace.artifacts import ArtifactReader
 from fleet_rlm.workspace.attachments import AttachmentLifecycle, PreparedAttachments
 from fleet_rlm.workspace.models import UNAVAILABLE_WORKSPACE_CAPABILITY
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 
 
 @dataclass(frozen=True, slots=True)
@@ -290,7 +291,13 @@ async def testing_run_environment(run: ClaimedRun, *, deadline: float) -> RunEnv
     async def release() -> None:
         return None
 
-    return RunEnvironment(TestingInterpreter(), sink, sink, release)
+    return RunEnvironment(
+        configured_invocation_factory(TestingInterpreter()),
+        sink,
+        sink,
+        release,
+        child_runtime_factory=ChildLeaseRecorder().factory,
+    )
 
 
 class TestingCapabilityPreparer:
@@ -372,6 +379,9 @@ def build_testing_rlm(**kwargs: Any) -> _TestingRLM:
 
 
 class DeterministicTurnPreparation:
+    async def aclose(self) -> bool:
+        return await self._module.aclose()
+
     def __init__(
         self,
         *,
@@ -446,7 +456,7 @@ def build_testing_services(
         preparation=DeterministicTurnPreparation(
             attachments=storage.attachment_lifecycle,
             artifact_reader=storage.artifact_reader,
-            skill_catalog=app.state.skill_catalog,
+            skill_catalog=app.state.composition.skill_catalog,
             options=rlm_options(settings),
             max_artifact_bytes=settings.max_artifact_bytes,
         ),

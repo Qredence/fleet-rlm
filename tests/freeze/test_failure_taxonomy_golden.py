@@ -17,7 +17,7 @@ from uuid import uuid4
 from fleet_rlm.api.errors import _STATUS_DEFAULTS
 from fleet_rlm.api.routes.turns import _open_failure_frames, _open_failure_message
 from fleet_rlm.api.sse import AISDKUIProjector
-from fleet_rlm.rlm.events import EventRecorder
+from fleet_rlm.rlm.event_types import EventRecorder
 from fleet_rlm.sessions.run_state import (
     FailedRunReceipt,
     RunIdempotencyMismatchError,

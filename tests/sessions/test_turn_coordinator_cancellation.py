@@ -17,7 +17,7 @@ from tests.support.turn_settlement import TestingRunSettlement
 async def test_turn_capture_finalizes_as_client_disconnect_on_stream_close(tmp_path: Path) -> None:
     """Closing a suspended Turn stream after three events ends the capture as a disconnect."""
     from fleet_rlm.observability.turn_capture import TurnCaptureStore
-    from fleet_rlm.rlm.events import EventRecorder, Status
+    from fleet_rlm.rlm.event_types import EventRecorder, Status
     from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
     from fleet_rlm.sessions.run_state import (
         ClaimedRun,

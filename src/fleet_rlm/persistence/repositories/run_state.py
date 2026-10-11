@@ -208,7 +208,7 @@ def _claim_failure(failure: RunFailure) -> ClaimFailure:
 
 
 def _command_usage(command: ClaimCommand) -> RLMUsage | None:
-    if hasattr(command, "usage"):
+    if isinstance(command, (FailClaim, BeginSettlement, RevokeClaim)):
         return cast(RLMUsage, command.usage)
     return None
 

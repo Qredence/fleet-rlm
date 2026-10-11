@@ -41,6 +41,7 @@ from fleet_rlm.rlm.result import RLMConfigError
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import SessionHistory, TurnInput
 from fleet_rlm.workspace.models import DAYTONA_WORKSPACE_CAPABILITY, UNAVAILABLE_WORKSPACE_CAPABILITY
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.rlm_inputs import ATTACHMENT_ID, SESSION_ID, SKILL_ID, _payload
 from tests.support.role_lm import placeholder_bundle
@@ -369,6 +370,9 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -398,7 +402,13 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
             async def release():
                 return None
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     async def not_cancelled() -> bool:
         return False
@@ -501,15 +511,13 @@ async def test_prepared_rlm_kwargs_bound_a_large_session_to_recent_previews() ->
 
 # --- from test_program_instructions.py --------------------------------
 def test_workspace_mutation_instruction_requires_a_registered_write_tool() -> None:
-    absent = root_signature_for_recursion(FleetRLMSignature, recursion_enabled=False).instructions
+    absent = root_signature_for_recursion(FleetRLMSignature).instructions
     present = root_signature_for_recursion(
         FleetRLMSignature,
-        recursion_enabled=False,
         tool_names=frozenset({"append_workspace_text"}),
     ).instructions
     publish_only = root_signature_for_recursion(
         FleetRLMSignature,
-        recursion_enabled=False,
         tool_names=frozenset({"publish_workspace_artifact"}),
     ).instructions
 

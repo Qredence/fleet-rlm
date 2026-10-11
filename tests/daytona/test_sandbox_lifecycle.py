@@ -25,12 +25,8 @@ from fleet_rlm.daytona.errors import (
     sanitize_failure_text,
     sanitize_provider_message,
 )
-from fleet_rlm.daytona.runtime import (
-    DaytonaSandboxSpec,
-    LiveDaytonaPlatform,
-    LiveDaytonaVolumeClient,
-    normalize_state,
-)
+from fleet_rlm.daytona.provider import LiveDaytonaPlatform, LiveDaytonaVolumeClient
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec, normalize_state
 
 # --- from test_sandbox_lifecycle.py -----------------------------------
 _SPEC = DaytonaSandboxSpec("fleet-test-v1")
@@ -291,7 +287,7 @@ async def test_live_platform_delete_resolves_id_for_daytona_async_contract() -> 
     await LiveDaytonaPlatform(client, _SPEC).delete("sb-1")
 
     client.get.assert_called_once_with("sb-1")
-    client.delete.assert_called_once_with(sandbox)
+    client.delete.assert_called_once_with(sandbox, wait=True, timeout=60)
 
 
 @pytest.mark.asyncio
@@ -447,7 +443,7 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
         snapshot_dependency_sha256,
         snapshot_execution_dependencies,
     )
-    from fleet_rlm.daytona.runtime import BASE_IMAGE
+    from fleet_rlm.daytona.specs import BASE_IMAGE
 
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
     dockerfile = build_snapshot_image(spec).dockerfile()
@@ -477,7 +473,7 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
 async def test_live_platform_builds_session_workspace_sdk_mount_offline() -> None:
     from uuid import uuid4
 
-    from fleet_rlm.daytona.runtime import DEFAULT_SNAPSHOT_NAME
+    from fleet_rlm.daytona.specs import DEFAULT_SNAPSHOT_NAME
     from fleet_rlm.sessions.bindings import session_workspace_volume_subpath
 
     class _Client:
@@ -507,7 +503,7 @@ async def test_live_platform_builds_session_workspace_sdk_mount_offline() -> Non
 
 def test_snapshot_provenance_is_exact() -> None:
     from fleet_rlm.daytona.errors import DaytonaAdapterError
-    from fleet_rlm.daytona.runtime import verify_sandbox_spec
+    from fleet_rlm.daytona.specs import verify_sandbox_spec
 
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
     verify_sandbox_spec(SimpleNamespace(snapshot=spec.snapshot), spec)
@@ -517,7 +513,7 @@ def test_snapshot_provenance_is_exact() -> None:
 
 def test_environment_profiles_keep_capacity_and_data_access_separate() -> None:
     from fleet_rlm.daytona.diagnostics import build_snapshot_image, environment_manifest
-    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+    from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile
 
     spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
     workspace_spec = DaytonaSandboxSpec(
@@ -571,7 +567,7 @@ class _FakeDeletionProvider:
     target: _FakeDeletionSandbox | None = None
     deleted: bool = False
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
         self.seen_deletes.append(sandbox_id)
 
     async def get(self, _sandbox_id: str) -> Any | None:
@@ -614,14 +610,14 @@ class _StepClock:
     ],
 )
 def test_classify_deletion_phase_maps_raw_states(raw: str, phase: str) -> None:
-    from fleet_rlm.daytona.runtime import classify_deletion_phase
+    from fleet_rlm.daytona.leases import classify_deletion_phase
 
     assert classify_deletion_phase(raw) == phase
 
 
 @pytest.mark.asyncio
 async def test_delete_request_acceptance_is_not_absence() -> None:
-    from fleet_rlm.daytona.runtime import AbsenceTimeout, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceTimeout, confirm_absence
 
     provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="started"))
     await provider.delete("sb-1")
@@ -640,7 +636,7 @@ async def test_delete_request_acceptance_is_not_absence() -> None:
 
 @pytest.mark.asyncio
 async def test_requested_then_deleting_then_absent_and_purged() -> None:
-    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceConfirmation, confirm_absence
 
     provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="started"))
     clock = _StepClock()
@@ -672,7 +668,7 @@ async def test_requested_then_deleting_then_absent_and_purged() -> None:
 
 @pytest.mark.asyncio
 async def test_terminal_destroyed_state_confirms_without_purge() -> None:
-    from fleet_rlm.daytona.runtime import AbsenceConfirmation, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceConfirmation, confirm_absence
 
     provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="destroyed"))
     outcome = await confirm_absence(
@@ -688,7 +684,7 @@ async def test_terminal_destroyed_state_confirms_without_purge() -> None:
 
 @pytest.mark.asyncio
 async def test_provider_error_state_is_classified_failure_not_absence() -> None:
-    from fleet_rlm.daytona.runtime import AbsenceProbeError, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceProbeError, confirm_absence
 
     provider = _FakeDeletionProvider(target=_FakeDeletionSandbox(state="error"))
     outcome = await confirm_absence(
@@ -705,7 +701,7 @@ async def test_provider_error_state_is_classified_failure_not_absence() -> None:
 
 @pytest.mark.asyncio
 async def test_probe_error_is_classified_not_silent() -> None:
-    from fleet_rlm.daytona.runtime import AbsenceProbeError, confirm_absence
+    from fleet_rlm.daytona.leases import AbsenceProbeError, confirm_absence
 
     async def failing_probe(_sandbox_id: str) -> Any | None:
         raise RuntimeError("provider 503")
@@ -723,7 +719,7 @@ async def test_probe_error_is_classified_not_silent() -> None:
 
 @pytest.mark.asyncio
 async def test_cancellation_propagates_instead_of_classifying() -> None:
-    from fleet_rlm.daytona.runtime import confirm_absence
+    from fleet_rlm.daytona.leases import confirm_absence
 
     async def cancelled_probe(_sandbox_id: str) -> Any | None:
         raise asyncio.CancelledError
@@ -761,7 +757,7 @@ class _ScriptedPlatform:
         self.deletes: list[str] = []
         self.probes: int = 0
 
-    async def delete(self, sandbox_id: str) -> None:
+    async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
         self.deletes.append(sandbox_id)
         if self.delete_error is not None:
             raise self.delete_error
@@ -777,7 +773,7 @@ class _ScriptedPlatform:
 
 
 async def _take_permit():
-    from fleet_rlm.daytona.runtime import DaytonaAdmission
+    from fleet_rlm.daytona.leases import DaytonaAdmission
 
     admission = DaytonaAdmission(max_active_leases=1)
     permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 5)
@@ -785,7 +781,7 @@ async def _take_permit():
 
 
 def _cleanup_coroutine(platform: _ScriptedPlatform, permit, **overrides: Any) -> Any:
-    from fleet_rlm.daytona.runtime import cleanup_child_runtime_async
+    from fleet_rlm.daytona.leases import cleanup_child_runtime_async
 
     kwargs: dict[str, Any] = {
         "platform": platform,
@@ -924,3 +920,58 @@ async def test_native_destroyed_error_does_not_retry_provider_operation(error_ty
     getattr(client, operation).assert_awaited_once()
     if operation == "create":
         assert client.create.await_args.args[0].queue_timeout is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_acquisition", [False, True])
+async def test_child_confirmation_body_type_error_is_not_retried(failed_acquisition: bool) -> None:
+    """A failed confirmation retains the permit; a subsequent verified retry releases it."""
+    from fleet_rlm.daytona.errors import ChildRuntimeCleanupError
+    from fleet_rlm.daytona.leases import (
+        AbsenceConfirmation,
+        DaytonaAdmission,
+        cleanup_after_failed_acquire,
+        cleanup_child_runtime_async,
+    )
+
+    admission = DaytonaAdmission(max_active_leases=1)
+    permit = await admission.acquire(deadline=asyncio.get_running_loop().time() + 1)
+    platform = SimpleNamespace(delete=AsyncMock(), get=AsyncMock())
+    sandbox = SimpleNamespace(id="child")
+    calls = 0
+
+    async def confirm(**_kwargs: object):
+        nonlocal calls
+        calls += 1
+        raise TypeError("confirmation body failed")
+
+    with pytest.raises((TypeError, ChildRuntimeCleanupError)):
+        if failed_acquisition:
+            await cleanup_after_failed_acquire(platform, sandbox, "child", permit, confirm=confirm)
+        else:
+            await cleanup_child_runtime_async(
+                platform=platform,
+                sandbox=sandbox,
+                sandbox_id="child",
+                mount_path=None,
+                permit=permit,
+                confirm=confirm,
+            )
+    assert calls == 1
+    platform.delete.assert_awaited_once()
+    assert not permit._released
+
+    async def confirmed(**_kwargs: object):
+        return AbsenceConfirmation("child", ("absent",), 0.0)
+
+    await cleanup_child_runtime_async(
+        platform=platform,
+        sandbox=sandbox,
+        sandbox_id="child",
+        mount_path=None,
+        permit=permit,
+        confirm=confirmed,
+    )
+    assert permit._released
+    permit.release()
+    assert admission._semaphore._value == 1

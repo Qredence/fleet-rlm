@@ -180,10 +180,26 @@ _DSNISH = re.compile(
     r"jdbc:[^\s\"']+"
     r")"
 )
+# JSON-encoded payloads -- every MLflow span attribute, provider error text, and
+# ``repr()``ed interpreter output -- spell a newline as the two characters ``\``
+# and ``n``, doubled when the payload is escaped a second time. Unanchored, the
+# Windows-drive alternative below matched every ``<letter>:\n``, so generated
+# code lost ``else:``, ``try:`` and ``exactly:`` to ``[path]`` in live traces
+# (tr-a521d879, tr-0ae69536) while no Windows path was present at all.
+#
+# Two conditions make a real drive path distinguishable. The letter must start a
+# token, which ``(?<![A-Za-z0-9_])`` enforces. And the escape must be judged
+# before the separator is consumed, not after: matched greedily the separator
+# backtracks into a shorter match and reports ``e:\\n`` as a path. The lookahead
+# runs first against both separator widths, treating a following character as an
+# escape only when no path character follows it, so a directory merely named
+# ``C:\new`` or ``C:\temp`` still redacts. Each site keeps its own trailing
+# character class.
+_WINDOWS_DRIVE_PATH = r"(?<![A-Za-z0-9_])[A-Za-z]:(?!\\{1,2}[nrtfbva0xuUN\"'](?![A-Za-z_0-9\\]))\\{1,2}"
 _PATHISH = re.compile(
     r"(?i)("
-    r"/(?:home|Users|Volumes|private|var|tmp|etc|opt|root|mnt|srv)/\S+|"
-    r"[A-Za-z]:\\[^\s]+|"
+    rf"/(?:home|Users|Volumes|private|var|tmp|etc|opt|root|mnt|srv)/\S+|"
+    rf"{_WINDOWS_DRIVE_PATH}[^\s]+|"
     r"/home/daytona/\S+"
     r")"
 )
@@ -217,8 +233,8 @@ _DECLARED_PROVIDER_TOKEN = re.compile(
 )
 _DECLARED_PRIVATE_PATH = re.compile(
     r"(?i)(?:"
-    r"/(?:Users|home|root|var|tmp|private)/[^\s\"'`<>]+|"
-    r"[A-Za-z]:\\[^\s\"'`<>]+"
+    rf"/(?:Users|home|root|var|tmp|private)/[^\s\"'`<>]+|"
+    rf"{_WINDOWS_DRIVE_PATH}[^\s\"'`<>]+"
     r")"
 )
 _DECLARED_STACK_DUMP = re.compile(

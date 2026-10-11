@@ -43,7 +43,7 @@ from fleet_rlm.workspace.models import (
     validate_workspace_memory_record,
     workspace_memory_record_id,
 )
-from fleet_rlm.workspace.storage import WorkspaceStorage
+from fleet_rlm.workspace.storage import WorkspaceMemoryStorage, WorkspaceStorage
 
 STAMP = datetime(2026, 7, 27, 11, 14, 5, tzinfo=UTC)
 # Deterministic golden v2 record for STAMP + "User Preference"; id =
@@ -636,7 +636,7 @@ def test_supersession_graph_marks_active_state_and_rejects_invalid_geometry() ->
 
 
 def _memory(tmp_path, *, max_file_bytes: int = 262_144) -> WorkspaceMemory:
-    return WorkspaceMemory(WorkspaceStorage(root=tmp_path), max_file_bytes=max_file_bytes)
+    return WorkspaceMemory(WorkspaceMemoryStorage(WorkspaceStorage(root=tmp_path)), max_file_bytes=max_file_bytes)
 
 
 def test_root_memory_is_verified_then_retired(tmp_path) -> None:
@@ -809,7 +809,7 @@ def test_delete_uses_checksum_precondition(tmp_path) -> None:
                 volume.write_text(path, "# Fleet Memory v2\nexternal change\n", overwrite=True)
             return volume.write_text(path, content, overwrite=overwrite, expected_sha256=expected_sha256)
 
-    store = WorkspaceMemory(RacyStorage())
+    store = WorkspaceMemory(WorkspaceMemoryStorage(RacyStorage()))
     record, _ = format_workspace_memory_record(
         "delete me", "General", timestamp=datetime(2026, 9, 20, 10, 0, tzinfo=UTC)
     )

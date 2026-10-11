@@ -9,7 +9,7 @@ from daytona import Image
 from daytona._async.snapshot import AsyncSnapshotService
 
 from fleet_rlm.daytona.diagnostics import snapshot_dependency_import_names
-from fleet_rlm.daytona.runtime import DaytonaSandboxSpec
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from scripts import daytona_snapshot
 
 

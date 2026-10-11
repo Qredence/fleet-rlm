@@ -141,7 +141,7 @@ STREAM_RUN_IDS = {
 
 def stream__project(details: tuple[Any, ...], run_id: UUID) -> list[dict[str, Any]]:
     from fleet_rlm.api.sse import AISDKUIProjector
-    from fleet_rlm.rlm.events import RuntimeEvent
+    from fleet_rlm.rlm.event_types import RuntimeEvent
 
     projector = AISDKUIProjector()
     chunks: list[dict[str, Any]] = []
@@ -160,7 +160,7 @@ def stream__project(details: tuple[Any, ...], run_id: UUID) -> list[dict[str, An
 
 
 def stream__happy_details() -> tuple[Any, ...]:
-    from fleet_rlm.rlm.events import (
+    from fleet_rlm.rlm.event_types import (
         ArtifactCreated,
         AttachmentRead,
         ChildProgress,
@@ -232,7 +232,7 @@ def stream__happy_details() -> tuple[Any, ...]:
 
 
 def stream__failure_details() -> tuple[Any, ...]:
-    from fleet_rlm.rlm.events import RunFailed, RunStarted, TextDelta
+    from fleet_rlm.rlm.event_types import RunFailed, RunStarted, TextDelta
 
     return (
         RunStarted("live"),
@@ -242,7 +242,7 @@ def stream__failure_details() -> tuple[Any, ...]:
 
 
 def stream__abort_details() -> tuple[Any, ...]:
-    from fleet_rlm.rlm.events import RunCancelled, RunStarted, StepStarted
+    from fleet_rlm.rlm.event_types import RunCancelled, RunStarted, StepStarted
 
     return (
         RunStarted("live"),
@@ -525,7 +525,7 @@ def config_render() -> str:
         f"| Root model | `{contract.root_model}` |",
         f"| Sub model | `{contract.sub_model}` |",
         f"| Root / Sub max tokens | {contract.root_max_tokens or 'default'} / {contract.sub_max_tokens or 'default'} |",
-        f"| Fleet child recursion | {'enabled' if contract.recursion_enabled else 'disabled'} |",
+        "| Fleet child recursion | Always available; bounded to depth one |",
         f"| MLflow | {contract.mlflow_tracking_uri if contract.mlflow_tracing_enabled else 'disabled'} |",
         f"| Provider environment names | {config__names(contract.provider_environment_names)} |",
         "| Database environment name | "
@@ -540,7 +540,7 @@ def config_render() -> str:
         "",
         (
             "Live verification requires operator authorization and the configured provider credentials. "
-            + "Native-only checks require `rlm.recursion_enabled = false`; recursive checks require it enabled. "
+            + "Root invocations always receive bounded child tools; tasks choose whether to delegate. "
             + "Checks never select another configuration. Isolated proofs use temporary database URLs as documented."
         ),
         "",

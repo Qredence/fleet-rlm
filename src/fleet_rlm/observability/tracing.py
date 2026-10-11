@@ -420,46 +420,7 @@ def _sanitize_mlflow_value(
     return type(value).__name__
 
 
-def _sanitize_mlflow_span(span: object) -> None:
-    """
-    Protect secrets and bound an MLflow span's inputs, outputs, and attributes before export.
-
-    Real SDK spans are cleared before sanitization, so failure cannot export
-    the original content. Lightweight test doubles retain the public setter seam.
-
-    Parameters:
-        span (object): MLflow span to sanitize.
-    """
-    if getattr(span, "_span", None) is not None:
-        _sanitize_live_mlflow_span(span)
-        return
-    try:
-        inputs = getattr(span, "inputs", None)
-        if inputs is not None:
-            setter = getattr(span, "set_inputs", None)
-            if callable(setter):
-                setter(_sanitize_mlflow_value(inputs))
-
-        outputs = getattr(span, "outputs", None)
-        if outputs is not None:
-            setter = getattr(span, "set_outputs", None)
-            if callable(setter):
-                setter(_sanitize_mlflow_value(outputs))
-
-        attributes = getattr(span, "attributes", None)
-        if isinstance(attributes, Mapping):
-            setter = getattr(span, "set_attributes", None)
-            if callable(setter):
-                sanitized = _sanitize_mlflow_value(attributes)
-                if isinstance(sanitized, dict):
-                    setter(sanitized)
-    except Exception:
-        # This branch supports non-exporting test doubles only. Real SDK spans
-        # use the clear-before-restore boundary above.
-        logger.debug("MLflow test span sanitization failed")
-
-
-def _sanitize_live_mlflow_span(span: Any) -> None:
+def _sanitize_mlflow_span(span: Any) -> None:
     """MLflow 3.16.1 export compatibility, certified against actual SDK spans.
 
     Public setters merge attributes and cannot remove exception events or
@@ -697,6 +658,11 @@ def configure_tracing(settings: Settings) -> bool:
     """
     global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED
     global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED
+    # Honor the selected policy before process-wide idempotency. A later lifespan
+    # with tracing disabled must not inherit ACTIVE from an earlier configuration.
+    if not settings.mlflow_tracing_enabled:
+        logger.debug("MLflow tracing is disabled by Fleet policy")
+        return False
     if _TRACING_ACTIVE:
         return True
     if (
@@ -708,10 +674,6 @@ def configure_tracing(settings: Settings) -> bool:
     _TRACING_ACTIVE = False
     _TRACE_CONTENT_ENABLED = settings.mlflow_trace_content_enabled
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
-
-    if not settings.mlflow_tracing_enabled:
-        logger.debug("MLflow tracing is disabled by Fleet policy")
-        return False
 
     tracking_uri = (settings.mlflow_tracking_uri or _DEFAULT_TRACKING_URI).strip()
     required_settings = {"mlflow.experiment_name": settings.mlflow_experiment_name}
@@ -1530,6 +1492,7 @@ def turn_trace(
             "fleet.session_id": str(session_id),
         }
         metadata: dict[str, str] = {
+            "mlflow.source.name": "fleet-rlm",
             "fleet.run_id": str(run_id),
             "fleet.app_version": _FLEET_APP_VERSION,
         }

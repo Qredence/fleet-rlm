@@ -50,11 +50,8 @@ __all__ = [
     "is_committed_conversation_turn",
     "to_canonical_history_records",
     "to_dspy_history",
-    "validate_legacy_records",
 ]
 
-
-_CANONICAL_RECORD_KEYS: Final[frozenset[str]] = frozenset({"request", "answer"})
 
 # Terminal ``StatusPart`` phases that mark a Turn as failed/cancelled/timed-out
 # and therefore excluded from the canonical Session conversation. A phase of
@@ -198,46 +195,6 @@ def dspy_history_for_claim(claim: ClaimedRun) -> dspy.History:
     """Materialize the exact DSPy History type from a lifecycle-issued claim."""
     committed_turns, user_requests = claimed_history_records(claim)
     return to_dspy_history(committed_turns, user_requests=user_requests)
-
-
-def validate_legacy_records(
-    records: Sequence[Mapping[str, object]],
-) -> list[dict[str, str]]:
-    """Normalize legacy Session-history payloads to canonical records.
-
-    Accepts only the canonical ``{"request": str, "answer": str}`` shape: extra
-    keys, missing keys, non-string fields, or non-mapping entries are all
-    rejected with :class:`ValueError` (fail closed; no silent truncation).
-
-    The returned list contains fresh ``dict`` copies, one per accepted input
-    record, in the same order. Empty input is allowed and yields an empty list.
-    """
-    normalized: list[dict[str, str]] = []
-    for index, record in enumerate(records):
-        if not isinstance(record, Mapping):
-            raise ValueError(
-                f"legacy Session-history record at index {index} must be a mapping, got {type(record).__name__}"
-            )
-        keys = set(record)
-        if keys != _CANONICAL_RECORD_KEYS:
-            raise ValueError(
-                f"legacy Session-history record at index {index} must contain exactly "
-                f"the canonical keys {sorted(_CANONICAL_RECORD_KEYS)}, got {sorted(keys)}"
-            )
-        request_value = record["request"]
-        answer_value = record["answer"]
-        if not isinstance(request_value, str):
-            raise ValueError(
-                f"legacy Session-history record at index {index} 'request' must be a string, "
-                f"got {type(request_value).__name__}"
-            )
-        if not isinstance(answer_value, str):
-            raise ValueError(
-                f"legacy Session-history record at index {index} 'answer' must be a string, "
-                f"got {type(answer_value).__name__}"
-            )
-        normalized.append({"request": request_value, "answer": answer_value})
-    return normalized
 
 
 SESSION_HISTORY_RESULT_BYTE_BUDGET = 262_144

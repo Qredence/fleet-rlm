@@ -12,7 +12,7 @@ import dspy
 import pytest
 
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.events import (
+from fleet_rlm.rlm.event_types import (
     TERMINAL_DETAIL_TYPES,
     RunCancelled,
     RunCompleted,
@@ -22,6 +22,7 @@ from fleet_rlm.rlm.events import (
     RuntimeEvent,
 )
 from fleet_rlm.rlm.execution import (
+    DelegationPolicy,
     ExecutionRuntime,
     RLMExecutionContext,
     RLMExecutionSpec,
@@ -33,6 +34,7 @@ from fleet_rlm.rlm.program import RLMOptions
 from fleet_rlm.sessions.models import AssistantTurnRecord, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import ClaimedRun
 from fleet_rlm.turns import OpenTurnCommand, TurnRuntime
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.in_memory_stores import InMemoryRunStateStore
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.turn_settlement import TestingRunSettlement
@@ -49,6 +51,9 @@ def _build_native(**kwargs: object):
 
 
 class _Capabilities:
+    def loaded_skills(self):
+        return ()
+
     spec = RLMExecutionSpec()
 
     def drain_public_details(self):
@@ -140,15 +145,18 @@ class _Harness:
                 preparation_notices=(),
             ),
             execution=ExecutionRuntime(
-                models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+                models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
                 options=RLMOptions(),
                 deadline=deadline,
-                interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
-                if self.mode == "native_success"
-                else None,
+                interpreter=configured_invocation_factory(
+                    DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+                    if self.mode == "native_success"
+                    else None
+                ),
                 cancellation_requested=turn.cancellation_requested,
             ),
             capabilities=_Capabilities(),
+            delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
         )
         harness = self
 

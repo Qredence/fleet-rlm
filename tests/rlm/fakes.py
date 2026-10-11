@@ -4,11 +4,43 @@ from __future__ import annotations
 
 from typing import Any
 
+from fleet_rlm.daytona.children import ChildRuntimeLease
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
 from fleet_rlm.rlm.execution import RLMExecutionSpec
 from fleet_rlm.workspace.artifacts import ArtifactCandidate
 from fleet_rlm.workspace.memory import MemoryCandidate
+
+
+def invocation_factory(**configuration: Any) -> DaytonaCodeInterpreter:
+    configuration.pop("deadline_monotonic", None)
+    return DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), **configuration)
+
+
+invocation_factory.__dict__["fleet_host_tool_dispatch_available"] = True
+
+
+def configured_invocation_factory(interpreter: Any):
+    """Adapt explicitly supplied unit-test interpreters to the invocation factory contract."""
+    if callable(interpreter):
+        return interpreter
+
+    def create(**configuration: Any):
+        bindings = {
+            "turn_budget": "bind_turn_budget",
+            "turn_request": "bind_turn_request",
+            "async_bridge": "bind_async_bridge",
+            "context_capsule": "bind_context_capsule",
+        }
+        for key, method_name in bindings.items():
+            method = getattr(interpreter, method_name, None)
+            if callable(method) and (key != "context_capsule" or configuration.get(key) is not None):
+                method(configuration.get(key))
+        observer = getattr(interpreter, "bind_observer", None)
+        if callable(observer):
+            observer(configuration.get("observer"), max_chars=configuration.get("observation_max_chars", 10000))
+        return interpreter
+
+    return create
 
 
 class EmptyCapabilities:
@@ -16,6 +48,9 @@ class EmptyCapabilities:
 
     def __init__(self, *, spec: Any | None = None) -> None:
         self.spec = RLMExecutionSpec() if spec is None else spec
+
+    def loaded_skills(self):
+        return ()
 
     def drain_public_details(self) -> tuple[Any, ...]:
         return ()
@@ -58,17 +93,21 @@ class ChildLeaseRecorder:
         del profile
         self.call_indexes.append(call_index)
         backend = InProcessInterpreterBackend()
-        interpreter = DaytonaCodeInterpreter(backend=backend)
         self.backends.append(backend)
-        self.interpreters[call_index] = interpreter
+
+        def interpreter_factory(**configuration: Any) -> DaytonaCodeInterpreter:
+            configuration.pop("deadline_monotonic", None)
+            interpreter = DaytonaCodeInterpreter(backend=backend, **configuration)
+            self.interpreters[call_index] = interpreter
+            return interpreter
 
         def close() -> None:
             self.close_calls[call_index] = self.close_calls.get(call_index, 0) + 1
             self.close_order.append(call_index)
-            interpreter.shutdown()
+            backend.close()
 
         lease = ChildRuntimeLease(
-            interpreter,
+            interpreter_factory,
             f"{self._sandbox_prefix}-{call_index}",
             self._volume,
             f"recursive/test-workspace/test-run/{call_index}",

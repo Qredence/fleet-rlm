@@ -14,10 +14,11 @@ from uuid import uuid4
 
 import pytest
 
-from fleet_rlm.app_lifecycle import build_run_preparation
+from fleet_rlm.app_preparation import DaytonaRunPreparation
 from fleet_rlm.config.settings import Settings
 from fleet_rlm.daytona.interpreter import SyncBridgeDispatcher
-from fleet_rlm.daytona.runtime import DaytonaAdmission, DaytonaSandboxSpec, InterpreterLease
+from fleet_rlm.daytona.leases import DaytonaAdmission, InterpreterLease
+from fleet_rlm.daytona.specs import DaytonaSandboxSpec
 from fleet_rlm.rlm.program import RLMModelBundle
 from fleet_rlm.sessions.models import SessionHistory, TurnAccess, TurnInput
 from fleet_rlm.sessions.run_state import (
@@ -26,6 +27,7 @@ from fleet_rlm.sessions.run_state import (
 )
 from fleet_rlm.turns.preparation import PreparedHostCapabilities, RunPreparationUnavailableError, prepare_turn
 from fleet_rlm.workspace.attachments import AttachmentRef
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 from tests.support.role_lm import placeholder_bundle
 from tests.support.session_manager import make_daytona_runtime
 from tests.support.turn_preparation import TestingRunPreparer
@@ -74,6 +76,9 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -99,7 +104,13 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             async def release():
                 operations.append("release-environment")
 
-            return RunEnvironment(SimpleNamespace(), sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(SimpleNamespace()),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class CapabilityFactory:
         async def prepare(self, turn, environment, attachments, *, deadline):
@@ -227,7 +238,13 @@ async def test_capability_preparation_is_bounded_by_turn_deadline_and_releases_e
                 released = True
 
             sink = Sink()
-            return RunEnvironment(None, sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(None),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
@@ -293,7 +310,13 @@ async def test_preparation_failure_removes_staged_run_bytes_but_not_session_work
                 return None
 
             sink = Sink()
-            return RunEnvironment(None, sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(None),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
@@ -381,14 +404,18 @@ async def test_capsule_validation_failure_releases_all_prepared_resources() -> N
 
             sink = Sink()
             return RunEnvironment(
-                None,
+                configured_invocation_factory(None),
                 sink,
                 sink,
                 release,
                 context_mount_path="/configured/volume",
+                child_runtime_factory=ChildLeaseRecorder().factory,
             )
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         spec = RLMExecutionSpec()
 
         def drain_public_details(self):
@@ -471,7 +498,7 @@ async def test_prelude_heartbeats_are_transient_repeat_at_cadence_and_stop_when_
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.rlm.events import EventRecorder, RunCompleted, RunStarted
+    from fleet_rlm.rlm.event_types import EventRecorder, RunCompleted, RunStarted
 
     gate = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -587,7 +614,7 @@ async def test_disconnect_before_open_resolves_settles_cancelled_and_persists_to
     from uuid import uuid4
 
     from fleet_rlm.api.routes.turns import create_turn
-    from fleet_rlm.rlm.events import EventRecorder, RunStarted, RuntimeEvent
+    from fleet_rlm.rlm.event_types import EventRecorder, RunStarted, RuntimeEvent
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.sessions.models import TurnAccess
     from fleet_rlm.turns import TurnRuntime
@@ -831,7 +858,13 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
                 return None
 
             sink = Sink()
-            return RunEnvironment(None, sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(None),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
@@ -839,6 +872,9 @@ async def test_connection_reset_during_capability_preparation_is_unavailable() -
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         async def prepare(self, turn, environment, attachments, *, deadline):
             del turn, environment, attachments, deadline
             raise DatabaseConnectionError("connection reset during TLS handshake")
@@ -893,7 +929,13 @@ async def test_connection_reset_during_attachment_staging_is_unavailable() -> No
                 return None
 
             sink = Sink()
-            return RunEnvironment(None, sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(None),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
@@ -951,7 +993,13 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
                 return None
 
             sink = Sink()
-            return RunEnvironment(None, sink, sink, release)
+            return RunEnvironment(
+                configured_invocation_factory(None),
+                sink,
+                sink,
+                release,
+                child_runtime_factory=ChildLeaseRecorder().factory,
+            )
 
     class Attachments:
         async def prepare_run(self, access, ids, run, sink):
@@ -959,6 +1007,9 @@ async def test_connection_reset_during_post_capability_cancellation_probe_is_una
             return PreparedAttachments((), ())
 
     class Capabilities:
+        def loaded_skills(self):
+            return ()
+
         preparation_notices = ()
 
         async def prepare(self, turn, environment, attachments, *, deadline):
@@ -1071,15 +1122,15 @@ def _test_dispatcher() -> SyncBridgeDispatcher:
 
 
 def _build_preparation(resources, **kwargs):
-    return build_run_preparation(
-        resources.runtime,
+    return DaytonaRunPreparation(
+        runtime=resources.runtime,
         volume_paths=resources.volume_paths,
         sandbox_spec=resources.sandbox_spec,
         dispatcher=resources.dispatcher,
         workspace_gateway=resources.workspace_gateway,
         volume_gateway=resources.volume_gateway,
         **kwargs,
-    )
+    ).plan()
 
 
 @pytest.mark.asyncio
@@ -1128,6 +1179,9 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
             self.interpreters = []
 
         class RunScratchInterpreter:
+            def shutdown(self, *, strict_broker_cleanup=False):
+                del strict_broker_cleanup
+
             def __init__(self) -> None:
                 self.bound_runs = []
                 self.cleaned_runs = []
@@ -1228,8 +1282,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
 
     assert prepared.execution.session.attachments[0].attachment_id == attachment_id
-    first_interpreter = resources.root_provider.interpreters[-1]
-    assert first_interpreter.bound_runs == [turn.run_id]
     budget = prepared.execution.execution.models.budget
     assert budget is not None
     assert budget.deadline == prepared.execution.execution.deadline
@@ -1402,7 +1454,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     if root_fenced_before_release:
         resources.runtime.mark_root_tainted(turn.access.workspace_id, turn.session_id)
     await prepared.aclose()
-    assert first_interpreter.cleaned_runs == ([] if root_fenced_before_release else [turn.run_id])
     # Staged attachments are released; remote workspace and project data remain durable.
     assert attachment_path not in volume
     assert {project_path, memory_path, result_path} <= set(volume)
@@ -1436,8 +1487,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         turn2,
         deadline=asyncio.get_running_loop().time() + 3600,
     )
-    second_interpreter = resources.root_provider.interpreters[-1]
-    assert second_interpreter.bound_runs == [turn2.run_id]
     digest = prepared2.execution.session.workspace_memory_digest
     assert f" -->: {learning}\n" in digest
     assert len(digest.encode("utf-8")) <= 4_096
@@ -1450,7 +1499,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     )
     assert kwargs["session_context"]["workspace_memory"]["tail"] == digest
     await prepared2.aclose()
-    assert second_interpreter.cleaned_runs == [turn2.run_id]
 
     turn3 = ClaimedRun(
         uuid4(),
@@ -1473,15 +1521,13 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         deadline=asyncio.get_running_loop().time() + 3600,
     )
     assert len(resources.root_provider.interpreters) == 2
-    assert second_interpreter.bound_runs == [turn2.run_id, turn3.run_id]
     await prepared3.aclose()
-    assert second_interpreter.cleaned_runs == [turn2.run_id, turn3.run_id]
     assert resources.root_provider.released is True
 
 
 @pytest.mark.asyncio
 async def test_admission_timeout_is_sanitized_by_live_preparation() -> None:
-    from fleet_rlm.daytona.runtime import DaytonaAdmissionTimeoutError
+    from fleet_rlm.daytona.leases import DaytonaAdmissionTimeoutError
 
     class RootProvider:
         async def release(self, _lease) -> None:
@@ -1577,7 +1623,11 @@ async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None
 
         async def acquire(self, _request, *, deadline, force_new=False):
             del deadline, force_new
-            return SimpleNamespace(sandbox_id="sandbox", interpreter=object(), volume_id="test-volume")
+            return SimpleNamespace(
+                sandbox_id="sandbox",
+                interpreter=SimpleNamespace(shutdown=lambda **_kwargs: None),
+                volume_id="test-volume",
+            )
 
         async def release(self, _lease) -> None:
             self.released += 1

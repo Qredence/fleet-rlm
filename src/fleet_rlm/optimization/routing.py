@@ -19,7 +19,8 @@ import dspy
 
 from fleet_rlm.daytona.interpreter import DAYTONA_EXECUTION_INSTRUCTIONS
 from fleet_rlm.observability.tracing import dspy_turn_callbacks
-from fleet_rlm.rlm.events import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted, _RLMTraceCallback
+from fleet_rlm.rlm.event_types import ObservationDetail, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.events import _RLMTraceCallback
 from fleet_rlm.rlm.ownership import OwnedEffect
 from fleet_rlm.rlm.program import RLMModelBundle, RLMOptions, build_native_rlm, root_signature_for_recursion
 from fleet_rlm.rlm.recursion import (
@@ -348,7 +349,6 @@ async def run_routing_scenario(
     sub_lm: Any,
     root_interpreter_factory: Callable[[], Any] | Callable[[], Awaitable[Any]],
     child_runtime_factory: Callable[[int], Any],
-    recursion_enabled: bool = True,
     repeats: int = 1,
     deadline_seconds: float = 120.0,
 ) -> tuple[RoutingScore, ...]:
@@ -371,20 +371,20 @@ async def run_routing_scenario(
 
         recursive = RecursiveRLMExecutor(
             models=RLMModelBundle(root_lm=root_lm, sub_lm=sub_lm),
-            options=RecursiveRLMOptions(enabled=recursion_enabled),
+            options=RecursiveRLMOptions(),
             child_runtime_factory=tracked_child_factory,
             deadline=deadline,
             observer=captured.append,
         )
-        signature = root_signature_for_recursion(_RoutingScenarioSignature, recursion_enabled=recursion_enabled)
-        tools = (recursive.tool, recursive.batched_tool) if recursion_enabled else None
+        signature = root_signature_for_recursion(_RoutingScenarioSignature)
+        tools = (recursive.tool, recursive.batched_tool)
         root_interpreter = await _maybe_await(root_interpreter_factory())
         try:
 
             def interpreter_factory(
                 interpreter: Any = root_interpreter, observer: Callable[[Any], None] = captured.append
             ) -> Any:
-                return interpreter.new_invocation(observer=observer, observation_max_chars=2_000)
+                return interpreter(observer=observer, observation_max_chars=2_000)
 
             interpreter_factory.__dict__["execution_instructions"] = DAYTONA_EXECUTION_INSTRUCTIONS
             rlm = build_native_rlm(

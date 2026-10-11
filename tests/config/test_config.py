@@ -46,7 +46,7 @@ def test_configuration_environment_contract_follows_toml_policy() -> None:
         "FLEET_LLM_BASE_URL",
     )
     assert contract.database_url_env == "FLEET_DATABASE_URL"
-    assert contract.recursion_enabled is True
+    assert not hasattr(contract, "recursion_enabled")
     assert contract.daytona_snapshot_environment_names == ("FLEET_DAYTONA_SNAPSHOT", "FLEET_DAYTONA_CHILD_SNAPSHOT")
 
 
@@ -137,7 +137,7 @@ def test_single_configuration_ignores_ambient_selectors(
 
     assert settings.root_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
     assert settings.sub_model == "uscentral.ai_gateway.deepseek-v4-1-flash-service"
-    assert settings.rlm_recursion_enabled is True
+    assert "rlm_recursion_enabled" not in type(settings).model_fields
 
 
 def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
@@ -160,7 +160,7 @@ def test_daytona_ignores_managed_mlflow_environment_values_when_not_selected(
 
 def test_committed_policy_enables_recursion() -> None:
     document = tomllib.loads(Path("config/fleet.toml").read_text(encoding="utf-8"))
-    assert document["rlm"]["recursion_enabled"] is True
+    assert "recursion_enabled" not in document["rlm"]
 
 
 @pytest.mark.parametrize(

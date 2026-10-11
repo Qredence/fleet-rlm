@@ -10,18 +10,10 @@ import dspy
 import pytest
 
 import fleet_rlm.rlm.execution as runtime_module
+from fleet_rlm.daytona.children import ChildRuntimeLease
 from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.daytona.runtime import ChildRuntimeLease
-from fleet_rlm.rlm.events import (
-    ChildProgress,
-    ObservationSession,
-    Status,
-    ToolCompleted,
-    ToolFailed,
-    ToolStarted,
-    _latest_lm_telemetry,
-    _RLMTraceCallback,
-)
+from fleet_rlm.rlm.event_types import ChildProgress, Status, ToolCompleted, ToolFailed, ToolStarted
+from fleet_rlm.rlm.events import ObservationSession, _latest_lm_telemetry, _RLMTraceCallback
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -43,8 +35,7 @@ from fleet_rlm.rlm.recursion import (
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
 from fleet_rlm.sessions.run_state import RunAuthority
-from tests.rlm.fakes import EmptyCapabilities
-from tests.support.native_rlm import build_native_rlm_for_test
+from tests.rlm.fakes import EmptyCapabilities, configured_invocation_factory, invocation_factory
 
 
 @pytest.mark.asyncio
@@ -89,11 +80,11 @@ async def test_root_child_root_flow_preserves_parent_repl_and_typed_submit() -> 
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+            recursive_options=RecursiveRLMOptions(max_calls=2),
             child_runtime_factory=lambda call_index, *, profile="semantic-child": _child_lease(
                 call_index, profile=profile
             ),
@@ -197,11 +188,11 @@ async def test_root_completion_drains_action_deadline_stragglers(monkeypatch: py
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2, max_parallel_children=2),
+            recursive_options=RecursiveRLMOptions(max_calls=2, max_parallel_children=2),
             child_runtime_factory=lambda call_index, *, profile="semantic-child": _child_lease(
                 call_index, profile=profile
             ),
@@ -228,13 +219,12 @@ def _child_lease(call_index: int, *, profile: str = "semantic-child") -> ChildRu
                 ChildRuntimeLease: A lease backed by an in-process interpreter.
     """
     del profile
-    interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
     return ChildRuntimeLease(
-        interpreter,
+        invocation_factory,
         f"child-{call_index}",
         "test-volume",
         f"recursive/test-workspace/test-run/{call_index}",
-        interpreter.shutdown,
+        lambda: None,
     )
 
 
@@ -260,11 +250,11 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=1, max_llm_calls=1),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+            recursive_options=RecursiveRLMOptions(max_calls=1),
             child_runtime_factory=_child_lease,
         ),
         capabilities=EmptyCapabilities(),
@@ -359,11 +349,11 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=3, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1), child_runtime_factory=child_factory
+            recursive_options=RecursiveRLMOptions(max_calls=1), child_runtime_factory=child_factory
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -381,55 +371,6 @@ async def test_runner_rejects_recursive_tool_after_authority_revocation() -> Non
         if isinstance(event.detail, (ToolStarted, ToolFailed))
     ] == [("ToolStarted", "rlm_query"), ("ToolFailed", "rlm_query")]
     assert created == []
-
-
-@pytest.mark.asyncio
-async def test_normal_daytona_policy_omits_recursive_tool_and_guidance() -> None:
-    adapter = dspy.JSONAdapter()
-    root = dspy.utils.DummyLM(
-        [{"reasoning": "answer directly", "code": "SUBMIT(answer='normal-complete')"}],
-        adapter=adapter,
-    )
-    sub = dspy.utils.DummyLM([{"answer": "unused"}], adapter=adapter)
-    captured: dict[str, object] = {}
-
-    def capturing_builder(**kwargs: object):
-        captured.update(kwargs)
-        return build_native_rlm_for_test(**kwargs)
-
-    async def not_cancelled() -> bool:
-        """Indicate that cancellation has not been requested.
-
-        Returns:
-                bool: `False`, indicating that cancellation has been requested.
-        """
-        return False
-
-    context = RLMExecutionContext(
-        identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
-        session=SessionView(
-            request="answer directly",
-            session_context=SessionContextManifest(uuid4(), 0, 0, ()),
-            attachments=(),
-            preparation_notices=(),
-        ),
-        execution=ExecutionRuntime(
-            models=RLMModelBundle(root, sub),
-            options=RLMOptions(max_iters=2, max_llm_calls=2),
-            deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
-            cancellation_requested=not_cancelled,
-        ),
-        delegation=DelegationPolicy(recursive_options=RecursiveRLMOptions(enabled=False)),
-        capabilities=EmptyCapabilities(),
-    )
-
-    stream = RLMRunner(program_builder=capturing_builder).stream(context)
-    _events = [event async for event in stream]
-
-    assert stream.outcome is not None and stream.outcome.succeeded
-    assert captured["tools"] is None
-    assert "rlm_query" not in captured["signature"].instructions
 
 
 @pytest.mark.asyncio
@@ -486,11 +427,11 @@ async def test_failed_child_cleanup_prevents_successful_root_outcome() -> None:
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2), child_runtime_factory=failed_lease
+            recursive_options=RecursiveRLMOptions(max_calls=2), child_runtime_factory=failed_lease
         ),
         capabilities=EmptyCapabilities(),
     )
@@ -562,11 +503,11 @@ async def test_runner_wait_owned_retains_pending_recursive_workers_until_child_l
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=4),
             deadline=time.monotonic() + 0.5,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=not_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+            recursive_options=RecursiveRLMOptions(max_calls=1),
             child_runtime_factory=child_factory,
         ),
         capabilities=EmptyCapabilities(),

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fleet_rlm.rlm.events import RLMReasoning, StepFinished, StepStarted, reconcile_trajectory
+from fleet_rlm.rlm.event_types import RLMReasoning, StepFinished, StepStarted
+from fleet_rlm.rlm.events import reconcile_trajectory
 from fleet_rlm.rlm.result import TrajectoryStep
 
 

@@ -11,18 +11,16 @@ from uuid import UUID, uuid4
 import pytest
 
 from fleet_rlm.daytona.errors import DaytonaAdapterError, ProviderRequestError
-from fleet_rlm.daytona.runtime import (
-    PREWARM_RUN_ID,
+from fleet_rlm.daytona.leases import (
     ActiveLeaseConflictError,
     ActiveLeaseRegistry,
     DaytonaAdmission,
     DaytonaAdmissionTimeoutError,
     DaytonaLeaseAcquisitionTimeoutError,
-    DaytonaRuntime,
     LeaseRequest,
-    RootSessionSpec,
-    SessionCleanupState,
 )
+from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec, SessionCleanupState
+from fleet_rlm.daytona.specs import PREWARM_RUN_ID
 from fleet_rlm.sessions.bindings import SandboxBinding
 from tests.support.session_manager import (
     _FakeFilesystem,
@@ -183,7 +181,7 @@ async def test_release_and_quarantine_shuts_interpreter_before_provider_fence() 
         order.append("sandbox-stop")
         await original_stop(sandbox_id, timeout=timeout, force=force)
 
-    async def delete(sandbox_id: str) -> None:
+    async def delete(sandbox_id: str, **_kwargs: object) -> None:
         order.append("sandbox-delete")
         await original_delete(sandbox_id)
 
@@ -316,7 +314,7 @@ async def test_legacy_workspace_binding_retires_before_session_mount() -> None:
 @pytest.mark.asyncio
 async def test_legacy_retirement_failure_keeps_binding_fenced() -> None:
     class FailingDeletePlatform(_FakePlatform):
-        async def delete(self, sandbox_id: str) -> None:
+        async def delete(self, sandbox_id: str, **_kwargs: object) -> None:
             del sandbox_id
             raise RuntimeError("controlled deletion failure")
 
@@ -478,7 +476,7 @@ async def test_unconfirmed_fence_keeps_session_unavailable() -> None:
     )
     first = await _acquire(mgr, request)
 
-    with pytest.raises(RuntimeError, match="provider stop failed"):
+    with pytest.raises(RuntimeError, match="Sandbox fence failed"):
         await mgr.fence_session(request.session_id)
     await mgr.release(first)
 
@@ -930,14 +928,14 @@ async def test_cancellation_during_provider_create_transfers_owned_cleanup() -> 
     await mgr._cleanup.shutdown(drain_seconds=2)
 
     assert mgr.active_leases.holder(cancelled_request.session_id) is None
-    assert platform.backends[0].close_calls == 1
+    assert platform.backends[0].close_calls == 0
     assert platform.deleted == ["sb-1"]
     await mgr.release(replacement_lease)
 
 
 @pytest.mark.asyncio
 async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup() -> None:
-    from fleet_rlm.daytona.runtime import DaytonaLeaseAcquisitionTimeoutError
+    from fleet_rlm.daytona.leases import DaytonaLeaseAcquisitionTimeoutError
 
     platform = _BlockingCreatePlatform(expected_entries=1)
     admission = DaytonaAdmission(max_active_leases=1)
@@ -954,7 +952,7 @@ async def test_provider_acquisition_deadline_returns_before_late_owned_cleanup()
     platform.release_creates.set()
     await mgr._cleanup.shutdown(drain_seconds=2)
     assert mgr.active_leases.holder(request.session_id) is None
-    assert platform.backends[0].close_calls == 1
+    assert platform.backends[0].close_calls == 0
 
     replacement = await mgr.acquire(_request(), deadline=asyncio.get_running_loop().time() + 2)
     await mgr.release(replacement)
@@ -984,7 +982,7 @@ async def test_late_acquisition_shutdown_is_scoped_to_its_manager() -> None:
 
     assert not owner.has_pending_ownership
     assert platform.deleted == ["sb-1"]
-    assert platform.backends[0].close_calls == 1
+    assert platform.backends[0].close_calls == 0
 
 
 @pytest.mark.asyncio
@@ -1404,7 +1402,7 @@ async def test_lease_construction_failure_fences_persisted_replacement_before_cl
         del args, kwargs
         raise RuntimeError("interpreter construction interrupted")
 
-    monkeypatch.setattr("fleet_rlm.daytona.runtime._build_interpreter", fail_construction)
+    monkeypatch.setattr("fleet_rlm.daytona.runtime._build_interpreter_factory", fail_construction)
 
     with pytest.raises(RuntimeError, match="interpreter construction interrupted"):
         await _acquire(mgr, request)
@@ -1461,6 +1459,11 @@ async def test_quarantine_preserves_replacement_binding_generation() -> None:
     assert fenced is not None
     assert fenced.generation == replacement.generation
     assert fenced.provider_state == "quarantined"
+
+
+def test_runtime_rejects_unknown_binding_identity() -> None:
+    mgr, _platform, _store, _volumes = _manager()
+    assert not mgr.is_binding_current(session_id=uuid4(), workspace_id=uuid4(), sandbox_id="unknown", generation=1)
 
 
 @pytest.mark.asyncio
@@ -1613,51 +1616,6 @@ async def test_prewarm_failure_surfaces_to_caller() -> None:
         await mgr.prewarm_session(
             session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
         )
-    assert not mgr.has_pending_ownership
-
-
-@pytest.mark.asyncio
-async def test_prewarm_release_failure_is_not_reported_as_success() -> None:
-    mgr, platform, store, _volumes = _manager()
-    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
-    backend = _attach_failing_backend(platform)
-
-    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
-        await mgr.prewarm_session(
-            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
-        )
-
-    binding = await store.get(session_id)
-    assert isinstance(binding, SandboxBinding)
-    assert binding.provider_state == "running"
-    assert backend.close_calls == 1, "pre-warm release must have attempted interpreter shutdown once"
-    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
-    assert mgr.has_pending_ownership, "pre-warm lease must remain retryable at drain"
-
-    assert await mgr.aclose(drain_seconds=5.0) is True
-    assert backend.close_calls == 1
-
-
-@pytest.mark.asyncio
-async def test_prewarm_release_failure_settles_through_drain_retry() -> None:
-    mgr, platform, _store, _volumes = _manager()
-    session_id, user_id, workspace_id = uuid4(), uuid4(), uuid4()
-    backend = _attach_failing_backend(platform)
-
-    with pytest.raises(RuntimeError, match="interpreter backend close failed"):
-        await mgr.prewarm_session(
-            session_id, user_id=user_id, workspace_id=workspace_id, deadline=asyncio.get_running_loop().time() + 10
-        )
-
-    assert backend.close_calls == 1
-    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) == PREWARM_RUN_ID
-    assert mgr.has_pending_ownership, "failed pre-warm release must stay owned until drain"
-
-    settled = await mgr.aclose(drain_seconds=5.0)
-
-    assert settled is True
-    assert backend.close_calls == 1, "drain retires the owned sandbox without reopening the failed broker"
-    assert mgr.active_leases.holder(session_id, workspace_id=workspace_id) is None
     assert not mgr.has_pending_ownership
 
 

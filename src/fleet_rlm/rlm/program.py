@@ -325,12 +325,12 @@ class RLMInstructionFragments:
 
 def fleet_rlm_instruction_fragments(
     *,
-    recursion_enabled: bool,
+    tool_names: frozenset[str] = frozenset({"rlm_query", "rlm_query_batched"}),
     host_tool_dispatch: bool = True,
 ) -> RLMInstructionFragments:
     step = 4
     if host_tool_dispatch:
-        step = 7 if recursion_enabled else 6
+        step = 7 if "rlm_query" in tool_names else 6
     verification = f"""{step}. Verify within the same action when possible, after completing any named host-tool work, then issue exactly one typed ``SUBMIT`` with every active
    Signature output as a keyword argument. For nontrivial deterministic or numerical work, include an independent invariant,
    known reference prefix, higher-precision stability check, or genuinely independent formulation in
@@ -352,7 +352,7 @@ def fleet_rlm_instruction_fragments(
         base=BASE_RLM_INSTRUCTIONS,
         repl=REPL_RLM_INSTRUCTIONS,
         tools=TOOL_RLM_INSTRUCTIONS if host_tool_dispatch else TOOL_RLM_INSTRUCTIONS_NO_DISPATCH,
-        recursion=RECURSION_RLM_INSTRUCTIONS if recursion_enabled and host_tool_dispatch else None,
+        recursion=RECURSION_RLM_INSTRUCTIONS if "rlm_query" in tool_names and host_tool_dispatch else None,
         verification=verification,
         discovery=DISCOVERY_RLM_INSTRUCTIONS,
     )
@@ -360,11 +360,11 @@ def fleet_rlm_instruction_fragments(
 
 def compose_rlm_instructions(
     *,
-    recursion_enabled: bool,
+    tool_names: frozenset[str] = frozenset({"rlm_query", "rlm_query_batched"}),
     host_tool_dispatch: bool = True,
 ) -> str:
     return fleet_rlm_instruction_fragments(
-        recursion_enabled=recursion_enabled,
+        tool_names=tool_names,
         host_tool_dispatch=host_tool_dispatch,
     ).compose()
 
@@ -410,7 +410,7 @@ class FleetRLMSignature(dspy.Signature):
     )
 
 
-FleetRLMSignature.instructions = compose_rlm_instructions(recursion_enabled=False)
+FleetRLMSignature.instructions = compose_rlm_instructions()
 
 
 def _tool_names_need_instruction_overlay(tool_names: frozenset[str]) -> bool:
@@ -420,13 +420,12 @@ def _tool_names_need_instruction_overlay(tool_names: frozenset[str]) -> bool:
 def root_signature_for_recursion(
     signature: type[dspy.Signature],
     *,
-    recursion_enabled: bool,
     skill_instructions: tuple[str, ...] = (),
-    tool_names: frozenset[str] = frozenset(),
+    tool_names: frozenset[str] = frozenset({"rlm_query", "rlm_query_batched"}),
     host_tool_dispatch: bool = True,
 ) -> type[dspy.Signature]:
     instructions = compose_rlm_instructions(
-        recursion_enabled=recursion_enabled,
+        tool_names=tool_names,
         host_tool_dispatch=host_tool_dispatch,
     )
     # Workspace guidance is dispatched through the same bridge as the sub-LM
@@ -1001,7 +1000,6 @@ def build_native_rlm(
     tools: Sequence[dspy.Tool | Callable[..., Any]] | None = None,
     sub_lm: dspy.LM | None = None,
     skill_instructions: Sequence[str] = (),
-    recursion_enabled: bool = False,
     host_tool_dispatch: bool = True,
     interpreter_factory: Callable[[], Any],
     verbose: bool = True,
@@ -1019,7 +1017,7 @@ def build_native_rlm(
         isinstance(signature, type)
         and issubclass(signature, dspy.Signature)
         and (
-            recursion_enabled
+            "rlm_query" in tool_names
             or skill_instructions
             or not host_tool_dispatch
             or _tool_names_need_instruction_overlay(tool_names)
@@ -1027,7 +1025,6 @@ def build_native_rlm(
     ):
         resolved_signature = root_signature_for_recursion(
             signature,
-            recursion_enabled=recursion_enabled,
             skill_instructions=tuple(skill_instructions),
             tool_names=tool_names,
             host_tool_dispatch=host_tool_dispatch,

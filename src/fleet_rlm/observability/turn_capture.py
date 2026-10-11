@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from fleet_rlm.rlm.events import RuntimeEvent
+    from fleet_rlm.rlm.event_types import RuntimeEvent
 
 logger = logging.getLogger(__name__)
 

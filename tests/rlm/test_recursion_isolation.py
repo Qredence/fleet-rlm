@@ -17,14 +17,7 @@ from uuid import uuid4
 import dspy
 import pytest
 
-from fleet_rlm.daytona.interpreter import DaytonaCodeInterpreter, InProcessInterpreterBackend
-from fleet_rlm.rlm.events import (
-    RunFailed,
-    Status,
-    ToolCompleted,
-    ToolFailed,
-    ToolStarted,
-)
+from fleet_rlm.rlm.event_types import RunFailed, Status, ToolCompleted, ToolFailed, ToolStarted
 from fleet_rlm.rlm.execution import (
     DelegationPolicy,
     ExecutionRuntime,
@@ -49,7 +42,7 @@ from fleet_rlm.rlm.result import (
 )
 from fleet_rlm.sessions.context import SessionContextManifest
 from fleet_rlm.sessions.models import TurnAccess
-from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities
+from tests.rlm.fakes import ChildLeaseRecorder, EmptyCapabilities, configured_invocation_factory, invocation_factory
 from tests.support.native_rlm import build_native_rlm_for_test
 from tests.support.recursion_scheduler import RecursiveRLMExecutor
 
@@ -186,7 +179,7 @@ def test_sequential_children_report_independent_completion_evidence() -> None:
     executor = _executor(root, sub, recorder, options=RecursiveRLMOptions(max_calls=2), observer=events.append)
 
     assert executor.tool(task="first slice", inputs=[])["answer"] == "a-answer"
-    from fleet_rlm.rlm.events import ToolCompleted
+    from fleet_rlm.rlm.event_types import ToolCompleted
 
     first_completed = [event for event in events if isinstance(event, ToolCompleted)]
     assert len(first_completed) == 1
@@ -279,14 +272,14 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
     sub = RecordingLM({"fallback slice": {"answer": "sub-fallback-answer"}}, adapter=adapter)
     recorder = ChildLeaseRecorder()
     metrics_context = DelegationPolicy(
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=2),
+        recursive_options=RecursiveRLMOptions(max_calls=2),
         child_runtime_factory=recorder.factory,
     )
 
     async def never_cancelled() -> bool:
         return False
 
-    root_interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+    root_interpreter = invocation_factory
     context = RLMExecutionContext(
         identity=RunIdentity(run_id=uuid4(), session_id=uuid4(), access=TurnAccess(uuid4(), uuid4())),
         session=SessionView(
@@ -299,7 +292,7 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=4, max_llm_calls=6),
             deadline=time.monotonic() + 30,
-            interpreter=root_interpreter,
+            interpreter=configured_invocation_factory(root_interpreter),
             cancellation_requested=never_cancelled,
         ),
         delegation=metrics_context,
@@ -308,7 +301,6 @@ async def test_roles_depths_histories_and_trajectory_are_preserved_through_the_r
 
     stream = RLMRunner().stream(context)
     _events = [event async for event in stream]
-    root_interpreter.shutdown()
 
     assert stream.outcome is not None and stream.outcome.succeeded
     assert stream.outcome.prediction is not None
@@ -463,13 +455,11 @@ def test_root_child_and_sibling_interpreter_namespaces_are_isolated() -> None:
                 models=RLMModelBundle(root, sub),
                 options=RLMOptions(max_iters=6, max_llm_calls=6),
                 deadline=time.monotonic() + 30,
-                interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+                interpreter=configured_invocation_factory(invocation_factory),
                 cancellation_requested=_never_cancelled,
             ),
             delegation=DelegationPolicy(
-                recursive_options=RecursiveRLMOptions(
-                    enabled=True, max_calls=2, child_max_iters=2, child_max_llm_calls=2
-                ),
+                recursive_options=RecursiveRLMOptions(max_calls=2, child_max_iters=2, child_max_llm_calls=2),
                 child_runtime_factory=recorder.factory,
             ),
             capabilities=EmptyCapabilities(),
@@ -601,11 +591,11 @@ async def test_root_oversized_submit_can_be_shortened_in_the_next_action() -> No
             models=RLMModelBundle(root, sub),
             options=RLMOptions(max_iters=2, max_llm_calls=2, max_output_chars=100, max_final_output_chars=100),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=never_cancelled,
         ),
         delegation=DelegationPolicy(
-            recursive_options=RecursiveRLMOptions(enabled=True),
+            recursive_options=RecursiveRLMOptions(),
             child_runtime_factory=recorder.factory,
         ),
         capabilities=EmptyCapabilities(),
@@ -655,7 +645,7 @@ def test_root_extracts_while_child_final_iteration_is_forced_to_finalize() -> No
     # Root scope: the same never-submitting behavior yields the same certified
     # extraction fallback as any plain-adapter native RLM.
     async def bare_root() -> Any:
-        interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend())
+        interpreter = dspy.LocalInterpreter()
         rlm = build_native_rlm_for_test(
             signature="request -> answer",
             options=RLMOptions(max_iters=1, max_llm_calls=3, max_output_chars=1000),
@@ -739,7 +729,7 @@ async def _run_turn(
             models=RLMModelBundle(root_lm, sub_lm),
             options=root_options or RLMOptions(max_iters=3, max_llm_calls=5),
             deadline=time.monotonic() + 30,
-            interpreter=DaytonaCodeInterpreter(backend=InProcessInterpreterBackend()),
+            interpreter=configured_invocation_factory(invocation_factory),
             cancellation_requested=never_cancelled,
         ),
         delegation=DelegationPolicy(
@@ -834,7 +824,7 @@ async def test_success_child_events_expose_only_approved_metadata() -> None:
         child_answers=child_answers,
         sub_answers=[{"answer": "unused"}],
         recorder=recorder,
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1),
+        recursive_options=RecursiveRLMOptions(max_calls=1),
     )
 
     assert stream.outcome is not None
@@ -912,7 +902,7 @@ async def test_failed_child_events_stay_bounded_and_sentinel_free() -> None:
         child_answers=child_answers,
         sub_answers=[{"answer": "unused"}],
         recorder=recorder,
-        recursive_options=RecursiveRLMOptions(enabled=True, max_calls=1, child_max_output_chars=64),
+        recursive_options=RecursiveRLMOptions(max_calls=1, child_max_output_chars=64),
     )
 
     statuses = _recursive_statuses(events)

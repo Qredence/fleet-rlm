@@ -65,8 +65,8 @@ class FakeDoctorDependencies:
 
 
 class ReadyFakeDoctorDependencies(FakeDoctorDependencies):
-    async def check_rlm_readiness(self, settings: Settings) -> None:
-        del settings
+    async def check_rlm_readiness(self, settings: Settings, sandbox: Any) -> None:
+        del settings, sandbox
         self._record("rlm")
 
 
@@ -93,7 +93,7 @@ def doctor_settings() -> Settings:
 def test_profile_readiness_distinguishes_unexercised_and_unsupported() -> None:
     from fleet_rlm.daytona.diagnostics import profile_readiness_steps
 
-    steps = profile_readiness_steps(capacity_supported=None)
+    steps = profile_readiness_steps(capacity_status="unsupported")
     assert [(step.name, step.status, step.ok) for step in steps] == [
         ("snapshot", "not-exercised", False),
         ("manifest", "pass", True),
@@ -107,7 +107,7 @@ def test_profile_readiness_distinguishes_unexercised_and_unsupported() -> None:
 def test_profile_readiness_distinguishes_failed_optional_probes() -> None:
     from fleet_rlm.daytona.diagnostics import profile_readiness_steps
 
-    steps = profile_readiness_steps(imports_failed=True, mount_failed=True)
+    steps = profile_readiness_steps(imports_status="fail", mount_status="fail")
     statuses = {step.name: step.status for step in steps}
     assert statuses["imports"] == "fail"
     assert statuses["mount"] == "fail"
@@ -130,6 +130,17 @@ def test_profile_readiness_accepts_explicit_snapshot_probe_status(status: str) -
 
     assert snapshot.status == status
     assert snapshot.ok is (status == "pass")
+
+
+@pytest.mark.parametrize("probe", ("snapshot", "imports", "mount", "region", "capacity"))
+@pytest.mark.parametrize("status", ("pass", "fail", "unsupported", "not-exercised"))
+def test_readiness_public_success_is_derived_from_explicit_status(probe, status) -> None:
+    from fleet_rlm.daytona.diagnostics import profile_readiness_steps
+
+    steps = profile_readiness_steps(**{f"{probe}_status": status})
+    step = next(step for step in steps if step.name == probe)
+    assert step.status == status
+    assert step.ok is (status == "pass")
 
 
 @pytest.mark.asyncio
@@ -263,12 +274,12 @@ async def test_daytona_doctor_can_gate_sandbox_readiness_on_the_root_rlm_contrac
         "settings",
         "database",
         "provider",
-        "rlm",
         "sandbox",
+        "rlm",
         "interpreter",
         "cleanup",
     ]
-    assert dependencies.calls[2:] == ["rlm", "create", "mount", "interpreter", "delete", "close"]
+    assert dependencies.calls[2:] == ["create", "mount", "rlm", "interpreter", "delete", "close"]
 
 
 @pytest.mark.asyncio
@@ -276,8 +287,8 @@ async def test_daytona_doctor_refuses_rlm_readiness_when_root_protocol_probe_fai
     from fleet_rlm.daytona.diagnostics import run_daytona_doctor
 
     class FailingReadyDependencies(ReadyFakeDoctorDependencies):
-        async def check_rlm_readiness(self, settings: Settings) -> None:
-            del settings
+        async def check_rlm_readiness(self, settings: Settings, sandbox: Any) -> None:
+            del settings, sandbox
             self._record("rlm")
             raise RuntimeError("provider returned native tokens api_key=private")
 
@@ -290,11 +301,13 @@ async def test_daytona_doctor_refuses_rlm_readiness_when_root_protocol_probe_fai
         ("settings", True),
         ("database", True),
         ("provider", True),
+        ("sandbox", True),
         ("rlm", False),
+        ("cleanup", True),
     ]
     assert "native tokens" not in result.steps[3].message
     assert "private" not in result.steps[3].message
-    assert dependencies.calls == ["database", "provider", "rlm", "close"]
+    assert dependencies.calls == ["database", "provider", "create", "mount", "rlm", "delete", "close"]
 
 
 @pytest.mark.asyncio
@@ -420,7 +433,7 @@ def test_missing_import_observation_is_normalized_and_content_free() -> None:
 )
 def test_missing_import_observation_rejects_unbounded_or_non_module_names(module: str) -> None:
     from fleet_rlm.daytona.diagnostics import normalize_missing_import_observation
-    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+    from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile
 
     with pytest.raises(ValueError, match="normalized import name"):
         normalize_missing_import_observation(module, DaytonaEnvironmentProfile.SESSION)
@@ -428,7 +441,7 @@ def test_missing_import_observation_rejects_unbounded_or_non_module_names(module
 
 def test_missing_import_defaults_to_bounded_missing_outcome() -> None:
     from fleet_rlm.daytona.diagnostics import MissingImportOutcome, normalize_missing_import_observation
-    from fleet_rlm.daytona.runtime import DaytonaEnvironmentProfile
+    from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile
 
     result = normalize_missing_import_observation("fleet.tools", DaytonaEnvironmentProfile.WORKSPACE_CHILD)
     assert result.outcome is MissingImportOutcome.MISSING

@@ -13,8 +13,7 @@ import dspy
 import pytest
 
 from fleet_rlm.rlm.budget import BudgetDimension, BudgetLimits, TurnBudget, TurnBudgetExhausted
-from fleet_rlm.rlm.events import (
-    ObservationSession,
+from fleet_rlm.rlm.event_types import (
     RLMCode,
     RLMOutput,
     RLMReasoning,
@@ -23,15 +22,19 @@ from fleet_rlm.rlm.events import (
     StepFinished,
     StepStarted,
     ToolCompleted,
-    ToolEventView,
     ToolFailed,
     ToolStarted,
+)
+from fleet_rlm.rlm.events import (
+    ObservationSession,
+    ToolEventView,
     observe_tool,
     reconcile_trajectory,
     record_phase_failure,
 )
-from fleet_rlm.rlm.execution import RunToolGuards
+from fleet_rlm.rlm.execution import DelegationPolicy, RunToolGuards
 from fleet_rlm.rlm.result import TrajectoryStep, observed_usage, validate_rlm_usage
+from tests.rlm.fakes import ChildLeaseRecorder, configured_invocation_factory
 
 # --- Execution Trace & Observation Session Contracts ---
 
@@ -610,7 +613,7 @@ def test_tool_failure_span_carries_closed_cause_without_exception_text(
 
 
 def test_trajectory_reconciliation_replaces_live_details_without_duplicates() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -648,7 +651,7 @@ def test_trajectory_reconciliation_replaces_live_details_without_duplicates() ->
 
 
 def test_trajectory_reconciliation_inserts_missing_earlier_step_before_later_live_step() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(2),
@@ -698,7 +701,7 @@ def test_trajectory_reconciliation_reemits_code_when_a_midrun_iteration_has_no_l
     carries MORE code chunks than trajectory steps (4 for 3 here) while distinct steps stay
     bounded by max_iters. Live assertions must count distinct steps, not raw chunks.
     """
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     # Live observations: iterations 1 and 3 executed (steps 1-2); iteration 2 produced
     # malformed code, so DSPy recorded a trajectory entry without any live execution.
@@ -743,7 +746,7 @@ def test_trajectory_reconciliation_reemits_code_when_a_midrun_iteration_has_no_l
 @pytest.mark.parametrize("preceding_length", [6, 100])
 def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_step(preceding_length: int) -> None:
     """A terminal DSPy record cannot create an SSE step beyond max_iters."""
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -789,7 +792,7 @@ def test_trajectory_reconciliation_folds_terminal_overflow_into_last_executed_st
 
 
 def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonical_part() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -817,7 +820,7 @@ def test_trajectory_reconciliation_replaces_incremental_output_with_one_canonica
 
 
 def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_started() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         RLMReasoning("native reasoning", 1),
@@ -845,7 +848,7 @@ def test_trajectory_reconciliation_keeps_live_reasoning_emitted_before_step_star
 
 
 def test_trajectory_reconciliation_updates_pre_step_live_reasoning_when_canonical_differs() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         RLMReasoning("stale reasoning", 1),
@@ -909,13 +912,14 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
             preparation_notices=(),
         ),
         execution=ExecutionRuntime(
-            models=SimpleNamespace(root_lm=object(), sub_lm=object()),
+            models=SimpleNamespace(budget=None, root_lm=object(), sub_lm=object()),
             options=RLMOptions(max_output_chars=16),
             deadline=asyncio.get_running_loop().time() + 10,
-            interpreter=None,
+            interpreter=configured_invocation_factory(None),
             cancellation_requested=not_cancelled,
         ),
         capabilities=EmptyCapabilities(),
+        delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
 
     events = [event async for event in RLMRunner(program_builder=Factory().create).stream(context)]
@@ -928,7 +932,7 @@ async def test_runner_deduplicates_final_reasoning_against_nonadjacent_normalize
 
 def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_streams() -> None:
     """RC-4a: live deltas equal to the canonical text emit nothing at turn end."""
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -959,7 +963,7 @@ def test_trajectory_reconciliation_silently_upserts_flag_drifted_identical_strea
 
 def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_as_identical() -> None:
     """RC-4a: the pre-fix live log (delta + full final frame) reconciles silently."""
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -990,7 +994,7 @@ def test_trajectory_reconciliation_treats_submit_label_and_live_terminal_frame_a
 
 def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None:
     """RC-4a: corrected text still emits exactly one canonical replacement."""
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -1019,7 +1023,7 @@ def test_trajectory_reconciliation_re_emits_once_for_a_true_correction() -> None
 
 def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution() -> None:
     """A context setup execution must not cause a duplicate canonical action stream."""
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
@@ -1052,7 +1056,7 @@ def test_trajectory_reconciliation_aligns_canonical_steps_after_setup_execution(
 
 
 def test_trajectory_reconciliation_treats_equivalent_action_formatting_as_the_same_payload() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     live_second = (
         'single_result = llm_query("Return exactly ROOT")\n'
@@ -1089,7 +1093,7 @@ def test_trajectory_reconciliation_treats_equivalent_action_formatting_as_the_sa
 
 
 def test_trajectory_reconciliation_aligns_normalized_code_after_setup_offset() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     live_action = """```python
 single_result = llm_query(\"Return exactly ROOT\")
@@ -1117,7 +1121,7 @@ single_result = llm_query(\"Return exactly ROOT\")
 
 
 def test_trajectory_reconciliation_reemits_earlier_code_correction_after_later_submit() -> None:
-    from fleet_rlm.rlm.events import RLMOutput
+    from fleet_rlm.rlm.event_types import RLMOutput
 
     details = [
         StepStarted(1),
