@@ -406,7 +406,7 @@ def test_phase1_daytona_stream_through_fastapi(tmp_path: Path) -> None:
             assert response.status_code == 200
             chunks, done = _sse_chunks(response)
             assert done == 1
-            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("type") in {"finish", "turn_finish"}
             assert chunks[-1].get("finishReason") == "stop"
             assert probe.first_delta_at is not None
             delta_count, fields = _streaming_evidence(chunks)

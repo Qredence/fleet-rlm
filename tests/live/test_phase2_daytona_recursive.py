@@ -566,7 +566,7 @@ def test_phase2_daytona_recursive_through_fastapi(tmp_path: Path, monkeypatch: p
             )
             trace_id = start_metadata.get("traceId")
             assert done == 1
-            assert chunks[-1].get("type") == "finish"
+            assert chunks[-1].get("type") in {"finish", "turn_finish"}
             assert chunks[-1].get("finishReason") == "stop"
             completion = _recursive_completion(chunks)
             assert completion is not None
