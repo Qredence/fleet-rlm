@@ -158,8 +158,7 @@ recursive depth;
 All execution admissions close before settlement drains owned work. Observer or
 exporter failure cannot grant capacity or permit late result publication.
 
-The `[rlm]` recursion settings include `recursion_enabled` (enabled in
-the shipped configuration) and bound the Fleet
+The `[rlm]` recursion settings bound the always-available Fleet
 `rlm_query(task=..., inputs=..., context=...)` child harness: `recursion_max_calls`,
 `recursion_max_prompt_chars`, `recursion_child_max_iters`,
 `recursion_child_max_llm_calls`, and `recursion_child_max_output_chars`.
@@ -181,12 +180,12 @@ The native recursive-child boundary is a fixed product invariant (`RLM_NATIVE_CH
 not an editable policy value. Existing policies that still set
 `rlm.recursion_max_depth` fail validation; delete the key.
 These are non-secret policy values; `.env` and ambient process variables do not
-override them. The shipped configuration enables recursion. Set `rlm.recursion_enabled = false`
-and restart Fleet for native-only operation. Native-only verification refuses
-an enabled recursive policy; recursive canaries require recursion enabled.
+override them. Root recursion is mandatory; remove the retired
+`rlm.recursion_enabled` key from custom TOML files. The model decides whether
+to delegate within the configured bounds.
 Alembic-head compatibility is checked by application/supervisor readiness and
 by `scripts/database.py preflight` before production traffic moves.
-When recursion is enabled, each child receives a fresh, dedicated Daytona
+Each child receives a fresh, dedicated Daytona
 Sandbox. The active `rlm_query` executor selects the volume-less
 `semantic-child` profile and stages only selected, authorized files in private
 scratch; it does not fall back to a mounted `workspace-child` profile. The
@@ -258,7 +257,7 @@ editor metadata. PATCH accepts only a non-empty batch:
 ```json
 {
   "revision": "<64-character revision from GET>",
-  "updates": [{"path": "rlm.recursion_enabled", "value": false}]
+  "updates": [{"path": "rlm.recursion_max_calls", "value": 4}]
 }
 ```
 
@@ -315,9 +314,9 @@ schema_version = 1
 default_profile = "recursive"
 [defaults.rlm]
 max_iters = 12
-recursion_enabled = false
+recursion_max_calls = 4
 [profiles.recursive.rlm]
-recursion_enabled = true
+recursion_max_calls = 8
 ```
 
 After (excerpt; retain all other required sections):
@@ -327,7 +326,7 @@ After (excerpt; retain all other required sections):
 schema_version = 2
 [rlm]
 max_iters = 12
-recursion_enabled = true
+recursion_max_calls = 8
 ```
 
 The repository configuration has already been migrated. Regenerate the

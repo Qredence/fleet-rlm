@@ -16,6 +16,7 @@ src/fleet_rlm/
 ├── workspace/            # files, projects, memory, artifacts, attachments, and storage
 ├── app.py                # FastAPI construction and lifespan
 ├── app_lifecycle.py      # provider resource construction and closure
+├── app_preparation.py    # concrete Daytona preparation for a claimed Turn
 ├── app_services.py       # composed lifespan service inventory
 ├── main.py               # ASGI entry point
 ├── paths.py              # provider-neutral Volume layout and path identity
@@ -29,3 +30,8 @@ Start lifecycle investigations in `turns/coordinator.py`, `turns/preparation.py`
 
 The maintained TypeScript client is separate under `tools/fleet-tui/`; its
 generated HTTP types are owned by `make api-sync`.
+
+Daytona lifecycle code uses concrete modules: `provider.py` for SDK operations,
+`leases.py` for admission and confirmed cleanup, `children.py` for disposable
+children, and `host_io.py` for serialized host operations. `runtime.py` retains
+root and binding coordination. See [resource ownership](daytona-lifecycle.md).

@@ -22,7 +22,7 @@ fleet CLI / ASGI entry point
 
 `src/fleet_rlm/main.py` exports the ASGI app; `cli/main.py` exposes the `fleet`
 and `fleet-rlm` commands. `app.py` builds FastAPI and owns its lifespan.
-`app_lifecycle.py` composes provider resources and one typed `RouteServices`
+`app_lifecycle.py` composes provider resources owned by `ApplicationComposition` and one typed `RouteServices`
 inventory, defined in `app_services.py`. Routes receive those services after
 composition is ready; they do not construct a second runtime.
 
@@ -42,7 +42,7 @@ through successful settlement and Turn Commit.
 | Owner | Responsibility |
 | --- | --- |
 | `turns/coordinator.py` (`TurnRuntime`) | Coordinates Run claim, preparation, execution, settlement, cancellation, and cleanup. |
-| `turns/preparation.py` | Prepares authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
+| `turns/preparation.py` and `app_preparation.py` | Prepare authorized context, Attachments, Skills, capabilities, and the acquired execution environment for a claimed Run. |
 | `turns/settlement.py` | Defines the `RunLifecycle` contract and settlement flow, including result validation and candidate publication. |
 | `persistence/` | Owns SQL-backed Session and Run state, durable repositories, and commit operations; Alembic owns live schema changes. |
 | `sessions/` | Owns the Session, Run, and Turn domain contracts shared by `persistence/`, `rlm/`, and `turns/` (it shares event and result value types with `rlm/`), projects committed history, and owns the bounded, revisioned task checkpoint. It must not import `turns/` or `persistence/`. |
@@ -85,13 +85,16 @@ or allow late work to change committed state.
 Use ordinary Sandbox Python for deterministic inspection and reduction. Native
 `llm_query` and `llm_query_batched` provide bounded semantic calls inside the
 current invocation. Fleet `rlm_query` and `rlm_query_batched` are separate,
-opt-in child investigations that run their own iterative DSPy invocation.
-The single configuration enables full-child recursion through
-`rlm.recursion_enabled`; operators may disable it and restart. Full children stop at depth one, share the
+bounded child investigations that run their own iterative DSPy invocation.
+Every Root invocation receives child tools and a child factory. Full children stop at depth one, share the
 parent Turn budget, and have bounded admission and ordered outcomes.
 
-`daytona/runtime.py` owns provider Sandboxes, retained Session roots, disposable
-children, host I/O leases, and cleanup. `daytona/interpreter.py` submits
+`daytona/runtime.py` coordinates retained Session roots, binding fences and shutdown.
+Concrete child and host-I/O owners live in `daytona/children.py` and
+`daytona/host_io.py`; existing SDK operations and lease cleanup live in
+`daytona/provider.py` and `daytona/leases.py`. The
+[resource ownership table](docs/reference/daytona-lifecycle.md) records their
+transitions and release conditions. `daytona/interpreter.py` submits
 generated Python to Daytona. Its authenticated, JSON-only broker in
 `daytona/broker.py` dispatches authorized host tools and DSPy semantic calls;
 model-authored code does not run in the Fleet process. A healthy root Sandbox
@@ -135,7 +138,7 @@ network-policy waiver remains in force.
 
 ## Events, policy, and optional services
 
-`rlm/events.py` defines transport-neutral Runtime Events. API projection owns
+`rlm/event_types.py` defines transport-neutral Runtime Events; `rlm/events.py` observes tools and DSPy callbacks. API projection owns
 the public SSE shape and durable replay; the TUI consumes that contract and
 generated HTTP types. `observability/` may record MLflow traces and evaluation
 data, but tracking failures do not decide execution or commit. `optimization/`

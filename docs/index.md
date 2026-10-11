@@ -3,8 +3,8 @@
 Fleet has one FastAPI/SSE backend in `src/fleet_rlm/` and one maintained
 terminal client in `tools/fleet-tui/`. DSPy owns the RLM loop; Daytona executes
 generated Python in Sandboxes. Authorized host tools and native semantic calls
-cross the authenticated broker boundary. The single TOML configuration
-enables bounded child RLMs through `rlm.recursion_enabled`.
+cross the authenticated broker boundary. Every root invocation receives bounded
+child RLM tools; the single TOML configuration controls their limits.
 
 ## Find the right guide
 

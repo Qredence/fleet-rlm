@@ -217,7 +217,7 @@ FLEET_LIVE=1 uv run pytest tests/live/test_attachment_artifact_durability.py -q 
 ```
 
 The native verifier loads `.env` with `override=False`, so existing process
-exports win. It requires the `rlm.recursion_enabled = false` setting and explicit model IDs:
+exports win. It requires explicit model IDs and verifies tasks that do not delegate:
 
 ```bash
 export FLEET_LIVE=1
