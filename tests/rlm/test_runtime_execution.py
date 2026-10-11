@@ -12,7 +12,7 @@ import threading
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import MagicMock
@@ -768,6 +768,59 @@ def _context(
         capabilities=cast(Any, EmptyCapabilities()),
         delegation=DelegationPolicy(child_runtime_factory=ChildLeaseRecorder().factory),
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("skill_instructions", [(), ("Verify the answer against the loaded Skill resource.",)])
+async def test_runner_composes_native_signature_once_with_prepared_skills(
+    monkeypatch: pytest.MonkeyPatch, skill_instructions: tuple[str, ...]
+) -> None:
+    from fleet_rlm.rlm import program
+    from fleet_rlm.rlm.execution import RLMExecutionSpec
+
+    spec = RLMExecutionSpec(skill_instructions=skill_instructions)
+    original_instructions = spec.signature.instructions
+    expected_signature = program.root_signature_for_recursion(spec.signature, skill_instructions=skill_instructions)
+    compose_signature = MagicMock(wraps=program.root_signature_for_recursion)
+    monkeypatch.setattr(program, "root_signature_for_recursion", compose_signature)
+    constructed: list[Any] = []
+    factory = _Factory()
+
+    def build_program(**kwargs: Any) -> _Program:
+        # Exercise native construction, but return a deterministic program so
+        # this regression never calls a model or a provider.
+        assert kwargs["signature"] is spec.signature
+        assert kwargs["skill_instructions"] == skill_instructions
+        constructed.append(program.build_native_rlm(**kwargs))
+        return factory.create(**kwargs)
+
+    context = _context(
+        session_id=uuid4(),
+        workspace_id=uuid4(),
+        run_id=uuid4(),
+        interpreter=_Interpreter(),
+        request="Use the prepared Skill.",
+        history=dspy.History(messages=[]),
+    )
+    context = replace(context, capabilities=cast(Any, EmptyCapabilities(spec=spec)))
+    runner = RLMRunner(program_builder=build_program)
+    try:
+        stream = runner.stream(context)
+        _events = [event async for event in stream]
+        assert stream.outcome is not None and stream.outcome.succeeded
+        assert len(constructed) == 1
+        signature = constructed[0].signature
+        assert signature.instructions == expected_signature.instructions
+        assert signature.fields.keys() == spec.signature.fields.keys()
+        for name, field in signature.fields.items():
+            assert field.annotation == spec.signature.fields[name].annotation
+            assert field.json_schema_extra == spec.signature.fields[name].json_schema_extra
+        assert spec.signature.instructions == original_instructions
+        assert compose_signature.call_count == 1
+        for instruction in skill_instructions:
+            assert signature.instructions.count(instruction) == 1
+    finally:
+        await runner.aclose()
 
 
 @pytest.mark.asyncio

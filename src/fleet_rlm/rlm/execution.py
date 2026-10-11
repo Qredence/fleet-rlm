@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from functools import partial
 from hashlib import sha256
 from json import dumps
@@ -68,7 +68,6 @@ from fleet_rlm.rlm.program import (
     build_native_rlm,
     build_rlm_input_kwargs,
     resolve_role_api_key,
-    root_signature_for_recursion,
     sanitize_base_url,
 )
 from fleet_rlm.rlm.recursion import (
@@ -1100,7 +1099,11 @@ def materialize_child_inputs(
 
 
 class RLMRunner:
-    """Consume only an immutable prepared context and emit no terminal detail."""
+    """Consume only an immutable prepared context and emit no terminal detail.
+
+    Injected program builders accept the ``build_native_rlm`` keyword contract
+    and own final signature instruction composition.
+    """
 
     def __init__(
         self,
@@ -1472,14 +1475,6 @@ class RLMRunner:
         # worker startup step can fail. Externally supplied schedulers are
         # preserved by RecursiveRLMExecutor.wait_owned().
         ownership.add_blocking_waiter(recursive_executor.wait_owned)
-        spec = replace(
-            spec,
-            signature=root_signature_for_recursion(
-                spec.signature,
-                skill_instructions=spec.skill_instructions,
-                tool_names=frozenset(str(tool.name) for tool in spec.tools) | {"rlm_query", "rlm_query_batched"},
-            ),
-        )
 
         def relay_capability_details(_result: Any) -> None:
             """Relay pending capability details to the event stream."""
@@ -1572,6 +1567,7 @@ class RLMRunner:
                 options=state_context.execution.options,
                 tools=all_tools,
                 sub_lm=state_context.execution.models.sub_lm,
+                skill_instructions=spec.skill_instructions,
                 host_tool_dispatch=True,
                 interpreter_factory=invocation_factory,
                 verbose=self._verbose,

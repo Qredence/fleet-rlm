@@ -267,11 +267,11 @@ async def test_worker_startup_failure_releases_the_runner_owned_child_scheduler(
         created.append(executor)
         return executor
 
-    def fail_signature(*_args, **_kwargs):
+    def fail_worker_executor(*_args, **_kwargs):
         raise RuntimeError("worker startup failed")
 
     monkeypatch.setattr(runtime_module, "RecursiveRLMExecutor", track_executor)
-    monkeypatch.setattr(runtime_module, "root_signature_for_recursion", fail_signature)
+    monkeypatch.setattr(runtime_module, "ThreadPoolExecutor", fail_worker_executor)
     ownership = WorkerOwnership()
     observations = ObservationSession(context.identity.run_id, context.identity.session_id)
 
