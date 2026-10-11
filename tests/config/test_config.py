@@ -66,6 +66,7 @@ def test_committed_policy_declares_databricks_model_roles() -> None:
             "api_key_env": "DATABRICKS_TOKEN",
             "base_url_env": "FLEET_LLM_BASE_URL",
             "max_tokens": 16384,
+            "reasoning_effort": "low",
             "timeout_seconds": 300,
             "num_retries": 3,
             "cache": False,

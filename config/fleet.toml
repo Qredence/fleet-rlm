@@ -20,6 +20,8 @@ model = "uscentral.ai_gateway.deepseek-v4-1-flash-service"
 api_key_env = "DATABRICKS_TOKEN"
 base_url_env = "FLEET_LLM_BASE_URL"
 max_tokens = 16384
+# Prefer lower reasoning effort without reducing room for action JSON.
+reasoning_effort = "low"
 timeout_seconds = 300
 num_retries = 3
 cache = false

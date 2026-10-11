@@ -866,7 +866,10 @@ def test_databricks_deepseek_requires_ai_gateway_route(base_url: str | None, mon
 
 
 @pytest.mark.asyncio
-async def test_databricks_action_request_carries_json_schema(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("reasoning_effort", [None, "low"])
+async def test_databricks_action_request_carries_json_schema(
+    monkeypatch: pytest.MonkeyPatch, reasoning_effort: str | None
+) -> None:
     import dspy
     from dspy.clients.engines.lm15_engine import AsyncLM15Engine
     from dspy.lm15 import Request, Response, response_from_openai_chat
@@ -907,6 +910,7 @@ async def test_databricks_action_request_carries_json_schema(monkeypatch: pytest
         "uscentral.ai_gateway.deepseek-v4-1-flash-service",
         api_key="token",
         base_url="https://workspace.example/ai-gateway/mlflow/v1",
+        reasoning_effort=reasoning_effort,
         cache=False,
     )
     with dspy.context(lm=lm, adapter=FleetJSONAdapter()):
@@ -917,6 +921,11 @@ async def test_databricks_action_request_carries_json_schema(monkeypatch: pytest
     assert seen[0].model.endswith("/uscentral.ai_gateway.deepseek-v4-1-flash-service")
     assert seen[0].config.response_format is not None
     assert seen[0].config.response_format["type"] == "json_schema"
+    if reasoning_effort is None:
+        assert seen[0].config.reasoning is None
+    else:
+        assert seen[0].config.reasoning is not None
+        assert seen[0].config.reasoning.effort == reasoning_effort
 
 
 @pytest.mark.asyncio
