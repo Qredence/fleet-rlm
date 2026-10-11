@@ -136,6 +136,18 @@ export type Message =
   | { id: string; kind: "warning"; runId: string; code: string; message: string; ts: number }
   | { id: string; kind: "error"; text: string; ts: number };
 
+/** Multi-line tool errors default to collapsed; explicit operator choices take precedence. */
+export function isMessageCollapsed(
+  message: Extract<Message, { kind: "tool" | "code" | "output" | "child_progress" }>,
+): boolean {
+  return (
+    message.collapsed ??
+    (message.kind === "tool" &&
+      message.status === "error" &&
+      hasMultipleLines(message.error ?? "Tool failed"))
+  );
+}
+
 export type Run = {
   id: string | null;
   phase: Phase;
@@ -523,13 +535,9 @@ function reduce(state: State, event: Event): State {
         return state;
       }
       const messages = state.messages.slice();
-      const implicitlyCollapsed =
-        message.kind === "tool" &&
-        message.status === "error" &&
-        hasMultipleLines(message.error ?? "Tool failed");
       messages[index] = {
         ...message,
-        collapsed: !(message.collapsed ?? implicitlyCollapsed),
+        collapsed: !isMessageCollapsed(message),
       };
       return { ...state, messages };
     }

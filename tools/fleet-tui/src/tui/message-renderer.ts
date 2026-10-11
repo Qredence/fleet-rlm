@@ -18,9 +18,9 @@ import {
 import { formatExecutionMetric } from "./execution-summary.js";
 import { keyText } from "./keybinding-hints.js";
 import { MARKS } from "./marks.js";
-import type { Message, Role } from "./store.js";
+import { isMessageCollapsed, type Message, type Role } from "./store.js";
 import { highlightCode } from "./syntax-highlight.js";
-import { hasMultipleLines, terminalSafeText } from "./terminal-text.js";
+import { terminalSafeText } from "./terminal-text.js";
 import {
   markdownTheme,
   statusGlyph,
@@ -283,12 +283,7 @@ function renderTool(message: Extract<Message, { kind: "tool" }>, width: number):
   const header = `${cardMark(MARKS.tool, "accent")} ${theme.fg("toolTitle", theme.bold(terminalSafeText(message.name)))}  ${statusText}`;
 
   const errorDetails = message.status === "error" ? (message.error ?? "Tool failed") : null;
-  // Multi-line tool errors collapse to their summary by default; everything
-  // else stays expanded until the operator folds it with ctrl+o.
-  const collapsed =
-    message.collapsed === true ||
-    (message.collapsed === undefined && errorDetails !== null && hasMultipleLines(errorDetails));
-  if (collapsed) {
+  if (isMessageCollapsed(message)) {
     const summary = errorDetails !== null ? summarizeErrorDetails(errorDetails) : "";
     const suffix = summary ? `  ${theme.fg("error", terminalSafeText(summary))}` : "";
     return panel(

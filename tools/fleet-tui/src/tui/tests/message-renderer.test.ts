@@ -2,7 +2,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { renderMessage } from "../message-renderer.js";
-import type { Message } from "../store.js";
+import { ConversationStore, type Message } from "../store.js";
 import { setTerminalColorScheme } from "../theme.js";
 import { terminalSafeText } from "../terminal-text.js";
 import { hasBackground, stripAnsi } from "./support/ansi.js";
@@ -143,8 +143,15 @@ describe("renderMessage", () => {
     expect(collapsed).toContain("to expand");
     expect(collapsed).not.toContain("Traceback (most recent call last)");
 
-    const expanded = stripAnsi(renderMessage({ ...tool, collapsed: false }, 90).join("\n"));
+    const store = new ConversationStore();
+    store.dispatch({ type: "message/upsert", message: tool });
+    store.dispatch({ type: "message/toggle-fold", id: tool.id });
+    const toggled = store.getState().messages[0];
+    expect(toggled).toMatchObject({ id: tool.id, collapsed: false });
+    if (!toggled) throw new Error("Tool message missing after toggle");
+    const expanded = stripAnsi(renderMessage(toggled, 90).join("\n"));
     expect(expanded).toContain("Traceback (most recent call last)");
+    expect(expanded).not.toContain("to expand");
   });
 
   it("renders folded code/output cards as one hint line", () => {
