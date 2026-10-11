@@ -49,7 +49,7 @@ _DEFAULT_TRACKING_URI = "databricks"
 _TRACE_DESTINATION_TAG = "mlflow.experiment.databricksTraceDestinationPath"
 _EXPERIMENT_PURPOSE_TAG = "fleet.experiment.purpose"
 _TRACE_CONTENT_MAX_CHARS = 10_000
-_TRACE_CONTENT_ENABLED = False
+_TRACE_CONTENT_ENABLED = True
 # Set only after configure_tracing succeeds. Policy may request tracing while the
 # tracking backend is absent; Turn spans must not enter MLflow's HTTP retry loop
 # and starve claim heartbeats.
@@ -79,6 +79,7 @@ _UNKNOWN_TRACKING_URI = object()
 _TRACKING_URI_BEFORE: object = _UNKNOWN_TRACKING_URI
 _TRACKING_URI_APPLIED: str | None = None
 _TRACE_CONFIG_CONTEXT: Any | None = None
+_TRACE_EXPERIMENT_ID: str | None = None
 _DSPY_AUTOLOG_ENABLED = False
 _MLFLOW_EXPORT_DISTRIBUTIONS = (
     ("mlflow", "3.16.1"),
@@ -110,7 +111,7 @@ def is_tracing_active() -> bool:
 def set_tracing_active_for_tests(active: bool) -> None:
     """Test-only override for Turn-span gate without a real tracking backend."""
     global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE
-    global _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS, _TRACING_ACTIVE
+    global _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS, _TRACE_EXPERIMENT_ID, _TRACING_ACTIVE
     _TRACING_ACTIVE = active
     if not active:
         # Test doubles are installed and removed per test. Do not let a prior
@@ -120,6 +121,7 @@ def set_tracing_active_for_tests(active: bool) -> None:
         _TRACE_CONFIG_CONTEXT = None
         _TRACKING_URI_BEFORE = _UNKNOWN_TRACKING_URI
         _TRACKING_URI_APPLIED = None
+        _TRACE_EXPERIMENT_ID = None
         _TRACE_CONTENT_ENABLED = False
         _TRACE_CONTENT_MAX_CHARS = 10_000
         _TRACE_ENVIRONMENT_SNAPSHOT.clear()
@@ -296,7 +298,7 @@ def _restore_trace_processors() -> bool:
 def reset_tracing() -> bool:
     """Disable Fleet's DSPy autologging and restore process-global MLflow state."""
     global _DSPY_AUTOLOG_ENABLED, _TRACE_CONTENT_ENABLED, _TRACE_CONTENT_MAX_CHARS
-    global _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE, _TRACING_ACTIVE
+    global _TRACKING_URI_APPLIED, _TRACKING_URI_BEFORE, _TRACE_EXPERIMENT_ID, _TRACING_ACTIVE
 
     cleanup_ok = True
     mlflow: Any | None = None
@@ -336,6 +338,7 @@ def reset_tracing() -> bool:
         _TRACKING_URI_APPLIED = None
     _restore_trace_environment()
     _TRACING_ACTIVE = False
+    _TRACE_EXPERIMENT_ID = None
     _TRACE_CONTENT_ENABLED = False
     _TRACE_CONTENT_MAX_CHARS = 10_000
     if cleanup_ok:
@@ -657,7 +660,7 @@ def configure_tracing(settings: Settings) -> bool:
     are logged and suppressed.
     """
     global _DSPY_AUTOLOG_ENABLED, _TRACE_CONFIG_CONTEXT, _TRACKING_URI_APPLIED
-    global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED
+    global _TRACING_ACTIVE, _TRACE_CONTENT_ENABLED, _TRACE_EXPERIMENT_ID
     # Honor the selected policy before process-wide idempotency. A later lifespan
     # with tracing disabled must not inherit ACTIVE from an earlier configuration.
     if not settings.mlflow_tracing_enabled:
@@ -672,6 +675,7 @@ def configure_tracing(settings: Settings) -> bool:
         return False
 
     _TRACING_ACTIVE = False
+    _TRACE_EXPERIMENT_ID = None
     _TRACE_CONTENT_ENABLED = settings.mlflow_trace_content_enabled
     _set_trace_content_max_chars(getattr(settings, "mlflow_trace_content_max_chars", _TRACE_CONTENT_MAX_CHARS))
 
@@ -765,7 +769,7 @@ def configure_tracing(settings: Settings) -> bool:
         if tracking_uri == _DEFAULT_TRACKING_URI:
             from mlflow.entities.trace_location import UnityCatalog
 
-            mlflow.set_experiment(
+            experiment = mlflow.set_experiment(
                 experiment_name=settings.mlflow_experiment_name,
                 trace_location=UnityCatalog(
                     catalog_name=cast(str, settings.mlflow_trace_catalog),
@@ -774,7 +778,10 @@ def configure_tracing(settings: Settings) -> bool:
                 ),
             )
         else:
-            mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
+            experiment = mlflow.set_experiment(experiment_name=settings.mlflow_experiment_name)
+        # Root spans must use Fleet's selected experiment, not re-resolve ambient
+        # MLFLOW_EXPERIMENT_NAME/ID selectors that may disagree with Fleet policy.
+        _TRACE_EXPERIMENT_ID = experiment.experiment_id
 
         _apply_experiment_purpose(settings)
 
@@ -1447,6 +1454,7 @@ def turn_trace(
                 name=_SPAN_NAME,
                 span_type=SpanType.CHAIN,
                 log_level="INFO",
+                experiment_id=_TRACE_EXPERIMENT_ID,
             )
             from mlflow.tracing.fluent import safe_set_span_in_context
 

@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
+from uuid import uuid4
 
 import pytest
 
@@ -81,9 +84,10 @@ def _install_fake_mlflow(
         calls.tracking_uri_args.append(uri)
         current_tracking_uri["value"] = uri
 
-    def _set_exp(*args: Any, **kwargs: Any) -> None:
+    def _set_exp(*args: Any, **kwargs: Any) -> Any:
         calls.experiment_args.append(args)
         calls.experiment_kwargs.append(kwargs)
+        return SimpleNamespace(experiment_id="42")
 
     def _get_experiment_by_name(name: str) -> Any:
         calls.experiment_lookups.append(name)
@@ -202,6 +206,7 @@ def test_configure_tracing_purpose_conflict_propagates_configuration_error(
     assert "mlflow.experiment_purpose" in str(exc_info.value)
     assert "FLEET_MLFLOW_EXPERIMENT_PURPOSE" not in str(exc_info.value)
     assert tracing.is_tracing_active() is False
+    assert tracing._TRACE_EXPERIMENT_ID is None
 
 
 def test_mlflow_316_span_processor_bounds_and_protects_secrets() -> None:
@@ -417,6 +422,7 @@ def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytes
     assert tracing.configure_tracing(settings) is True
     assert calls.tracking_uri_args == ["databricks"]
     assert calls.autolog_calls == 1
+    assert tracing._TRACE_EXPERIMENT_ID == "42"
 
     tracing.reset_tracing()
 
@@ -424,6 +430,100 @@ def test_configure_tracing_is_idempotent_until_explicit_reset(monkeypatch: pytes
     assert calls.autolog_calls == 2
     assert calls.autolog_kwargs[-1] == {"disable": True, "silent": True}
     assert tracing.is_tracing_active() is False
+    assert tracing._TRACE_EXPERIMENT_ID is None
+
+
+def test_fresh_process_configures_sdk_and_persists_root(tmp_path: Path) -> None:
+    """A fresh import must not claim tracing or DSPy hooks are already configured."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            """
+import sys
+from uuid import uuid4
+import mlflow
+from fleet_rlm.config.settings import Settings
+from fleet_rlm.observability import tracing
+
+assert tracing.is_tracing_active() is False
+assert tracing._DSPY_AUTOLOG_ENABLED is False
+settings = Settings(
+    mlflow_tracing_enabled=True,
+    mlflow_tracking_uri=sys.argv[1],
+    mlflow_experiment_name="fleet-fresh-startup",
+    mlflow_async_logging=False,
+)
+try:
+    assert tracing.configure_tracing(settings) is True
+    assert tracing._DSPY_AUTOLOG_ENABLED is True
+    assert tracing._TRACE_EXPERIMENT_ID is not None
+    with tracing.turn_trace(uuid4(), uuid4(), enabled=True) as handle:
+        trace_id = handle.trace_id
+        assert trace_id is not None
+    mlflow.flush_trace_async_logging()
+    trace = mlflow.get_trace(trace_id)
+    assert trace is not None
+    assert trace.info.trace_location.mlflow_experiment.experiment_id == tracing._TRACE_EXPERIMENT_ID
+    assert [span.name for span in trace.data.spans] == ["fleet_turn"]
+finally:
+    tracing.reset_tracing()
+""",
+            f"sqlite:///{tmp_path / 'mlflow.db'}",
+        ],
+        env={**os.environ, "MLFLOW_EXPERIMENT_NAME": "stale-ambient-experiment", "MLFLOW_EXPERIMENT_ID": "0"},
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("trace_phase", ["preparation", "execution"])
+def test_turn_root_persists_in_fleet_experiment_despite_ambient_selector_conflict(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, trace_phase: Any
+) -> None:
+    import mlflow
+    from mlflow.tracking import fluent
+
+    prior_uri = mlflow.get_tracking_uri()
+    monkeypatch.setattr(fluent, "_active_experiment_id", None)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_ID", "0")
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "stale-ambient-experiment")
+    settings = _enabled_settings(
+        mlflow_tracking_uri=f"sqlite:///{tmp_path / 'mlflow.db'}",
+        mlflow_async_logging=False,
+    )
+
+    try:
+        assert tracing.configure_tracing(settings) is True
+        selected = mlflow.get_experiment_by_name(settings.mlflow_experiment_name)
+        assert selected is not None
+        assert selected.experiment_id == tracing._TRACE_EXPERIMENT_ID
+        # set_experiment updates the ambient ID but leaves the stale name. This
+        # mismatch used to make root creation return a NoOpSpan instead of export.
+        assert os.environ["MLFLOW_EXPERIMENT_ID"] == selected.experiment_id
+        assert os.environ["MLFLOW_EXPERIMENT_NAME"] == "stale-ambient-experiment"
+
+        with tracing.turn_trace(uuid4(), uuid4(), enabled=True, trace_phase=trace_phase) as handle:
+            trace_id = handle.trace_id
+            assert trace_id is not None
+            assert tracing.current_turn_trace_id() == trace_id
+
+        mlflow.flush_trace_async_logging()
+        persisted = mlflow.get_trace(trace_id)
+        assert persisted is not None
+        location = persisted.info.trace_location.mlflow_experiment
+        assert location is not None
+        assert location.experiment_id == selected.experiment_id
+        assert [span.name for span in persisted.data.spans] == ["fleet_turn"]
+        assert os.environ["MLFLOW_EXPERIMENT_NAME"] == "stale-ambient-experiment"
+    finally:
+        tracing.reset_tracing()
+        mlflow.set_tracking_uri(prior_uri)
+
+    assert tracing._TRACE_EXPERIMENT_ID is None
 
 
 def test_tracing_cleanup_restores_policy_environment_after_autolog_failure(
@@ -460,6 +560,7 @@ def test_tracing_cleanup_restores_policy_environment_after_autolog_failure(
 
     assert tracing.configure_tracing(settings) is False
     assert tracing.is_tracing_active() is False
+    assert tracing._TRACE_EXPERIMENT_ID is None
     assert len(autolog_calls) == 1
     assert "disable" not in autolog_calls[0]
     assert tracing._DSPY_AUTOLOG_ENABLED is False
