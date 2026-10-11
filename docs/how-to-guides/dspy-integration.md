@@ -352,34 +352,6 @@ with host-mediated Tools and typed inputs.
 
 See the root [architecture](../../ARCHITECTURE.md) for ownership and Turn commit ordering.
 
-## Run the Phase 1 Daytona stream canary
-
-The Phase 1 one-Turn live canary is maintained as a pytest test. It checks that
-a small text Attachment is materialized through the Volume capsule, native
-`llm_query` and `llm_query_batched` calls occur without `rlm_query`, Root
-reasoning or code reaches SSE before terminal completion, typed `SUBMIT`
-finishes the Turn, and Turn-owned broker, Sandbox, and Volume resources clean
-up. Its task expectations use native semantic calls; bounded child tools remain available.
-
-For that aggregate canary, set `FLEET_P27_SESSION_SNAPSHOT` to the candidate's
-immutable Daytona snapshot name, then run:
-
-```bash
-FLEET_PHASE1_STREAM_EVIDENCE_PATH=.scratch/phase1-daytona-stream.json \
-FLEET_P27_SESSION_SNAPSHOT=your-candidate-snapshot-v1 \
-uv run pytest -q -n 0 --timeout=900 \
-  tests/live/test_phase1_daytona_stream.py::test_phase1_daytona_stream_through_fastapi
-```
-
-The test requires `runtime.live_enabled`, an allowed Root and Sub model, and
-Daytona and model credentials. The evidence-path variable must be exported in
-the process environment before pytest starts. The immutable snapshot variable
-selects a candidate image for this test. The test loads
-`.env` with `override=False`; operator exports retain precedence. A passing
-canary is evidence for this test only and does not promote or release the
-candidate. Replace the snapshot example with the candidate's immutable Daytona
-snapshot name, which must end in `-v` followed by a positive integer.
-
 ## Current live Daytona contracts
 
 The native verifier runs two current contracts against one committed candidate:

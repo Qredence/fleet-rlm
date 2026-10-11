@@ -6,9 +6,9 @@ complete those other PRDs.
 
 ## Baseline and scope
 
-Baseline commit: `3cb6bf15e`. Existing edits to `README.md` and the untracked
-`fleet-rlm-improvement-plan.md` were preserved. No dependency, schema, public API,
-stream, configuration policy or observation retention change was made.
+Baseline commit: `3cb6bf15e`. Existing edits to `README.md` were preserved. No
+dependency, schema, public API, stream, configuration policy or observation
+retention change was made.
 
 Existing concrete operations moved to `provider.py`, ownership/receipts to
 `leases.py`, child execution to `children.py`, and serialized host I/O to

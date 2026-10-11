@@ -1,11 +1,10 @@
 # Table of contents
 
-Current guides, active migration records, and historical baselines are grouped
-in [Documentation Home](index.md). Retained broker-backed execution is the sole
+Current guides, active migration records, and dated reports are grouped in
+[Documentation Home](index.md). Retained broker-backed execution is the sole
 supported runtime; Fleet child RLM tools are always available and their limits
-follow the single configuration. A dated
-decision or passing receipt is scoped to its recorded revision and is not
-current production certification.
+follow the single configuration. A dated decision or passing receipt is scoped
+to its recorded revision and is not current production certification.
 
 * [Documentation Home](index.md)
 * [Architecture](../ARCHITECTURE.md)
@@ -16,10 +15,6 @@ current production certification.
 * [MLflow evaluation pilot](how-to-guides/mlflow-evaluation.md)
 * [Terminal UI](how-to-guides/terminal-tui.md)
 * [Workspace Memory degradation diagnostics](how-to-guides/workspace-memory-degradation.md)
-* Proposals
-  * [Book-scale RLM implementation (proposed, unimplemented)](testing/book-scale-rlm-implementation.md)
-* Historical baselines
-  * [Maintainability freeze](how-to-guides/maintainability-freeze.md)
 * Dated reports
   * [PRD 1 completion receipt](reports/prd-01-completion-2026-10-10.md)
   * [Live capability verification](reports/live-capability-verification-2026-10-10.md)
