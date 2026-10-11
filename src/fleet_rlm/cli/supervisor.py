@@ -196,7 +196,7 @@ def _local_mlflow_server(
     logs: Path,
     timestamp: str,
 ) -> Iterator[subprocess.Popen[bytes] | None]:
-    """Reuse or supervise the standard loopback MLflow tracking server."""
+    """Supervise the standard loopback MLflow server without trusting an unknown store."""
     if (
         settings is None
         or not settings.mlflow_tracing_enabled
@@ -208,12 +208,12 @@ def _local_mlflow_server(
     expected_version = importlib.metadata.version("mlflow")
     actual_version = _mlflow_server_version(_LOCAL_MLFLOW_URI)
     if actual_version is not None:
-        if actual_version != expected_version:
-            raise SupervisorError(
-                f"MLflow at {_LOCAL_MLFLOW_URI} reports version {actual_version}, but Fleet requires {expected_version}"
-            )
-        yield None
-        return
+        raise SupervisorError(
+            f"MLflow is already running at {_LOCAL_MLFLOW_URI} (version {actual_version}), "
+            "but its backend store cannot be verified. Fleet will not reuse or stop it. "
+            "Select an explicitly managed tracking destination in config/fleet.toml, "
+            "or free port 5001 before restarting Fleet."
+        )
 
     try:
         _require_available_port(_LOCAL_MLFLOW_HOST, _LOCAL_MLFLOW_PORT)

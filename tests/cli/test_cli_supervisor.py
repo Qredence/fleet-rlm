@@ -149,6 +149,52 @@ def test_local_mlflow_server_starts_with_durable_storage_and_stops_owned_process
     assert (logs / "mlflow-latest.log").resolve() == (logs / "mlflow-stamp.log").resolve()
 
 
+@pytest.mark.parametrize("version", ("3.16.1", "3.15.0"))
+def test_local_mlflow_refuses_unknown_store_even_with_matching_version(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    version: str,
+) -> None:
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", lambda *_args, **_kwargs: version)
+    monkeypatch.setattr(supervisor.importlib.metadata, "version", lambda _name: "3.16.1")
+
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("An unowned MLflow server must not be spawned or stopped")
+
+    monkeypatch.setattr(supervisor.subprocess, "Popen", unexpected)
+    monkeypatch.setattr(supervisor.os, "killpg", unexpected)
+    with (
+        pytest.raises(supervisor.SupervisorError, match="backend store cannot be verified"),
+        _LOCAL_MLFLOW_SERVER(
+            _local_mlflow_settings(),
+            repo_root=tmp_path,
+            logs=tmp_path / "logs",
+            timestamp="stamp",
+        ),
+    ):
+        pytest.fail("The backend must not launch against an unverified store")
+    assert not (tmp_path / ".fleet_rlm").exists()
+
+
+def test_local_mlflow_leaves_explicit_external_destination_running(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def unexpected(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("An explicitly configured external server must not be probed, spawned, or stopped")
+
+    monkeypatch.setattr(supervisor, "_mlflow_server_version", unexpected)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", unexpected)
+    monkeypatch.setattr(supervisor.os, "killpg", unexpected)
+    with _LOCAL_MLFLOW_SERVER(
+        _local_mlflow_settings(mlflow_tracking_uri="http://127.0.0.1:5002"),
+        repo_root=tmp_path,
+        logs=tmp_path / "logs",
+        timestamp="stamp",
+    ) as owned:
+        assert owned is None
+
+
 def test_local_mlflow_readiness_reports_early_exit(tmp_path: Path) -> None:
     log_path = tmp_path / "mlflow.log"
 

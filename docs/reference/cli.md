@@ -24,11 +24,30 @@ With the shipped local tracing configuration, `fleet cli`
 starts the installed MLflow server on
 `127.0.0.1:5001` with one worker, SQLite metadata under
 `.fleet_rlm/mlflow/mlflow.db`, and artifacts under
-`.fleet_rlm/mlflow/artifacts`. It reuses an already-running server only when
-`GET /version` matches the installed MLflow version, and it never stops a
-reused process. Custom policies may disable tracing or select another tracking
-destination. Standalone backend commands require the configured tracking server
-to be started separately.
+`.fleet_rlm/mlflow/artifacts`. If port 5001 already serves MLflow, the launcher
+refuses to reuse it: `GET /version` verifies software compatibility, not the
+backend store. It never stops an unowned process or silently chooses another
+port. Custom policies may disable tracing or explicitly select an externally
+managed tracking destination (for example, `http://127.0.0.1:5002`). Operators
+are responsible for that server's store and lifecycle. Standalone backend
+commands require the configured tracking server to be started separately.
+
+To run the root store externally on port 5002, set `mlflow.tracking_uri` to
+`"http://127.0.0.1:5002"` in `config/fleet.toml`, then run this command from the
+repository root in a separate terminal:
+
+```bash
+mkdir -p .fleet_rlm/mlflow/artifacts
+ARTIFACTS_URI="$(uv run python -c \
+  'from pathlib import Path; print(Path(".fleet_rlm/mlflow/artifacts").resolve().as_uri())')"
+uv run mlflow server --host 127.0.0.1 --port 5002 --workers 1 \
+  --backend-store-uri "sqlite:///$PWD/.fleet_rlm/mlflow/mlflow.db" \
+  --artifacts-destination "$ARTIFACTS_URI"
+```
+
+Alternatively, stop the existing port-5001 service yourself only if you own it,
+then launch `uv run fleet cli` with the shipped tracking URI so the supervisor
+starts and stops its own root-store server.
 
 ### Upgrade the local MLflow store to 3.16
 
