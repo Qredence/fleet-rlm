@@ -303,6 +303,61 @@ async def test_claim_loss_reconciles_a_commit_that_finishes_after_the_waiter_rac
 
 
 @pytest.mark.asyncio
+async def test_timeout_reconciles_a_commit_that_finishes_after_the_waiter_race() -> None:
+    """A timeout waiter must not turn a concurrently committed Turn into RunTimedOut."""
+    from fleet_rlm.rlm.event_types import RunCompleted, RunFailed, RunTimedOut, TextCompleted, TextDelta
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.result import RLMOutcome, empty_rlm_usage
+    from fleet_rlm.sessions.committed_turn import CommittedTurn, TextPart, UsagePart
+    from fleet_rlm.sessions.run_state import CommittedTurnReceipt
+    from fleet_rlm.turns import ClaimHeartbeat
+
+    release_finish = asyncio.Event()
+    committed_turn = CommittedTurn(
+        schema_version=1,
+        parts=(UsagePart(value=empty_rlm_usage()), TextPart(text="committed")),
+    )
+    turn = _turn()
+    receipt = CommittedTurnReceipt(turn.run_id, 1, committed_turn, ())
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed"), release_finish=release_finish)
+
+    async def finish(_turn, _resolution, **kwargs):
+        del kwargs
+        lifecycle.finish_started.set()
+        await release_finish.wait()
+        return receipt
+
+    lifecycle.finish = finish
+    stream = _Stream(outcome=RLMOutcome("failed"), blocking=False)
+    cleanup = RunCleanupSupervisor()
+
+    class Runner:
+        def stream(self, _execution):
+            return stream
+
+    driver = _driver(lifecycle, Runner(), cleanup)
+    # Shared Turn deadline is already exhausted when finalization waits, so the
+    # waiter returns None while finish is still blocked on release_finish.
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    prepared.execution.execution = SimpleNamespace(deadline=asyncio.get_running_loop().time())
+    claim_lost = asyncio.Event()
+    heartbeat = ClaimHeartbeat(asyncio.create_task(asyncio.Event().wait()), claim_lost)
+    task = asyncio.create_task(_collect(driver, turn, prepared, heartbeat))
+    await lifecycle.finish_started.wait()
+    await asyncio.sleep(0)
+    release_finish.set()
+    events = await task
+    await cleanup.shutdown(drain_seconds=1)
+
+    details = [event.detail for event in events]
+    assert any(isinstance(detail, TextDelta) for detail in details)
+    assert any(isinstance(detail, TextCompleted) for detail in details)
+    assert sum(isinstance(detail, RunCompleted) for detail in details) == 1
+    assert not any(isinstance(detail, (RunFailed, RunTimedOut)) for detail in details)
+    assert lifecycle.settle_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_failed_claim_loss_fence_bounds_stream_ownership_wait(monkeypatch) -> None:
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome

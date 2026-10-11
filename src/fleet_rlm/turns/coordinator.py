@@ -731,7 +731,7 @@ class TurnRuntime:
                 claim_loss_usage=outcome.usage,
                 finalization_task=state.finalization_task,
             )
-            committed = await self._reconcile_finalization_after_claim_loss(state.finalization_task)
+            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task)
             if isinstance(committed, CommittedTurnReceipt):
                 return committed
             record_turn_stop_reason("claim_lost")
@@ -739,24 +739,27 @@ class TurnRuntime:
             annotate_trace_io(request=trace_request, response_text="Turn failed", failed=True)
             return result
         if result is None:
-            record_turn_stop_reason("turn_timeout")
+            # Same race as claim-loss: the waiter can expire while finalization
+            # is still committing. Reconcile before projecting RunTimedOut.
             await self._stop_claim_waiter(state)
+            await self._handoff_cleanup_or_drain(
+                run,
+                prepared,
+                state,
+                finalization_task=state.finalization_task,
+            )
+            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task)
+            if isinstance(committed, CommittedTurnReceipt):
+                return committed
+            record_turn_stop_reason("turn_timeout")
             run.authority.revoke()
-            try:
-                receipt = _record_settlement(
-                    await self._lifecycle.settle(
-                        run,
-                        RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
-                    )
-                )
-            finally:
-                await self._handoff_cleanup_or_drain(
+            receipt = _record_settlement(
+                await self._lifecycle.settle(
                     run,
-                    prepared,
-                    state,
-                    finalization_task=state.finalization_task,
+                    RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
                 )
-                await asyncio.sleep(0)
+            )
+            await asyncio.sleep(0)
             return receipt
         await self._stop_claim_waiter(state)
         return result
@@ -795,15 +798,15 @@ class TurnRuntime:
         return None
 
     @staticmethod
-    async def _reconcile_finalization_after_claim_loss(
+    async def _reconcile_finalization_after_waiter_race(
         finalization_task: asyncio.Task[RunSettlement] | None,
     ) -> CommittedTurnReceipt | None:
-        """Observe owned finalization after a claim-loss waiter wins.
+        """Observe owned finalization after claim-loss or timeout wins the waiter.
 
         The cleanup supervisor remains the resource owner; this is a second
         shielded observer of the same task, not a replacement cleanup path.
-        Only a durable commit changes the live projection from claim-loss
-        failure to the committed suffix and one completion terminal.
+        Only a durable commit changes the live projection from claim-loss or
+        timeout failure to the committed suffix and one completion terminal.
         """
         if finalization_task is None:
             return None
