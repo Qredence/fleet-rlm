@@ -358,6 +358,137 @@ async def test_timeout_reconciles_a_commit_that_finishes_after_the_waiter_race()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("claim_lost", [False, True], ids=["timeout", "claim-loss"])
+async def test_stalled_finalization_does_not_hold_stream_after_waiter_race(monkeypatch, claim_lost) -> None:
+    from fleet_rlm.rlm.event_types import RunFailed, RunTimedOut
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.result import RLMOutcome
+    from fleet_rlm.turns import ClaimHeartbeat
+
+    monkeypatch.setattr("fleet_rlm.turns.coordinator._FINALIZATION_RECONCILIATION_TIMEOUT_S", 0.01)
+    release_finish = asyncio.Event()
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("timeout"), release_finish=release_finish)
+    stream = _Stream(outcome=RLMOutcome("failed"), blocking=False)
+    cleanup = RunCleanupSupervisor()
+    runner = SimpleNamespace(stream=lambda _execution: stream)
+    driver = _driver(lifecycle, runner, cleanup)
+    turn = _turn()
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    if not claim_lost:
+        prepared.execution.execution = SimpleNamespace(deadline=asyncio.get_running_loop().time())
+    heartbeat = ClaimHeartbeat(asyncio.create_task(asyncio.Event().wait()), asyncio.Event())
+    task = asyncio.create_task(_collect(driver, turn, prepared, heartbeat))
+    try:
+        await asyncio.wait_for(lifecycle.finish_started.wait(), 1)
+        if claim_lost:
+            heartbeat.lost.set()
+        events = await asyncio.wait_for(asyncio.shield(task), 1)
+        expected = RunFailed if claim_lost else RunTimedOut
+        assert isinstance(events[-1].detail, expected)
+        assert not release_finish.is_set()
+        assert not prepared.closed.is_set()
+        assert lifecycle.complete_calls == 0
+    finally:
+        release_finish.set()
+        await task
+        await cleanup.shutdown(drain_seconds=1)
+    assert prepared.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_finalization_observer_does_not_wait_for_owned_task() -> None:
+    from fleet_rlm.rlm.result import RLMOutcome
+
+    release_finish = asyncio.Event()
+    lifecycle = _CleanupLifecycle(outcome=RLMOutcome("failed"), release_finish=release_finish)
+    turn = _turn()
+    finalization = asyncio.create_task(lifecycle.finish(turn, lifecycle.outcome))
+    committed_receipt = asyncio.get_running_loop().create_future()
+    observer = asyncio.create_task(
+        TurnRuntime._reconcile_finalization_after_waiter_race(finalization, committed_receipt)
+    )
+    try:
+        await lifecycle.finish_started.wait()
+        await asyncio.sleep(0)
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(observer, 1)
+        assert not finalization.done()
+        assert not committed_receipt.cancelled()
+    finally:
+        release_finish.set()
+        await finalization
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("late_receipt", [False, True], ids=["before-timeout", "during-settlement"])
+async def test_timeout_projects_durable_commit_while_snapshot_remains_blocked(monkeypatch, late_receipt) -> None:
+    from fleet_rlm.rlm.event_types import RunTimedOut, TextCompleted
+    from fleet_rlm.rlm.ownership import RunCleanupSupervisor
+    from fleet_rlm.rlm.result import PredictionResult, RLMOutcome
+    from fleet_rlm.sessions.run_state import BeginSettlement, CommittedTurnReceipt, RunAlreadyCompletedError
+
+    monkeypatch.setattr("fleet_rlm.turns.coordinator._FINALIZATION_RECONCILIATION_TIMEOUT_S", 0.01)
+    release_snapshot = asyncio.Event()
+    snapshot_started = asyncio.Event()
+    settlement_started = asyncio.Event()
+    commit_returned = asyncio.Event()
+    turn = _turn()
+
+    class Store:
+        async def commit(self, run, committed, artifacts):
+            del artifacts
+            if late_receipt:
+                # Simulate the database commit winning, but its receipt
+                # arriving only when the timeout transition observes it.
+                await settlement_started.wait()
+            commit_returned.set()
+            return CommittedTurnReceipt(run.run_id, 1, committed, ())
+
+        async def transition_claim(self, _run, command):
+            if late_receipt and isinstance(command, BeginSettlement):
+                settlement_started.set()
+                await commit_returned.wait()
+                raise RunAlreadyCompletedError("Turn already committed")
+            raise AssertionError("durable success must not transition to timeout")
+
+    class SnapshotSink:
+        def result_path(self, session_id, run_id):
+            return f"/snapshots/{session_id}/{run_id}.json"
+
+        async def write(self, _path, _data):
+            snapshot_started.set()
+            await release_snapshot.wait()
+
+        async def remove(self, _path):
+            raise AssertionError("committed snapshot must be retained")
+
+    outcome = RLMOutcome("completed", PredictionResult("done", {"answer": "done"}, "fleet.default", "1"))
+    stream = _Stream(outcome=outcome, blocking=False)
+    cleanup = RunCleanupSupervisor()
+    runner = SimpleNamespace(stream=lambda _execution: stream)
+    driver = _driver(TestingRunSettlement(Store(), max_artifact_bytes=100), runner, cleanup)
+    prepared = _Prepared(deadline=asyncio.get_running_loop().time() + 10)
+    prepared.result_snapshot_sink = SnapshotSink()
+    prepared.execution.execution = SimpleNamespace(deadline=asyncio.get_running_loop().time() + 0.01)
+    task = asyncio.create_task(_collect(driver, turn, prepared, None))
+    try:
+        await asyncio.wait_for(snapshot_started.wait(), 1)
+        events = await asyncio.wait_for(asyncio.shield(task), 1)
+        details = [event.detail for event in events]
+        assert sum(isinstance(detail, RunCompleted) for detail in details) == 1
+        assert any(isinstance(detail, TextCompleted) for detail in details)
+        assert not any(isinstance(detail, RunTimedOut) for detail in details)
+        assert not release_snapshot.is_set()
+        assert not prepared.closed.is_set()
+    finally:
+        release_snapshot.set()
+        await task
+        await cleanup.shutdown(drain_seconds=1)
+    assert prepared.closed.is_set()
+
+
+@pytest.mark.asyncio
 async def test_failed_claim_loss_fence_bounds_stream_ownership_wait(monkeypatch) -> None:
     from fleet_rlm.rlm.ownership import RunCleanupSupervisor
     from fleet_rlm.rlm.result import RLMOutcome

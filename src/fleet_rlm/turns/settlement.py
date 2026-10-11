@@ -153,6 +153,7 @@ class RunLifecycle(Protocol):
         result_snapshot_sink: ResultSnapshotSink | None = None,
         memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
         memory_intents_builder: MemoryIntentBuilder | None = None,
+        on_commit: Callable[[CommittedTurnReceipt], None] | None = None,
     ) -> RunSettlement: ...
 
     async def request_cancel(self, access: TurnAccess, run_id: UUID) -> CancelResult: ...
@@ -213,6 +214,7 @@ async def finish_run(
     result_snapshot_sink: ResultSnapshotSink | None = None,
     memory_promotion: OwnedPostCommitMemoryPromotion | None = None,
     memory_intents_builder: MemoryIntentBuilder | None = None,
+    on_commit: Callable[[CommittedTurnReceipt], None] | None = None,
 ) -> RunSettlement:
     """
     Finalize a claimed Run by committing a successful Turn or recording a failure.
@@ -351,6 +353,11 @@ async def finish_run(
         )
         return await _transition_receipt(plan, run, FailClaim(_claim_failure(failure), failure.usage))
 
+    # Publish durable success before optional post-commit work can delay the
+    # finalization receipt. The coordinator observes this without taking over
+    # ownership of the remaining work.
+    if on_commit is not None:
+        on_commit(receipt)
     await _reconcile_snapshot_after_commit(snapshot_task, result_snapshot_sink, snapshot_path)
     await _promote_memory_candidates_after_commit(plan, resolution, memory_promotion, run_id=run.run_id)
     await _settle_staging(plan, artifact_sink, candidates)

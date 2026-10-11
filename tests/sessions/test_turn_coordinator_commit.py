@@ -469,11 +469,15 @@ async def test_live_commit_projects_suffix_before_terminal_and_then_closes() -> 
             artifact_sink=None,
             result_snapshot_sink=None,
             memory_promotion=None,
+            on_commit=None,
         ):
             del claimed, resolution, artifact_sink, memory_promotion
             assert result_snapshot_sink is None
             operations.append("finish")
-            return CommittedTurnReceipt(run_id, 1, committed, ())
+            receipt = CommittedTurnReceipt(run_id, 1, committed, ())
+            if on_commit is not None:
+                on_commit(receipt)
+            return receipt
 
     class Prepared:
         execution = object()

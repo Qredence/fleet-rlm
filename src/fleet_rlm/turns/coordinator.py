@@ -82,6 +82,7 @@ from fleet_rlm.turns.stream import OpenedTurnStream, terminal
 
 logger = logging.getLogger(__name__)
 _FAILED_FENCE_OWNED_WAIT_SECONDS = 30.0
+_FINALIZATION_RECONCILIATION_TIMEOUT_S = 1.0
 
 
 class TurnRuntime:
@@ -705,8 +706,9 @@ class TurnRuntime:
             await asyncio.sleep(0)
             return receipt
 
+        committed_receipt: asyncio.Future[CommittedTurnReceipt] = asyncio.get_running_loop().create_future()
         state.finalization_task = asyncio.create_task(
-            self._finish_with_trace(run, outcome, prepared),
+            self._finish_with_trace(run, outcome, prepared, on_commit=committed_receipt.set_result),
             name="fleet-turn-finalization",
         )
         execution_deadline = self._execution_deadline(prepared)
@@ -731,7 +733,7 @@ class TurnRuntime:
                 claim_loss_usage=outcome.usage,
                 finalization_task=state.finalization_task,
             )
-            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task)
+            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task, committed_receipt)
             if isinstance(committed, CommittedTurnReceipt):
                 return committed
             record_turn_stop_reason("claim_lost")
@@ -748,17 +750,27 @@ class TurnRuntime:
                 state,
                 finalization_task=state.finalization_task,
             )
-            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task)
+            committed = await self._reconcile_finalization_after_waiter_race(state.finalization_task, committed_receipt)
             if isinstance(committed, CommittedTurnReceipt):
                 return committed
             record_turn_stop_reason("turn_timeout")
             run.authority.revoke()
-            receipt = _record_settlement(
-                await self._lifecycle.settle(
-                    run,
-                    RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
+            try:
+                receipt = _record_settlement(
+                    await self._lifecycle.settle(
+                        run,
+                        RunFailure("timeout", "timeout", "Turn timed out", outcome.usage),
+                    )
                 )
-            )
+            except RunAlreadyCompletedError:
+                # Commit may win the database transition just after the
+                # bounded observer expires. Do not project a false timeout.
+                committed = await self._reconcile_finalization_after_waiter_race(
+                    state.finalization_task, committed_receipt
+                )
+                if committed is None:
+                    raise
+                return committed
             await asyncio.sleep(0)
             return receipt
         await self._stop_claim_waiter(state)
@@ -800,18 +812,30 @@ class TurnRuntime:
     @staticmethod
     async def _reconcile_finalization_after_waiter_race(
         finalization_task: asyncio.Task[RunSettlement] | None,
+        committed_receipt: asyncio.Future[CommittedTurnReceipt],
     ) -> CommittedTurnReceipt | None:
         """Observe owned finalization after claim-loss or timeout wins the waiter.
 
         The cleanup supervisor remains the resource owner; this is a second
-        shielded observer of the same task, not a replacement cleanup path.
+        bounded observer of the same task, not a replacement cleanup path.
         Only a durable commit changes the live projection from claim-loss or
         timeout failure to the committed suffix and one completion terminal.
         """
-        if finalization_task is None:
+        waiters: set[asyncio.Future[Any]] = {committed_receipt}
+        if finalization_task is not None:
+            waiters.add(finalization_task)
+        if not any(waiter.done() for waiter in waiters):
+            await asyncio.wait(
+                waiters,
+                timeout=_FINALIZATION_RECONCILIATION_TIMEOUT_S,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        if committed_receipt.done():
+            return committed_receipt.result()
+        if finalization_task is None or not finalization_task.done():
             return None
         try:
-            receipt = await shield_cleanup(finalization_task)
+            receipt = finalization_task.result()
         except BaseException:
             return None
         return receipt if isinstance(receipt, CommittedTurnReceipt) else None
@@ -821,6 +845,8 @@ class TurnRuntime:
         run: ClaimedRun,
         resolution: RLMOutcome | RunFailure,
         prepared: PreparedTurn,
+        *,
+        on_commit: Callable[[CommittedTurnReceipt], None] | None = None,
     ) -> RunSettlement:
         self._settle_turn_budget(prepared)
         terminal_status = resolution.terminal_status
@@ -843,6 +869,8 @@ class TurnRuntime:
                 if callable(close_before_commit):
                     await close_before_commit()
             finish_kwargs: dict[str, Any] = {}
+            if on_commit is not None:
+                finish_kwargs["on_commit"] = on_commit
             builder = getattr(prepared, "memory_intent_builder", None)
             if builder is not None:
                 finish_kwargs["memory_intents_builder"] = builder
@@ -1134,7 +1162,8 @@ class TurnRuntime:
             )
             if finalization_task is not None:
                 with contextlib.suppress(BaseException):
-                    await shield_cleanup(finalization_task)
+                    receipt = await shield_cleanup(finalization_task)
+                    committed = committed or isinstance(receipt, CommittedTurnReceipt)
             self._settle_turn_budget(prepared)
             try:
                 await prepared.aclose()
