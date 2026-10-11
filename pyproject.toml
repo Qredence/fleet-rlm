@@ -97,6 +97,9 @@ entrypoint = "fleet_rlm.main:app"
 # The single dev dependency list (PEP 735). Local workflows install it via
 # `uv sync --dev`; there is deliberately no published `dev` extra.
 dev = [
+    # Type-check and test bundled sandbox resources without installing browser binaries.
+    "beautifulsoup4==4.15.0",
+    "playwright==1.63.0",
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

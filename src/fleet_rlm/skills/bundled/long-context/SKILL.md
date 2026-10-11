@@ -45,6 +45,7 @@ Keep large inputs in variable space. Inputs may come from the user query, commit
 
    ```python
    import runpy
+
    browser_helper = runpy.run_path("/workspace/skills/long-context/scripts/browse_page.py")
    evidence = browser_helper["retrieve"](url)  # HTTP first, Chromium fallback for JS shells
    ```
