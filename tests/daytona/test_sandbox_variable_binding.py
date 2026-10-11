@@ -258,7 +258,7 @@ async def test_broker_resolves_awaitable_tools_and_returns_structured_failure() 
 _TEXT_ID = UUID("00000000-0000-4000-8000-0000000000a1")
 _OTHER_ID = UUID("00000000-0000-4000-8000-0000000000a2")
 _ATTACHMENT_PROBE = (
-    "print(repr([(a['id'], a['filename'], a['content_type'], a['byte_size'], a['data'], a['encoding'])"
+    "print(repr([(a['id'], a['filename'], a['content_type'], a['byte_size'], a['data'], a['encoding'], a['line_count'])"
     " for a in attachments]))\nprint(repr(context))"
 )
 
@@ -307,28 +307,64 @@ _BACKENDS = pytest.mark.parametrize("kind", ["in_process", "sandbox"])
     [
         pytest.param(
             {_TEXT_ID: ("note.txt", b"Fleet context")},
-            [(str(_TEXT_ID), "note.txt", "text/plain", 13, "Fleet context", "utf-8")],
+            [(str(_TEXT_ID), "note.txt", "text/plain", 13, "Fleet context", "utf-8", 1)],
             "Fleet context",
             id="single-text",
         ),
         pytest.param(
+            {_TEXT_ID: ("note.txt", b"\xef\xbb\xbfa\n")},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 5, "\ufeffa\n", "utf-8", 1)],
+            "\ufeffa\n",
+            id="utf8-bom-preserved",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("note.txt", "a\u2028b\n".encode())},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 6, "a\u2028b\n", "utf-8", 2)],
+            "a\u2028b\n",
+            id="unicode-text-line-separator",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("note.txt", "é\nö\n".encode())},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 6, "é\nö\n", "utf-8", 2)],
+            "é\nö\n",
+            id="lf-final-newline",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("note.txt", b"a\r\nb\r\n")},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 6, "a\r\nb\r\n", "utf-8", 2)],
+            "a\r\nb\r\n",
+            id="crlf-final-newline",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("note.txt", b"a\n\n")},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 3, "a\n\n", "utf-8", 2)],
+            "a\n\n",
+            id="trailing-blank-line",
+        ),
+        pytest.param(
+            {_TEXT_ID: ("note.txt", b"a\r\n\r\n")},
+            [(str(_TEXT_ID), "note.txt", "text/plain", 5, "a\r\n\r\n", "utf-8", 2)],
+            "a\r\n\r\n",
+            id="crlf-trailing-blank-line",
+        ),
+        pytest.param(
             {_TEXT_ID: ("a.txt", b"first"), _OTHER_ID: ("b.txt", b"second")},
             [
-                (str(_TEXT_ID), "a.txt", "text/plain", 5, "first", "utf-8"),
-                (str(_OTHER_ID), "b.txt", "text/plain", 6, "second", "utf-8"),
+                (str(_TEXT_ID), "a.txt", "text/plain", 5, "first", "utf-8", 1),
+                (str(_OTHER_ID), "b.txt", "text/plain", 6, "second", "utf-8", 1),
             ],
             [],
             id="multiple",
         ),
         pytest.param(
             {_TEXT_ID: ("blob.bin", b"\xff\xfe\x00")},
-            [(str(_TEXT_ID), "blob.bin", "text/plain", 3, b"\xff\xfe\x00", "bytes")],
+            [(str(_TEXT_ID), "blob.bin", "text/plain", 3, b"\xff\xfe\x00", "bytes", None)],
             [],
             id="invalid-utf8",
         ),
         pytest.param(
             {_TEXT_ID: ("nul.txt", b"a\x00b")},
-            [(str(_TEXT_ID), "nul.txt", "text/plain", 3, b"a\x00b", "bytes")],
+            [(str(_TEXT_ID), "nul.txt", "text/plain", 3, b"a\x00b", "bytes", None)],
             [],
             id="nul-bearing",
         ),

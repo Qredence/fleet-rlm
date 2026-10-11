@@ -179,7 +179,23 @@ async def test_volume_attachment_context_round_trips_inside_the_interpreter(tmp_
     assert prediction.answer == "Fleet context"
     assert payload.rlm_preview(10) == "prepared i"
     assert "/home/daytona" not in payload.rlm_preview()
+    assert "line_count" in payload.rlm_preview()
+    assert "data.splitlines()" in payload.rlm_preview()
+    assert "a final newline adds no blank line" in payload.rlm_preview()
+    assert "an extra blank line counts" in payload.rlm_preview()
     assert body not in payload.to_sandbox()
+
+
+def test_attachment_context_rejects_empty_content(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="attachment byte size is invalid"):
+        AttachmentContextEntry(
+            ATTACHMENT_ID,
+            "empty.txt",
+            "text/plain",
+            0,
+            "a" * 64,
+            str(tmp_path / "empty.txt"),
+        )
 
 
 def test_attachment_context_rejects_paths_outside_mount(tmp_path: Path) -> None:

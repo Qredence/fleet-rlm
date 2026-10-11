@@ -520,6 +520,7 @@ def _materialize_context_manifest(
                     "byte_size": expected_size,
                     "data": data,
                     "encoding": encoding,
+                    "line_count": len(data.splitlines()) if isinstance(data, str) else None,
                 }
             )
             accesses.append(attachment_id)
@@ -609,9 +610,16 @@ class AttachmentContextCapsule(dspy.SandboxSerializable):
         )
 
     def rlm_preview(self, max_chars: int = _MAX_PREVIEW_CHARS) -> str:
-        preview = "prepared immutable context in attachments (one text item is also context): " + ", ".join(
-            f"{entry.filename!r} ({entry.content_type or 'application/octet-stream'}, {entry.byte_size} bytes)"
-            for entry in self.entries
+        preview = (
+            "prepared immutable context in attachments (one text item is also context). "
+            "Use each UTF-8 item's line_count for text line totals and data.splitlines() for line numbering "
+            "(Python text semantics, including Unicode line separators): "
+            "LF/CRLF terminate lines; a final newline adds no blank line, but an extra blank line counts; "
+            "binary line_count is None. "
+            + ", ".join(
+                f"{entry.filename!r} ({entry.content_type or 'application/octet-stream'}, {entry.byte_size} bytes)"
+                for entry in self.entries
+            )
         )
         return preview[: max(1, min(max_chars, _MAX_PREVIEW_CHARS))]
 
