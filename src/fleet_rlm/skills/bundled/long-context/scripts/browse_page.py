@@ -120,8 +120,22 @@ def browser_text(url: str) -> tuple[str, str, str]:
                         or request.resource_type in {"image", "media", "font"}
                     ):
                         route.abort()
-                    else:
-                        route.continue_()
+                        return
+                    # Chromium follows redirect chains without invoking the
+                    # routing handler again. Never hand it a redirect response:
+                    # the HTTP-first stage resolves checked public redirects.
+                    try:
+                        response = route.fetch(max_redirects=0, timeout=TIMEOUT_S * 1000)
+                    except Error:
+                        route.abort()
+                        return
+                    try:
+                        if 300 <= response.status < 400:
+                            route.abort()
+                        else:
+                            route.fulfill(response=response)
+                    finally:
+                        response.dispose()
 
                 context.route("**/*", route_request)
                 context.route_web_socket("**/*", lambda websocket: websocket.close())

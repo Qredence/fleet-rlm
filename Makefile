@@ -151,9 +151,9 @@ test-coverage:
 
 test-daytona-cov: test-coverage
 
-DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v7
+DAYTONA_SNAPSHOT_NAME ?= fleet-rlm-python313-v11
 DAYTONA_SNAPSHOT_PROFILE ?= session
-DAYTONA_CHILD_SNAPSHOT_NAME ?= fleet-rlm-python313-child-v2
+DAYTONA_CHILD_SNAPSHOT_NAME ?= fleet-rlm-python313-child-v5
 
 daytona-snapshot-create:
 	uv run python scripts/daytona_snapshot.py create --profile $(DAYTONA_SNAPSHOT_PROFILE) --name $(DAYTONA_SNAPSHOT_NAME)

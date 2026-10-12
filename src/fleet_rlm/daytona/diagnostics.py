@@ -41,6 +41,8 @@ from fleet_rlm.sessions.bindings import workspace_volume_subpath
 _SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
 _BROWSER_INSTALL = "python -m playwright install --with-deps chromium"
 _BROWSER_PATH = "/opt/fleet/playwright"
+# Published Session image names retain their pre-browser dependency contract.
+_HTTP_ONLY_SNAPSHOTS = frozenset(f"fleet-rlm-python313-v{version}" for version in range(1, 11))
 _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
 _IMPORT_NAME = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$", re.IGNORECASE)
 
@@ -209,7 +211,7 @@ def environment_manifest(
         raise TypeError("profile must be a DaytonaEnvironmentProfile")
     semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
     dependencies = snapshot_execution_dependencies(profile)
-    legacy = spec.snapshot == "fleet-rlm-python313-v5" and not semantic
+    legacy = spec.snapshot in _HTTP_ONLY_SNAPSHOTS and not semantic
     if legacy:
         dependencies = tuple(item for item in dependencies if not item.startswith("playwright=="))
     digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")

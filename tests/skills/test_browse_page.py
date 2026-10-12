@@ -13,6 +13,7 @@ from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -173,6 +174,94 @@ def test_browser_fallback_retains_original_url(helper, monkeypatch, tmp_path):
     assert receipt["requested_url"] == "https://example.org"
     assert receipt["method"] == "browser"
     assert receipt["completeness"]["dynamic_content_complete"] is False
+
+
+@pytest.mark.parametrize("resource_type", ["document", "script"])
+@pytest.mark.parametrize("status", [200, 301, 302, 303, 307, 308])
+def test_browser_never_hands_redirects_to_chromium(helper, monkeypatch, resource_type, status):
+    from playwright import sync_api
+
+    monkeypatch.setattr(helper.socket, "getaddrinfo", lambda *_a, **_k: [(0, 0, 0, "", ("93.184.216.34", 443))])
+    manager = MagicMock()
+    browser = manager.__enter__.return_value.chromium.launch.return_value
+    context = browser.new_context.return_value
+    page = context.new_page.return_value
+    page.url = "https://example.org"
+    context.new_cdp_session.return_value.send.return_value = {
+        "result": {"value": {"text": "Public evidence", "title": "Example"}}
+    }
+    response = MagicMock(status=status)
+    response.headers = {"location": "http://127.0.0.1/private"}
+    route = MagicMock()
+    route.request = SimpleNamespace(url="https://example.org/resource", method="GET", resource_type=resource_type)
+    route.fetch.return_value = response
+
+    def navigate(*_args, **_kwargs):
+        context.route.call_args.args[1](route)
+        return SimpleNamespace(status=200)
+
+    page.goto.side_effect = navigate
+    monkeypatch.setattr(sync_api, "sync_playwright", lambda: manager)
+    assert helper.browser_text("https://example.org") == ("Public evidence", "https://example.org", "Example")
+    route.fetch.assert_called_once_with(max_redirects=0, timeout=helper.TIMEOUT_S * 1000)
+    route.continue_.assert_not_called()
+    if status == 200:
+        route.fulfill.assert_called_once_with(response=response)
+        route.abort.assert_not_called()
+    else:
+        route.abort.assert_called_once_with()
+        route.fulfill.assert_not_called()
+    response.dispose.assert_called_once_with()
+    context.close.assert_called_once_with()
+    browser.close.assert_called_once_with()
+
+
+@pytest.mark.skipif(os.environ.get("FLEET_TEST_BROWSER") != "1", reason="opt-in actual Chromium fixture")
+@pytest.mark.parametrize("resource_type", ["document", "script"])
+def test_actual_chromium_blocks_redirects_before_private_request(helper, monkeypatch, resource_type):
+    from playwright.sync_api import Error
+
+    private_requests = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/private")
+                self.end_headers()
+            else:
+                if self.path == "/private":
+                    private_requests.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b'<body>Public evidence<script src="/redirect"></script></body>')
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}"
+
+    def fixture_url(target):
+        if target not in {url + "/", url + "/redirect"}:
+            raise ValueError("private fixture target")
+        return target
+
+    monkeypatch.setattr(helper, "public_url", fixture_url)
+    try:
+        if resource_type == "document":
+            with pytest.raises(Error):
+                helper.browser_text(url + "/redirect")
+        else:
+            assert helper.browser_text(url + "/")[0] == "Public evidence"
+        assert private_requests == []
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 @pytest.mark.skipif(os.environ.get("FLEET_TEST_BROWSER") != "1", reason="opt-in actual Chromium fixture")

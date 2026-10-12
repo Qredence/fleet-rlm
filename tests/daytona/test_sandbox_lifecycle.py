@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
@@ -445,7 +446,7 @@ def test_spec_builds_non_root_pinned_image_with_toolchain_and_declared_dependenc
     )
     from fleet_rlm.daytona.specs import BASE_IMAGE
 
-    spec = DaytonaSandboxSpec("fleet-rlm-python313-v1")
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v11")
     dockerfile = build_snapshot_image(spec).dockerfile()
     digest = snapshot_dependency_sha256()
 
@@ -582,6 +583,36 @@ def test_browser_image_identity_and_legacy_image_are_distinct() -> None:
     assert "playwright" not in legacy_image
     assert "runtime-manifest.json" not in legacy_image
     assert "USER daytona" in legacy_image
+
+
+@pytest.mark.parametrize("version", range(1, 11))
+def test_published_session_images_do_not_gain_browser_dependencies(version: int) -> None:
+    from fleet_rlm.daytona.diagnostics import (
+        build_snapshot_image,
+        environment_manifest,
+        snapshot_dependency_import_names,
+    )
+    from fleet_rlm.daytona.specs import DaytonaEnvironmentProfile
+
+    for profile in (DaytonaEnvironmentProfile.SESSION, DaytonaEnvironmentProfile.WORKSPACE_CHILD):
+        spec = DaytonaSandboxSpec(f"fleet-rlm-python313-v{version}", profile=profile)
+        manifest = environment_manifest(spec)
+        assert not manifest.browser_enabled
+        assert "browser" not in manifest.as_dict()
+        assert all(package != "playwright" for package, _, _ in snapshot_dependency_import_names(spec=spec))
+        assert "playwright" not in build_snapshot_image(spec).dockerfile()
+
+
+def test_published_v10_image_identity_remains_unchanged() -> None:
+    from fleet_rlm.daytona.diagnostics import build_snapshot_image, environment_manifest
+
+    spec = DaytonaSandboxSpec("fleet-rlm-python313-v10")
+    # Freeze the pre-browser contract so new dependencies require a new image name.
+    assert environment_manifest(spec).digest == "72c0d2d934b0b9524e554ffdeb47a360e667301f54584752c82f6ed711ac547b"
+    assert (
+        hashlib.sha256(build_snapshot_image(spec).dockerfile().encode()).hexdigest()
+        == "1cccfc4f801bf75d19ed848e7e4ab05e1a3c222e32f414e727258e9e5c2ff062"
+    )
 
 
 # --- Deletion Lifecycle and Absence Confirmation ---

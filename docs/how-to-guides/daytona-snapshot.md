@@ -50,6 +50,14 @@ also remain immutable rollback targets. No image is a selected deployment
 value until its provider checks, disposable probes, sealed receipt, and
 deployment-reference change are complete.
 
+The browser-enabled Session image uses the fresh `fleet-rlm-python313-v11`
+contract, including pinned Playwright and Chromium. Published Session names
+through `fleet-rlm-python313-v10` retain their HTTP-only dependency and manifest
+contracts. The SemanticChild image remains `fleet-rlm-python313-child-v5` and
+does not include a browser. The Makefile defaults target these candidate names;
+they do not change the operator's configured deployment references or establish
+provider certification.
+
 ## Plan, create, and check
 
 The command loads `.env` through Fleet's settings loader; no shell `export` is
@@ -57,17 +65,17 @@ needed:
 
 ```bash
 uv run python scripts/daytona_snapshot.py plan \
-  --profile session --name fleet-rlm-python313-v10
+  --profile session --name fleet-rlm-python313-v11
 uv run python scripts/daytona_snapshot.py plan \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py create \
-  --profile session --name fleet-rlm-python313-v10
+  --profile session --name fleet-rlm-python313-v11
 uv run python scripts/daytona_snapshot.py create \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py check \
-  --profile session --name fleet-rlm-python313-v10
+  --profile session --name fleet-rlm-python313-v11
 uv run python scripts/daytona_snapshot.py check \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
@@ -83,7 +91,7 @@ After creation, verify each image in a disposable no-Volume Sandbox:
 
 ```bash
 uv run python scripts/daytona_snapshot.py verify-runtime \
-  --profile session --name fleet-rlm-python313-v10
+  --profile session --name fleet-rlm-python313-v11
 uv run python scripts/daytona_snapshot.py verify-runtime \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
