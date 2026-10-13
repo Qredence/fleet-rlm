@@ -80,7 +80,6 @@ IMPORT_TABLES = (
     "fleet_warm_pool_ownership",
     "fleet_attachments",
     "fleet_artifacts",
-    "fleet_skills",
     "fleet_memory_promotion_intents",
 )
 

@@ -253,21 +253,6 @@ class ArtifactRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class SkillRow(Base):
-    """Retained SQL row; the active bundled runtime catalog is in memory."""
-
-    __tablename__ = "fleet_skills"
-
-    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=_uuid)
-    workspace_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    version: Mapped[str] = mapped_column(String(64), nullable=False, default="0.0.0")
-    trust: Mapped[str] = mapped_column(String(32), nullable=False, default="system")
-    visibility: Mapped[str] = mapped_column(String(32), nullable=False, default="workspace")
-    metadata_json: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class MemoryPromotionIntentRow(Base):
     """Crash-recoverable autonomous Memory promotion intent (P23).
 

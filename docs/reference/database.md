@@ -24,8 +24,8 @@ uv run alembic check
 ```
 
 The canonical tables are `fleet_users`, `fleet_workspaces`, `fleet_sessions`,
-`fleet_turns`, `fleet_runs`, `fleet_sandbox_bindings`, `fleet_attachments`, `fleet_artifacts`,
-`fleet_skills`, and `fleet_memory_promotion_intents` (the autonomous-memory
+`fleet_turns`, `fleet_runs`, `fleet_sandbox_bindings`, `fleet_attachments`,
+`fleet_artifacts`, and `fleet_memory_promotion_intents` (the autonomous-memory
 promotion outbox). SQLAlchemy models live in `fleet_rlm.persistence.models`.
 
 Production startup assumes migrations have already run. Explicit SQLite

@@ -126,7 +126,7 @@ async def test_database_compatibility_rejects_database_without_alembic_revision(
 @pytest.mark.asyncio
 async def test_database_compatibility_accepts_exact_alembic_head(tmp_path: Path) -> None:
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'head.sqlite3'}"
-    await _set_revision(database_url, "01a087800003")
+    await _set_revision(database_url, "01a087800004")
 
     await check_database_compatibility(database_url)
 
@@ -175,7 +175,7 @@ def test_existing_baseline_database_upgrades_to_settling_head(
     finally:
         engine.dispose()
     assert {"terminal_intent", "recovery_metadata_json"} <= columns
-    assert revision == "01a087800003"
+    assert revision == "01a087800004"
 
 
 def test_existing_baseline_database_upgrades_to_memory_intents_head(
@@ -218,7 +218,38 @@ def test_existing_baseline_database_upgrades_to_memory_intents_head(
         "claim_heartbeat_at",
         "completion_reason",
     } <= intent_columns
-    assert revision == "01a087800003"
+    assert revision == "01a087800004"
+
+
+def test_fleet_skills_table_is_dropped_at_head_and_restored_by_downgrade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unused fleet_skills table leaves the schema at head and returns, empty, on downgrade."""
+    root = Path(__file__).resolve().parents[2]
+    database_path = tmp_path / "skills.sqlite3"
+    database_url = f"sqlite:///{database_path}"
+    monkeypatch.setenv("FLEET_DATABASE_URL", database_url)
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "migrations"))
+
+    command.upgrade(config, "01a087800003")
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert "fleet_skills" in set(inspect(connection).get_table_names())
+
+        command.upgrade(config, "head")
+        with engine.connect() as connection:
+            assert "fleet_skills" not in set(inspect(connection).get_table_names())
+
+        command.downgrade(config, "-1")
+        with engine.connect() as connection:
+            columns = {column["name"] for column in inspect(connection).get_columns("fleet_skills")}
+            row_count = connection.execute(text("SELECT COUNT(*) FROM fleet_skills")).scalar_one()
+    finally:
+        engine.dispose()
+    assert columns == {"id", "workspace_id", "name", "version", "trust", "visibility", "metadata_json", "created_at"}
+    assert row_count == 0
 
 
 # --- from test_turn_lineage_migration.py ------------------------------
