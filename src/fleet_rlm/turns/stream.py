@@ -84,7 +84,6 @@ class OpenedTurnStream:
         self._close_task: asyncio.Task[None] | None = None
         self._close_lock = asyncio.Lock()
         self._close_complete = False
-        self._open_error: BaseException | None = None
 
     def __aiter__(self) -> Self:
         return self
@@ -120,11 +119,7 @@ class OpenedTurnStream:
             return
         if self._events is not None or self._open_task is None:
             return
-        try:
-            opened = await asyncio.shield(self._open_task)
-        except BaseException as exc:
-            self._open_error = exc
-            raise
+        opened = await asyncio.shield(self._open_task)
         if isinstance(opened, OpenedTurnStream):
             self.run_id = opened.run_id
             self._opened_owner = opened
