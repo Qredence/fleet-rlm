@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 from fleet_rlm.api.sse import AISDKUIProjector
@@ -362,3 +363,20 @@ def test_openapi_declares_typed_render_data_payloads() -> None:
     assert code_data["code"]["type"] == "string"
     assert output_data["output"]["type"] == "string"
     assert "type" not in structured_data["value"]
+
+
+def test_projection_dispatch_covers_exactly_the_closed_runtime_detail_vocabulary() -> None:
+    from fleet_rlm.api import sse
+    from fleet_rlm.rlm.event_types import RUNTIME_DETAIL_TYPES
+
+    assert set(sse._PROJECTORS) == set(RUNTIME_DETAIL_TYPES)
+
+
+def test_projection_rejects_an_unregistered_detail_type() -> None:
+    import pytest
+
+    from fleet_rlm.api.sse import project_runtime_event
+
+    event = SimpleNamespace(detail=object(), run_id=uuid4(), session_id=uuid4())
+    with pytest.raises(AssertionError, match="unhandled Runtime Event detail: object"):
+        project_runtime_event(event)  # ty: ignore[invalid-argument-type]
