@@ -72,6 +72,7 @@ class WorkspaceIO:
         self._workspace_io_idle_task: asyncio.Task[None] | None = None
         self._warm_workspace_io_sandboxes: dict[UUID, tuple[Any, SandboxResource, float]] = {}
         self._warm_workspace_io_lock = asyncio.Lock()
+        self._prewarming_workspaces: set[UUID] = set()
 
     def _workspace_io_resources(self) -> tuple[SandboxResource, ...]:
         return tuple(lease for lease in self._leases if lease.role == "host_io")
@@ -125,6 +126,37 @@ class WorkspaceIO:
                 logger.warning("Workspace idle cleanup remains runtime-owned", extra={"error_type": type(exc).__name__})
 
         self._workspace_io_idle_task = asyncio.create_task(expire(), name="fleet-daytona-workspace-io-idle")
+
+    def schedule_workspace_prewarm(self, workspace_id: UUID) -> asyncio.Task[None] | None:
+        """Create the Workspace I/O Sandbox in the background so the next Turn reuses it.
+
+        Returns None when a warm Sandbox or an in-flight pre-warm already exists. The task is
+        retained as a provider task, not in the pending set: a Turn holds the warm lock while it
+        awaits that set, and the pre-warm needs the same lock, so sharing the set would deadlock.
+        """
+        if not self.accepting or workspace_id in self._warm_workspace_io_sandboxes:
+            return None
+        if workspace_id in self._prewarming_workspaces:
+            return None
+        self._prewarming_workspaces.add(workspace_id)
+
+        async def prewarm() -> None:
+            try:
+                async with self.open_workspace_sandbox(workspace_id, purpose="workspace-prewarm", reuse_warm=True):
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Workspace I/O pre-warm failed; the next Turn acquires normally",
+                    extra={"error_type": type(exc).__name__},
+                )
+            finally:
+                self._prewarming_workspaces.discard(workspace_id)
+
+        task = asyncio.create_task(prewarm(), name="fleet-daytona-workspace-io-prewarm")
+        _retain_provider_task(task, self._provider_tasks)
+        return task
 
     @contextlib.asynccontextmanager
     async def open_workspace_sandbox(

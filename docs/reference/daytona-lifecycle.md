@@ -22,6 +22,20 @@ limits its wait without cancelling cleanup. Failed cleanup retains the resource 
 permit for retry. Deletion uses the pinned SDK's `delete(wait=True)` and confirms
 absence before releasing capacity. Stop confirmation remains distinct from deletion.
 
+An interpreter invocation owns its synchronous SDK client, Python context, and
+host-tool broker. Shutdown deletes the context and closes the broker before
+closing that client; failed cleanup retains the handles for retry. Application
+storage instead uses local views of the composition-owned asynchronous client.
+Run cleanup closes its storage view after owned work settles and before releasing
+the invocation gate, including cancellation and failure paths. The shared client
+remains open until composition disposal finishes its provider cleanup.
+
+Ordinary SDK execution output is capped in the Sandbox before transfer. Reaching
+that cap truncates output while execution continues; final submissions have a
+separate bounded frame. Unexpected output beyond the host transport ceiling is
+terminal, fences further actions, and taints the root for retirement. Disconnects
+and output refusals never authorize replaying model code or its external effects.
+
 ## Authoritative state and indexes
 
 - Root Session records own retained roots; the active-Run registry and binding

@@ -142,7 +142,10 @@ production seam: composition inventory tests live in
 `tests/sessions/test_live_composition.py`, Turn execution tests
 in `tests/sessions/test_turn_coordinator_execution.py`, binding repository tests
 in `tests/daytona/test_sandbox_lifecycle.py`, and pure broker
-source and transport tests in `tests/daytona/test_broker.py`. Include
+source and transport tests in `tests/daytona/test_broker.py`. Pinned SDK
+WebSocket capture, transport fencing, and worker/application ownership regressions
+live in `tests/daytona/test_sdk_context_ownership.py`; HTTP evidence capture
+lives in `tests/skills/test_capture_page.py`. Include
 the claim-heartbeat, cleanup, claim-parity, live-preparation, orphan-cleanup,
 broker-binding, and interpreter-observation suites when changing lifecycle or
 provider ownership.

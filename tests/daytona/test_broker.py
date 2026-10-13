@@ -21,7 +21,7 @@ import pytest
 from fleet_rlm.daytona import broker as broker_module
 from fleet_rlm.daytona.broker import DaytonaHttpToolBroker
 from fleet_rlm.daytona.errors import DaytonaAdapterError
-from fleet_rlm.observability.diagnostics import trace_failure_category
+from tests.support.sdk_interpreter import LocalSDKInterpreter
 
 
 def _free_port() -> int:
@@ -38,7 +38,6 @@ def _start_embedded_server(prefix: str = "") -> Iterator[tuple[str, dict[str, st
         broker_module._SERVER_SOURCE.replace("__SECRET__", repr(secret))
         .replace("__PORT__", str(port))
         .replace("__MAX_REQUEST_BYTES__", str(broker_module._MAX_REQUEST_BYTES))
-        .replace("__MAX_OUTPUT_CHARS__", str(broker_module._MAX_OUTPUT_CHARS))
         .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(broker_module._DEFAULT_TOOL_TIMEOUT_S))
     )
     process = subprocess.Popen(
@@ -70,60 +69,56 @@ def embedded_server() -> Iterator[tuple[str, dict[str, str]]]:
         yield server
 
 
-def _run_execute(
-    client: httpx.Client, code: str, *, timeout_s: float = 2
-) -> tuple[threading.Thread, list[httpx.Response]]:
-    responses: list[httpx.Response] = []
-    thread = threading.Thread(
-        target=lambda: responses.append(
-            client.post("/execute", json={"code": code, "variables": {}, "timeout_s": timeout_s}, timeout=3)
-        ),
-        daemon=True,
-    )
+def _run_execute(client, code, *, timeout_s=2):
+    responses = []
+    client.post("/action", json={"active": True, "timeout_s": timeout_s}).raise_for_status()
+    service = LocalSDKInterpreter()
+
+    def run():
+        result = service.run_code(code, context=service.create_context())
+        client.post("/action", json={"active": False}).raise_for_status()
+        responses.append(
+            httpx.Response(200, json={"stdout": result.stdout, "error": result.error.value if result.error else None})
+        )
+
+    thread = threading.Thread(target=run, daemon=True)
     thread.start()
     return thread, responses
 
 
-@pytest.mark.parametrize(
-    ("failure", "cause_type", "category"),
-    [
-        (httpx.ReadTimeout("private endpoint detail"), "BrokerExecutionTimeout", "timeout"),
-        (httpx.ConnectError("private endpoint detail"), "BrokerExecutionError", "unknown"),
-    ],
-)
-def test_execute_classifies_request_timeout_without_exposing_transport_detail(
-    failure: Exception, cause_type: str, category: str
-) -> None:
+def _execute(broker, code, variables, *, timeout_s, on_stdout=None):
+    service = LocalSDKInterpreter()
+    context = service.create_context()
+    context.update(variables)
+    result = broker.service_execution(
+        lambda: service.run_code(
+            code, context=context, on_stdout=(lambda message: on_stdout(message.output)) if on_stdout else None
+        ),
+        timeout_s=timeout_s,
+    )
+    return {
+        "stdout": result.stdout,
+        "error": result.error.value if result.error else None,
+        "error_category": result.error.name if result.error else None,
+        "streamed_stdout": bool(on_stdout and result.stdout),
+    }
+
+
+def test_service_execution_does_not_replay_sdk_failure():
     broker = DaytonaHttpToolBroker(object(), port=1)
-    client = MagicMock()
-    client.post.side_effect = failure
-    broker._client = client
+    broker._client = MagicMock()
     broker._url = "http://sandbox.invalid"
-    broker._poll_once = lambda: None  # type: ignore[method-assign]
+    broker._poll_once = lambda: None
+    calls = []
 
-    with pytest.raises(DaytonaAdapterError) as caught:
-        broker.execute("print('hello')", {}, timeout_s=2)
+    def execute():
+        calls.append(1)
+        raise RuntimeError("SDK stream failed")
 
-    assert caught.value.cause_type == cause_type
-    assert trace_failure_category(caught.value) == category
-    assert "private endpoint detail" not in str(caught.value)
-
-
-def test_execute_transport_timeout_includes_response_grace() -> None:
-    broker = DaytonaHttpToolBroker(object(), port=1)
-    client = MagicMock()
-    response = MagicMock(status_code=200)
-    response.json.return_value = {"stdout": "", "error": None}
-    client.post.return_value = response
-    broker._client = client
-    broker._url = "http://sandbox.invalid"
-    broker._poll_once = lambda: None  # type: ignore[method-assign]
-
-    broker.execute("pass", {}, timeout_s=7)
-
-    kwargs = client.post.call_args.kwargs
-    assert kwargs["timeout"] == 7 + broker_module._EXECUTE_RESPONSE_GRACE_S
-    assert kwargs["json"]["timeout_s"] == 7
+    with pytest.raises(RuntimeError, match="SDK stream failed"):
+        broker.service_execution(execute, timeout_s=2)
+    assert calls == [1]
+    assert broker._client.post.call_args.kwargs["json"] == {"active": False}
 
 
 @pytest.mark.parametrize("post_expiry_delay_s", [0.0, 0.5])
@@ -156,13 +151,13 @@ def test_execute_returns_sandbox_timeout_when_host_tool_outlives_the_action(
         with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
             broker._client = client
             started = time.monotonic()
-            result = broker.execute(source, {}, timeout_s=2)
+            result = _execute(broker, source, {}, timeout_s=2)
             elapsed = time.monotonic() - started
 
     assert result["error_category"] in ("HTTPError", "TimeoutError")
     assert broker._delivery_error is None
     assert "category=duplicate_call" in caplog.text
-    assert elapsed < 2 + broker_module._EXECUTE_RESPONSE_GRACE_S
+    assert elapsed < 5
 
 
 def test_execute_exposes_the_action_deadline_to_dispatched_host_tools(
@@ -184,7 +179,7 @@ def test_execute_exposes_the_action_deadline_to_dispatched_host_tools(
     with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
         broker._client = client
         before = time.monotonic()
-        result = broker.execute(broker.setup_source("print(answer())"), {}, timeout_s=4)
+        result = _execute(broker, broker.setup_source("print(answer())"), {}, timeout_s=4)
         after = time.monotonic()
 
     assert "ok" in str(result.get("stdout"))
@@ -230,6 +225,34 @@ def test_health_probe_requires_the_invocation_secret(
     assert httpx.get(f"{base_url}/health", timeout=2).status_code == 401
 
 
+def test_host_dispatch_refuses_unbound_tool_names_and_runs_no_bound_tool() -> None:
+    """The header secret is not the tool boundary; host dispatch is.
+
+    Sandbox stubs and agent code share one process and one secret, so authority to
+    call a tool comes from the host's bound tool map, not from the secret. An unbound
+    name must come back as a tool_error without running any bound tool.
+    """
+    calls: list[str] = []
+    broker = DaytonaHttpToolBroker(object(), port=1)
+    broker.bind_tools({"allowed": lambda: calls.append("allowed")})
+    posted: list[bytes] = []
+
+    class RecordingClient:
+        def post(self, _path: str, *, content: bytes, **_options: object) -> SimpleNamespace:
+            posted.append(content)
+            return SimpleNamespace(status_code=200)
+
+    broker._client = RecordingClient()  # type: ignore[assignment]
+    broker._dispatch_tool_request(
+        {"id": "call-1", "lease": "lease-1", "tool_name": "missing", "args": [], "kwargs": {}}
+    )
+
+    assert calls == []
+    body = json.loads(posted[0])
+    assert body["tool_error"]["category"] == "KeyError"
+    assert "result" not in body
+
+
 def test_broker_persists_state_between_actions_and_rejects_rebinding(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
@@ -238,7 +261,7 @@ def test_broker_persists_state_between_actions_and_rejects_rebinding(
     base_url, headers = embedded_server
     broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
     broker._secret = headers["X-Broker-Secret"]
-    backend = sandbox_backend(object())
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=LocalSDKInterpreter()))
     backend.bind_async_bridge(None)
     backend.bind_host_tools({"tool": lambda value: value + 1})
     broker.bind_tools(backend._bound_tools)
@@ -443,9 +466,9 @@ def test_poll_returns_a_typed_error_when_a_tool_result_exceeds_the_envelope() ->
 
 
 def test_broker_runtime_allows_bounded_high_precision_integer_conversion() -> None:
-    from fleet_rlm.daytona.broker import _SERVER_SOURCE
+    from fleet_rlm.daytona.interpreter import _SandboxProcessBackend
 
-    assert "sys.set_int_max_str_digits(200_000)" in _SERVER_SOURCE
+    assert "sys.set_int_max_str_digits(200_000)" in __import__("inspect").getsource(_SandboxProcessBackend._execute_sdk)
 
 
 @pytest.mark.parametrize("error_type", [TypeError, RuntimeError])
@@ -662,7 +685,7 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
 
             def _run() -> None:
                 try:
-                    outcomes.append(broker.execute(source, {}, timeout_s=5))
+                    outcomes.append(_execute(broker, source, {}, timeout_s=5))
                 except Exception as exc:
                     errors.append(exc)
 
@@ -690,7 +713,7 @@ def test_execute_survives_late_result_delivery_after_wait_expiry(
     assert "category=duplicate_call" in caplog.text
 
 
-def test_broker_sse_reverse_channel_streams_stdout_in_realtime(
+def test_sdk_callback_streams_stdout_in_realtime(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
     base_url, headers = embedded_server
@@ -708,7 +731,7 @@ def test_broker_sse_reverse_channel_streams_stdout_in_realtime(
 
     with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
         broker._client = client
-        result = broker.execute(code, {}, timeout_s=5, on_stdout=on_stdout)
+        result = _execute(broker, code, {}, timeout_s=5, on_stdout=on_stdout)
 
     assert result.get("streamed_stdout") is True
     assert "line1\n" in "".join(received_chunks)
@@ -716,7 +739,7 @@ def test_broker_sse_reverse_channel_streams_stdout_in_realtime(
     assert "line1\nline2\n" in result["stdout"]
 
 
-def test_broker_sse_reverse_channel_dispatches_tool_call_promptly(
+def test_polling_dispatches_tool_call_promptly(
     embedded_server: tuple[str, dict[str, str]],
 ) -> None:
     base_url, headers = embedded_server
@@ -737,52 +760,41 @@ def test_broker_sse_reverse_channel_dispatches_tool_call_promptly(
 
     with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
         broker._client = client
-        result = broker.execute(source, {}, timeout_s=5)
+        result = _execute(broker, source, {}, timeout_s=5)
 
     assert called is True
     assert "answer is 42" in result["stdout"]
 
 
-@pytest.mark.parametrize("subscriber", ["full", "disconnected", "duplicate"])
-def test_dropped_or_repeated_sse_notifications_execute_tool_once(subscriber: str) -> None:
-    with _start_embedded_server() as (base_url, headers):
-        broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
-        broker._secret = headers["X-Broker-Secret"]
-        calls: list[int] = []
+def test_broker_has_no_execution_or_output_stream_endpoints(embedded_server):
+    base_url, headers = embedded_server
+    with httpx.Client(base_url=base_url, headers=headers) as client:
+        assert client.post("/execute", json={"code": "raise Exception()"}).status_code == 404
+        assert client.get("/events").status_code == 404
 
-        def compute(x: int) -> int:
-            calls.append(x)
-            return x * 2
 
-        broker.bind_tools({"compute": compute})
-        broker._url = base_url
-        # Inject an SSE subscriber that fails, drops, or repeats delivery. The
-        # actual embedded broker's HTTP polling path must recover the request.
-        behavior = {
-            "full": "raise queue.Full()",
-            "disconnected": "raise BrokenPipeError()",
-            "duplicate": "original(data); original(data)",
-        }[subscriber]
-        injection = (
-            "import __main__, queue\n"
-            "class Subscriber:\n"
-            "    def put_nowait(self, data):\n"
-            f"        {behavior}\n"
-            "original = __main__._emit_event\n"
-            + (
-                "def duplicate(data):\n    original(data); original(data)\n__main__._emit_event = duplicate\n"
-                if subscriber == "duplicate"
-                else (
-                    "with __main__._lock:\n"
-                    "    __main__._event_subscribers.clear()\n"
-                    "    __main__._event_subscribers.add(Subscriber())\n"
-                )
-            )
-        )
-        source = broker.setup_source(injection + "result = compute(x=21)\nprint(result)")
-        with httpx.Client(base_url=base_url, headers=headers, timeout=5) as client:
-            broker._client = client
-            result = broker.execute(source, {}, timeout_s=1)
-        assert result["error"] is None
-        assert "42" in result["stdout"]
-        assert calls == [21]
+def test_sdk_execution_preserves_host_error_category_and_recovers(embedded_server):
+    from fleet_rlm.daytona.interpreter import sandbox_backend
+
+    base_url, headers = embedded_server
+    broker = DaytonaHttpToolBroker(object(), port=int(base_url.rsplit(":", 1)[1]))
+    broker._secret = headers["X-Broker-Secret"]
+    calls = []
+
+    def failing():
+        calls.append(1)
+        raise ValueError("invalid tool input")
+
+    backend = sandbox_backend(SimpleNamespace(code_interpreter=LocalSDKInterpreter()))
+    backend.bind_host_tools({"failing": failing})
+    broker.bind_tools(backend._bound_tools)
+    broker._url = base_url
+    backend._broker = broker
+    with httpx.Client(base_url=base_url, headers=headers, timeout=2) as client:
+        broker._client = client
+        result = backend.run("failing()")
+        assert result.error_category == "ValueError"
+        assert "[call_id=" in result.error
+        assert calls == [1]
+        assert backend.run("print('recovered')").stdout == "recovered\n"
+        backend.close()

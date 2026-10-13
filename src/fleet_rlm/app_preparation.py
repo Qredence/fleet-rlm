@@ -11,6 +11,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from fleet_rlm.config.settings import Settings
+from fleet_rlm.daytona.browser import RunBrowser
 from fleet_rlm.daytona.diagnostics import environment_manifest
 from fleet_rlm.daytona.interpreter import (
     SyncBridgeDispatcher,
@@ -20,6 +21,7 @@ from fleet_rlm.daytona.leases import DaytonaAdmissionTimeoutError, DaytonaLeaseA
 from fleet_rlm.daytona.provider import remove_run_scratch
 from fleet_rlm.daytona.runtime import DaytonaRuntime, RootSessionSpec
 from fleet_rlm.daytona.specs import DaytonaSandboxSpec, ensure_volume_layout
+from fleet_rlm.observability.tracing import turn_phase_span
 from fleet_rlm.paths import SESSION_WORKSPACE_MOUNT_PATH, VolumePaths
 from fleet_rlm.rlm.budget import BudgetLimits
 from fleet_rlm.rlm.ownership import OwnedEffect
@@ -35,6 +37,7 @@ from fleet_rlm.turns.preparation import (
     RunPreparationUnavailableError,
     TurnPreparationPlan,
 )
+from fleet_rlm.web_search import TavilySearch
 from fleet_rlm.workspace.artifacts import ArtifactReader
 from fleet_rlm.workspace.attachments import AttachmentLifecycle
 from fleet_rlm.workspace.host_io import DaytonaHostIO, DaytonaRunStorage
@@ -80,6 +83,7 @@ class DaytonaRunPreparation:
     volume_gateway: DaytonaWorkspaceVolumeGateway
     artifact_reader: ArtifactReader | None = None
     task_service: SessionTaskService | None = None
+    web_search_client: TavilySearch | None = None
 
     @staticmethod
     def context_key(run: ClaimedRun) -> tuple[tuple[str, ...], tuple[tuple[str, str], ...], str | None]:
@@ -94,37 +98,42 @@ class DaytonaRunPreparation:
         key = (run.access.workspace_id, run.session_id)
         release_invocation: Callable[[], None] | None = None
         owner: InterpreterLease | None = None
+        sink: DaytonaRunStorage | None = None
         try:
             try:
                 release_invocation = await self.runtime.begin_root_invocation(*key, deadline=deadline)
             except TimeoutError:
                 raise RunPreparationTimeoutError("Turn preparation timed out") from None
 
-            async with self.workspace_gateway.open_sandbox(
-                run.access.workspace_id, purpose="session-volume-layout"
-            ) as io_sandbox:
-                await ensure_volume_layout(
-                    io_sandbox,
-                    self.volume_paths,
-                    session_id=run.session_id,
-                    run_id=run.run_id,
-                )
-
-            try:
-                owner = await self.runtime.acquire_root_session(
-                    RootSessionSpec(
-                        workspace_id=key[0],
-                        session_id=key[1],
-                        user_id=run.access.user_id,
+            # Split so the trace shows which cost a pre-warm can remove: the Volume layout runs on
+            # the Workspace I/O Sandbox, while the root session is the Session's execution Sandbox.
+            with turn_phase_span("Turn.open_volume_layout", inputs={}):
+                async with self.workspace_gateway.open_sandbox(
+                    run.access.workspace_id, purpose="session-volume-layout"
+                ) as io_sandbox:
+                    await ensure_volume_layout(
+                        io_sandbox,
+                        self.volume_paths,
+                        session_id=run.session_id,
                         run_id=run.run_id,
-                        context_fingerprint=self.context_key(run),
-                        deadline=deadline,
                     )
-                )
-            except DaytonaAdmissionTimeoutError as exc:
-                raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
-            except (DaytonaLeaseAcquisitionTimeoutError, TimeoutError) as exc:
-                raise RunPreparationTimeoutError("Turn preparation timed out") from exc
+
+            with turn_phase_span("Turn.acquire_root_session", inputs={}):
+                try:
+                    owner = await self.runtime.acquire_root_session(
+                        RootSessionSpec(
+                            workspace_id=key[0],
+                            session_id=key[1],
+                            user_id=run.access.user_id,
+                            run_id=run.run_id,
+                            context_fingerprint=self.context_key(run),
+                            deadline=deadline,
+                        )
+                    )
+                except DaytonaAdmissionTimeoutError as exc:
+                    raise RunPreparationUnavailableError("Turn environment is unavailable") from exc
+                except (DaytonaLeaseAcquisitionTimeoutError, TimeoutError) as exc:
+                    raise RunPreparationTimeoutError("Turn preparation timed out") from exc
 
             if owner is None:
                 raise RuntimeError("acquired Sandbox owner is unavailable")
@@ -158,9 +167,36 @@ class DaytonaRunPreparation:
                 allow_volume_root=True,
             )
             project_workspace = host_io.workspace_storage(str(self.volume_paths.projects_root()))
+            browser = (
+                RunBrowser(
+                    sink.sandbox,
+                    sink.scratch_root,
+                    deadline,
+                    is_authorized=lambda: not run.authority.revoked,
+                    mark_tainted=lambda: self.runtime.mark_root_tainted(*key),
+                )
+                if environment_manifest(self.sandbox_spec).agent_browser_enabled
+                else None
+            )
+
+            async def cleanup_browser() -> None:
+                try:
+                    if browser is None:
+                        return
+                    effect = OwnedEffect.start(asyncio.to_thread(browser.close))
+                    settled = await effect.settle()
+                    if settled.caller_cancelled:
+                        raise asyncio.CancelledError
+                except BaseException:
+                    self.runtime.mark_root_tainted(*key)
+                    raise
+
+            browser_cleanup = cleanup_browser if browser is not None else None
 
             async def release_preparation() -> None:
                 try:
+                    if browser_cleanup is not None:
+                        await browser_cleanup()
 
                     def cleanup_run_scratch() -> None:
                         remove_run_scratch(sink.sandbox, sink.scratch_root)
@@ -175,8 +211,11 @@ class DaytonaRunPreparation:
                     await self.runtime.restore_root_autostop(owner)
                     raise
                 finally:
-                    if release_invocation is not None:
-                        release_invocation()
+                    try:
+                        sink.close()
+                    finally:
+                        if release_invocation is not None:
+                            release_invocation()
 
             child_runtime_factory = self.runtime.build_child_factory(
                 volume_id=owner.volume_id,
@@ -216,6 +255,7 @@ class DaytonaRunPreparation:
                 dispatcher=self.dispatcher,
                 execution_output_cap=self.settings.rlm_max_execution_output_chars,
                 run_id=run.run_id,
+                mark_tainted=lambda: self.runtime.mark_root_tainted(*key),
             )
             return RunEnvironment(
                 interpreter=interpreter_factory,
@@ -236,19 +276,28 @@ class DaytonaRunPreparation:
                 mark_tainted=lambda: self.runtime.mark_root_tainted(*key),
                 async_bridge=self.dispatcher,
                 image_identity=environment_manifest(self.sandbox_spec).digest,
+                browser_cleanup=browser_cleanup,
+                host_tools=browser.as_tools() if browser is not None else (),
+                host_tool_event_views=browser.event_views() if browser is not None else {},
             )
         except BaseException:
             self.runtime.mark_root_tainted(*key)
-            if owner is not None:
+            try:
+                if owner is not None:
+                    try:
+                        await asyncio.shield(self.runtime.close_root_session(*key, deadline=deadline))
+                    except BaseException as exc:
+                        logger.warning(
+                            "Daytona root cleanup failed on error",
+                            extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
+                        )
+            finally:
                 try:
-                    await asyncio.shield(self.runtime.close_root_session(*key, deadline=deadline))
-                except BaseException as exc:
-                    logger.warning(
-                        "Daytona root cleanup failed on error",
-                        extra={"session_id": str(key[1]), "error_type": type(exc).__name__},
-                    )
-            if release_invocation is not None:
-                release_invocation()
+                    if sink is not None:
+                        sink.close()
+                finally:
+                    if release_invocation is not None:
+                        release_invocation()
             raise
 
     def plan(self) -> TurnPreparationPlan:
@@ -272,5 +321,6 @@ class DaytonaRunPreparation:
                 volume_paths=self.volume_paths,
                 artifact_reader=self.artifact_reader,
                 task_service=self.task_service,
+                web_search_client=self.web_search_client,
             ),
         )

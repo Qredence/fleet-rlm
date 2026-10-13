@@ -9,7 +9,7 @@ import threading
 from contextlib import redirect_stdout, suppress
 from io import StringIO
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -36,7 +36,12 @@ from tests.support.workspace_storage import InMemoryDaytonaWorkspaceGateway
 
 
 @pytest.mark.asyncio
-async def test_preparation_bounds_history_and_closes_in_dependency_order() -> None:
+@pytest.mark.parametrize("with_browser", [False, True])
+async def test_preparation_bounds_history_and_closes_in_dependency_order(
+    monkeypatch: pytest.MonkeyPatch, with_browser: bool
+) -> None:
+    from contextlib import contextmanager
+
     from fleet_rlm.rlm.execution import RLMExecutionSpec
     from fleet_rlm.rlm.program import RLMOptions
     from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
@@ -104,23 +109,32 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
             async def release():
                 operations.append("release-environment")
 
+            async def close_browser():
+                operations.append("close-browser")
+
             return RunEnvironment(
                 configured_invocation_factory(SimpleNamespace()),
                 sink,
                 sink,
                 release,
                 child_runtime_factory=ChildLeaseRecorder().factory,
+                browser_cleanup=close_browser if with_browser else None,
             )
 
+    seeded_checkpoint = object()
+    seen_checkpoints: list[object] = []
+
     class CapabilityFactory:
-        async def prepare(self, turn, environment, attachments, *, deadline):
+        async def prepare(self, turn, environment, attachments, *, deadline, task_checkpoint=None):
             del turn, environment, attachments
             assert deadline > 0
+            seen_checkpoints.append(task_checkpoint)
             return Capabilities()
 
     class TaskService:
         async def seed(self, *_args, **_kwargs):
             operations.append("seed-task")
+            return seeded_checkpoint
 
     async def not_cancelled():
         return False
@@ -134,6 +148,16 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
         not_cancelled,
         _RunClaimToken(uuid4()),
     )
+    phases: list[str] = []
+
+    @contextmanager
+    def recording_span(name, *, inputs):
+        del inputs
+        phases.append(name)
+        yield SimpleNamespace(set_outputs=lambda _outputs: None)
+
+    monkeypatch.setattr("fleet_rlm.turns.preparation.turn_phase_span", recording_span)
+
     prepared = await TestingRunPreparer(
         models=placeholder_bundle(),
         options=RLMOptions(),
@@ -149,9 +173,56 @@ async def test_preparation_bounds_history_and_closes_in_dependency_order() -> No
     assert manifest.message_count == 1
     assert [(item.ordinal, item.role, item.preview) for item in manifest.recent] == [(1, "user", "prior")]
     assert prepared.result_snapshot_sink is None
+    await prepared.aclose_before_commit()
+    assert operations == ["seed-task", "acquire-environment"] + (["close-browser"] if with_browser else [])
     await prepared.aclose()
     await prepared.aclose()
-    assert operations == ["seed-task", "acquire-environment", "close-capabilities", "release-environment"]
+    assert operations == (
+        ["seed-task", "acquire-environment"]
+        + (["close-browser"] if with_browser else [])
+        + ["close-capabilities", "release-environment"]
+    )
+    # The capability preparer reuses the seeded checkpoint instead of reading it again.
+    assert seen_checkpoints == [seeded_checkpoint]
+    # Seed and cancellation probes are the un-spanned part of Turn.prepare (Finding 5).
+    assert "Turn.seed_task_state" in phases
+    assert "Turn.check_cancellation" in phases
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_while_seeding_task_state_is_unavailable_not_an_escape() -> None:
+    """A Daytona failure opening the Volume must become a Turn failure the stream can project."""
+    from fleet_rlm.daytona.errors import ProviderRequestError
+    from fleet_rlm.rlm.program import RLMOptions
+    from fleet_rlm.sessions.models import HistoryMessage, SessionHistory, TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import ClaimedRun, _RunClaimToken
+    from fleet_rlm.turns.preparation import RunPreparationUnavailableError
+
+    class FailingTaskService:
+        async def seed(self, *_args, **_kwargs):
+            raise ProviderRequestError("Daytona provider error", cause_type="TimeoutError")
+
+    async def not_cancelled():
+        return False
+
+    turn = ClaimedRun(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("next"),
+        SessionHistory((HistoryMessage("user", "prior"),)),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    with pytest.raises(RunPreparationUnavailableError, match="Session task state is unavailable"):
+        await TestingRunPreparer(
+            models=placeholder_bundle(),
+            options=RLMOptions(),
+            attachments=None,
+            acquire_environment=None,
+            capabilities=None,
+            task_service=FailingTaskService(),
+        ).prepare(turn, deadline=asyncio.get_running_loop().time() + 3600)
 
 
 @pytest.mark.asyncio
@@ -1156,6 +1227,12 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     settings = Settings(run_environment="daytona", volume_mount_path="/workspace")
 
     class SandboxProcess:
+        async def exec(self, command: str, **_kwargs):
+            if command.startswith("mkdir -p --"):
+                return SimpleNamespace(exit_code=0, result="")
+            assert "/opt/fleet/browser_session.py close" in command
+            return SimpleNamespace(exit_code=0, result="fleet-browser-cleanup-ok")
+
         async def code_run(self, code: str, **_kwargs):
             output = StringIO()
             with redirect_stdout(output), suppress(SystemExit):
@@ -1316,7 +1393,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "write_project_text",
         "write_workspace_text",
     }
-    expected_tools.update({"load_skill", "read_skill_resource"})
+    expected_tools.update({"load_skill", "read_skill_resource", "open_browser"})
     assert {
         str(getattr(tool, "name", getattr(tool, "__name__", ""))) for tool in prepared.execution.capabilities.spec.tools
     } == expected_tools
@@ -1694,3 +1771,242 @@ async def test_runtime_owns_late_sandbox_lookup_until_release(mode: str) -> None
     assert await resources.runtime.aclose()
     assert lookups == 1
     assert resources.root_provider.released == 1
+
+
+@pytest.mark.asyncio
+async def test_acquire_environment_times_volume_layout_and_root_session_separately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Pre-warm decisions need the split: a warm Volume layout and a cold root Sandbox are different costs."""
+    from contextlib import asynccontextmanager, contextmanager
+
+    from fleet_rlm import app_preparation
+    from fleet_rlm.sessions.models import TurnAccess, TurnInput
+    from fleet_rlm.sessions.run_state import ClaimedRun, _RunClaimToken
+
+    phases: list[str] = []
+
+    @contextmanager
+    def recording_span(name, *, inputs):
+        del inputs
+        phases.append(name)
+        yield SimpleNamespace(set_outputs=lambda _outputs: None)
+
+    monkeypatch.setattr(app_preparation, "turn_phase_span", recording_span)
+    monkeypatch.setattr(app_preparation, "ensure_volume_layout", AsyncMock())
+
+    class WorkspaceGateway:
+        @asynccontextmanager
+        async def open_sandbox(self, *_args, **_kwargs):
+            yield SimpleNamespace()
+
+    class Runtime:
+        async def begin_root_invocation(self, *_args, deadline):
+            del deadline
+            return lambda: None
+
+        async def acquire_root_session(self, _spec):
+            raise RuntimeError("root session unavailable in this test")
+
+        def mark_root_tainted(self, *_key):
+            return None
+
+    async def not_cancelled():
+        return False
+
+    preparation = app_preparation.DaytonaRunPreparation(
+        runtime=Runtime(),
+        attachment_lifecycle=None,
+        skill_catalog=None,
+        settings=SimpleNamespace(max_upload_bytes=1),
+        models=None,
+        volume_paths=None,
+        sandbox_spec=None,
+        dispatcher=None,
+        workspace_gateway=WorkspaceGateway(),
+        volume_gateway=None,
+    )
+    turn = ClaimedRun(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("next"),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    with pytest.raises(RuntimeError, match="root session unavailable"):
+        await preparation.acquire_environment(turn, deadline=asyncio.get_running_loop().time() + 60)
+
+    assert phases == ["Turn.open_volume_layout", "Turn.acquire_root_session"]
+
+
+@pytest.fixture
+def environment_case(monkeypatch: pytest.MonkeyPatch):
+    """Real Run storage and release wiring over credential-free provider doubles."""
+    from contextlib import asynccontextmanager
+
+    from fleet_rlm import app_preparation
+    from fleet_rlm.paths import VolumePaths
+    from fleet_rlm.workspace.host_io import DaytonaRunStorage
+
+    events = []
+    sinks = []
+    sandbox = SimpleNamespace(
+        id="root",
+        fs=SimpleNamespace(delete_file=AsyncMock(side_effect=lambda *_a, **_k: events.append("scratch-done"))),
+        process=SimpleNamespace(),
+        code_interpreter=SimpleNamespace(),
+        close=AsyncMock(),
+    )
+
+    class Gateway:
+        @asynccontextmanager
+        async def open_sandbox(self, *_args, **_kwargs):
+            yield sandbox
+
+    class TrackingStorage(DaytonaRunStorage):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            sinks.append(self)
+
+        def close(self):
+            if not self._closed:
+                events.append("storage-close")
+            super().close()
+
+    monkeypatch.setattr(app_preparation, "DaytonaRunStorage", TrackingStorage)
+    monkeypatch.setattr(app_preparation, "ensure_volume_layout", AsyncMock())
+    owner = SimpleNamespace(sandbox=sandbox, sandbox_id="root", volume_id="volume")
+    runtime = SimpleNamespace(
+        begin_root_invocation=AsyncMock(return_value=lambda: events.append("gate-release")),
+        acquire_root_session=AsyncMock(return_value=owner),
+        track_sandbox=MagicMock(),
+        suspend_root_autostop=AsyncMock(),
+        restore_root_autostop=AsyncMock(side_effect=lambda *_a, **_k: events.append("autostop-restore")),
+        mark_root_tainted=MagicMock(side_effect=lambda *_a: events.append("tainted")),
+        root_is_tainted=lambda *_args: False,
+        close_root_session=AsyncMock(side_effect=lambda *_a, **_k: events.append("root-retired")),
+        build_child_factory=MagicMock(return_value=None),
+    )
+    dispatcher = SyncBridgeDispatcher()
+    dispatcher.sync_client_factory = MagicMock(side_effect=AssertionError("application created worker SDK client"))
+    preparation = DaytonaRunPreparation(
+        runtime=runtime,
+        attachment_lifecycle=None,
+        skill_catalog=None,
+        settings=Settings(run_environment="daytona"),
+        models=None,
+        volume_paths=VolumePaths.from_mount(),
+        sandbox_spec=DaytonaSandboxSpec("fleet-rlm-python313-v12"),
+        dispatcher=dispatcher,
+        workspace_gateway=Gateway(),
+        volume_gateway=None,
+    )
+
+    async def not_cancelled():
+        return False
+
+    run = ClaimedRun(
+        uuid4(),
+        uuid4(),
+        TurnAccess(uuid4(), uuid4()),
+        TurnInput("next"),
+        SessionHistory(()),
+        not_cancelled,
+        _RunClaimToken(uuid4()),
+    )
+    return SimpleNamespace(
+        preparation=preparation, run=run, runtime=runtime, sandbox=sandbox, sinks=sinks, events=events
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_environment_release_closes_storage_after_cleanup_and_before_gate_release(environment_case):
+    case = environment_case
+    environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    await environment.release()
+    assert case.events == ["scratch-done", "autostop-restore", "storage-close", "gate-release"]
+    case.preparation.dispatcher.sync_client_factory.assert_not_called()
+    case.sandbox.close.assert_not_called()
+    case.sinks[0].close()
+    assert case.events.count("storage-close") == 1
+    with pytest.raises(RuntimeError, match="Run storage is closed"):
+        await environment.attachment_sink.read(environment.context_mount_path + "/late", max_bytes=10)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["scratch", "browser"])
+async def test_failed_run_environment_cleanup_closes_storage_and_taints_root(
+    monkeypatch: pytest.MonkeyPatch, environment_case, failure: str
+):
+    from fleet_rlm import app_preparation
+
+    case = environment_case
+    if failure == "browser":
+        browser = SimpleNamespace(
+            close=MagicMock(side_effect=RuntimeError("browser unresolved")),
+            as_tools=lambda: (),
+            event_views=lambda: {},
+        )
+        monkeypatch.setattr(app_preparation, "RunBrowser", lambda *_a, **_k: browser)
+    else:
+        case.sandbox.fs.delete_file.side_effect = RuntimeError("scratch unresolved")
+    environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    with pytest.raises(RuntimeError, match=f"{failure} unresolved"):
+        await environment.release()
+    case.runtime.mark_root_tainted.assert_called()
+    assert case.events[-2:] == ["storage-close", "gate-release"]
+    assert case.sinks[0]._closed
+
+
+@pytest.mark.asyncio
+async def test_cancelled_run_environment_release_waits_for_scratch_before_closing_storage(
+    monkeypatch: pytest.MonkeyPatch, environment_case
+):
+    from fleet_rlm import app_preparation
+
+    case = environment_case
+    entered, finish = threading.Event(), threading.Event()
+
+    def cleanup(_sandbox, _path):
+        entered.set()
+        if not finish.wait(5):
+            raise TimeoutError("test did not finish scratch cleanup")
+        case.events.append("scratch-done")
+
+    monkeypatch.setattr(app_preparation, "remove_run_scratch", cleanup)
+    environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    task = asyncio.create_task(environment.release())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert not case.sinks[0]._closed
+        assert "gate-release" not in case.events
+    finally:
+        finish.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert case.events.index("scratch-done") < case.events.index("storage-close") < case.events.index("gate-release")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [RuntimeError("preparation failed"), asyncio.CancelledError()])
+async def test_failed_environment_construction_retires_root_and_closes_created_storage(environment_case, failure):
+    case = environment_case
+    case.runtime.build_child_factory.side_effect = failure
+    with pytest.raises(type(failure)):
+        await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    assert case.events == ["tainted", "root-retired", "storage-close", "gate-release"]
+    assert case.sinks[0]._closed
+    case.preparation.dispatcher.sync_client_factory.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_interpreter_transport_failure_fence_is_bound_to_the_acquired_root(environment_case):
+    case = environment_case
+    environment = await case.preparation.acquire_environment(case.run, deadline=asyncio.get_running_loop().time() + 60)
+    environment.interpreter.mark_tainted()
+    case.runtime.mark_root_tainted.assert_called_once_with(case.run.access.workspace_id, case.run.session_id)
+    await environment.release()

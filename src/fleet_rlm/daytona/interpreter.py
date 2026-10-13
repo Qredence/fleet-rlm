@@ -1,4 +1,4 @@
-"""DSPy code interpreter backed by a Turn-scoped Daytona broker."""
+"""DSPy code interpreter using SDK contexts and a Turn-scoped host-tool broker."""
 
 from __future__ import annotations
 
@@ -71,7 +71,68 @@ DAYTONA_EXECUTION_INSTRUCTIONS = (
     "Host Tools are callable Python functions. Submit the answer with typed keyword `SUBMIT`."
 )
 _MAX_CAPTURED_OUTPUT_CHARS = 64 * 1024
+_OUTPUT_TRUNCATION_NOTICE = "\n...[sandbox output truncated]\n"
 _UNSET = object()
+
+# Executed in the Sandbox, never in Fleet. Limit writes before the SDK receives
+# and accumulates them. The action's globals persist; its stream counters do not.
+_SDK_CAPTURE_SOURCE = """
+def _fleet_capture_action(code, namespace, stream_limit, notice, final_limit, marker):
+    import base64
+    import contextlib
+    import json
+    import sys
+
+    class BoundedStream:
+        def __init__(self, stream):
+            self.stream = stream
+            self.remaining = stream_limit
+            self.truncated = False
+
+        def write(self, value):
+            if not isinstance(value, str):
+                raise TypeError('stream output must be text')
+            retained = value[:self.remaining]
+            if retained:
+                self.stream.write(retained)
+                self.remaining -= len(retained)
+            if len(value) > len(retained) and not self.truncated:
+                self.truncated = True
+                self.stream.write(notice)
+            return len(value)
+
+        def flush(self):
+            self.stream.flush()
+
+        def writelines(self, values):
+            for value in values:
+                self.write(value)
+
+        def __getattr__(self, name):
+            return getattr(self.stream, name)
+
+    stdout, stderr = sys.stdout, sys.stderr
+    try:
+        with contextlib.redirect_stdout(BoundedStream(stdout)), contextlib.redirect_stderr(BoundedStream(stderr)):
+            exec(compile(code, '<fleet-rlm>', 'exec'), namespace, namespace)
+    except BaseException as exc:
+        value = getattr(exc, 'value', None)
+        if type(exc).__name__ == 'FleetFinalOutputError' and isinstance(value, dict):
+            compact = json.dumps(value, ensure_ascii=False, allow_nan=False, separators=(',', ':'), sort_keys=True)
+            if len(compact) > final_limit:
+                raise ValueError('SUBMIT output exceeds the final output limit') from None
+            payload = base64.b64encode(json.dumps(value, ensure_ascii=False, allow_nan=False).encode('utf-8'))
+            stdout.write(marker + payload.decode('ascii') + marker + '\\n')
+            stdout.flush()
+        raise
+"""
+
+
+def _bounded_sdk_output(value: str) -> str:
+    """Retain the producer's truncation notice, including for non-streaming SDK doubles."""
+    if len(value) > _MAX_CAPTURED_OUTPUT_CHARS and value[_MAX_CAPTURED_OUTPUT_CHARS:] != _OUTPUT_TRUNCATION_NOTICE:
+        return value[:_MAX_CAPTURED_OUTPUT_CHARS] + _OUTPUT_TRUNCATION_NOTICE
+    return value
 
 
 OutputCallback = Callable[[str], None]
@@ -499,6 +560,7 @@ class _SandboxProcessBackend:
         timeout_s: int | None = None,
         broker_port: int = DEFAULT_BROKER_PORT,
         deadline_monotonic: float | None = None,
+        mark_tainted: Callable[[], None] | None = None,
     ) -> None:
         self._sandbox = sandbox
         if timeout_s is not None and int(timeout_s) <= 0:
@@ -527,6 +589,9 @@ class _SandboxProcessBackend:
         self._context_binding: tuple[str, str] | None = None
         self._context_loaded = False
         self._setup_installed = False
+        self._sdk_context: Any | None = None
+        self._transport_failure: DaytonaAdapterError | None = None
+        self._mark_tainted = mark_tainted
         self._context_accesses: list[str] = []
         self._closed = False
         self._broker: DaytonaHttpToolBroker | None = None
@@ -652,6 +717,8 @@ class _SandboxProcessBackend:
         *,
         on_stdout: OutputCallback | None = None,
     ) -> BackendExecutionResult:
+        if self._transport_failure is not None:
+            raise self._transport_failure
         if self._closed:
             raise DaytonaAdapterError(message="backend already closed", cause_type="InterpreterLifecycleError")
 
@@ -679,7 +746,7 @@ class _SandboxProcessBackend:
         if loader_source:
             code = f"{loader_source}\n\n{code}"
         try:
-            result = broker.execute(code, variables or {}, timeout_s=self._action_timeout(), on_stdout=on_stdout)
+            result = self._execute_sdk(code, variables or {}, timeout=self._action_timeout(), on_stdout=on_stdout)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -689,14 +756,7 @@ class _SandboxProcessBackend:
         stdout = str(result.get("stdout") or "")
         if on_stdout is not None and stdout and not result.get("streamed_stdout"):
             on_stdout(stdout)
-        failure = result.get("tool_error")
         error = str(result.get("error") or "") or None
-        if isinstance(failure, dict):
-            error = (
-                f"{str(failure.get('category', 'tool_error'))[:80]} "
-                f"[call_id={str(failure.get('call_id', ''))[:128]}]: "
-                f"{str(failure.get('message', 'tool call failed'))[:500]}"
-            )
         if error is None and setup_manifest_ids:
             # A loader return means every bound entry passed verification.
             self._context_loaded = True
@@ -709,6 +769,102 @@ class _SandboxProcessBackend:
             error_category=str(result.get("error_category") or "") or None,
             context_accesses=self._drain_context_accesses(),
         )
+
+    def _execute_sdk(
+        self,
+        code: str,
+        variables: Mapping[str, Any],
+        *,
+        timeout: float | None,
+        on_stdout: OutputCallback | None = None,
+    ) -> dict[str, Any]:
+        service = self._sandbox.code_interpreter
+        if self._sdk_context is None:
+            self._sdk_context = service.create_context()
+        # JSON-only bindings are data, never interpolated as Python expressions.
+        bindings = json.dumps(dict(variables), ensure_ascii=True, allow_nan=False)
+        final_limit = (
+            self._max_final_output_chars if self._max_final_output_chars is not None else _MAX_CAPTURED_OUTPUT_CHARS
+        )
+        source = (
+            "import json as _fleet_binding_json, os as _fleet_os, sys as _fleet_sys\n"
+            "if _fleet_os.path.isdir('/workspace'): _fleet_os.chdir('/workspace')\n"
+            "if hasattr(_fleet_sys, 'set_int_max_str_digits'): _fleet_sys.set_int_max_str_digits(200_000)\n"
+            f"globals().update(_fleet_binding_json.loads({bindings!r}))\n"
+            f"_fleet_tool_timeout_s = {timeout!r}\n"
+            f"{_SDK_CAPTURE_SOURCE}\n"
+            f"_fleet_capture_action({code!r}, globals(), {_MAX_CAPTURED_OUTPUT_CHARS!r}, "
+            f"{_OUTPUT_TRUNCATION_NOTICE!r}, {final_limit!r}, {FINAL_OUTPUT_MARKER!r})"
+        )
+        # UTF-8 needs at most four bytes per JSON character; default JSON spacing
+        # adds at most one byte per compact character. Base64 expands by 4/3.
+        final_frame_limit = 4 * ((5 * final_limit + 2) // 3) + 2 * len(FINAL_OUTPUT_MARKER) + 1
+        stream_limit = _MAX_CAPTURED_OUTPUT_CHARS + len(_OUTPUT_TRUNCATION_NOTICE)
+        transport_limits = {"stdout": stream_limit + final_frame_limit, "stderr": stream_limit}
+        received = {"stdout": 0, "stderr": 0}
+
+        def refuse_transport() -> None:
+            if self._transport_failure is None:
+                self._transport_failure = DaytonaAdapterError(
+                    message="Sandbox output exceeded its transport limit",
+                    cause_type="InterpreterOutputTransportError",
+                )
+                if self._mark_tainted is not None:
+                    self._mark_tainted()
+            raise self._transport_failure
+
+        def forward(stream: str, message: Any) -> None:
+            value = str(message.output)
+            received[stream] += len(value)
+            if received[stream] > transport_limits[stream]:
+                refuse_transport()
+            if on_stdout is not None and value:
+                on_stdout(value)
+
+        try:
+            result = self._ensure_broker().service_execution(
+                lambda: service.run_code(
+                    source,
+                    context=self._sdk_context,
+                    on_stdout=lambda message: forward("stdout", message),
+                    on_stderr=lambda message: forward("stderr", message),
+                    timeout=math.ceil(timeout) if timeout is not None else 0,
+                ),
+                timeout_s=timeout,
+            )
+        except BaseException:
+            if self._transport_failure is not None:
+                raise self._transport_failure from None
+            raise
+        # Some SDK bridges serialize callback exceptions as execution errors or
+        # omit callbacks. Neither case can turn a transport refusal into success.
+        if self._transport_failure is not None:
+            raise self._transport_failure
+        stdout = str(result.stdout or "")
+        stderr = str(result.stderr or "")
+        if len(stdout) > transport_limits["stdout"] or len(stderr) > transport_limits["stderr"]:
+            refuse_transport()
+        error = result.error
+        submitted = error is not None and error.name == "FleetFinalOutputError"
+        final = extract_final_payload(stdout) if submitted else None
+        error_message = None
+        error_category = str(error.name) if error is not None else None
+        if error_category == "_FleetToolCallError":
+            category = str(error.value).partition(" [call_id=")[0]
+            if category.isidentifier() and len(category) <= 80:
+                error_category = category
+        if error is not None and not (submitted and final is not None):
+            error_message = str(error.value)
+        if final is not None:
+            stdout = stdout.removesuffix(final_output_frame(final) + "\n")
+        return {
+            "stdout": _bounded_sdk_output(stdout),
+            "stderr": _bounded_sdk_output(stderr),
+            "final": final,
+            "error": error_message,
+            "error_category": error_category,
+            "streamed_stdout": any(received.values()),
+        }
 
     def _ensure_broker(self) -> DaytonaHttpToolBroker:
         if self._broker is None:
@@ -740,7 +896,11 @@ class _SandboxProcessBackend:
         only the model's code, and their error positions refer to it.
         """
         lines = [
-            remote_submit_setup_code(self._output_fields, max_output_chars=self._max_final_output_chars),
+            remote_submit_setup_code(
+                self._output_fields,
+                max_output_chars=self._max_final_output_chars,
+                emit_frame=False,
+            ),
             "if 'context' not in globals(): context = []",
         ]
         if self._run_scratch_path is not None:
@@ -753,7 +913,7 @@ class _SandboxProcessBackend:
                 "_fleet_scratch_os.environ['FLEET_RUN_SCRATCH'] = FLEET_RUN_SCRATCH"
             )
         try:
-            result = broker.execute(broker.setup_source("\n\n".join(lines)), {}, timeout_s=timeout)
+            result = self._execute_sdk(broker.setup_source("\n\n".join(lines)), {}, timeout=timeout)
         except Exception as exc:
             if isinstance(exc, DaytonaAdapterError):
                 raise
@@ -773,9 +933,25 @@ class _SandboxProcessBackend:
 
     def close(self) -> None:
         self._closed = True
+        failure: Exception | None = None
+        if self._sdk_context is not None:
+            try:
+                self._sandbox.code_interpreter.delete_context(self._sdk_context)
+            except Exception as exc:
+                failure = exc
+            else:
+                self._sdk_context = None
         if self._broker is not None:
-            self._broker.stop(strict=True)
-            self._broker = None
+            try:
+                self._broker.stop(strict=True)
+            except Exception as exc:
+                failure = failure or exc
+            else:
+                self._broker = None
+        if failure is not None:
+            raise failure
+        if isinstance(self._sandbox, _SDKWorkerSandbox):
+            self._sandbox.close()
 
 
 class DaytonaCodeInterpreter:
@@ -1431,6 +1607,7 @@ class SandboxInvocationFactory:
     run_id: Any | None = None
     call_index: int | None = None
     timeout_s: int | None = None
+    mark_tainted: Callable[[], None] | None = None
     fleet_host_tool_dispatch_available = True
     broker_acknowledges_tools = True
     supports_sandbox_serializable_inputs = True
@@ -1443,6 +1620,7 @@ class SandboxInvocationFactory:
             dispatcher=self.dispatcher,
             timeout_s=self.timeout_s,
             deadline_monotonic=invocation.pop("deadline_monotonic", None),
+            mark_tainted=self.mark_tainted,
         )
         interpreter = DaytonaCodeInterpreter(
             backend=backend,
@@ -1466,8 +1644,11 @@ def sandbox_interpreter_factory(
     run_id: Any | None = None,
     call_index: int | None = None,
     timeout_s: int | None = None,
+    mark_tainted: Callable[[], None] | None = None,
 ) -> SandboxInvocationFactory:
-    return SandboxInvocationFactory(sandbox, loop, dispatcher, execution_output_cap, run_id, call_index, timeout_s)
+    return SandboxInvocationFactory(
+        sandbox, loop, dispatcher, execution_output_cap, run_id, call_index, timeout_s, mark_tainted
+    )
 
 
 def sandbox_backend(
@@ -1478,12 +1659,21 @@ def sandbox_backend(
     timeout_s: int | None = None,
     broker_port: int = DEFAULT_BROKER_PORT,
     deadline_monotonic: float | None = None,
+    mark_tainted: Callable[[], None] | None = None,
 ) -> InterpreterBackend:
     """Build a stateful backend owning one broker on a positive, configured port."""
-    if loop is not None:
+    if isinstance(sandbox, _SDKWorkerSandbox):
+        pass
+    elif dispatcher is not None and dispatcher.sync_client_factory is not None:
+        sandbox = _SDKWorkerSandbox(str(sandbox.id), dispatcher.sync_client_factory)
+    elif loop is not None:
         sandbox = sync_sandbox(sandbox, loop, dispatcher)
     return _SandboxProcessBackend(
-        sandbox, timeout_s=timeout_s, broker_port=broker_port, deadline_monotonic=deadline_monotonic
+        sandbox,
+        timeout_s=timeout_s,
+        broker_port=broker_port,
+        deadline_monotonic=deadline_monotonic,
+        mark_tainted=mark_tainted,
     )
 
 
@@ -1503,6 +1693,7 @@ class SyncBridgeDispatcher:
 
     def __init__(self) -> None:
         self._service_loop: asyncio.AbstractEventLoop | None = None
+        self.sync_client_factory: Callable[[], Any] | None = None
 
     def set_loop(self, loop: asyncio.AbstractEventLoop | None) -> None:
         """Register the loop servicing sync-view SDK coroutines for this composition."""
@@ -1656,88 +1847,62 @@ def _sync_await(
     return owner.run(awaitable)
 
 
-class _SyncCodeInterpreter:
+class _AsyncOperationBridge:
+    """Only the operations still needed by asynchronous application I/O."""
+
     def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
+        self, service: Any, owner: _SyncBridgeLoop, loop: asyncio.AbstractEventLoop, operations: set[str]
     ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
+        self._service, self._owner, self._loop, self._operations = service, owner, loop, operations
 
-    def create_context(self, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_context(**kwargs), self._owner, self._guard_loop)
+    def __getattr__(self, name: str) -> Any:
+        if name not in self._operations:
+            raise AttributeError(name)
+        operation = getattr(self._service, name)
 
-    def run_code(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.run_code(code, **kwargs), self._owner, self._guard_loop)
+        def invoke(*args: Any, **kwargs: Any) -> Any:
+            if name == "create_folder" and len(args) == 1 and "mode" not in kwargs:
+                kwargs["mode"] = "755"
+            return _sync_await(operation(*args, **kwargs), self._owner, self._loop)
 
-    def delete_context(self, context: Any, **kwargs: Any) -> None:
-        _sync_await(self._service.delete_context(context, **kwargs), self._owner, self._guard_loop)
-
-
-class _SyncProcess:
-    def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
-
-    def code_run(self, code: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.code_run(code, **kwargs), self._owner, self._guard_loop)
-
-    def exec(self, command: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.exec(command, **kwargs), self._owner, self._guard_loop)
-
-    def create_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_session(session_id, **kwargs), self._owner, self._guard_loop)
-
-    def execute_session_command(self, session_id: str, request: Any, **kwargs: Any) -> Any:
-        return _sync_await(
-            self._service.execute_session_command(session_id, request, **kwargs), self._owner, self._guard_loop
-        )
-
-    def delete_session(self, session_id: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_session(session_id, **kwargs), self._owner, self._guard_loop)
+        return invoke
 
 
-class _SyncFileSystem:
-    def __init__(
-        self,
-        service: Any,
-        owner: _SyncBridgeLoop,
-        guard_loop: asyncio.AbstractEventLoop | None = None,
-    ) -> None:
-        self._service = service
-        self._owner = owner
-        self._guard_loop = guard_loop
+class _SDKWorkerSandbox:
+    """Lazy official sync SDK handle, owned and closed by its worker scope."""
 
-    def upload_file(self, content: bytes, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.upload_file(content, path, **kwargs), self._owner, self._guard_loop)
+    def __init__(self, sandbox_id: str, factory: Callable[[], Any]) -> None:
+        self.id = sandbox_id
+        self._factory = factory
+        self._client: Any | None = None
+        self._sandbox: Any | None = None
+        self._closed = False
 
-    def download_file(self, path: str, **kwargs: Any) -> bytes:
-        return _sync_await(self._service.download_file(path, **kwargs), self._owner, self._guard_loop)
+    def __getattr__(self, name: str) -> Any:
+        if name not in {"fs", "process", "code_interpreter", "get_preview_link"}:
+            raise AttributeError(name)
+        if self._closed:
+            raise DaytonaAdapterError(
+                message="synchronous Daytona scope is closed", cause_type="InterpreterBridgeError"
+            )
+        if self._client is None:
+            self._client = self._factory()
+        if self._sandbox is None:
+            self._sandbox = self._client.get(self.id)
+        return getattr(self._sandbox, name)
 
-    def delete_file(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.delete_file(path, **kwargs), self._owner, self._guard_loop)
+    def close(self) -> None:
+        from fleet_rlm.daytona.provider import close_sync_daytona_client
 
-    def list_files(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.list_files(path, **kwargs), self._owner, self._guard_loop)
-
-    def get_file_info(self, path: str, **kwargs: Any) -> Any:
-        return _sync_await(self._service.get_file_info(path, **kwargs), self._owner, self._guard_loop)
-
-    def create_folder(self, path: str, mode: str = "755", **kwargs: Any) -> Any:
-        return _sync_await(self._service.create_folder(path, mode, **kwargs), self._owner, self._guard_loop)
+        self._closed = True
+        if self._client is not None:
+            close_sync_daytona_client(self._client)
+            self._client = None
+            self._sandbox = None
 
 
 class _DSPySyncSandboxView:
-    """Explicit synchronous Daytona view used by synchronous execution contexts."""
+    """Application I/O view posting asynchronous SDK operations onto its owning loop."""
 
     def __init__(
         self,
@@ -1746,9 +1911,21 @@ class _DSPySyncSandboxView:
         dispatcher: SyncBridgeDispatcher | None = None,
     ) -> None:
         owner = _SyncBridgeLoop(caller_loop=loop, dispatcher=dispatcher)
-        self.code_interpreter = _SyncCodeInterpreter(sandbox.code_interpreter, owner, loop)
-        self.process = _SyncProcess(sandbox.process, owner, loop)
-        self.fs = _SyncFileSystem(sandbox.fs, owner, loop)
+        self.code_interpreter = _AsyncOperationBridge(
+            sandbox.code_interpreter, owner, loop, {"create_context", "run_code", "delete_context"}
+        )
+        self.process = _AsyncOperationBridge(
+            sandbox.process,
+            owner,
+            loop,
+            {"code_run", "exec", "create_session", "execute_session_command", "delete_session"},
+        )
+        self.fs = _AsyncOperationBridge(
+            sandbox.fs,
+            owner,
+            loop,
+            {"upload_file", "download_file", "delete_file", "list_files", "get_file_info", "create_folder"},
+        )
         self._sandbox = sandbox
         self._loop = loop
         self._owner = owner
@@ -1772,7 +1949,12 @@ def sync_sandbox(
     loop: asyncio.AbstractEventLoop,
     dispatcher: SyncBridgeDispatcher | None = None,
 ) -> Any:
-    """Return a synchronous sandbox view."""
+    """Bridge application I/O without constructing a synchronous SDK client."""
+    if isinstance(sandbox, _SDKWorkerSandbox):
+        raise DaytonaAdapterError(
+            message="worker SDK scopes cannot be used for application I/O",
+            cause_type="InterpreterConfigurationError",
+        )
     if isinstance(sandbox, _DSPySyncSandboxView):
         return sandbox
     return _DSPySyncSandboxView(sandbox, loop, dispatcher)
@@ -1780,7 +1962,7 @@ def sync_sandbox(
 
 def tombstone_sync_sandbox(sandbox: Any) -> None:
     """Tombstone a sync sandbox view so late calls fail fast."""
-    if isinstance(sandbox, _DSPySyncSandboxView):
+    if isinstance(sandbox, (_DSPySyncSandboxView, _SDKWorkerSandbox)):
         sandbox.close()
 
 
@@ -1878,7 +2060,16 @@ def extract_final_payload(stdout: str, *, marker: str = FINAL_OUTPUT_MARKER) -> 
     return None
 
 
-def _generic_submit_source() -> str:
+def _submit_frame_source(*, emit_frame: bool) -> str:
+    if not emit_frame:
+        return ""
+    return f"""    payload = _base64.b64encode(
+        _json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    ).decode("ascii")
+    print(f"{FINAL_OUTPUT_MARKER}{{payload}}{FINAL_OUTPUT_MARKER}", flush=True)"""
+
+
+def _generic_submit_source(*, emit_frame: bool) -> str:
     return f"""
 import base64 as _base64
 import json as _json
@@ -1886,15 +2077,13 @@ import json as _json
 def SUBMIT(**kwargs):
     _fleet_validate_json(kwargs)
     _fleet_check_output_size(kwargs)
-    payload = _base64.b64encode(
-        _json.dumps(kwargs, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    ).decode("ascii")
-    print(f"{FINAL_OUTPUT_MARKER}{{payload}}{FINAL_OUTPUT_MARKER}", flush=True)
+    result = kwargs
+{_submit_frame_source(emit_frame=emit_frame)}
     raise FleetFinalOutputError(kwargs)
 """.strip()
 
 
-def _typed_submit_source(output_fields: list[dict[str, Any]]) -> str:
+def _typed_submit_source(output_fields: list[dict[str, Any]], *, emit_frame: bool) -> str:
     """Generate source code for a typed SUBMIT function based on configured output fields."""
     signature_parts: list[str] = []
     validation_parts: list[str] = []
@@ -1958,10 +2147,7 @@ def SUBMIT({signature}):
     {body}
     _fleet_validate_json(result)
     _fleet_check_output_size(result)
-    payload = _base64.b64encode(
-        _json.dumps(result, ensure_ascii=False, allow_nan=False).encode("utf-8")
-    ).decode("ascii")
-    print(f"{FINAL_OUTPUT_MARKER}{{payload}}{FINAL_OUTPUT_MARKER}", flush=True)
+{_submit_frame_source(emit_frame=emit_frame)}
     raise FleetFinalOutputError(result)
 """.strip()
 
@@ -2004,15 +2190,25 @@ def _fleet_check_output_size(value):
 
 
 def build_submit_setup_code(
-    output_fields: list[dict[str, Any]] | None = None, *, max_output_chars: int | None = None
+    output_fields: list[dict[str, Any]] | None = None,
+    *,
+    max_output_chars: int | None = None,
+    emit_frame: bool = True,
 ) -> str:
     """Generate the Python source code defining the SUBMIT function."""
-    body = _typed_submit_source(output_fields) if output_fields else _generic_submit_source()
+    body = (
+        _typed_submit_source(output_fields, emit_frame=emit_frame)
+        if output_fields
+        else _generic_submit_source(emit_frame=emit_frame)
+    )
     return f"{_strict_submit_helpers_source(max_output_chars)}\n\n{body}"
 
 
 def remote_submit_setup_code(
-    output_fields: list[dict[str, Any]] | None = None, *, max_output_chars: int | None = None
+    output_fields: list[dict[str, Any]] | None = None,
+    *,
+    max_output_chars: int | None = None,
+    emit_frame: bool = True,
 ) -> str:
     """Generate self-contained setup source for submitting final tool output.
 
@@ -2033,5 +2229,5 @@ class FleetFinalOutputError(Exception):
         self.value = value
         super().__init__("Final output submitted")
 
-{build_submit_setup_code(output_fields, max_output_chars=max_output_chars)}
+{build_submit_setup_code(output_fields, max_output_chars=max_output_chars, emit_frame=emit_frame)}
 """.strip()

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
@@ -648,7 +648,7 @@ async def test_sync_sandbox_exposes_only_explicit_async_services() -> None:
     def exercise() -> None:
         assert bridge.code_interpreter.create_context(language="python") == {"language": "python"}
         assert bridge.code_interpreter.run_code("1 + 1", context="ctx") == ("1 + 1", {"context": "ctx"})
-        assert bridge.code_interpreter.delete_context("ctx") is None
+        assert bridge.code_interpreter.delete_context("ctx") == ("ctx", {})
         assert bridge.process.code_run("pwd") == ("pwd", {})
         assert bridge.process.create_session("session") == ("session", {})
         assert bridge.process.execute_session_command("session", "ls") == ("session", "ls", {})
@@ -1201,13 +1201,14 @@ def test_backend_rechecks_deadline_after_startup_and_setup(monkeypatch: pytest.M
         def setup_source(self, code):
             return code
 
-        def execute(self, code, variables, *, timeout_s, on_stdout=None):
-            del code, variables, on_stdout
+        def service_execution(self, execute, *, timeout_s):
             calls.append(timeout_s)
             clock["now"] = 111.0
-            return {}
+            return execute()
 
-    backend = _SandboxProcessBackend(object(), deadline_monotonic=110.0)
+    service = MagicMock()
+    service.run_code.return_value = SimpleNamespace(stdout="", stderr="", error=None)
+    backend = _SandboxProcessBackend(SimpleNamespace(code_interpreter=service), deadline_monotonic=110.0)
     backend._broker = Broker()
     with pytest.raises(DaytonaAdapterError, match="deadline exceeded"):
         backend.run("print('must not dispatch')")

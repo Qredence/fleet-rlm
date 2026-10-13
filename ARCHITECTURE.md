@@ -109,18 +109,35 @@ the same cleanup owner. Shutdown drains preparation and active file operations
 before deleting their Sandbox. Unconfirmed cleanup blocks replacement and
 remains runtime-owned for retry.
 
-Broker SSE notifications wake host polling; only `/pending` issues tool leases.
-A dropped notification leaves unclaimed work available to polling. Claimed
-tools are not automatically re-executed, and `/result` fences late or duplicate
-delivery against the issued lease.
+Only `/pending` issues host-tool leases; `/result` fences late or duplicate
+delivery against the issued lease. Polling dispatches each claimed tool once.
+The authenticated `/action` control enables tool admission for the current SDK
+execution and its deadline; it accepts no Python code.
 
 The adapter calls one typed backend protocol: `run(code, variables,
 on_stdout=...)` returns `BackendExecutionResult`. `_SandboxProcessBackend`
-owns its live `DaytonaHttpToolBroker`, including the port configuration,
-startup, tool bindings, and strict shutdown. The adapter's `broker` property
-only exposes that backend-owned instance for inspection. Configure custom
-ports through `sandbox_backend(..., broker_port=...)`; zero is rejected
-because live execution requires the broker's persistent Python namespace.
+owns one official Daytona interpreter context per invocation, creates it lazily,
+executes with `run_code` and SDK stdout/stderr callbacks, and deletes it on
+shutdown. The broker only dispatches host tools; it owns no executable namespace
+or output stream. Configure its local tool port through
+`sandbox_backend(..., broker_port=...)`.
+
+Each SDK action limits ordinary stdout and stderr inside the Sandbox to 65,536
+characters per stream, plus one truncation notice. Execution continues after
+truncation. A validated `SUBMIT` payload uses a separate bounded final frame
+after the original streams are restored. Host callbacks enforce a transport
+ceiling before the SDK accumulates further output; an unexpected excess fences
+the invocation and taints the root. A failed or uncertain action is never replayed.
+
+Synchronous workers use the official synchronous Daytona SDK with the same host
+configuration as `AsyncDaytona`, which owns lifecycle operations. Worker scopes
+close their synchronous clients after context and broker cleanup. The pinned
+SDK has no public synchronous close method, so the provider module owns a narrow
+shutdown compatibility seam. Application host I/O bridges asynchronous SDK
+operations onto its composition loop and creates no synchronous SDK clients.
+The Run storage view is closed after owned browser, file, and scratch work
+settles, before releasing the invocation gate. Closing a view does not close
+the composition-owned asynchronous client.
 
 The active semantic-child path requests a Volume-less Sandbox. Fleet resolves
 selected child inputs under existing Session authority, stages bounded copies
@@ -130,9 +147,25 @@ checkpoint, publication capability, credentials, or writable parent Volume.
 Root verifies child findings and owns any durable updates. An unresolved child
 or provider cleanup cannot become a successful committed Turn.
 
-Public search, page retrieval, Git inspection, and package installation run as
-ordinary Sandbox Python or subprocess work. The retired host URL-fetching
-subsystem is not an alternate execution path. Daytona network and mount policy
+Public page retrieval, Git inspection, and package installation run as ordinary
+Sandbox Python or subprocess work. Optional Tavily discovery uses one host-bound
+`web_search` tool through the existing broker, with host-only credentials and a
+Turn-local credit reservation counter. It returns bounded unverified snippets,
+never synthesized answers or arbitrary host-fetched page bodies. The retired host
+URL-fetching subsystem is not an alternate execution path.
+
+The bundled `web-research` Skill guides public research. Its HTTP helper retains
+bounded text and provenance in Run scratch; agent-browser connects over loopback
+CDP to fresh, explicitly sandboxed Chromium owned by that Run. Browser command guidance comes from the installed version’s upstream core Skill;
+Fleet’s runtime Skill supplies only its invocation and evidence adapter. The native
+launcher belongs to `daytona/`, not model-readable Skill resources. The narrow
+`open_browser` tool retains its launch process group on the host; subsequent
+actions use the CLI directly. Browser and driver processes carry a Run marker
+and must be confirmed stopped before success commit,
+scratch removal, and root reuse. Cleanup failure taints the root for retirement.
+Browser-free semantic children do not receive the host search tool. Skills grant
+no authority and do not implicitly load dependencies under exact selections.
+Daytona network and mount policy
 requests do not by themselves prove provider enforcement; the recorded Phase 5
 network-policy waiver remains in force.
 
@@ -184,3 +217,8 @@ and the [testing strategy](docs/how-to-guides/testing-strategy.md) for test
 lanes. `make check-codebase-tree` and `make check-dependency-boundaries` guard
 ownership. Local checks do not certify provider behavior, containment,
 comparative quality, or release promotion.
+
+Skill selection remains in the Root reasoning loop. The isolated
+`optimization/skill_selection.py` comparison can expose advisory Jev recommendations
+to a native RLM in an evaluation harness. It is not imported by serving composition;
+explicit selections bypass it, and it cannot load Skills or grant capabilities.

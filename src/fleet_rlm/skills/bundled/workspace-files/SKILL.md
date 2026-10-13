@@ -3,7 +3,7 @@ name: workspace-files
 description: Use durable Session Workspace, Project, Attachment, and Artifact tools correctly.
 compatibility: Durable Project and Session Workspace writes and Artifact promotion require the Daytona run environment.
 metadata:
-  version: "1.4.1"
+  version: "1.4.2"
   affordances:
     - workspace.files
     - artifacts.publish

@@ -11,10 +11,12 @@ import hashlib
 import json
 import re
 import shlex
+import tempfile
 import time
 from dataclasses import dataclass
 from enum import StrEnum
 from importlib.resources import files
+from pathlib import Path
 from typing import Any, Literal, Protocol
 from uuid import uuid4
 
@@ -39,10 +41,24 @@ from fleet_rlm.persistence.database import ensure_database_compatible
 from fleet_rlm.sessions.bindings import workspace_volume_subpath
 
 _SNAPSHOT_REQUIREMENTS = "snapshot-requirements.txt"
+_BROWSER_REQUIREMENTS = "browser-requirements.txt"
 _BROWSER_INSTALL = "python -m playwright install --with-deps chromium"
 _BROWSER_PATH = "/opt/fleet/playwright"
+_AGENT_BROWSER_VERSION = "0.39.0"
+_AGENT_BROWSER_BINARY_SHA256 = "6adeb7e2466f0d9ea4ef562222e221bfdd067f5545d7b052dc64fb13ba250f48"
+_AGENT_BROWSER_SOURCE_SHA256 = "265b44a18e735d3e5fdde628065765f9cc529f5adf4fb9a41c2dc8ac7e2c7b1c"
+_BROWSER_LAUNCHER = "browser_session.py"
 # Published Session image names retain their pre-browser dependency contract.
 _HTTP_ONLY_SNAPSHOTS = frozenset(f"fleet-rlm-python313-v{version}" for version in range(1, 11))
+_HISTORICAL_SESSION_SNAPSHOTS = frozenset(f"fleet-rlm-python313-v{version}" for version in range(1, 13))
+_HISTORICAL_CHILD_SNAPSHOTS = frozenset(f"fleet-rlm-python313-child-v{version}" for version in range(1, 6))
+_HISTORICAL_ANALYSIS_DEPENDENCIES = (
+    "mpmath==1.4.1",
+    "numpy==2.5.1",
+    "pandas==3.0.5",
+    "beautifulsoup4==4.15.0",
+)
+_HISTORICAL_BROWSER_DEPENDENCIES = ("playwright==1.63.0",)
 _IMPORT_NAME_OVERRIDES: dict[str, str] = {"beautifulsoup4": "bs4"}
 _IMPORT_NAME = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)*$", re.IGNORECASE)
 
@@ -108,6 +124,7 @@ class DaytonaEnvironmentManifest:
     schema_version: str = "fleet.daytona-runtime-manifest/v1"
     helper_protocol: str = "daytona-native-context/v1"
     browser_enabled: bool = False
+    agent_browser_enabled: bool = False
 
     def as_dict(self) -> dict[str, object]:
         """Return the non-secret manifest payload baked into new images."""
@@ -135,6 +152,17 @@ class DaytonaEnvironmentManifest:
                 "install_command": _BROWSER_INSTALL,
                 "browsers_path": _BROWSER_PATH,
                 "chromium_sandbox": True,
+            }
+        if self.agent_browser_enabled:
+            payload["agent_browser"] = {
+                "version": _AGENT_BROWSER_VERSION,
+                "binary_sha256": _AGENT_BROWSER_BINARY_SHA256,
+                "source_sha256": _AGENT_BROWSER_SOURCE_SHA256,
+                "launcher_sha256": hashlib.sha256(
+                    files("fleet_rlm.daytona").joinpath(_BROWSER_LAUNCHER).read_bytes()
+                ).hexdigest(),
+                "protocol": "fleet-browser-session/v1",
+                "connection": "run-owned-loopback-cdp",
             }
         return payload
 
@@ -167,16 +195,21 @@ class DaytonaEnvironmentManifest:
         return hashlib.sha256(encoded).hexdigest()
 
 
-def snapshot_execution_dependencies(
-    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
-) -> tuple[str, ...]:
-    """Load the exact generated-code packages baked into the Snapshot."""
-    content = files("fleet_rlm.daytona").joinpath(_SNAPSHOT_REQUIREMENTS).read_text(encoding="utf-8")
+def _pinned_requirements(resource: str) -> tuple[str, ...]:
+    content = files("fleet_rlm.daytona").joinpath(resource).read_text(encoding="utf-8")
     dependencies = tuple(
         line.strip() for line in content.splitlines() if line.strip() and not line.lstrip().startswith("#")
     )
     if not dependencies or any("==" not in dependency or dependency.count("==") != 1 for dependency in dependencies):
         raise RuntimeError("Snapshot dependencies must use exact non-empty == pins")
+    return dependencies
+
+
+def snapshot_execution_dependencies(
+    profile: DaytonaEnvironmentProfile = DaytonaEnvironmentProfile.SESSION,
+) -> tuple[str, ...]:
+    """Load the active analysis baseline; published declarations retain fixed pins."""
+    dependencies = _pinned_requirements(_SNAPSHOT_REQUIREMENTS)
     if profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD:
         return ()
     return dependencies
@@ -210,10 +243,14 @@ def environment_manifest(
     if not isinstance(profile, DaytonaEnvironmentProfile):
         raise TypeError("profile must be a DaytonaEnvironmentProfile")
     semantic = profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
-    dependencies = snapshot_execution_dependencies(profile)
+    historical = spec.snapshot in _HISTORICAL_SESSION_SNAPSHOTS and not semantic
+    dependencies = _HISTORICAL_ANALYSIS_DEPENDENCIES if historical else snapshot_execution_dependencies(profile)
     legacy = spec.snapshot in _HTTP_ONLY_SNAPSHOTS and not semantic
-    if legacy:
-        dependencies = tuple(item for item in dependencies if not item.startswith("playwright=="))
+    if not semantic and not legacy:
+        browser_dependencies = (
+            _HISTORICAL_BROWSER_DEPENDENCIES if historical else _pinned_requirements(_BROWSER_REQUIREMENTS)
+        )
+        dependencies = (*dependencies, *browser_dependencies)
     digest_source = "".join(f"{item}\n" for item in dependencies).encode("utf-8")
     return DaytonaEnvironmentManifest(
         profile=profile,
@@ -226,10 +263,39 @@ def environment_manifest(
         volume_allowed=not semantic,
         warm_pool_eligible=semantic,
         browser_enabled=not semantic and not legacy,
+        agent_browser_enabled=not semantic and not legacy and spec.snapshot != "fleet-rlm-python313-v11",
     )
 
 
-def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
+def _agent_browser_install_code() -> str:
+    """Pinned build-time artifacts; no npm or runtime browser installation."""
+    return (
+        "import hashlib, io, pathlib, platform, shutil, tarfile, tempfile, urllib.request\n"
+        "assert platform.machine() == 'x86_64', 'Fleet browser image requires Linux x64'\n"
+        f"version = {_AGENT_BROWSER_VERSION!r}\n"
+        "binary = urllib.request.urlopen('https://github.com/vercel-labs/agent-browser/releases/download/' "
+        "+ 'v' + version + '/agent-browser-linux-musl-x64', timeout=60).read()\n"
+        f"assert hashlib.sha256(binary).hexdigest() == {_AGENT_BROWSER_BINARY_SHA256!r}\n"
+        "path = pathlib.Path('/usr/local/bin/agent-browser')\n"
+        "path.write_bytes(binary)\n"
+        "path.chmod(0o755)\n"
+        "archive = urllib.request.urlopen('https://codeload.github.com/vercel-labs/agent-browser/tar.gz/refs/tags/v' "
+        "+ version, timeout=60).read()\n"
+        f"assert hashlib.sha256(archive).hexdigest() == {_AGENT_BROWSER_SOURCE_SHA256!r}\n"
+        "with tempfile.TemporaryDirectory() as temporary:\n"
+        "    with tarfile.open(fileobj=io.BytesIO(archive), mode='r:gz') as bundle:\n"
+        "        bundle.extractall(temporary, filter='data')\n"
+        "    root = pathlib.Path(temporary) / ('agent-browser-' + version)\n"
+        "    destination = pathlib.Path('/opt/fleet/agent-browser')\n"
+        "    shutil.copytree(root / 'skill-data/core', destination / 'skill-data/core')\n"
+        "    shutil.copyfile(root / 'LICENSE', destination / 'LICENSE')\n"
+        "from playwright.sync_api import sync_playwright\n"
+        "with sync_playwright() as playwright:\n"
+        "    pathlib.Path('/opt/fleet/chromium').symlink_to(playwright.chromium.executable_path)\n"
+    )
+
+
+def _historical_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
     from daytona import Image
 
     manifest_profile = (
@@ -253,6 +319,26 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
         image = image.env({"PLAYWRIGHT_BROWSERS_PATH": _BROWSER_PATH}).run_commands(
             f"{_BROWSER_INSTALL} && chmod -R a+rX {_BROWSER_PATH} && rm -rf /var/lib/apt/lists/*"
         )
+    if manifest.agent_browser_enabled:
+        launcher = files("fleet_rlm.daytona").joinpath(_BROWSER_LAUNCHER)
+        image = (
+            image.run_commands("python -c " + shlex.quote(f"exec({_agent_browser_install_code()!r})"))
+            .env(
+                {
+                    "AGENT_BROWSER_SKILLS_DIR": "/opt/fleet/agent-browser/skill-data",
+                    "AGENT_BROWSER_EXECUTABLE_PATH": "/opt/fleet/chromium",
+                }
+            )
+            .run_commands(
+                "python -c "
+                + shlex.quote(
+                    "from pathlib import Path; "
+                    "p = Path('/opt/fleet/browser_session.py'); "
+                    f"p.write_text({launcher.read_text(encoding='utf-8')!r}); "
+                    "p.chmod(0o444)"
+                )
+            )
+        )
     image = image.env(
         {
             "PYTHONUNBUFFERED": "1",
@@ -267,6 +353,77 @@ def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
             "chmod 0444 /opt/fleet/runtime-manifest.json"
         ).env({"FLEET_SNAPSHOT_MANIFEST_SHA256": manifest.digest})
     image = image.dockerfile_commands(["USER daytona"])
+    return image
+
+
+def build_snapshot_image(spec: DaytonaSandboxSpec) -> Any:
+    """Use SDK build contexts for new declarations; freeze published images."""
+    from daytona import Image
+
+    if spec.snapshot in _HISTORICAL_SESSION_SNAPSHOTS or spec.snapshot in _HISTORICAL_CHILD_SNAPSHOTS:
+        return _historical_snapshot_image(spec)
+    profile = (
+        DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        if spec.profile is DaytonaEnvironmentProfile.SEMANTIC_CHILD
+        else DaytonaEnvironmentProfile.SESSION
+    )
+    manifest = environment_manifest(spec, profile)
+    image: Any = Image.base(spec.base_image).run_commands(
+        "apt-get update && apt-get install -y --no-install-recommends "
+        "git ca-certificates procps && rm -rf /var/lib/apt/lists/*",
+        "groupadd --gid 1000 daytona",
+        "useradd --uid 1000 --gid daytona --create-home --home-dir /home/daytona --shell /bin/bash daytona",
+        "chown -R daytona:daytona /home/daytona",
+    )
+    if manifest.dependencies:
+        image = image.pip_install_from_requirements(str(files("fleet_rlm.daytona").joinpath(_SNAPSHOT_REQUIREMENTS)))
+    if manifest.browser_enabled:
+        image = (
+            image.pip_install_from_requirements(str(files("fleet_rlm.daytona").joinpath(_BROWSER_REQUIREMENTS)))
+            .env({"PLAYWRIGHT_BROWSERS_PATH": _BROWSER_PATH})
+            .run_commands(f"{_BROWSER_INSTALL} && chmod -R a+rX {_BROWSER_PATH} && rm -rf /var/lib/apt/lists/*")
+        )
+    if manifest.agent_browser_enabled:
+        image = (
+            image.run_commands("python -c " + shlex.quote(f"exec({_agent_browser_install_code()!r})"))
+            .add_local_file(
+                str(files("fleet_rlm.daytona").joinpath(_BROWSER_LAUNCHER)), "/opt/fleet/browser_session.py"
+            )
+            .env(
+                {
+                    "AGENT_BROWSER_SKILLS_DIR": "/opt/fleet/agent-browser/skill-data",
+                    "AGENT_BROWSER_EXECUTABLE_PATH": "/opt/fleet/chromium",
+                }
+            )
+        )
+    # The Image owns its generated file until the SDK finishes uploading the
+    # build context. The destination basename is stable across builds.
+    temporary = tempfile.TemporaryDirectory(prefix="fleet-snapshot-")
+    path = Path(temporary.name) / "runtime-manifest.json"
+    path.write_text(json.dumps(manifest.as_dict(), sort_keys=True, separators=(",", ":")), encoding="utf-8")
+    image = (
+        image.add_local_file(path, "/opt/fleet/runtime-manifest.json")
+        .run_commands(
+            "chmod 0444 /opt/fleet/runtime-manifest.json"
+            + (" /opt/fleet/browser_session.py" if manifest.agent_browser_enabled else "")
+        )
+        .env(
+            {
+                "PYTHONUNBUFFERED": "1",
+                "FLEET_SNAPSHOT_DEPENDENCIES_SHA256": manifest.dependency_sha256,
+                "FLEET_SNAPSHOT_MANIFEST_SHA256": manifest.digest,
+            }
+        )
+        .workdir("/home/daytona")
+        .dockerfile_commands(["USER daytona"])
+    )
+    # SDK 0.220 derives COPY names from absolute host paths. Stable archive
+    # names keep the immutable Dockerfile independent of checkout/temp paths.
+    for entry in image._context_list:
+        name = Path(entry.source_path).name
+        image._dockerfile = image._dockerfile.replace(str(entry.archive_path), name)
+        entry.archive_path = name
+    image._fleet_build_directory = temporary
     return image
 
 

@@ -1,7 +1,7 @@
 """RLM runtime execution, run-scoped reuse, and execution-context contracts.
 
 * ``test_runtime_execution.py``: Behavior contracts for runtime execution.
-* ``test_session_runtime_reuse.py``: Run-scoped DSPy program contracts for retained broker execution.
+* ``test_session_runtime_reuse.py``: Run-scoped DSPy program contracts for retained Sandbox execution.
 * ``test_execution_context.py``: Ready-to-run immutable RLM context contract.
 """
 

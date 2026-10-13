@@ -1,7 +1,7 @@
 # ruff: noqa: E501
 """Sandbox-local HTTP bridge for Daytona interpreter host tools.
 
-The broker owns the only executable namespace used by a live invocation.  The
+The broker dispatches host tools for an SDK interpreter context.  The
 Fleet process only polls typed requests and fulfils registered host tools; it
 never executes model-authored Python.
 """
@@ -30,13 +30,7 @@ logger = logging.getLogger(__name__)
 
 _SERVER_PATH = "/home/daytona/fleet_rlm_tool_broker.py"
 _MAX_REQUEST_BYTES = 2 * 1024 * 1024
-_MAX_OUTPUT_CHARS = 64 * 1024
 _DEFAULT_TOOL_TIMEOUT_S = 120
-# The sandbox starts its action clock when /execute arrives, after the host
-# sent it. Waiting a little past timeout_s lets the sandbox's own deadline
-# reply (for example a timed-out tool wait) reach the host as a recoverable
-# action error instead of the host transport timing out first.
-_EXECUTE_RESPONSE_GRACE_S = 10.0
 
 
 def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
@@ -48,59 +42,15 @@ def _encode_result_envelope(body: Mapping[str, Any]) -> bytes:
 
 
 _SERVER_SOURCE = r"""
-import contextlib, hmac, io, json, os, queue, sys, threading, time, uuid
+import hmac, json, threading, time, uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
 _secret = __SECRET__
-_pending, _results, _completed, _namespace = {}, {}, set(), {"__name__": "__fleet_rlm_repl__"}
-_lock, _execution_lock = threading.RLock(), threading.Lock()
+_pending, _results, _completed = {}, {}, set()
+_lock = threading.RLock()
 _active_deadline = None
 _active_execution = False
-_event_subscribers = set()
-if os.path.isdir("/workspace"):
-    os.chdir("/workspace")
-
-# Keep a bounded, useful conversion ceiling for legitimate high-precision
-# computations.  The default CPython limit makes the Pi canary fail before it
-# can submit a result, despite the sandbox output budget already bounding what
-# returns to the host.
-if hasattr(sys, "set_int_max_str_digits"):
-    sys.set_int_max_str_digits(200_000)
-
-def _emit_event(data):
-    with _lock:
-        subscribers = list(_event_subscribers)
-    for q in subscribers:
-        try:
-            q.put_nowait(data)
-        except Exception:
-            pass
-
-class _BoundedWriter(io.StringIO):
-    def __init__(self, limit, stream_type="stdout"):
-        super().__init__()
-        self._limit = limit
-        self._truncated = False
-        self._stream_type = stream_type
-    def write(self, value):
-        remaining = self._limit - self.tell()
-        if remaining <= 0:
-            self._truncated = True
-            return len(value)
-        if len(value) > remaining:
-            super().write(value[:remaining])
-            self._truncated = True
-            written = value[:remaining]
-        else:
-            super().write(value)
-            written = value
-        if written:
-            _emit_event({"type": self._stream_type, "delta": written})
-        return len(value)
-    def getvalue(self):
-        value = super().getvalue()
-        return value + "\n...[sandbox output truncated]" if self._truncated else value
 
 def _send(handler, body, status=200):
     raw = json.dumps(body, allow_nan=False).encode("utf-8")
@@ -118,33 +68,6 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
         if self.path == "/health": _send(self, {"status": "ok"}); return
-        if self.path == "/events":
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-            q = queue.Queue(maxsize=1000)
-            with _lock:
-                _event_subscribers.add(q)
-            try:
-                while True:
-                    try:
-                        item = q.get(timeout=0.2)
-                        if item is None:
-                            break
-                        raw = ("data: " + json.dumps(item, allow_nan=False) + "\n\n").encode("utf-8")
-                        self.wfile.write(raw)
-                        self.wfile.flush()
-                    except queue.Empty:
-                        self.wfile.write(b":keep-alive\n\n")
-                        self.wfile.flush()
-            except Exception:
-                pass
-            finally:
-                with _lock:
-                    _event_subscribers.discard(q)
-            return
         if self.path.startswith("/pending"):
             out = []
             with _lock:
@@ -158,44 +81,15 @@ class Handler(BaseHTTPRequestHandler):
         if not self._authorized(): _send(self, {"error": "unauthorized"}, 401); return
         try: data = _read(self)
         except Exception: _send(self, {"error": "invalid request"}, 400); return
-        if self.path == "/execute":
-            code, variables = data.get("code"), data.get("variables") or {}
+        if self.path == "/action":
+            global _active_deadline, _active_execution
             timeout_s = data.get("timeout_s")
-            if (not isinstance(code, str) or not isinstance(variables, dict) or isinstance(timeout_s, bool)
-                    or (timeout_s is not None and (not isinstance(timeout_s, (int, float)) or timeout_s <= 0))):
-                _send(self, {"error": "invalid execution"}, 400); return
-            stdout, stderr = _BoundedWriter(__MAX_OUTPUT_CHARS__, "stdout"), _BoundedWriter(__MAX_OUTPUT_CHARS__, "stderr")
-            result = {"stdout": "", "stderr": "", "final": None, "error": None, "error_category": None, "tool_error": None}
-            try:
-                with _execution_lock:
-                    with _lock:
-                        global _active_deadline, _active_execution
-                        _active_execution = True
-                        _active_deadline = time.monotonic() + float(timeout_s) if timeout_s is not None else None
-                        _namespace["_fleet_tool_timeout_s"] = float(timeout_s) if timeout_s is not None else None
-                    try:
-                        _namespace.update(variables)
-                        try:
-                            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr): exec(compile(code, "<fleet-rlm>", "exec"), _namespace, _namespace)
-                        except BaseException as exc:
-                            value = getattr(exc, "value", None)
-                            if type(exc).__name__ == "FleetFinalOutputError" and isinstance(value, dict): result["final"] = value
-                            else:
-                                failure = getattr(exc, "fleet_tool_error", None)
-                                if isinstance(failure, dict):
-                                    result["tool_error"] = failure
-                                    result["error"] = failure["message"]
-                                    result["error_category"] = failure["category"]
-                                else:
-                                    result.update(error=str(exc)[:2000], error_category=type(exc).__name__)
-                    finally:
-                        with _lock:
-                            _active_deadline = None
-                            _active_execution = False
-                        _emit_event({"type": "execution_done"})
-            finally:
-                result["stdout"], result["stderr"] = stdout.getvalue(), stderr.getvalue()
-            _send(self, result); return
+            if timeout_s is not None and (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or timeout_s <= 0):
+                _send(self, {"error": "invalid action timeout"}, 400); return
+            with _lock:
+                _active_execution = bool(data.get("active"))
+                _active_deadline = time.monotonic() + timeout_s if timeout_s is not None else None
+            _send(self, {"status": "ok"}); return
         if self.path == "/tool_call":
             call_id = str(data.get("id") or uuid.uuid4().hex); event = threading.Event()
             with _lock:
@@ -205,9 +99,6 @@ class Handler(BaseHTTPRequestHandler):
                     _send(self, {"error": "invocation is not executing"}, 409); return
                 _pending[call_id] = {"tool_name": data.get("tool_name"), "args": data.get("args") or [], "kwargs": data.get("kwargs") or {}, "lease": None, "event": event}
                 deadline = _active_deadline
-            # SSE is only a wake-up hint. /pending is the sole lease issuer,
-            # so a dropped event cannot hide unclaimed work from polling.
-            _emit_event({"type": "tools_pending"})
             wait_s = max(0.0, deadline - time.monotonic()) if deadline is not None else __DEFAULT_TOOL_TIMEOUT_S__
             if not event.wait(wait_s):
                 with _lock:
@@ -250,6 +141,10 @@ class DaytonaHttpToolBroker:
     ) -> None:
         self._sandbox = sandbox
         self._port = port
+        # Per-invocation header secret. It shows a request came from this Sandbox's own
+        # tool stubs and keeps other local peers out. It is not a capability boundary:
+        # the stubs embed it, and agent code runs inside the SDK context. Tool authority
+        # is the host's bound tool map plus each tool's own scope checks (_dispatch_tool_request).
         self._secret = secrets.token_urlsafe(32)
         self._url: str | None = None
         self._session: str | None = None
@@ -285,7 +180,7 @@ class DaytonaHttpToolBroker:
             "            'message': str(failure.get('message', 'tool call failed'))[:500],\n"
             "            'call_id': str(failure.get('call_id', ''))[:128],\n"
             "        }\n"
-            "        super().__init__(self.fleet_tool_error['message'])\n\n"
+            "        super().__init__(self.fleet_tool_error['category'] + ' [call_id=' + self.fleet_tool_error['call_id'] + ']: ' + self.fleet_tool_error['message'])\n\n"
             + "\n\n".join((self._wrapper_source(name, fn) for name, fn in self._tools.items()))
             + "\n\n"
             + submit_source
@@ -295,103 +190,38 @@ class DaytonaHttpToolBroker:
         """Complete bounded broker startup before computing execution time."""
         self._ensure_started()
 
-    def execute(
-        self,
-        code: str,
-        variables: Mapping[str, Any],
-        *,
-        timeout_s: float | None,
-        on_stdout: Callable[[str], None] | None = None,
-    ) -> Any:
+    def service_execution(self, execute: Callable[[], Any], *, timeout_s: float | None) -> Any:
+        """Service host tools while one SDK execution runs; never replay it."""
         self._ensure_started()
         assert self._client is not None
         self._delivery_error = None
-        client = self._client
-        outcome: list[httpx.Response | BaseException] = []
-        sse_stop_event = threading.Event()
-        sse_ready = threading.Event()
-        tools_pending = threading.Event()
-        streamed_stdout = False
+        self._client.post("/action", json={"active": True, "timeout_s": timeout_s}).raise_for_status()
+        outcome: list[Any] = []
 
-        def post() -> None:
+        def run() -> None:
             try:
-                outcome.append(
-                    client.post(
-                        "/execute",
-                        json={"code": code, "variables": dict(variables), "timeout_s": timeout_s},
-                        timeout=(timeout_s + _EXECUTE_RESPONSE_GRACE_S if timeout_s is not None else None),
-                    )
-                )
+                outcome.append(execute())
             except BaseException as exc:
                 outcome.append(exc)
 
-        def listen_events() -> None:
-            nonlocal streamed_stdout
-            try:
-                with client.stream(
-                    "GET", "/events", timeout=(timeout_s + _EXECUTE_RESPONSE_GRACE_S if timeout_s is not None else None)
-                ) as stream:
-                    if stream.status_code != 200:
-                        sse_ready.set()
-                        return
-                    sse_ready.set()
-                    for line in stream.iter_lines():
-                        if sse_stop_event.is_set() or self._stopped:
-                            break
-                        if not line or not line.startswith("data: "):
-                            continue
-                        try:
-                            data = json.loads(line[6:].strip())
-                        except Exception:
-                            continue
-                        ev_type = data.get("type")
-                        if ev_type == "execution_done":
-                            break
-                        if ev_type == "tools_pending":
-                            tools_pending.set()
-                        elif ev_type in ("stdout", "stderr") and on_stdout is not None:
-                            delta = data.get("delta")
-                            if isinstance(delta, str) and delta:
-                                streamed_stdout = True
-                                with contextlib.suppress(Exception):
-                                    on_stdout(delta)
-            except Exception:
-                pass
-            finally:
-                sse_ready.set()
-
-        worker = threading.Thread(target=post, daemon=True)
-        sse_thread = threading.Thread(target=listen_events, daemon=True)
-
-        with host_action_deadline(time.monotonic() + timeout_s) if timeout_s is not None else contextlib.nullcontext():
-            sse_thread.start()
-            sse_ready.wait(timeout=0.2)
-            worker.start()
-            while worker.is_alive():
-                if self._stopped:
-                    break
-                tools_pending.wait(timeout=0.02)
-                tools_pending.clear()
-                self._poll_once()
-                worker.join(0.01)
-            sse_stop_event.set()
-
-        delivery_error = self._delivery_error
-        if delivery_error is not None:
-            raise delivery_error
-        if outcome and isinstance(outcome[0], httpx.TimeoutException):
-            raise DaytonaAdapterError(
-                message="sandbox execution request timed out", cause_type="BrokerExecutionTimeout"
-            ) from None
-        if not outcome or isinstance(outcome[0], BaseException):
-            raise DaytonaAdapterError(message="sandbox execution request failed", cause_type="BrokerExecutionError")
-        response = outcome[0]
-        if response.status_code != 200:
-            raise DaytonaAdapterError(message="sandbox execution failed", cause_type="BrokerExecutionError")
-        result_json = response.json()
-        if streamed_stdout:
-            result_json["streamed_stdout"] = True
-        return result_json
+        worker = threading.Thread(target=run, daemon=True)
+        try:
+            with (
+                host_action_deadline(time.monotonic() + timeout_s)
+                if timeout_s is not None
+                else contextlib.nullcontext()
+            ):
+                worker.start()
+                while worker.is_alive():
+                    self._poll_once()
+                    worker.join(0.02)
+            if self._delivery_error is not None:
+                raise self._delivery_error
+            if isinstance(outcome[0], BaseException):
+                raise outcome[0]
+            return outcome[0]
+        finally:
+            self._client.post("/action", json={"active": False}).raise_for_status()
 
     def stop(self, *, strict: bool = False) -> None:
         """Disable execution and attempt to close the client and delete its session.
@@ -431,7 +261,6 @@ class DaytonaHttpToolBroker:
             _SERVER_SOURCE.replace("__SECRET__", repr(self._secret))
             .replace("__PORT__", str(self._port))
             .replace("__MAX_REQUEST_BYTES__", str(_MAX_REQUEST_BYTES))
-            .replace("__MAX_OUTPUT_CHARS__", str(_MAX_OUTPUT_CHARS))
             .replace("__DEFAULT_TOOL_TIMEOUT_S__", str(_DEFAULT_TOOL_TIMEOUT_S))
         )
         try:

@@ -361,6 +361,17 @@ class DaytonaRunStorage:
         self.scratch_root = f"/tmp/fleet/{run_id}"
         self._paths = paths
         self.volume_fs = _RunVolumeFs(self)
+        self._closed = False
+
+    def close(self) -> None:
+        """Fence this Run's local storage view after all owned I/O has settled."""
+        if not self._closed:
+            tombstone_sync_sandbox(self.sandbox)
+            self._closed = True
+
+    def _check_open(self) -> None:
+        if self._closed:
+            raise RuntimeError("Run storage is closed")
 
     def _is_scratch(self, location: str) -> bool:
         path = PurePosixPath(location)
@@ -368,12 +379,14 @@ class DaytonaRunStorage:
         return path != root and root in path.parents and ".." not in path.parts
 
     def _sync_target(self, logical_path: str) -> Any:
+        self._check_open()
         return self._scratch_fs if self._is_scratch(logical_path) else self.host_io.volume_fs
 
     def result_path(self, session_id: UUID, run_id: UUID) -> str:
         return str(self._paths.run_result_path(session_id, run_id))
 
     async def read(self, location: str, *, max_bytes: int) -> bytes:
+        self._check_open()
         value = (
             await self._files.read_bytes(location, max_bytes=max_bytes + 1)
             if self._is_scratch(location)
@@ -384,18 +397,21 @@ class DaytonaRunStorage:
         return value
 
     async def write(self, location: str, data: bytes) -> None:
+        self._check_open()
         if self._is_scratch(location):
             await self._files.write_bytes(location, data)
         else:
             await self.host_io.volume_fs.awrite_bytes(location, data)
 
     async def remove(self, location: str) -> None:
+        self._check_open()
         if self._is_scratch(location):
             await self._files.remove_bytes(location)
         else:
             await self.host_io.volume_fs.aremove_bytes(location)
 
     async def write_private(self, logical_path: str, data: bytes) -> None:
+        self._check_open()
         if not self._is_scratch(logical_path):
             raise ValueError("Run attachment path is outside Run scratch")
         parent = PurePosixPath(logical_path).parent.relative_to(PurePosixPath(self.scratch_root))

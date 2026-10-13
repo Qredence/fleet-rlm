@@ -1,13 +1,13 @@
-"""The Daytona broker is the only live Python namespace for a Turn."""
+"""SDK contexts own live Python state for each invocation."""
 
 from __future__ import annotations
 
+import ast
 import asyncio
-import contextlib
 import hashlib
-import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, ClassVar
 from unittest.mock import MagicMock
 from uuid import UUID
@@ -26,10 +26,11 @@ from fleet_rlm.daytona.interpreter import (
 )
 from fleet_rlm.rlm.event_types import RLMOutput
 from fleet_rlm.rlm.program import AttachmentContextCapsule, AttachmentContextEntry
+from tests.support.sdk_interpreter import LocalSDKInterpreter
 
 
 class _LocalBroker:
-    """Exercise the backend protocol with JSON transport and a persistent namespace."""
+    """Broker double paired with an offline SDK-owned execution context."""
 
     instances: ClassVar[list[_LocalBroker]] = []
 
@@ -37,9 +38,15 @@ class _LocalBroker:
         assert port > 0
         self.port = port
         self.namespace: dict[str, Any] = {}
+        self.service = LocalSDKInterpreter()
         self.calls: list[str] = []
         self.closed = False
         self.instances.append(self)
+        _sandbox.code_interpreter = SimpleNamespace(
+            create_context=lambda: self.namespace,
+            run_code=self.run_code,
+            delete_context=lambda context: context.clear(),
+        )
 
     def start(self) -> None:
         pass
@@ -54,32 +61,22 @@ class _LocalBroker:
     def setup_source(self, source: str) -> str:
         return source
 
-    def execute(
-        self, code: str, variables: dict[str, Any], *, timeout_s: float | None, on_stdout=None
-    ) -> dict[str, Any]:
-        del on_stdout
+    def service_execution(self, execute, *, timeout_s):
         assert timeout_s is None or timeout_s > 0
-        self.calls.append(code)
-        self.namespace.update(json.loads(json.dumps(variables, ensure_ascii=False, allow_nan=False)))
-        stdout = io.StringIO()
-        error = None
-        final = None
-        try:
-            with contextlib.redirect_stdout(stdout):
-                exec(compile(code, "<broker-test>", "exec"), self.namespace, self.namespace)
-        except BaseException as exc:
-            if type(exc).__name__ == "FleetFinalOutputError":
-                final = exc.value
-            else:
-                error = str(exc)
-        return {"stdout": stdout.getvalue(), "stderr": "", "error": error, "final": final}
+        return execute()
+
+    def run_code(self, source, *, context, on_stdout, on_stderr, timeout):
+        action = ast.parse(source).body[-1]
+        assert isinstance(action, ast.Expr) and isinstance(action.value, ast.Call)
+        self.calls.append(ast.literal_eval(action.value.args[0]))
+        return self.service.run_code(source, context=context, on_stdout=on_stdout, on_stderr=on_stderr, timeout=timeout)
 
     def stop(self, *, strict: bool) -> None:
         assert strict
         self.closed = True
 
 
-def test_broker_namespace_persists_within_turn_and_resets_for_next_turn(
+def test_sdk_namespace_persists_within_turn_and_resets_for_next_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _LocalBroker.instances.clear()
@@ -146,7 +143,7 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
     options = {} if configured_port is None else {"broker_port": configured_port}
-    backend = sandbox_backend(object(), **options)
+    backend = sandbox_backend(SimpleNamespace(), **options)
     root = DaytonaCodeInterpreter(backend=backend, tools={"host_tool": lambda: "host result"})
     expected_port = DEFAULT_BROKER_PORT if configured_port is None else configured_port
     assert backend.broker_port == expected_port
@@ -156,7 +153,7 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
 
     observed: list[object] = []
     first = DaytonaCodeInterpreter(
-        backend=sandbox_backend(object(), **options),
+        backend=sandbox_backend(SimpleNamespace(), **options),
         tools={"host_tool": lambda: "host result"},
         observer=observed.append,
     )
@@ -176,7 +173,7 @@ def test_backend_owns_broker_configuration_tools_streaming_and_cleanup(
     assert root.broker is None
     assert not backend._closed
 
-    second = DaytonaCodeInterpreter(backend=sandbox_backend(object(), **options))
+    second = DaytonaCodeInterpreter(backend=sandbox_backend(SimpleNamespace(), **options))
     assert second._backend.broker_port == expected_port
     assert second.execute("print('cached' in globals())") == "False\n"
     assert second.broker is not broker
@@ -191,7 +188,7 @@ def test_backend_rejects_invalid_port_before_broker_creation(monkeypatch: pytest
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", _LocalBroker)
     with pytest.raises(DaytonaAdapterError, match="broker port must be between"):
-        sandbox_backend(object(), broker_port=port)
+        sandbox_backend(SimpleNamespace(), broker_port=port)
     assert not _LocalBroker.instances
 
 
@@ -492,11 +489,13 @@ def test_setup_is_installed_once_and_actions_carry_only_model_code(monkeypatch: 
 
 def test_setup_failure_stops_before_model_code(monkeypatch: pytest.MonkeyPatch) -> None:
     class FailingSetupBroker(_LocalBroker):
-        def execute(self, code: str, variables: dict[str, Any], *, timeout_s: int, on_stdout=None) -> dict[str, Any]:
+        def run_code(self, source, **kwargs):
             if not self.calls:
-                self.calls.append(code)
-                return {"stdout": "", "stderr": "", "error": "setup exploded", "final": None}
-            return super().execute(code, variables, timeout_s=timeout_s, on_stdout=on_stdout)
+                self.calls.append(source)
+                return SimpleNamespace(
+                    stdout="", stderr="", error=SimpleNamespace(name="RuntimeError", value="setup exploded")
+                )
+            return super().run_code(source, **kwargs)
 
     _LocalBroker.instances.clear()
     monkeypatch.setattr("fleet_rlm.daytona.interpreter.DaytonaHttpToolBroker", FailingSetupBroker)

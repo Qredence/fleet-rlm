@@ -79,7 +79,7 @@ class TestInterpreterTimeoutsAndLimits:
             raise TimeoutError("Daytona execution timed out")
 
         monkeypatch.setattr(DaytonaHttpToolBroker, "start", lambda _broker: None)
-        monkeypatch.setattr(DaytonaHttpToolBroker, "execute", timeout)
+        monkeypatch.setattr(DaytonaHttpToolBroker, "service_execution", timeout)
         interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=10))
         with pytest.raises(ProviderRequestError) as error:
             interpreter.execute("print('slow')")
@@ -91,19 +91,33 @@ class TestInterpreterTimeoutsAndLimits:
             sandbox_backend(MagicMock(), timeout_s=invalid_timeout)
         assert error.value.cause_type == "InterpreterConfigurationError"
 
-    def test_timeout_is_forwarded_to_broker(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_timeout_is_forwarded_to_sdk_and_tool_admission(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from types import SimpleNamespace
+
+        from tests.support.sdk_interpreter import LocalSDKInterpreter
+
         observed: list[int] = []
+        service = LocalSDKInterpreter()
+        run_code = service.run_code
 
-        def execute(_broker: Any, _code: str, _variables: Any, *, timeout_s: int, on_stdout=None) -> dict[str, Any]:
-            del on_stdout
+        def execute(_broker, run, *, timeout_s):
             observed.append(timeout_s)
-            return {"stdout": "done\n"}
+            return run()
 
+        def run(code, **kwargs):
+            assert kwargs["timeout"] == 42
+            return run_code(code, **kwargs)
+
+        service.run_code = run
         monkeypatch.setattr(DaytonaHttpToolBroker, "start", lambda _broker: None)
-        monkeypatch.setattr(DaytonaHttpToolBroker, "execute", execute)
-        interpreter = DaytonaCodeInterpreter(backend=sandbox_backend(MagicMock(), timeout_s=42))
+        monkeypatch.setattr(DaytonaHttpToolBroker, "service_execution", execute)
+        interpreter = DaytonaCodeInterpreter(
+            backend=sandbox_backend(SimpleNamespace(code_interpreter=service), timeout_s=42)
+        )
         assert interpreter.execute("print('done')") == "done\n"
-        assert observed == [42, 42]  # one-time setup, then the action
+        assert observed == [42, 42]
+        monkeypatch.setattr(DaytonaHttpToolBroker, "stop", lambda _broker, **_kwargs: None)
+        interpreter.shutdown()
 
     def test_empty_and_oversized_code_are_rejected(self) -> None:
         interpreter = DaytonaCodeInterpreter(backend=InProcessInterpreterBackend(), max_code_chars=100)

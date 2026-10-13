@@ -50,8 +50,11 @@ also remain immutable rollback targets. No image is a selected deployment
 value until its provider checks, disposable probes, sealed receipt, and
 deployment-reference change are complete.
 
-The browser-enabled Session image uses the fresh `fleet-rlm-python313-v11`
-contract, including pinned Playwright and Chromium. Published Session names
+The new browser-driver Session image uses the fresh `fleet-rlm-python313-v12`
+contract, including agent-browser 0.39.0 and its matched core Skill resources.
+The Playwright/Chromium installation remains pinned, and Fleet owns sandboxed
+Chrome rather than using the driver's stock launcher. Published `v11` retains
+its original Playwright-only browser contract. Published Session names
 through `fleet-rlm-python313-v10` retain their HTTP-only dependency and manifest
 contracts. The SemanticChild image remains `fleet-rlm-python313-child-v5` and
 does not include a browser. The Makefile defaults target these candidate names;
@@ -65,17 +68,17 @@ needed:
 
 ```bash
 uv run python scripts/daytona_snapshot.py plan \
-  --profile session --name fleet-rlm-python313-v11
+  --profile session --name fleet-rlm-python313-v12
 uv run python scripts/daytona_snapshot.py plan \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py create \
-  --profile session --name fleet-rlm-python313-v11
+  --profile session --name fleet-rlm-python313-v12
 uv run python scripts/daytona_snapshot.py create \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 
 uv run python scripts/daytona_snapshot.py check \
-  --profile session --name fleet-rlm-python313-v11
+  --profile session --name fleet-rlm-python313-v12
 uv run python scripts/daytona_snapshot.py check \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
@@ -91,14 +94,16 @@ After creation, verify each image in a disposable no-Volume Sandbox:
 
 ```bash
 uv run python scripts/daytona_snapshot.py verify-runtime \
-  --profile session --name fleet-rlm-python313-v11
+  --profile session --name fleet-rlm-python313-v12
 uv run python scripts/daytona_snapshot.py verify-runtime \
   --profile semantic-child --name fleet-rlm-python313-child-v5
 ```
 
 The probe verifies the baked manifest, each declared package's import and exact
 version, Python version, non-root user, working
-directory, and `git` toolchain, then deletes the disposable Sandbox and checks
+directory, and `git` toolchain. The new Session image also verifies the native driver,
+matched core Skill, Run-owned Chromium/CDP, an interactive local fixture, and
+confirmed browser process cleanup. The probe then deletes the disposable Sandbox and checks
 that the identity is gone. This is separate from the Fleet doctor: the doctor
 also checks configured Volume/database/LLM readiness and can stop at an earlier
 prerequisite.
@@ -141,3 +146,34 @@ does not copy a Python namespace or a full Session into a child. Roll back by
 restoring the preceding immutable value in `.env` and restarting the owning
 composition after active Runs drain. Do not delete the prior snapshot while a
 binding, warm pool, or rollback procedure can still reference it.
+
+## SDK context execution and the next Root image
+
+New declarations (for example `fleet-rlm-python313-v13`) use SDK requirements
+files and build-context file copying. Root's analysis baseline is NumPy, pandas,
+and BeautifulSoup. Playwright is pinned in a separate browser requirements file;
+browser installation and agent-browser remain explicit image steps. Published
+Session names through `v12` and SemanticChild names through `child-v5` retain
+their historical declarations. This change does not select or promote a snapshot.
+Historical dependency pins are fixed independently of the active requirements
+files; regression fingerprints protect their Dockerfiles and baked manifests.
+
+Each RLM invocation creates a fresh SDK Python context. Variables persist between
+actions in that invocation; shutdown deletes the context. Host tools still use
+Fleet's authenticated broker and authority checks. SDK callbacks supply execution
+output; the broker has no Python execution or stdout/stderr streaming endpoint.
+Each action caps ordinary stdout and stderr inside the Sandbox at 65,536
+characters per stream and reports truncation while continuing execution.
+The final submission is preserved separately. Host transport limits fence
+unexpected excess without replaying the action. Application storage uses the
+asynchronous SDK bridge; synchronous clients belong only to interpreter workers.
+
+Additional task packages installed in Root's local filesystem survive stop/start,
+but disappear when the Sandbox is deleted or replaced. They are not durable
+Workspace dependencies. Workspace files use the existing Volume subpaths;
+Volumes remain nontransactional and Fleet still coordinates writes and Commit.
+
+Run the snapshot `plan`, `create`, `check`, and `verify-runtime` commands with a
+fresh name before changing the configured reference. SDK context checks do not
+establish that sandboxed Chromium launches successfully; browser promotion still
+requires its separate runtime probe.

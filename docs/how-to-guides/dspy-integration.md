@@ -3,7 +3,7 @@
 Fleet executes primary Turns through one compatible native `dspy.RLM` per Run.
 A healthy Root Sandbox may be reused across sequential successful Turns; DSPy's
 private `REPLHistory`, Python namespace, and Turn capabilities are fresh for every invocation. The
-Sandbox adapter executes generated Python in a Turn-scoped broker with serializable
+Sandbox adapter executes generated Python in a Turn-scoped SDK context with serializable
 variable bindings. The broker dispatches authorized Fleet tools and
 DSPy's native semantic tools to the host through Daytona's authenticated preview
 connection. Host callables and preview credentials stay on the host. The same
@@ -16,8 +16,8 @@ separate validation gates.
 
 ## Execution contract
 
-- The broker keeps variables, imports, and functions across actions within one
-  Turn. Each later Turn starts a fresh broker namespace, even when it reuses
+- The SDK context keeps variables, imports, and functions across actions within one
+  Turn. Each later Turn starts a fresh SDK namespace, even when it reuses
   the healthy Root Sandbox. Session Workspace files under `/workspace` remain
   durable across Turns and Sandbox replacement.
 - Every Turn receives the complete committed `dspy.History` for its claimed
@@ -25,7 +25,7 @@ separate validation gates.
   records; hidden reasoning, Tool output, and failed Turns are excluded.
 - `rlm_query(task=task, inputs=inputs, context="")` and Root-only
   `rlm_query_batched(tasks=tasks)`
-  are recursive primitives exposed when the selected policy enables recursion.
+  are always available on the Root and bounded to depth one.
   Root code selects bounded authorized relative file or directory references;
   the host copies their checked contents into child-private scratch. The
   parent retains authority over public output and final `SUBMIT`.
@@ -315,26 +315,23 @@ the child lane for sub-problems that need iterative, code-executing, file-touchi
 lifecycles in isolation, and use recursive batching only when every independent
 subproblem individually justifies a child RLM.
 
-## Daytona broker polling and cell overhead
+## Daytona SDK execution and tool dispatch
 
-The host-side Daytona broker uses a pooled `httpx.Client`, one broker-owned
-callback executor per runtime, and bounded long-polling on `/pending` and
-streamed `/output`. A useful cell-level trace breakdown is emitted on the
-`sandbox.execute` span: `poll_latency_ms`, `pending_wait_requested_ms`,
-`pending_wait_elapsed_ms`, `output_poll_latency_ms`,
-`output_wait_requested_ms`, `output_wait_elapsed_ms`,
-`callback_dispatch_ms`, `tool_execution_ms`, `result_post_ms`, and
-`execution_wall_ms`. Requested wait and observed server-side condition wait are
-reported separately so a preview-proxy delay is not mistaken for broker idle
-time. The output path exits as soon as the broker marks a cell complete and
-performs one final release read instead of a fixed post-completion drain.
+The official synchronous SDK owns worker execution and WebSocket output capture.
+The broker uses a pooled `httpx.Client` to dispatch leased tool requests through
+`/pending` and post their results. Python globals belong to the SDK context.
+The `sandbox.execute` span reports `ensure_bindings_ms` and `execute_ms` for
+setup and action execution.
 
-These measurements are local instrumentation and do not imply a live Daytona
-SLO. Run the co-located broker tests for deterministic protocol coverage.
-Provider lifecycle claims require a bounded live Daytona verification; the
-retired lifecycle benchmark is not available to establish a new latency gate.
-The current architecture already pre-warms and reuses the resident Root
-Sandbox; recursive children remain isolated under the shipped policy.
+Each action caps ordinary stdout and stderr at 65,536 characters per stream,
+emits one truncation notice, and continues execution. The trusted wrapper emits
+validated final submissions after restoring the streams. A host transport
+ceiling fences unexpected excess, taints the Root, and prevents action replay
+or reuse until execution containment is confirmed.
+
+These measurements do not imply a live Daytona SLO. The broker and pinned SDK
+WebSocket tests provide credential-free protocol coverage; provider lifecycle
+claims require separately authorized live verification.
 
 ## Typed startup inputs
 
