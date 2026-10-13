@@ -1,6 +1,6 @@
 """Public Daytona runtime facade and client-construction contracts.
 
-This suite covers runtime lifecycle contracts and Daytona 0.220.0 client
+This suite covers runtime lifecycle contracts and Daytona 0.224.0 client
 construction against the pinned SDK.
 """
 
@@ -1324,7 +1324,7 @@ async def test_build_daytona_client_uses_explicit_api_url_without_deprecation(
         client = build_daytona_client(settings)
 
     try:
-        assert version("daytona") == "0.220.0"
+        assert version("daytona") == "0.224.0"
         assert client._api_url == "https://app.daytona.io/api"
         assert client._api_client.default_headers["X-Daytona-Organization-ID"] == "test-org"
         assert not any("server_url" in str(item.message) for item in caught)
