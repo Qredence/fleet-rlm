@@ -264,11 +264,12 @@ class SessionView:
     workspace_memory_digest: str = ""
     active_task_summary: str = ""
     # Canonical committed Session conversation materialized from the
-    # claimed checkpoint. Defaults to an empty ``dspy.History`` so
-    # ``dspy.RLM._validate_inputs`` always sees a real instance for the
-    # Signature-declared ``history`` input. The production Turn-input
-    # assembly path (``fleet_rlm.sessions.history.dspy_history_for_claim``)
-    # overrides this default with the checkpoint materialization.
+    # claimed checkpoint. ``dspy.RLM._validate_inputs`` only checks that the
+    # Signature-declared ``history`` key is present, not its type; the empty
+    # ``dspy.History`` default keeps the value well-formed for the action
+    # prompt. The production Turn-input assembly path
+    # (``fleet_rlm.sessions.history.dspy_history_for_claim``) overrides this
+    # default with the checkpoint materialization.
     history: dspy.History | CommittedSessionHistory = field(default_factory=lambda: dspy.History(messages=[]))
 
 
@@ -626,6 +627,13 @@ async def _run_in_worker(
     Returns:
         The result produced by the RLM operation.
     """
+    # Why a private loop on a worker thread: DSPy 3.4.0 ``RLM.aforward`` awaits
+    # the LM but runs ``CodeInterpreter.execute`` synchronously, and that call
+    # blocks while sandbox host Tools, child leases, and result persistence are
+    # scheduled back onto the application loop (``AsyncToolBridge`` and
+    # ``run_coroutine_threadsafe``). Running the Turn on the application loop
+    # would block it and deadlock those callbacks. ``dspy.asyncify`` would keep
+    # the thread hop but lose the per-Run single-thread executor affinity.
     call = partial(_run_private_event_loop, rlm, context, kwargs, execute)
     if executor is None:
         return await asyncio.to_thread(call)
