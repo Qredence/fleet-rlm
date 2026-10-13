@@ -3,7 +3,8 @@
 Fleet's routing and prompt optimization code lives in
 `src/fleet_rlm/optimization/`; the maintained Turn path and its policy remain
 the sources of truth. Benchmark, campaign, dataset, judge, and certification
-runners and their archived guides have been retired; current supported behavior
+runners and their archived guides have been retired; the isolated Skill-selection
+study below is an opt-in experiment. Current supported behavior
 is documented below.
 
 ## Runtime routing and optimization
@@ -61,3 +62,50 @@ quality certification or a substitute for an explicitly designed evaluation.
 Historical benchmark and campaign receipts retain their original scope and
 revision. They do not describe current runner availability or current
 production certification.
+
+## Isolated Skill-selection comparison
+
+`uv run python scripts/evaluate_skill_selection.py --plan` validates the 36-case
+public synthetic fixture without reading credentials or calling providers.
+Eighteen task families calibrate decisions and eighteen separate families are
+held out. Fixtures are reviewed examples, not observed user traces or proof of
+production quality.
+
+With explicit operator authorization, install the optional evaluation dependencies
+with `uv sync --extra optimize --dev`, ensure Deno is on PATH, and run:
+
+```bash
+uv run python scripts/evaluate_skill_selection.py --run
+```
+
+The script reads the existing host `TYPESAFE_API_KEY` and configured Root model
+credentials. DSPy's certified 3.4.0 TypeSafe extra supplies the SDK. No secrets
+enter the isolated interpreter. `--jev-model` defaults to `jev-latest`; record the
+model alias and execution date when interpreting results. Experimental decision
+APIs can change; do not upgrade DSPy outside its certified workflow.
+
+One top-level Noul decision per Skill allows zero or multiple recommendations.
+ReAnchor fits thresholds using calibration examples only. The comparison freezes
+those thresholds and disables inference caches for held-out measurements.
+Both arms use the same native RLM builder and JSON adapter, capped at four
+selection iterations, with alternating arm order. The default DSPy
+PythonInterpreter provides an isolated selection environment: it loads guidance
+only and does not browse, execute resource scripts, or carry out fixture tasks.
+
+Baseline Root discovery is compared with an optional `recommend_skills` tool.
+The host filters already-loaded and forbidden candidates, caps recommendations
+to remaining loading slots, and breaks probability ties in catalog order. Root
+still decides whether to call `load_skill`. Explicit selections bypass prediction;
+failed advice returns a safe unavailable result and leaves the normal loader usable.
+
+Reports are written to a new path under `.fleet_rlm/evaluation/skill-selection/`.
+They include fixture identity, catalog versions, frozen thresholds, per-case
+selection results, failures, model invocation counts, reported usage, and latency.
+Missing provider costs are never estimated. Counts are managed DSPy invocations,
+not a claim about SDK retries or billed HTTP requests. Reports never overwrite
+existing evidence.
+
+The summary recommends retaining Root selection or considering a separately
+authorized end-to-end trial. An improvement in this small selection-only dataset
+does not establish faster or better complete Turns and never promotes a runtime
+policy. This experiment adds no production selector, endpoint, or setting.

@@ -1,0 +1,768 @@
+[
+  {
+    "id": "calibration-integer-addition",
+    "family": "integer-addition",
+    "split": "calibration",
+    "request": "Compute 12 + 19 using Python and return the integer.",
+    "required": [],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-short-letter",
+    "family": "short-letter",
+    "split": "calibration",
+    "request": "Rewrite this sentence politely: Please send the receipt.",
+    "required": [],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-csv-distribution",
+    "family": "csv-distribution",
+    "split": "calibration",
+    "request": "An attached sales CSV is available. Compute summary statistics and qualified outliers.",
+    "required": [
+      "data-analysis"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-supplied-measurements",
+    "family": "supplied-measurements",
+    "split": "calibration",
+    "request": "Compute and independently verify the mean and variance of the supplied 50 measurements.",
+    "required": [
+      "data-analysis"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-rlm-design",
+    "family": "rlm-design",
+    "split": "calibration",
+    "request": "Explain how dspy.RLM uses its Python interpreter and SUBMIT contract.",
+    "required": [
+      "dspy-rlm"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-dspy-retrieval-distinction",
+    "family": "dspy-retrieval-distinction",
+    "split": "calibration",
+    "request": "Compare dspy.RLM with dspy.Retrieve; explain their different contracts.",
+    "required": [
+      "dspy-rlm"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-large-transcript",
+    "family": "large-transcript",
+    "split": "calibration",
+    "request": "A 300-page interview transcript is attached. Find every mention of hiring and cite positions.",
+    "required": [
+      "long-context"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-contract-partitions",
+    "family": "contract-partitions",
+    "split": "calibration",
+    "request": "An attached 2 MB contract requires exhaustive extraction of all termination conditions.",
+    "required": [
+      "long-context"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "calibration-workspace-edit",
+    "family": "workspace-edit",
+    "split": "calibration",
+    "request": "Read workspace notes.txt and append the verified correction through the Workspace tools.",
+    "required": [
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "read_workspace_text",
+      "append_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-project-tree",
+    "family": "project-tree",
+    "split": "calibration",
+    "request": "Find README files within the advertised Project and inspect the relevant one.",
+    "required": [
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "list_project_files",
+      "read_project_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-artifact-report",
+    "family": "artifact-report",
+    "split": "calibration",
+    "request": "Create and verify a Markdown Artifact from the supplied verified findings.",
+    "required": [
+      "report-builder"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "create_artifact"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-report-readback",
+    "family": "report-readback",
+    "split": "calibration",
+    "request": "Write an executive report from the supplied evidence, save it, and read it back for verification.",
+    "required": [
+      "report-builder",
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "write_workspace_text",
+      "read_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-discover-release",
+    "family": "discover-release",
+    "split": "calibration",
+    "request": "Find official public sources about a software release using web search.",
+    "required": [
+      "web-research"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "web_search"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-accordion-expand",
+    "family": "accordion-expand",
+    "split": "calibration",
+    "request": "Open the supplied public URL, expand its JavaScript accordion, and save revealed evidence.",
+    "required": [
+      "web-research"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "open_browser"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-large-web-documents",
+    "family": "large-web-documents",
+    "split": "calibration",
+    "request": "Find official sources and compare every exception in their very long documents.",
+    "required": [
+      "web-research",
+      "long-context"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "web_search"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-statistics-report",
+    "family": "statistics-report",
+    "split": "calibration",
+    "request": "Analyze the supplied financial CSV and publish a verified report with computed metrics.",
+    "required": [
+      "data-analysis",
+      "report-builder"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "create_artifact"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "calibration-pinned-workspace",
+    "family": "pinned-workspace",
+    "split": "calibration",
+    "request": "Use the explicitly selected Workspace Skill to read notes.txt.",
+    "required": [
+      "workspace-files"
+    ],
+    "allowed": [
+      "workspace-files"
+    ],
+    "loaded": [
+      "workspace-files"
+    ],
+    "available_tools": [
+      "read_workspace_text"
+    ],
+    "explicit": true
+  },
+  {
+    "id": "calibration-full-capacity",
+    "family": "full-capacity",
+    "split": "calibration",
+    "request": "Four Skills are already loaded. Analyze the attached long CSV, then save and verify a report.",
+    "required": [
+      "data-analysis",
+      "long-context",
+      "report-builder",
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [
+      "data-analysis",
+      "long-context",
+      "report-builder",
+      "workspace-files"
+    ],
+    "available_tools": [
+      "write_workspace_text",
+      "read_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-multiply",
+    "family": "multiply",
+    "split": "heldout",
+    "request": "Compute 14 * 27 deterministically and return the answer.",
+    "required": [],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-misleading-keywords",
+    "family": "misleading-keywords",
+    "split": "heldout",
+    "request": "Write one playful sentence containing browser, report, CSV, and workspace. Do not research or create files.",
+    "required": [],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-time-series",
+    "family": "time-series",
+    "split": "heldout",
+    "request": "The supplied 180-row temperature series needs a verified trend analysis and qualified anomalies.",
+    "required": [
+      "data-analysis"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-missing-dataset",
+    "family": "missing-dataset",
+    "split": "heldout",
+    "request": "Analyze my spreadsheet. No spreadsheet, attachment, URL, or Workspace file has been supplied. State the missing input.",
+    "required": [],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-dspy-submission-debug",
+    "family": "dspy-submission-debug",
+    "split": "heldout",
+    "request": "Explain why a dspy.RLM action must use named SUBMIT output fields instead of returning a string.",
+    "required": [
+      "dspy-rlm"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-large-code-review",
+    "family": "large-code-review",
+    "split": "heldout",
+    "request": "An attached source archive has 200 files. Find all implementations of retry behavior and cite exact locations.",
+    "required": [
+      "long-context"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-workspace-reuse",
+    "family": "workspace-reuse",
+    "split": "heldout",
+    "request": "Read the advertised Session Workspace draft and replace one incorrect paragraph.",
+    "required": [
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "read_workspace_text",
+      "edit_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-large-workspace-log",
+    "family": "large-workspace-log",
+    "split": "heldout",
+    "request": "Read the advertised 5 MB Workspace log in bounded pages and exhaustively collect all outage windows.",
+    "required": [
+      "long-context",
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "read_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-evidence-brief",
+    "family": "evidence-brief",
+    "split": "heldout",
+    "request": "Publish a checked briefing Artifact from these already verified supplied facts.",
+    "required": [
+      "report-builder"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "create_artifact"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-http-only-docs",
+    "family": "http-only-docs",
+    "split": "heldout",
+    "request": "Read the supplied public documentation URL and retain cited source text. Search and browser tools are unavailable.",
+    "required": [
+      "web-research"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-missing-interactive-browser",
+    "family": "missing-interactive-browser",
+    "split": "heldout",
+    "request": "Discover the official accordion example and report whether it can be expanded. web_search exists but open_browser is absent; report any limitation.",
+    "required": [
+      "web-research"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "web_search"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-research-report",
+    "family": "research-report",
+    "split": "heldout",
+    "request": "Find official sources for the requested public comparison, then produce a verified report Artifact.",
+    "required": [
+      "web-research",
+      "report-builder"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "web_search",
+      "create_artifact"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-persist-computed-findings",
+    "family": "persist-computed-findings",
+    "split": "heldout",
+    "request": "Compute independently checked statistics from the supplied data and append them to Workspace findings.txt.",
+    "required": [
+      "data-analysis",
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "append_workspace_text"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-long-document-report",
+    "family": "long-document-report",
+    "split": "heldout",
+    "request": "Analyze the attached long procurement document and create a verified report Artifact covering all risks.",
+    "required": [
+      "long-context",
+      "report-builder"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [
+      "create_artifact"
+    ],
+    "explicit": false
+  },
+  {
+    "id": "heldout-explicit-public-reader",
+    "family": "explicit-public-reader",
+    "split": "heldout",
+    "request": "Only web-research is explicitly selected. Read the supplied public article.",
+    "required": [
+      "web-research"
+    ],
+    "allowed": [
+      "web-research"
+    ],
+    "loaded": [
+      "web-research"
+    ],
+    "available_tools": [],
+    "explicit": true
+  },
+  {
+    "id": "heldout-restricted-discovery",
+    "family": "restricted-discovery",
+    "split": "heldout",
+    "request": "Compare current software prices. Only workspace-files is permitted and no relevant files are supplied. State the unavailable research capability.",
+    "required": [],
+    "allowed": [
+      "workspace-files"
+    ],
+    "loaded": [],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-research-followup",
+    "family": "research-followup",
+    "split": "heldout",
+    "request": "web-research is already loaded and source text has been saved. Exhaustively analyze that 2 MB captured text for every exception.",
+    "required": [
+      "web-research",
+      "long-context"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [
+      "web-research"
+    ],
+    "available_tools": [],
+    "explicit": false
+  },
+  {
+    "id": "heldout-capacity-exhausted",
+    "family": "capacity-exhausted",
+    "split": "heldout",
+    "request": "The four loaded Skills cover the task: explain dspy.RLM from the large attached notes and publish the verified findings to Workspace.",
+    "required": [
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "workspace-files"
+    ],
+    "allowed": [
+      "data-analysis",
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "web-research",
+      "workspace-files"
+    ],
+    "loaded": [
+      "dspy-rlm",
+      "long-context",
+      "report-builder",
+      "workspace-files"
+    ],
+    "available_tools": [
+      "write_workspace_text",
+      "create_artifact"
+    ],
+    "explicit": false
+  }
+]
