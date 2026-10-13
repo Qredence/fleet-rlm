@@ -71,6 +71,8 @@ export interface TextEvent {
   type: "text";
   streamId: string;
   textDelta: string;
+  /** Full committed text replaces accumulated deltas when present. */
+  textSnapshot?: string | undefined;
   final: boolean;
   role?: "user" | "assistant" | undefined;
   messageId?: string | undefined;
@@ -238,6 +240,7 @@ export function serializeCanonicalEvent(event: CanonicalEvent): Record<string, u
     checkpointVersion: "checkpoint_version",
     streamId: "stream_id",
     textDelta: "text_delta",
+    textSnapshot: "text_snapshot",
     codeDelta: "code_delta",
     outputDelta: "output_delta",
     isDelta: "is_delta",

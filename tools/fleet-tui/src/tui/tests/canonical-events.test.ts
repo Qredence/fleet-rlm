@@ -46,6 +46,66 @@ const scenarios = readdirSync(FIXTURE_DIR)
   .sort();
 
 describe("terminal text snapshots", () => {
+  it.each([false, true])(
+    "final snapshot replaces partial text with structured result=%s",
+    (structured) => {
+      const live = new LiveTurnProjector(clock);
+      const chunks = [
+        { type: "turn_start", runId: "run" },
+        { type: "text", streamId: "text", delta: "Hel", final: false },
+        ...(structured
+          ? [
+              {
+                type: "structured_result",
+                schemaId: "result",
+                schemaVersion: "1",
+                value: { answer: 42 },
+              },
+            ]
+          : []),
+        { type: "text", streamId: "text", delta: "", text: "Hello", final: true },
+        { type: "turn_finish", finishReason: "stop" },
+      ];
+      const messages = semanticView(
+        chunks.flatMap((chunk) => live.push(chunk as FleetUIMessageChunk)),
+      );
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject(
+        structured
+          ? { kind: "result", narrative: "Hello" }
+          : { kind: "text", text: "Hello", streaming: false },
+      );
+    },
+  );
+
+  it("displays a final-only snapshot", () => {
+    const live = new LiveTurnProjector(clock);
+    live.push({ type: "turn_start", runId: "run" } as FleetUIMessageChunk);
+    expect(
+      semanticView(
+        live.push({ type: "text", delta: "", text: "Hello", final: true } as FleetUIMessageChunk),
+      ),
+    ).toMatchObject([{ kind: "text", text: "Hello", streaming: false }]);
+  });
+
+  it("keeps answers from consecutive live Turns", () => {
+    const events: StoreEvent[] = [];
+    for (const runId of ["first", "second"]) {
+      const live = new LiveTurnProjector(clock);
+      events.push(...live.push({ type: "turn_start", runId } as FleetUIMessageChunk));
+      events.push(
+        ...live.push({ type: "text", delta: runId, final: false } as FleetUIMessageChunk),
+      );
+      events.push(
+        ...live.push({ type: "text", delta: "", text: runId, final: true } as FleetUIMessageChunk),
+      );
+    }
+    expect(semanticView(events)).toMatchObject([
+      { kind: "text", text: "first" },
+      { kind: "text", text: "second" },
+    ]);
+  });
+
   it.each([false, true])("live and reload agree with structured result=%s", (structured) => {
     const live = new LiveTurnProjector(clock);
     const chunks = [
@@ -89,7 +149,7 @@ describe("terminal text snapshots", () => {
     expect(semanticView(events)).toEqual(semanticView(durable));
   });
 
-  it("preserves an explicit empty delta and still accepts text-only chunks", () => {
+  it("preserves end markers separately from full text snapshots", () => {
     expect(
       adaptLiveChunk({
         type: "text",
@@ -97,7 +157,10 @@ describe("terminal text snapshots", () => {
         text: "Hello",
         final: true,
       } as FleetUIMessageChunk)[0],
-    ).toMatchObject({ textDelta: "", final: true });
+    ).toMatchObject({ textDelta: "", textSnapshot: "Hello", final: true });
+    expect(
+      adaptLiveChunk({ type: "text", delta: "", final: true } as FleetUIMessageChunk)[0],
+    ).toEqual({ type: "text", streamId: "text", textDelta: "", final: true, role: "assistant" });
     expect(adaptLiveChunk({ type: "text", text: "Hello" } as FleetUIMessageChunk)[0]).toMatchObject(
       { textDelta: "Hello" },
     );

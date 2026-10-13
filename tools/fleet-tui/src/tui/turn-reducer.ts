@@ -117,21 +117,22 @@ export class TurnEventReducer {
       }
       case "text": {
         if (this.resultId) {
-          if (event.textDelta.length === 0) return [];
+          if (event.textDelta.length === 0 && event.textSnapshot === undefined) return [];
           const prior = this.messages.get(this.resultId);
           if (prior?.kind !== "result") return [];
           return this.save({
             ...prior,
             narrative: normalizedNarrative(
-              `${prior.narrative ?? ""}${event.textDelta}`,
+              event.textSnapshot ?? `${prior.narrative ?? ""}${event.textDelta}`,
               prior.value,
             ),
           });
         }
-        const id = event.messageId ?? event.streamId;
+        const id = event.messageId ?? `${this.runId}:text:${event.streamId}`;
         const prior = this.messages.get(id);
-        const value = (prior?.kind === "text" ? prior.text : "") + event.textDelta;
-        if (event.textDelta.length === 0 && !prior) return [];
+        const value =
+          event.textSnapshot ?? (prior?.kind === "text" ? prior.text : "") + event.textDelta;
+        if (event.textDelta.length === 0 && event.textSnapshot === undefined && !prior) return [];
         this.textId = id;
         return this.save(
           text(id, event.role ?? "assistant", value, !event.final, this.clock, this.runId),

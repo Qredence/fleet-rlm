@@ -113,6 +113,9 @@ export function adaptLiveChunk(chunk: FleetUIMessageChunk): CanonicalEvent[] {
           type: "text",
           streamId: str(rec.streamId) ?? str(rec.stream_id) ?? "text",
           textDelta: typeof rec.delta === "string" ? rec.delta : (str(rec.text) ?? ""),
+          ...(rec.final === true && typeof rec.text === "string" && rec.text.length > 0
+            ? { textSnapshot: rec.text }
+            : {}),
           final: rec.final === true,
           role: "assistant",
         },

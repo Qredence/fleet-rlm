@@ -886,7 +886,7 @@ describe("terminal projection", () => {
 
     expect(messages).toMatchObject([
       {
-        id: "text-1",
+        id: "run-1:text:text-1",
         kind: "result",
         value: 7,
         narrative: "Explanation",
