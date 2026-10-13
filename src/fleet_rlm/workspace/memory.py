@@ -581,9 +581,6 @@ class WorkspaceMemory:
         scored, _ = search_workspace_memory_entries(self, normalized_query=norm_q, category=category)
         return tuple(item.entry for item in scored[:limit])
 
-    def read_recent(self, *, limit: int = 50) -> tuple[WorkspaceMemoryEntry, ...]:
-        return self.list_entries(limit=limit).entries
-
     def read_injection_digest(self, *, request: str = "") -> str:
         ranked: tuple[_ScoredMemoryEntry, ...] = ()
         try:
@@ -1137,13 +1134,6 @@ class WorkspaceMemoryToolHost:
             """Persist one user-requested learning or preference in Workspace Memory."""
             return self._remember(key_learning, category)
 
-        def update_workspace_memory(
-            key_learning: str,
-            category: str = "General",
-        ) -> dict[str, object]:
-            """Persist one user-requested learning or preference in Workspace Memory."""
-            return self._remember(key_learning, category)
-
         def list_memories(
             after: str | None = None,
             limit: int = _LIST_MEMORIES_DEFAULT_LIMIT,
@@ -1256,18 +1246,6 @@ class WorkspaceMemoryToolHost:
                 desc=(
                     "Record one durable Workspace Memory learning or preference only when the user explicitly "
                     "requests that it be remembered; returns the new entry's id for later edit or forget."
-                ),
-                args={
-                    "key_learning": {"type": "string"},
-                    "category": {"type": "string"},
-                },
-            ),
-            dspy.Tool(
-                update_workspace_memory,
-                name="update_workspace_memory",
-                desc=(
-                    "Legacy alias of remember: record one durable Workspace Memory learning or preference only "
-                    "when the user explicitly requests that it be remembered."
                 ),
                 args={
                     "key_learning": {"type": "string"},
@@ -1438,9 +1416,6 @@ class WorkspaceMemoryToolHost:
             {
                 "read_workspace_memory": ToolEventView(output_projection=lambda res: _output(res, read_fields)),
                 "remember": ToolEventView(
-                    input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
-                ),
-                "update_workspace_memory": ToolEventView(
                     input_projection=remember_input, output_projection=lambda res: _output(res, rem_fields)
                 ),
                 "list_memories": ToolEventView(

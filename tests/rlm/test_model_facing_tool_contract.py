@@ -50,7 +50,6 @@ _EXPECTED_CATEGORIES = {
     "workspace_memory": {
         "read_workspace_memory",
         "remember",
-        "update_workspace_memory",
         "list_memories",
         "search_memories",
         "edit_memory",

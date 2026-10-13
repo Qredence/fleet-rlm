@@ -59,7 +59,7 @@ separate validation gates.
   bounded, tolerant <= 4 KiB relevant+recent `workspace_memory tail` digest
   inside `session_context` (composed per Turn request, never query-stale
   cached).
-- `remember` (or its back-compat alias `update_workspace_memory`) appends one
+- `remember` appends one
   complete provenance-aware v3 record (`<!-- id:8hex -->`), limited to 4 KiB of
   formatted UTF-8, only when the user explicitly requests memory. Repeating
   the same record is idempotent. A completed append is immediately durable

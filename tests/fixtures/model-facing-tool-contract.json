@@ -2597,52 +2597,6 @@
       }
     },
     {
-      "name": "update_workspace_memory",
-      "category": "workspace_memory",
-      "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost",
-      "description": "Legacy alias of remember: record one durable Workspace Memory learning or preference only when the user explicitly requests that it be remembered.",
-      "argument_schema": {
-        "type": "object",
-        "properties": {
-          "category": {
-            "type": "string"
-          },
-          "key_learning": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "category",
-          "key_learning"
-        ],
-        "additionalProperties": false
-      },
-      "result_schema": {
-        "$ref": "#/$defs/memory_write"
-      },
-      "availability_policy": "Available only in the Daytona Workspace Memory capability; it is omitted from the deterministic private composition.",
-      "authorization_policy": "Host binds the current Workspace Memory store; the generic observed-tool Run-authority fence fails closed after revocation.",
-      "event_projection_policy": {
-        "mode": "bounded_allowlist",
-        "input": [
-          "category",
-          "key_learning_bytes"
-        ],
-        "output": [
-          "ok",
-          "namespace",
-          "memory_id",
-          "category",
-          "entry_bytes",
-          "total_bytes"
-        ],
-        "omits": [
-          "key_learning"
-        ],
-        "source": "src/fleet_rlm/workspace/memory.py:WorkspaceMemoryToolHost.event_views"
-      }
-    },
-    {
       "name": "write_project_text",
       "category": "project",
       "source": "src/fleet_rlm/workspace/projects.py:ProjectToolHost",

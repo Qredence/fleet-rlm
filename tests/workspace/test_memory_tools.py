@@ -241,7 +241,7 @@ def test_event_views_expose_only_memory_metadata() -> None:
     observed: list[object] = []
 
     read = observe_tool(tools["read_workspace_memory"], observed.append, views["read_workspace_memory"])
-    update = observe_tool(tools["update_workspace_memory"], observed.append, views["update_workspace_memory"])
+    update = observe_tool(tools["remember"], observed.append, views["remember"])
     read()
     update(key_learning=secret, category="Preference")
 
@@ -272,9 +272,9 @@ def test_event_views_expose_only_memory_metadata() -> None:
     observed.clear()
     failed_host = _host(FakeMemoryStore(failure=WorkspaceMemoryStoreUnavailableError("provider details")))
     failed_update = observe_tool(
-        _tools(failed_host)["update_workspace_memory"],
+        _tools(failed_host)["remember"],
         observed.append,
-        failed_host.event_views()["update_workspace_memory"],
+        failed_host.event_views()["remember"],
     )
     with pytest.raises(MemoryToolError):
         failed_update(key_learning="private learning", category="Preference")

@@ -1389,7 +1389,6 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
         "search_memories",
         "stat_project_file",
         "stat_workspace_file",
-        "update_workspace_memory",
         "write_project_text",
         "write_workspace_text",
     }
@@ -1405,7 +1404,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     }
     learning = "Prefer concise release notes."
     updated = await asyncio.to_thread(
-        tools["update_workspace_memory"],
+        tools["remember"],
         key_learning=learning,
         category="Preference",
     )
@@ -1416,7 +1415,7 @@ async def test_live_preparation_stages_attachment_and_cleans_it(
     assert f"<!-- id:{memory_id} source:user_explicit" in recalled["content"] and learning in recalled["content"]
     assert recalled["skipped_malformed_records"] == 0
     memory_views = prepared.execution.capabilities.spec.tool_event_views
-    update_input = memory_views["update_workspace_memory"].input({"key_learning": learning, "category": "Preference"})
+    update_input = memory_views["remember"].input({"key_learning": learning, "category": "Preference"})
     read_output = memory_views["read_workspace_memory"].output(recalled)
     assert update_input == {"category": "Preference", "key_learning_bytes": len(learning)}
     assert "key_learning" not in update_input

@@ -247,7 +247,7 @@ class WorkspaceFlowFactory:
                         "remember_failed": "Failed-turn memory remains durable.",
                         "remember_cancelled": "Cancelled-turn memory remains durable.",
                     }[request]
-                    result = tools["update_workspace_memory"](
+                    result = tools["remember"](
                         key_learning=learning,
                         category="Preference",
                     )
@@ -436,7 +436,7 @@ async def test_workspace_memory_is_shared_across_sessions_without_exposing_its_b
     memory_details = [
         event.detail
         for event in events
-        if getattr(event.detail, "tool_name", None) in {"read_workspace_memory", "update_workspace_memory"}
+        if getattr(event.detail, "tool_name", None) in {"read_workspace_memory", "remember"}
     ]
     assert {detail.kind for detail in memory_details} == {"tool.started", "tool.completed"}
     assert "Keep release notes concise." not in repr(memory_details)
@@ -487,8 +487,7 @@ async def test_successful_memory_append_survives_failed_or_cancelled_turn(
 
     assert outcome is not None and outcome.terminal_status == terminal
     assert any(
-        event.kind == "tool.completed" and getattr(event.detail, "tool_name", None) == "update_workspace_memory"
-        for event in events
+        event.kind == "tool.completed" and getattr(event.detail, "tool_name", None) == "remember" for event in events
     )
     assert recalled is not None and recalled.prediction is not None
     assert learning in recalled.prediction.answer
