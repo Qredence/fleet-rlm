@@ -1666,3 +1666,19 @@ async def test_provider_probe_reports_native_extraction_fallback_for_forced_fina
 
     assert result.iterations == 3
     assert result.termination_mode == "native_extraction_fallback"
+
+
+@pytest.mark.parametrize(
+    ("completion", "empty"),
+    [("", True), ("not json at all", False), ('{"reasoning": "r"}', False)],
+)
+def test_stock_adapter_parse_errors_classify_empty_responses(completion: str, empty: bool) -> None:
+    """Pin the stock DSPy empty-response text that Fleet's repair feedback keys on."""
+    from dspy.utils.exceptions import AdapterParseError
+
+    from fleet_rlm.rlm.adapter import _is_empty_adapter_parse
+
+    with pytest.raises(AdapterParseError) as raised, dspy.context(lm=_ScriptedLM([completion])):
+        dspy.JSONAdapter()(dspy.settings.lm, {}, _IterationActionSignature, [], {"iteration": "1/5"})
+
+    assert _is_empty_adapter_parse(raised.value) is empty

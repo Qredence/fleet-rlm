@@ -7,11 +7,12 @@ Provider retries remain owned by stock DSPy LMs.
 from __future__ import annotations
 
 from collections.abc import Generator, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import dspy
 from dspy import BaseLM, Signature
-from dspy.utils.exceptions import AdapterParseError, LMTimeoutError
+from dspy.utils.exceptions import AdapterParseError
 
 from fleet_rlm.rlm.budget import DEFAULT_PARSE_RETRIES, AdapterBudget, FinalizationExhausted, TurnBudget
 from fleet_rlm.rlm.submit_validation import is_finalization_action
@@ -19,7 +20,11 @@ from fleet_rlm.rlm.submit_validation import is_finalization_action
 RETRY_CORRECTION_FIELD = "fleet_retry_correction"
 BUDGET_DIRECTIVE_FIELD = "fleet_budget_directive"
 WRAP_UP_CORRECTION_FIELD = "fleet_wrap_up_correction"
+# DSPy 3.4.0 raises an attribute-less AdapterParseError for empty provider
+# output (dspy/adapters/base.py); test_native_dspy_contract pins this text.
 _EMPTY_RESPONSE_MARKER = "The LM returned an empty or null response"
+_RepairRequest = tuple[Any, dict[str, Any], type[Signature], dict[str, Any]]
+_RepairMachine = Generator[_RepairRequest, list[dict[str, Any]], list[dict[str, Any]]]
 
 
 def _iteration_parts(inputs: Mapping[str, Any]) -> tuple[int, int] | None:
@@ -129,6 +134,26 @@ def _action_code(response: object) -> object:
     return first.get("code") if isinstance(first, Mapping) else None
 
 
+@dataclass(frozen=True, slots=True)
+class _Finished:
+    """Terminal value returned by the repair machine."""
+
+    value: list[dict[str, Any]]
+
+
+def _advance(machine: _RepairMachine, outcome: list[dict[str, Any]] | AdapterParseError) -> _RepairRequest | _Finished:
+    """Feed one call outcome to the repair machine; return its next request or final result.
+
+    Shared by the sync and async drive loops so both apply identical repair policy.
+    """
+    try:
+        if isinstance(outcome, AdapterParseError):
+            return machine.throw(outcome)
+        return machine.send(outcome)
+    except StopIteration as done:
+        return _Finished(done.value)
+
+
 class FleetJSONAdapter(dspy.JSONAdapter):
     """The pinned JSON action protocol plus a bounded corrective re-ask."""
 
@@ -142,15 +167,6 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         super().__init__()
         self._budget = AdapterBudget(max_parse_retries=max_parse_retries, turn=budget)
         self._root_finalization = root_finalization
-
-    @property
-    def _wrap_up_attempts(self) -> int:
-        return self._budget.finalization_used
-
-    def _lm_for_request(self, lm: Any) -> Any:
-        # The Turn-scoped LM is already an isolated copy owned by this Turn, so
-        # the call view is the LM itself and no per-request wrapper is created.
-        return lm
 
     def _enter_wrap_up(self, *, rejection_reason: str | None = None) -> None:
         self._budget.enter_wrap_up(rejection_reason=rejection_reason)
@@ -219,21 +235,16 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ) -> list[dict[str, Any]]:
         machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
         try:
-            request = next(machine)
-            while True:
-                call_lm, call_kwargs, request_signature, request_inputs = request
+            step: _RepairRequest | _Finished = next(machine)
+            while not isinstance(step, _Finished):
+                call_lm, call_kwargs, request_signature, request_inputs = step
                 try:
                     response = super().__call__(call_lm, call_kwargs, request_signature, demos, request_inputs)
-                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
-                    try:
-                        request = machine.throw(exc)
-                    except StopIteration as done:
-                        return done.value
+                except AdapterParseError as exc:
+                    step = _advance(machine, exc)
                 else:
-                    try:
-                        request = machine.send(response)
-                    except StopIteration as done:
-                        return done.value
+                    step = _advance(machine, response)
+            return step.value
         finally:
             machine.close()
 
@@ -247,21 +258,16 @@ class FleetJSONAdapter(dspy.JSONAdapter):
     ) -> list[dict[str, Any]]:
         machine = self._repair_steps(lm, lm_kwargs, signature, inputs)
         try:
-            request = next(machine)
-            while True:
-                call_lm, call_kwargs, request_signature, request_inputs = request
+            step: _RepairRequest | _Finished = next(machine)
+            while not isinstance(step, _Finished):
+                call_lm, call_kwargs, request_signature, request_inputs = step
                 try:
                     response = await super().acall(call_lm, call_kwargs, request_signature, demos, request_inputs)
-                except (AdapterParseError, LMTimeoutError, TimeoutError) as exc:
-                    try:
-                        request = machine.throw(exc)
-                    except StopIteration as done:
-                        return done.value
+                except AdapterParseError as exc:
+                    step = _advance(machine, exc)
                 else:
-                    try:
-                        request = machine.send(response)
-                    except StopIteration as done:
-                        return done.value
+                    step = _advance(machine, response)
+            return step.value
         finally:
             machine.close()
 
@@ -271,17 +277,12 @@ class FleetJSONAdapter(dspy.JSONAdapter):
         lm_kwargs: dict[str, Any],
         signature: type[Signature],
         inputs: dict[str, Any],
-    ) -> Generator[
-        tuple[Any, dict[str, Any], type[Signature], dict[str, Any]],
-        list[dict[str, Any]],
-        list[dict[str, Any]],
-    ]:
+    ) -> _RepairMachine:
         """Serve one action, applying bounded parse repair and wrap-up correction.
 
         Wrap-up is keyed to the RLM iteration count rather than a wall-clock
         reserve: it begins on the final iteration.
         """
-        lm = self._lm_for_request(lm)
         attempt = 0
         base_signature, base_inputs = signature, dict(inputs)
         wrap_up = False
