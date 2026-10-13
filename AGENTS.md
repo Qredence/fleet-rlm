@@ -2,49 +2,71 @@
 
 Fleet RLM combines a Python FastAPI backend, DSPy reasoning, Daytona execution, and a TypeScript terminal client.
 
-## Project Structure & Module Organization
+Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and module-level detail, and the [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes. Keep file-level detail out of this guide so it does not drift.
 
-- `src/fleet_rlm/` contains backend packages for sessions, turns, persistence, API, reasoning, workspace, and Daytona.
-  - `daytona/` splits concrete ownership: `provider.py` (SDK ops), `leases.py` (admission/cleanup), `children.py`, `host_io.py`, coordinated by `runtime.py`.
-  - `config/catalog.py` owns the field-policy inventory; `rlm/event_types.py` owns Runtime Event dataclasses; `app_preparation.py` prepares claimed Turns.
-- `tests/` groups backend tests by behavior owner; shared fixtures live in `tests/support/`.
-- `tools/fleet-tui/` contains the terminal client and its tests.
-- `config/fleet.toml` owns runtime policy; `migrations/` contains Alembic migrations.
-- `docs/` holds guides and references; `scripts/` contains repository helpers. Runtime skill resources live in `src/fleet_rlm/skills/bundled/`.
+## Layout
 
-Read [ARCHITECTURE.md](ARCHITECTURE.md) for ownership boundaries and [TUI guidance](tools/fleet-tui/AGENTS.md) before client changes. Child RLM tools are always available (bounded to depth one); operators do not toggle recursion in TOML.
+- `src/fleet_rlm/`: backend packages for sessions, turns, persistence, API, reasoning, workspace, and Daytona.
+- `tests/`: grouped by behavior owner; shared fixtures live in `tests/support/`.
+- `tools/fleet-tui/`: terminal client and its tests.
+- `config/fleet.toml`: runtime policy; the field-policy inventory is `src/fleet_rlm/config/catalog.py`.
+- `migrations/`: Alembic migrations. `docs/` and `scripts/`: guides and repository helpers.
+- `src/fleet_rlm/skills/bundled/`: runtime skill resources.
 
-## Build, Test, and Development Commands
+## Invariants
 
-Use Python 3.11–3.13, uv, Node 22.19+, and the TUI’s pinned pnpm version.
+- Child RLM tools are always available, bounded to depth one. Operators do not toggle recursion in TOML.
+- Do not add a cross-layer import to make code compile. `make check-dependency-boundaries` enforces the layers.
+- Fleet never migrates on startup. After schema changes or pulls, apply migrations per the [database reference](docs/reference/database.md), then run `uv run alembic check`.
+- Never hand-edit generated outputs. Regenerate with `make api-sync`, `make stream-sync`, or `make config-reference`. The artifact-to-command table is in [ARCHITECTURE.md](ARCHITECTURE.md#boundaries-and-contracts-for-changes).
 
-- `uv sync --all-extras --dev`: install Python dependencies.
-- From `tools/fleet-tui/`, run `pnpm install --frozen-lockfile`.
+## Commands
+
+Use Python 3.11–3.13, uv, Node 22.19+, and the TUI's pinned pnpm version.
+
+- `uv sync --all-extras --dev`: install Python dependencies. From `tools/fleet-tui/`, run `pnpm install --frozen-lockfile`.
 - `make dev`: start the backend; follow [README.md](README.md) for credentials and database initialization.
 - `make build`: build Python distributions.
-- `make test`: run default non-live backend tests.
-- `make tui-check`: check generated contracts, formatting, lint, types, and client tests.
-- `make check`: run the primary repository quality gate.
-- `make check-docs`: validate documentation links and structure after docs edits.
+- `make test`: default non-live backend tests. `make test-coverage` enforces 75% package-wide coverage.
+- `make tui-check`: generated contracts, formatting, lint, types, and client tests.
+- `make check-codebase-tree` and `make check-dependency-boundaries`: ownership and layering.
+- `make check`: the primary repository quality gate.
 
-## Coding Style & Naming Conventions
+## Validation selection
 
-Python uses four-space indentation, double quotes, and 120-character lines. Use `snake_case` for modules/functions and `PascalCase` for classes. Ruff formats and lints; ty checks types.
+- Docs only: `make check-docs` and `git diff --check`.
+- Backend code: the focused suite first, such as `uv run pytest tests/daytona/test_sandbox_lifecycle.py`, then `make check`.
+- Client code: `make tui-check`.
+- API, stream, or config contracts: regenerate, then `make api-check`, `make stream-check`, or `make check-docs`.
+- Schema changes: apply migrations, then `uv run alembic check`.
+- Test lanes: see the [testing strategy](docs/how-to-guides/testing-strategy.md).
 
-TypeScript uses two-space indentation, 100-character lines, and Biome. Import directly from owning modules and respect package boundaries.
+## Testing
 
-## Testing Guidelines
+- Backend tests use pytest and pytest-asyncio; client tests use Vitest. Name files `test_*.py` or `*.test.ts`.
+- The default lane excludes `live_llm`, `live_daytona`, `benchmark`, `db`, and `packaging`; markers are strict.
+- Put tests in the behavior-owning folder under `tests/`, never as a flat `tests/test_*.py`. Outside `tests/live/`, `tests/freeze/`, `tests/e2e/`, and `tests/packaging/`, each file needs at least three cases.
+- Add regressions to the existing behavior-owning suite.
 
-Backend tests use pytest and pytest-asyncio; client tests use Vitest. Name files `test_*.py` or `*.test.ts`. Add regressions to existing behavior-owning suites.
+## Refactors and cleanup
 
-Run focused tests with `uv run pytest tests/daytona/test_sandbox_lifecycle.py`. `make test-coverage` enforces 75% package-wide backend coverage.
+- When you move, rename, or delete anything, search the old name across `src/`, `tests/`, `docs/`, `scripts/`, `tools/fleet-tui/`, and the instruction files, and update every reference in the same change.
+- Delete superseded internal code instead of leaving shims or deprecated aliases. Keep a CLI or HTTP surface only where `openapi.yaml` or a contract test pins it.
+- Do not reintroduce retired paths or commands; `scripts/check_repo_hygiene.py` lists them.
+- List every new file under `scripts/` in `scripts/README.md`.
+- Write scratch and campaign output only to gitignored locations (`.scratch`, `.fleet_rlm`, `.remember`), one artifact per campaign rather than per attempt. Never commit their contents.
 
-## Commit & Pull Request Guidelines
+## Coding Style
 
-Use focused conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, or `chore:`. Follow the PR template: explain resulting behavior, link applicable issues, identify contract/migration impacts, and report exact validation commands and outcomes.
+- Python: four-space indentation, double quotes, 120-character lines; `snake_case` modules and functions, `PascalCase` classes. Ruff formats and lints; ty checks types.
+- TypeScript: two-space indentation, 100-character lines, Biome. Import directly from owning modules and respect package boundaries.
+
+## Commits and Pull Requests
+
+Use focused conventional commits: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`, or `chore:`. Follow the PR template: explain resulting behavior, link applicable issues, identify contract and migration impacts, and report exact validation commands and outcomes.
 
 ## Validate and Deliver Safely
 
-For documentation changes, run `make check-docs` and `git diff --check`. Keep secrets out of Git. Credentialed provider, Daytona, database, and benchmark runs require explicit operator authorization.
+Pick the validation lane from [Validation selection](#validation-selection) and report the exact commands and outcomes.
 
-Regenerate contracts with `make api-sync`, `make stream-sync`, or `make config-reference`; never hand-edit generated outputs. Preserve unrelated local changes.
+Keep secrets out of Git. Credentialed provider, Daytona, database, and benchmark runs need explicit operator authorization. That includes anything that spends credentials or credits: `FLEET_LIVE=1` runs, scripts with an explicit run flag, the optional `web_search` tool, and migrations against a shared database. Preserve unrelated local changes.
